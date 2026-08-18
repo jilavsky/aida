@@ -1,0 +1,20 @@
+{
+  "_comment": "Example ~/.aida/mcp.json — commented via this dummy key since JSON has no comment syntax. NOT auto-copied. Stays close to the standard mcpServers format so configs port from Claude Desktop / other MCP clients; `groups` and `skills` are AIDA-specific extensions other clients simply ignore.",
+  "config_version": 1,
+  "mcpServers": {
+    "pyirena-mcp": {
+      "command": "/opt/conda/envs/pyirena/bin/pyirena-mcp",
+      "args": [],
+      "env": {},
+      "groups": ["pyirena-analysis"],
+      "skills": ["pyirena-usage"]
+    },
+    "bait-mcp": {
+      "command": "/opt/conda/envs/bait/bin/bait-mcp",
+      "args": ["--config", "/etc/bait/instrument.yaml"],
+      "env": {},
+      "groups": ["instrument-control"],
+      "skills": []
+    }
+  }
+}

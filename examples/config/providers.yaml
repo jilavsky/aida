@@ -1,0 +1,32 @@
+# Example ~/.aida/providers.yaml — commented, illustrative only.
+# NO secret values ever belong in this file — only `secret_ref` names that
+# point at entries in the OS keychain (or an AIDA_SECRET_<PROFILE> env var).
+# See PLAN.md §4 "Configuration layout" and aida.config.secrets.
+
+config_version: 1
+
+profiles:
+  # A local model served through an OpenAI-compatible endpoint
+  # (Ollama, LM Studio, Unsloth Desktop, llama.cpp server, ...).
+  ollama-qwen:
+    kind: openai_compat
+    base_url: "http://localhost:11434/v1"
+    model: "qwen2.5:14b"
+    secret_ref: null            # local endpoints often need no key
+    capability_notes: "small local model — prefer lean MCP groups"
+
+  # Anthropic Claude via the ANL Argo proxy (as used by BeamlineAdvisor).
+  argo-claude:
+    kind: anthropic
+    base_url: "https://apps.inside.anl.gov/argoapi/"
+    model: "claude-sonnet"
+    secret_ref: "argo-claude"   # `aida config secret set argo-claude <ANL username>`
+    capability_notes: "cloud model via institutional proxy"
+
+  # Anthropic Claude direct.
+  claude-direct:
+    kind: anthropic
+    base_url: null               # SDK default
+    model: "claude-sonnet"
+    secret_ref: "claude-direct"  # `aida config secret set claude-direct <api key>`
+    capability_notes: ""

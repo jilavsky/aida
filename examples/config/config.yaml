@@ -1,0 +1,20 @@
+# Example ~/.aida/config.yaml — commented, illustrative only.
+# This file is NOT auto-copied into ~/.aida; it exists as a reference.
+# Real config is generated with safe defaults on first `aida` run.
+
+config_version: 1
+
+# Where human-readable conversation records/exports are written.
+# null (default) resolves to ~/Documents/Aida at runtime.
+records_dir: null
+
+# Python logging level for both the console and ~/.aida/logs/aida.log.
+log_level: INFO
+
+# Default safety mode for new workspaces that don't specify their own:
+#   relaxed -> no per-action confirmation inside a workspace's allowed folders
+#   confirm -> confirm every write/delete (default; safer starting point)
+default_safety_mode: confirm
+
+# GUI theme (Phase 5+): system | light | dark
+theme: system

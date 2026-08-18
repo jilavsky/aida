@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from aida.config.settings import (
+    AppConfig,
+    McpConfig,
+    ProvidersConfig,
+    WorkspacesConfig,
+    load_app_config,
+    load_mcp_config,
+    load_providers_config,
+    load_settings,
+    load_workspaces_config,
+    save_app_config,
+    save_mcp_config,
+    save_providers_config,
+    save_workspaces_config,
+)
+
+
+def test_load_settings_first_run_writes_defaults(aida_home: Path):
+    settings = load_settings()
+
+    assert (aida_home / "config.yaml").exists()
+    assert (aida_home / "providers.yaml").exists()
+    assert (aida_home / "workspaces.yaml").exists()
+    assert (aida_home / "mcp.json").exists()
+
+    assert settings.app.config_version == 1
+    assert settings.providers.profiles == {}
+    assert settings.workspaces.workspaces == {}
+    assert settings.mcp.servers == {}
+
+
+def test_app_config_roundtrip(aida_home: Path):
+    cfg = AppConfig(log_level="DEBUG", default_safety_mode="relaxed")
+    path = save_app_config(cfg, aida_home)
+    assert path.exists()
+
+    loaded = load_app_config(aida_home)
+    assert loaded.log_level == "DEBUG"
+    assert loaded.default_safety_mode == "relaxed"
+    assert loaded.config_version == 1
+
+
+def test_old_config_missing_fields_gets_defaults(aida_home: Path):
+    """pyIrena rule: old configs must always load."""
+    partial = {"config_version": 1}  # no log_level, no records_dir, ...
+    path = aida_home / "config.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as fh:
+        yaml.safe_dump(partial, fh)
+
+    loaded = load_app_config(aida_home)
+    assert loaded.log_level == "INFO"  # default, not a crash
+    assert loaded.theme == "system"
+
+
+def test_unknown_future_field_ignored(aida_home: Path):
+    """A config written by a *future* AIDA version with an extra field must
+    still load under this version rather than raising."""
+    data = {"config_version": 1, "log_level": "WARNING", "some_future_field": 42}
+    path = aida_home / "config.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as fh:
+        yaml.safe_dump(data, fh)
+
+    loaded = load_app_config(aida_home)
+    assert loaded.log_level == "WARNING"
+
+
+def test_providers_config_roundtrip(aida_home: Path):
+    from aida.config.settings import ProviderProfile
+
+    cfg = ProvidersConfig(
+        profiles={
+            "argo-claude": ProviderProfile(
+                name="argo-claude",
+                kind="anthropic",
+                base_url="https://apps.inside.anl.gov/argoapi/",
+                model="claude-sonnet",
+                secret_ref="argo-claude",
+            )
+        }
+    )
+    save_providers_config(cfg, aida_home)
+    loaded = load_providers_config(aida_home)
+    assert "argo-claude" in loaded.profiles
+    assert loaded.profiles["argo-claude"].kind == "anthropic"
+
+    # No secret value anywhere in the file on disk.
+    raw = (aida_home / "providers.yaml").read_text()
+    assert "secret_ref" in raw
+    assert "sk-" not in raw
+
+
+def test_workspaces_config_roundtrip(aida_home: Path):
+    from aida.config.settings import WorkspaceConfig
+
+    cfg = WorkspacesConfig(
+        workspaces={
+            "use-pyirena": WorkspaceConfig(
+                name="use-pyirena",
+                profile="argo-claude",
+                source_folders=["/data/USAXS"],
+                target_folder="~/Documents/Aida/analysis",
+                mcp_group="pyirena-analysis",
+                safety="relaxed",
+            )
+        }
+    )
+    save_workspaces_config(cfg, aida_home)
+    loaded = load_workspaces_config(aida_home)
+    ws = loaded.workspaces["use-pyirena"]
+    assert ws.profile == "argo-claude"
+    assert ws.safety == "relaxed"
+    assert ws.source_folders == ["/data/USAXS"]
+
+
+def test_mcp_config_roundtrip(aida_home: Path):
+    from aida.config.settings import McpServerConfig
+
+    cfg = McpConfig(
+        servers={
+            "pyirena-mcp": McpServerConfig(
+                name="pyirena-mcp",
+                command="/opt/conda/envs/pyirena/bin/pyirena-mcp",
+                groups=["pyirena-analysis"],
+                skills=["pyirena-usage"],
+            )
+        }
+    )
+    save_mcp_config(cfg, aida_home)
+    loaded = load_mcp_config(aida_home)
+    assert "pyirena-mcp" in loaded.servers
+    assert loaded.servers["pyirena-mcp"].groups == ["pyirena-analysis"]

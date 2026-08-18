@@ -1,0 +1,31 @@
+# Example ~/.aida/workspaces.yaml — commented, illustrative only.
+# A workspace bundles: provider profile, source/target folders, MCP group,
+# skills, system prompt, and safety mode. See PLAN.md §4 "Workspaces".
+
+config_version: 1
+
+workspaces:
+  use-pyirena:
+    profile: argo-claude
+    source_folders:
+      - "/Volumes/data/USAXS_2026_08"
+    target_folder: "~/Documents/Aida/analysis"
+    sidecar_folder_name: "figures"    # Obsidian-style attachments folder
+    mcp_group: pyirena-analysis
+    skills:
+      - saxs-basics
+      - pyirena-usage
+    system_prompt: "prompts/pyirena.md"
+    safety: relaxed                    # folders are backed up; see PLAN.md §5
+
+  perform-reviews:
+    profile: argo-claude
+    source_folders:
+      - "~/Documents/reviews/incoming"
+    target_folder: "~/Documents/reviews/out"
+    sidecar_folder_name: "figures"
+    mcp_group: none
+    skills:
+      - review-checklist
+    system_prompt: null
+    safety: confirm
