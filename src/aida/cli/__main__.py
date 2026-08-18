@@ -1,53 +1,66 @@
-"""Entry point for the ``aida`` console script (and ``aida-gui`` stub)."""
+"""Entry point for the ``aida`` console script (and ``aida-gui`` stub).
+
+Dispatch is deliberately not one shared ``argparse`` parser: each subcommand
+(``doctor``, ``chat``, ``run``, ``config``) owns its own argument parsing so
+it stays independently testable and ``aida chat --profile foo --skills a,b``
+can grow chat-specific flags without touching this file.
+"""
 
 from __future__ import annotations
 
-import argparse
 import sys
 
 from aida.config.logging_setup import configure_logging
 from aida.config.settings import load_settings
 
+_COMMANDS = {
+    "doctor": "Report environment/config diagnostics",
+    "chat": "Interactive chat (Phase 2)",
+    "run": "Run a stored workflow headlessly (Phase 10)",
+    "config": "Show on-device config locations",
+}
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="aida", description="AIDA — AI Data Assistant")
-    sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("doctor", help="Report environment/config diagnostics")
-    sub.add_parser("chat", help="Interactive chat (Phase 2)")
-    sub.add_parser("run", help="Run a stored workflow headlessly (Phase 10)")
-    sub.add_parser("config", help="Show on-device config locations")
-
-    return parser
+def _print_top_level_help() -> None:
+    print("usage: aida <command> [options]")
+    print()
+    print("commands:")
+    for name, help_text in _COMMANDS.items():
+        print(f"  {name:<8} {help_text}")
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+
+    if not argv or argv[0] in ("-h", "--help"):
+        _print_top_level_help()
+        return 0
+
+    command, rest = argv[0], argv[1:]
+    if command not in _COMMANDS:
+        print(f"Unknown command: {command!r}")
+        _print_top_level_help()
+        return 1
 
     settings = load_settings()
     configure_logging(settings.app.log_level)
 
-    if args.command == "doctor":
+    if command == "doctor":
         from aida.cli.doctor import main as doctor_main
 
         return doctor_main()
-    if args.command == "chat":
+    if command == "chat":
         from aida.cli.chat import main as chat_main
 
-        return chat_main()
-    if args.command == "run":
+        return chat_main(rest)
+    if command == "run":
         from aida.cli.run import main as run_main
 
-        return run_main()
-    if args.command == "config":
-        from aida.cli.config_cmds import main as config_main
+        return run_main(rest)
+    # command == "config"
+    from aida.cli.config_cmds import main as config_main
 
-        return config_main()
-
-    parser.print_help()
-    return 0
+    return config_main(rest)
 
 
 def main_gui() -> int:

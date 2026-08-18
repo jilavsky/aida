@@ -47,6 +47,7 @@ rag = ["chromadb>=0.5"]
 dev = [
     "pytest>=8.0",
     "pytest-timeout>=2.3",
+    "pytest-asyncio>=0.24",
     "ruff>=0.6",
 ]
 
@@ -68,3 +69,4 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 timeout = 30
 testpaths = ["tests"]
+asyncio_mode = "strict"
