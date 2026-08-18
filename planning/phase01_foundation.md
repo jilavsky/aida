@@ -15,7 +15,8 @@ later phase builds on. No agent functionality yet.
 ### Repository & packaging
 
 - [x] Create repo layout per PLAN.md §3 (`src/aida/`, `tests/`, `examples/`, `planning/`)
-- [x] `pyproject.toml`: name `aida`, version `0.0.1`, MIT, `requires-python >= 3.11`,
+- [x] `pyproject.toml`: distribution name `aida-workbench` (import name stays
+      `aida` — see below), version `0.0.1`, MIT, `requires-python >= 3.11`,
       extras `gui`, `docs`, `rag`, `dev`; console entry points `aida` (CLI) and
       `aida-gui` (stub for now)
 - [x] `environment.yml` for conda env `aida` (mirror pyIrena's style)
@@ -23,10 +24,14 @@ later phase builds on. No agent functionality yet.
       `.env`, `*.db`, `logs/`, any `secrets*` pattern inside the repo
 - [x] README.md: one-paragraph description, install, status badge, "pre-alpha" notice
 - [x] LICENSE (MIT), basic CONTRIBUTING note
-- [ ] **Claim `aida` on PyPI**: build and publish 0.0.1 placeholder (name checked
-      unclaimed 2026-08-18 — do this early; if the name is rejected, fall back to
-      `aida-workbench` and record the change in PLAN.md §2). *Requires a PyPI account
-      and cannot be done from the build sandbox — see delivery instructions.*
+- [ ] **Claim a PyPI name and publish 0.0.1**: attempted bare `aida` on 2026-08-18 —
+      PyPI returned `403 ... isn't allowed to upload to project 'aida'` (automated
+      typosquat/name-confusion block, not a real prior claim: the project page
+      still 404s). Per the fallback this task already anticipated, switched to
+      distribution name `aida-workbench` (recorded in PLAN.md §2 changelog and in
+      `pyproject.toml`). **Still pending:** rebuild (`python -m build`) and
+      `twine upload dist/*` under the new name — cannot be done from the build
+      sandbox (no PyPI credentials there); see delivery instructions.
 
 ### Configuration system (`aida.config`)
 
@@ -74,8 +79,9 @@ later phase builds on. No agent functionality yet.
       `tests/test_doctor.py::test_doctor_flags_broken_config` and a manual run.
 - [ ] CI green on all three OSes — pending first push to GitHub (cannot run GitHub
       Actions from the build sandbox).
-- [ ] `aida` name secured on PyPI (or fallback name recorded in PLAN.md) — pending
-      user action (requires a PyPI account/credentials).
+- [ ] Package name secured on PyPI (`aida-workbench` — fallback recorded in
+      PLAN.md §2, bare `aida` auto-blocked) — pending user action (rebuild +
+      `twine upload` with the corrected `pyproject.toml`).
 
 ## Out of scope for this phase
 

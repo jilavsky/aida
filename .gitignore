@@ -8,11 +8,18 @@ dist/
 .venv/
 venv/
 
-# AIDA on-device state must never live in the repo
+# AIDA on-device state must never live in the repo.
+# NOTE: intentionally NOT a bare `secrets*` glob — that pattern also matches
+# (and silently drops from git / from built wheels) src/aida/config/secrets.py,
+# the module that *implements* the no-secrets-on-disk guarantee. Real secrets
+# never reach YAML/JSON in the first place (see aida.config.secrets +
+# tests/test_secrets.py); these entries only guard against a stray file.
 .aida/
 *.db
 logs/
-secrets*
+secrets.yaml
+secrets.json
+secrets.env
 .env
 .env.*
 

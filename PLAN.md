@@ -11,8 +11,11 @@ Progress is tracked in per-phase checklist files under `planning/` — one file 
 phase, each independently testable. See Section 10 for the phase map.
 
 - Repo: `https://github.com/jilavsky/Aida`
-- Package / import name: `aida` (PyPI name appeared unclaimed as of 2026-08-18 —
-  **claim it early**, see Phase 1)
+- Import package name: `aida` (unchanged — `import aida`, console scripts `aida` /
+  `aida-gui`)
+- PyPI distribution name: `aida-workbench` (bare `aida` was auto-blocked by PyPI as
+  a likely typosquat/name-confusion risk on first upload attempt — 2026-08-18; see
+  Section 2 changelog entry below. Install with `pip install aida-workbench[gui]`.)
 - License: MIT
 - Language: Python (>= 3.11)
 - Desktop GUI: PySide6 (Qt 6), following pyIrena conventions
@@ -89,6 +92,18 @@ Deliberate changes and additions:
 Deferred/parked (see `planning/phase_future.md`): voice STT/TTS, per-user beamline
 credentials, external-trigger report generation, remote (HTTP) MCP servers,
 alternative web frontend.
+
+### Changelog
+
+- **2026-08-18** — Row 11 (Name): the bare PyPI name `aida` returned
+  `403 ... isn't allowed to upload to project 'aida'` on the first real upload
+  attempt — PyPI's automated typosquat/name-confusion protection (not an
+  auth/config problem, and not a genuine prior claim: `pypi.org/project/aida/`
+  still 404s). Per the fallback this document already flagged in Phase 1,
+  switched the **PyPI distribution name only** to `aida-workbench`. The import
+  package name (`aida`), repo (`jilavsky/aida`), and console scripts (`aida`,
+  `aida-gui`) are all unchanged — end users run `pip install aida-workbench[gui]`
+  and everything else works exactly as documented elsewhere in this plan.
 
 ---
 
@@ -361,14 +376,15 @@ shared).
 ## 9. Distribution
 
 - Now: git clone + `pip install -e .`, conda `environment.yml`.
-- Phase 1: claim the `aida` name on PyPI with a minimal placeholder release
-  (0.0.1) — the name appears unclaimed and that will not last.
+- Phase 1: claim a placeholder release (0.0.1) under the distribution name
+  `aida-workbench` on PyPI (bare `aida` was auto-blocked — see Section 2
+  changelog, 2026-08-18). Import name stays `aida`.
 - Phase 10: real PyPI releases (following pyIrena's publish workflow pattern:
   version in `pyproject.toml` authoritative, tag-checked), conda-forge feedstock
   considered after PyPI is stable.
 - Native app bundles (PyInstaller/Briefcase) are a Phase 10 *investigation*, not a
-  commitment — `pip install aida[gui]` + `aida-gui` entry point is acceptable for
-  the target audience (they already install pyIrena this way).
+  commitment — `pip install aida-workbench[gui]` + `aida-gui` entry point is
+  acceptable for the target audience (they already install pyIrena this way).
 
 ---
 
@@ -389,7 +405,7 @@ its acceptance section is checked. Phases 2–4 are headless on purpose — the 
 | 7 | `phase07_mcp_management.md` | MCP management UI: servers, groups, per-tool permissions, logs, raw result inspector | Add/enable/disable servers & groups entirely from GUI; diagnose a failing tool from the log panel | UC3, UC4 |
 | 8 | `phase08_rag.md` | RAG: ingestion, local/cloud embedding profiles, index management, retrieval into context | UC1 full: documentation folder indexed; answers cite retrieved passages; index rebuild from GUI | UC1 |
 | 9 | `phase09_coding_scripting.md` | Code editor widget, templates, script save/run (AIEvaluator), command allowlist, web search | UC5: check beamline status via AIEvaluator script + bait_mcp from an AIDA workspace | UC5 |
-| 10 | `phase10_automation_distribution.md` | `aida run` headless CLI, stored named workflows, simple scheduler, PyPI/conda packaging | A stored workflow runs from a shell script with no GUI; `pip install aida` works | UC6 |
+| 10 | `phase10_automation_distribution.md` | `aida run` headless CLI, stored named workflows, simple scheduler, PyPI/conda packaging | A stored workflow runs from a shell script with no GUI; `pip install aida-workbench` works | UC6 |
 | — | `phase_future.md` | Parked: voice STT/TTS, beamline credentials, external triggers, HTTP MCP, web frontend | (idea log, not a commitment) | UC6+ |
 
 Dependencies are linear except: Phase 6 and 7 can proceed in parallel after 5;

@@ -3,7 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "aida"
+# PyPI distribution name. Note this differs from the import package name
+# ("aida", see [tool.hatch.build.targets.wheel] below) and from the repo
+# name (jilavsky/aida): PyPI auto-blocked first uploads of the bare name
+# "aida" as a likely typosquat/name-confusion risk (403, not a real conflict
+# — see PLAN.md §2, entry dated 2026-08-18). "aida-workbench" is the
+# documented fallback; `pip install aida-workbench[gui]` still gives you
+# `import aida` and the `aida` / `aida-gui` console scripts.
+name = "aida-workbench"
 version = "0.0.1"
 description = "AIDA — AI Data Assistant: a local scientific agent workbench."
 readme = "README.md"
