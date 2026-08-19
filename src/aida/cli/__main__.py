@@ -16,6 +16,8 @@ from aida.config.settings import load_settings
 _COMMANDS = {
     "doctor": "Report environment/config diagnostics",
     "chat": "Interactive chat (Phase 2)",
+    "conversations": "List/resume/delete/export persisted conversations (Phase 4)",
+    "workspace": "List/show/create/edit named workspaces (Phase 4)",
     "run": "Run a stored workflow headlessly (Phase 10)",
     "config": "Show on-device config locations",
 }
@@ -25,8 +27,9 @@ def _print_top_level_help() -> None:
     print("usage: aida <command> [options]")
     print()
     print("commands:")
+    width = max(len(name) for name in _COMMANDS) + 1
     for name, help_text in _COMMANDS.items():
-        print(f"  {name:<8} {help_text}")
+        print(f"  {name:<{width}} {help_text}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -53,6 +56,14 @@ def main(argv: list[str] | None = None) -> int:
         from aida.cli.chat import main as chat_main
 
         return chat_main(rest)
+    if command == "conversations":
+        from aida.cli.conversations import main as conversations_main
+
+        return conversations_main(rest)
+    if command == "workspace":
+        from aida.cli.workspace_cmds import main as workspace_main
+
+        return workspace_main(rest)
     if command == "run":
         from aida.cli.run import main as run_main
 

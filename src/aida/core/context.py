@@ -24,20 +24,37 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // _CHARS_PER_TOKEN_ESTIMATE)
 
 
+def skill_path(skills_dir: Path, name: str) -> Path | None:
+    """Resolve a skill name to its file, or ``None`` if it doesn't exist.
+
+    A skill is a Markdown file ``<skills_dir>/<name>.md`` or a folder
+    ``<skills_dir>/<name>/SKILL.md``.
+    """
+    candidate_file = skills_dir / f"{name}.md"
+    if candidate_file.is_file():
+        return candidate_file
+    candidate_folder = skills_dir / name / "SKILL.md"
+    if candidate_folder.is_file():
+        return candidate_folder
+    return None
+
+
+def skill_exists(skills_dir: Path, name: str) -> bool:
+    return skill_path(skills_dir, name) is not None
+
+
 def load_skill_texts(skills_dir: Path, skill_names: list[str]) -> list[str]:
     """Load each named skill's Markdown content from ``skills_dir``.
 
-    A skill is a Markdown file ``<skills_dir>/<name>.md`` or a folder
-    ``<skills_dir>/<name>/SKILL.md``. Missing skills are skipped (not a hard
-    error) — a workspace can list a skill that hasn't been added yet without
-    aida.chat crashing.
+    Missing skills are skipped (not a hard error) — a workspace can list a
+    skill that hasn't been added yet without aida.chat crashing. Use
+    ``skill_exists`` if a caller needs to warn about that instead of
+    silently skipping (``aida.workspace.workspaces.validate_workspace`` does).
     """
     texts: list[str] = []
     for name in skill_names:
-        candidate_file = skills_dir / f"{name}.md"
-        candidate_folder = skills_dir / name / "SKILL.md"
-        path = candidate_file if candidate_file.is_file() else candidate_folder
-        if path.is_file():
+        path = skill_path(skills_dir, name)
+        if path is not None:
             texts.append(f"# Skill: {name}\n\n{path.read_text(encoding='utf-8')}")
     return texts
 
@@ -76,4 +93,11 @@ def trim_history(
     return system_messages + other_messages, was_trimmed
 
 
-__all__ = ["build_system_message", "estimate_tokens", "load_skill_texts", "trim_history"]
+__all__ = [
+    "build_system_message",
+    "estimate_tokens",
+    "load_skill_texts",
+    "skill_exists",
+    "skill_path",
+    "trim_history",
+]
