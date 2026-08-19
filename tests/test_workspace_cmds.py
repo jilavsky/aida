@@ -31,26 +31,30 @@ def test_cmd_list_no_workspaces(aida_home: Path, records_home: Path, capsys, mon
     assert "No workspaces configured." in capsys.readouterr().out
 
 
-def test_cmd_new_creates_and_persists_to_disk(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_new_creates_and_persists_to_disk(aida_home: Path, records_home: Path, capsys, monkeypatch, tmp_path: Path):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
 
+    # tmp_path (not a hardcoded "/tmp") so this is reachable on every OS —
+    # a literal "/tmp" doesn't exist on Windows, which is exactly what broke
+    # this test in CI (windows-latest, Python 3.13).
+    source_folder = str(tmp_path)
     rc = cmd_new(
         _parse(
             "new", "ws1",
             "--profile", "p1",
             "--mcp-group", "none",
-            "--source-folders", "/tmp",
+            "--source-folders", source_folder,
         )
     )
     out = capsys.readouterr().out
     assert rc == 0
     assert "Created workspace 'ws1'" in out
-    assert "[ok] no warnings" in out  # profile p1 exists, mcp_group none, /tmp exists
+    assert "[ok] no warnings" in out  # profile p1 exists, mcp_group none, source_folder exists
 
     reloaded = load_workspaces_config(aida_home)
     assert "ws1" in reloaded.workspaces
     assert reloaded.workspaces["ws1"].profile == "p1"
-    assert reloaded.workspaces["ws1"].source_folders == ["/tmp"]
+    assert reloaded.workspaces["ws1"].source_folders == [source_folder]
 
 
 def test_cmd_new_refuses_to_clobber_existing(aida_home: Path, records_home: Path, capsys, monkeypatch):
