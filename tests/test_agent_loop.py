@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import pytest
 
+from aida.artifacts.base import FileArtifact, ImageArtifact, TextArtifact
 from aida.core.agent import AgentLoop
 from aida.core.events import (
     AgentError,
+    FileArtifactCreated,
+    ImageArtifactCreated,
     MessageFinished,
     TextDelta,
     TextFinished,
@@ -201,6 +204,116 @@ async def test_cancel_between_tool_calls_stops_further_execution():
     assert len(executed) == 1  # second tool call never ran
     assert isinstance(events[-1], AgentError)
     assert events[-1].message == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_image_artifact_in_tool_result_emits_image_artifact_created():
+    async def _get_plot(_args):
+        art = ImageArtifact(data=b"pngbytes", mime_type="image/png", path="/tmp/plot.png")
+        return ToolResult(content="[image artifact ...]", artifacts=[art])
+
+    tool = NativeTool(
+        schema=ToolSchema(name="get_plot", description="", parameters={"type": "object"}),
+        func=_get_plot,
+    )
+    provider = MockProvider(
+        [
+            MockTurn(tool_calls=[MockToolCall(name="get_plot", id="call_1")]),
+            MockTurn(text="here is the plot"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"get_plot": tool})
+    messages = [Message(role="user", content="plot it")]
+
+    events = [e async for e in loop.run(messages)]
+
+    created = next(e for e in events if isinstance(e, ImageArtifactCreated))
+    assert created.call_id == "call_1"
+    assert created.mime_type == "image/png"
+    assert created.path == "/tmp/plot.png"
+    # The event must never carry the raw bytes — that would defeat the
+    # whole point of a typed event over a flattened string.
+    assert not hasattr(created, "data")
+
+
+@pytest.mark.asyncio
+async def test_file_artifact_in_tool_result_emits_file_artifact_created():
+    async def _get_report(_args):
+        art = FileArtifact(path="/tmp/report.csv", mime_type="text/csv", data=b"a,b\n1,2\n")
+        return ToolResult(content="[file artifact ...]", artifacts=[art])
+
+    tool = NativeTool(
+        schema=ToolSchema(name="get_report", description="", parameters={"type": "object"}),
+        func=_get_report,
+    )
+    provider = MockProvider(
+        [
+            MockTurn(tool_calls=[MockToolCall(name="get_report", id="call_1")]),
+            MockTurn(text="here is the report"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"get_report": tool})
+    messages = [Message(role="user", content="get report")]
+
+    events = [e async for e in loop.run(messages)]
+
+    created = next(e for e in events if isinstance(e, FileArtifactCreated))
+    assert created.call_id == "call_1"
+    assert created.path == "/tmp/report.csv"
+    assert created.mime_type == "text/csv"
+
+
+@pytest.mark.asyncio
+async def test_file_artifact_without_path_emits_no_event():
+    # A FileArtifact that was never saved to disk (no path) has nothing a
+    # frontend could open — no event should be emitted for it, only for the
+    # text content already carried in ToolCallFinished.
+    async def _get_link(_args):
+        art = FileArtifact(path=None, mime_type="text/csv", filename="remote.csv")
+        return ToolResult(content="[file artifact ...]", artifacts=[art])
+
+    tool = NativeTool(
+        schema=ToolSchema(name="get_link", description="", parameters={"type": "object"}),
+        func=_get_link,
+    )
+    provider = MockProvider(
+        [
+            MockTurn(tool_calls=[MockToolCall(name="get_link", id="call_1")]),
+            MockTurn(text="here is the link"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"get_link": tool})
+    messages = [Message(role="user", content="get link")]
+
+    events = [e async for e in loop.run(messages)]
+
+    assert not any(isinstance(e, FileArtifactCreated) for e in events)
+
+
+@pytest.mark.asyncio
+async def test_text_artifact_in_result_emits_no_artifact_event():
+    # TextArtifact carries no binary payload the frontend needs a separate
+    # event for — it's already fully represented in ToolCallFinished.result.
+    async def _get_text(_args):
+        art = TextArtifact(text="hello")
+        return ToolResult(content="hello", artifacts=[art])
+
+    tool = NativeTool(
+        schema=ToolSchema(name="get_text", description="", parameters={"type": "object"}),
+        func=_get_text,
+    )
+    provider = MockProvider(
+        [
+            MockTurn(tool_calls=[MockToolCall(name="get_text", id="call_1")]),
+            MockTurn(text="done"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"get_text": tool})
+    messages = [Message(role="user", content="get text")]
+
+    events = [e async for e in loop.run(messages)]
+
+    assert not any(isinstance(e, (ImageArtifactCreated, FileArtifactCreated)) for e in events)
 
 
 @pytest.mark.asyncio

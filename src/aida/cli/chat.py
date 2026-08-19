@@ -11,7 +11,7 @@ import argparse
 import asyncio
 
 from aida.config.paths import skills_dir
-from aida.config.settings import Settings, load_settings
+from aida.config.settings import McpConfig, McpServerConfig, Settings, load_settings
 from aida.core.agent import AgentLoop
 from aida.core.context import build_system_message, load_skill_texts
 from aida.core.events import (
@@ -28,8 +28,14 @@ from aida.core.events import (
     UsageInfo,
 )
 from aida.core.tools import NativeTool, default_native_tools
+from aida.mcp.groups import resolve_explicit, resolve_group
+from aida.mcp.manager import McpManager
 from aida.providers.base import CompletionSettings, Message
 from aida.providers.profiles import build_provider
+
+
+class UnknownMcpServerError(Exception):
+    """Raised when ``--mcp`` names a server that isn't in ``mcp.json``."""
 
 
 class UnknownProfileError(Exception):
@@ -63,6 +69,23 @@ def print_event(event: AgentEvent) -> None:
     elif isinstance(event, AgentError):
         detail = f" ({event.detail})" if event.detail else ""
         print(f"\n[error:{event.layer}] {event.message}{detail}")
+
+
+def resolve_mcp_servers(
+    mcp_config: McpConfig, *, group: str | None, names: list[str] | None
+) -> list[McpServerConfig]:
+    """Precedence: an explicit ``--mcp server1,server2`` list wins over
+    ``--mcp-group NAME``; if neither is given, no MCP servers are enabled
+    (lazy start — configuring a server in ``mcp.json`` never launches it by
+    itself). Raises ``UnknownMcpServerError`` naming any typo'd server."""
+    if names:
+        try:
+            return resolve_explicit(mcp_config, names)
+        except ValueError as exc:
+            raise UnknownMcpServerError(str(exc)) from exc
+    if group:
+        return resolve_group(mcp_config, group)
+    return []
 
 
 def resolve_profile(settings: Settings, name: str):
@@ -183,19 +206,69 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skills", default="", help="Comma-separated skill names to load into the system context"
     )
+    parser.add_argument(
+        "--mcp-group",
+        default="",
+        help="Named MCP server group from mcp.json to enable (see each server's 'groups' key)",
+    )
+    parser.add_argument(
+        "--mcp",
+        default="",
+        help="Comma-separated MCP server names to enable directly, bypassing groups",
+    )
     return parser
+
+
+async def _async_main(
+    settings: Settings,
+    profile_name: str,
+    skill_names: list[str],
+    mcp_servers: list[McpServerConfig],
+) -> int:
+    mcp_manager: McpManager | None = None
+    tools = default_native_tools()
+    all_skill_names = list(skill_names)
+
+    if mcp_servers:
+        mcp_manager = McpManager(mcp_servers)
+        mcp_tools = await mcp_manager.start_all()
+        tools.update(mcp_tools)
+        for skill in mcp_manager.skills():
+            if skill not in all_skill_names:
+                all_skill_names.append(skill)
+
+        for name in mcp_manager.running_server_names:
+            server_tool_count = sum(1 for t in mcp_tools if t.startswith(f"{name}."))
+            print(f"[mcp] {name}: {server_tool_count} tool(s)")
+        for name, error in mcp_manager.start_errors.items():
+            print(f"[mcp] {name}: FAILED to start — {error}")
+
+    try:
+        session = ChatSession(settings, profile_name, tools=tools, skill_names=all_skill_names)
+    except UnknownProfileError as exc:
+        print(str(exc))
+        if mcp_manager is not None:
+            await mcp_manager.aclose()
+        return 1
+
+    try:
+        await _run_repl(session)
+    finally:
+        if mcp_manager is not None:
+            await mcp_manager.aclose()
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv or [])
     skill_names = [s.strip() for s in args.skills.split(",") if s.strip()]
+    mcp_names = [s.strip() for s in args.mcp.split(",") if s.strip()]
 
     settings = load_settings()
     try:
-        session = ChatSession(settings, args.profile, skill_names=skill_names)
-    except UnknownProfileError as exc:
+        mcp_servers = resolve_mcp_servers(settings.mcp, group=args.mcp_group, names=mcp_names)
+    except UnknownMcpServerError as exc:
         print(str(exc))
         return 1
 
-    asyncio.run(_run_repl(session))
-    return 0
+    return asyncio.run(_async_main(settings, args.profile, skill_names, mcp_servers))

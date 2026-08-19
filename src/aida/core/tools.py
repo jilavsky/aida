@@ -10,19 +10,31 @@ phases (PLAN.md §10).
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from aida.artifacts.base import Artifact
 from aida.providers.base import ToolSchema
 
 
 @dataclass
 class ToolResult:
-    """What a native tool hands back to the agent loop."""
+    """What a native tool hands back to the agent loop.
+
+    ``artifacts`` (Phase 3): any typed image/file/table/json artifacts the
+    tool produced, e.g. converted from an MCP result via
+    ``aida.mcp.results.convert_result``. ``content`` is still what actually
+    gets fed back to the model as the tool-result message (normally the
+    text-policy description of each artifact) — ``artifacts`` is what lets
+    the agent loop emit ``ImageArtifactCreated``/``FileArtifactCreated``
+    events for the frontend, per PLAN.md hard rule 3 ("typed results
+    throughout" — never just guessing from a string).
+    """
 
     content: Any
     is_error: bool = False
+    artifacts: list[Artifact] = field(default_factory=list)
 
 
 ToolFunc = Callable[[dict[str, Any]], Awaitable[ToolResult]]

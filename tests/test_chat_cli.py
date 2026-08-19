@@ -4,8 +4,22 @@ from pathlib import Path
 
 import pytest
 
-from aida.cli.chat import ChatSession, UnknownProfileError, print_event, resolve_profile
-from aida.config.settings import ProviderProfile, Settings, load_settings
+from aida.cli.chat import (
+    ChatSession,
+    UnknownMcpServerError,
+    UnknownProfileError,
+    _build_parser,
+    print_event,
+    resolve_mcp_servers,
+    resolve_profile,
+)
+from aida.config.settings import (
+    McpConfig,
+    McpServerConfig,
+    ProviderProfile,
+    Settings,
+    load_settings,
+)
 from aida.core.events import (
     AgentError,
     FileArtifactCreated,
@@ -38,6 +52,56 @@ def test_resolve_profile_missing_lists_available(aida_home: Path, records_home: 
     with pytest.raises(UnknownProfileError) as exc_info:
         resolve_profile(settings, "does-not-exist")
     assert "mock-profile" in str(exc_info.value)
+
+
+# --- resolve_mcp_servers / CLI flags -----------------------------------------
+
+
+def _mcp_config() -> McpConfig:
+    return McpConfig(
+        servers={
+            "pyirena": McpServerConfig(name="pyirena", command="pyirena-mcp", groups=["analysis"]),
+            "bait": McpServerConfig(name="bait", command="bait-mcp", groups=["analysis"]),
+        }
+    )
+
+
+def test_resolve_mcp_servers_defaults_to_none():
+    assert resolve_mcp_servers(_mcp_config(), group="", names=[]) == []
+
+
+def test_resolve_mcp_servers_by_group():
+    servers = resolve_mcp_servers(_mcp_config(), group="analysis", names=[])
+    assert {s.name for s in servers} == {"pyirena", "bait"}
+
+
+def test_resolve_mcp_servers_explicit_list():
+    servers = resolve_mcp_servers(_mcp_config(), group="", names=["pyirena"])
+    assert {s.name for s in servers} == {"pyirena"}
+
+
+def test_resolve_mcp_servers_explicit_wins_over_group():
+    servers = resolve_mcp_servers(_mcp_config(), group="analysis", names=["pyirena"])
+    assert {s.name for s in servers} == {"pyirena"}
+
+
+def test_resolve_mcp_servers_unknown_name_raises():
+    with pytest.raises(UnknownMcpServerError):
+        resolve_mcp_servers(_mcp_config(), group="", names=["typo"])
+
+
+def test_parser_accepts_mcp_flags():
+    args = _build_parser().parse_args(
+        ["--profile", "p", "--mcp-group", "analysis", "--mcp", "pyirena,bait"]
+    )
+    assert args.mcp_group == "analysis"
+    assert args.mcp == "pyirena,bait"
+
+
+def test_parser_mcp_flags_default_empty():
+    args = _build_parser().parse_args(["--profile", "p"])
+    assert args.mcp_group == ""
+    assert args.mcp == ""
 
 
 # --- print_event formatting -------------------------------------------------

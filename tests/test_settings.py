@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
@@ -137,3 +138,34 @@ def test_mcp_config_roundtrip(aida_home: Path):
     loaded = load_mcp_config(aida_home)
     assert "pyirena-mcp" in loaded.servers
     assert loaded.servers["pyirena-mcp"].groups == ["pyirena-analysis"]
+
+
+def test_existing_claude_desktop_mcp_json_loads_unmodified(aida_home: Path):
+    """Phase 3 acceptance criterion: "An existing Claude Desktop mcp.json
+    entry for pyirena works unmodified." Claude Desktop's config has no
+    ``groups``/``skills``/``config_version`` keys (those are AIDA-only
+    extras) and may carry extra keys AIDA doesn't know about (e.g.
+    ``disabled``) — none of that should prevent loading, and AIDA's extra
+    fields should simply default rather than erroring."""
+    raw_claude_desktop_config = {
+        "mcpServers": {
+            "pyirena": {
+                "command": "/opt/conda/envs/pyirena/bin/pyirena-mcp",
+                "args": ["--stdio"],
+                "env": {"PYIRENA_DATA_ROOT": "/data/USAXS"},
+                "disabled": False,
+            }
+        }
+    }
+    aida_home.mkdir(parents=True, exist_ok=True)
+    (aida_home / "mcp.json").write_text(json.dumps(raw_claude_desktop_config), encoding="utf-8")
+
+    loaded = load_mcp_config(aida_home)
+
+    server = loaded.servers["pyirena"]
+    assert server.command == "/opt/conda/envs/pyirena/bin/pyirena-mcp"
+    assert server.args == ["--stdio"]
+    assert server.env == {"PYIRENA_DATA_ROOT": "/data/USAXS"}
+    # AIDA-only extras simply default — no error, no data loss.
+    assert server.groups == []
+    assert server.skills == []

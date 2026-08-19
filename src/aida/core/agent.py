@@ -15,9 +15,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from aida.artifacts.base import Artifact, FileArtifact, ImageArtifact
 from aida.core.events import (
     AgentError,
     AgentEvent,
+    FileArtifactCreated,
+    ImageArtifactCreated,
     MessageFinished,
     TextFinished,
     ToolCallFinished,
@@ -144,6 +147,7 @@ class AgentLoop:
                     return
 
                 tool = self.tools.get(tc.name)
+                result_artifacts: list[Artifact] = []
                 if tool is None:
                     result_content: object = f"Unknown tool: {tc.name}"
                     is_error = True
@@ -152,6 +156,7 @@ class AgentLoop:
                         result = await tool.func(tc.arguments)
                         result_content = result.content
                         is_error = result.is_error
+                        result_artifacts = result.artifacts
                     except Exception as exc:  # noqa: BLE001 - a tool crash must not kill the loop
                         result_content = str(exc)
                         is_error = True
@@ -159,6 +164,27 @@ class AgentLoop:
                 yield ToolCallFinished(
                     call_id=tc.id, tool_name=tc.name, result=result_content, is_error=is_error
                 )
+
+                # Typed artifacts a tool result carried (PLAN.md hard rule 3):
+                # tell the frontend about each one via its own event, rather
+                # than letting an ImageArtifact silently ride along inside
+                # ToolCallFinished.result where a UI would have to guess.
+                for artifact in result_artifacts:
+                    if isinstance(artifact, ImageArtifact):
+                        yield ImageArtifactCreated(
+                            artifact_id=artifact.id,
+                            call_id=tc.id,
+                            mime_type=artifact.mime_type,
+                            path=artifact.path,
+                        )
+                    elif isinstance(artifact, FileArtifact) and artifact.path is not None:
+                        yield FileArtifactCreated(
+                            artifact_id=artifact.id,
+                            call_id=tc.id,
+                            path=artifact.path,
+                            mime_type=artifact.mime_type,
+                        )
+
                 messages.append(
                     Message(
                         role="tool",
