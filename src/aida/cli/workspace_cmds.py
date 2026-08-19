@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 
 from aida.config.settings import Settings, WorkspaceConfig, load_settings
+from aida.workspace.safety import relaxed_mode_warning_if_newly_enabled
 from aida.workspace.workspaces import (
     get_workspace,
     list_workspace_names,
@@ -93,6 +94,9 @@ def cmd_new(args: argparse.Namespace) -> int:
     )
     save_workspace(settings, ws)
     print(f"Created workspace {args.name!r}.")
+    warning = relaxed_mode_warning_if_newly_enabled(None, ws.safety)
+    if warning:
+        print(f"[warning] {warning}")
     _print_validation(settings, ws)
     return 0
 
@@ -119,6 +123,9 @@ def cmd_edit(args: argparse.Namespace) -> int:
     )
     save_workspace(settings, ws)
     print(f"Updated workspace {args.name!r}.")
+    warning = relaxed_mode_warning_if_newly_enabled(existing.safety, ws.safety)
+    if warning:
+        print(f"[warning] {warning}")
     _print_validation(settings, ws)
     return 0
 
@@ -152,7 +159,8 @@ def _add_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -> None:
         "--safety",
         default="confirm" if defaults else None,
         choices=["confirm", "relaxed"],
-        help="'confirm' (ask before writes) or 'relaxed' (enforcement arrives in Phase 6)",
+        help="'confirm' (ask before every write/delete) or 'relaxed' (only asks for actions outside the "
+        "workspace's allowed folders)",
     )
 
 

@@ -43,6 +43,14 @@ class AppConfig:
     records_dir: str | None = None  # None -> aida.config.paths.default_records_dir()
     log_level: str = "INFO"
     default_safety_mode: str = "confirm"  # "relaxed" | "confirm"
+    # Phase 6: folders implicitly allowed for every workspace/session, on
+    # top of that workspace's own source_folders/target_folder — e.g. a
+    # shared reference library the user wants every workspace to be able
+    # to read without configuring it per-workspace. Empty by default (no
+    # implicit access beyond what each workspace already grants itself).
+    # Editable via this config file for v1, same as everything else in
+    # Settings dialog v1 that doesn't have its own editor yet.
+    allowed_folders: list[str] = field(default_factory=list)
     theme: str = "system"
     window_width: int | None = None
     window_height: int | None = None
@@ -54,6 +62,8 @@ class AppConfig:
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
         known = {f for f in cls.__dataclass_fields__}
         filtered = {k: v for k, v in (data or {}).items() if k in known}
+        if "allowed_folders" in filtered:
+            filtered["allowed_folders"] = list(filtered["allowed_folders"] or [])
         return cls(**filtered)
 
     def to_dict(self) -> dict[str, Any]:
@@ -62,6 +72,7 @@ class AppConfig:
             "records_dir": self.records_dir,
             "log_level": self.log_level,
             "default_safety_mode": self.default_safety_mode,
+            "allowed_folders": self.allowed_folders,
             "theme": self.theme,
             "window_width": self.window_width,
             "window_height": self.window_height,

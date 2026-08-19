@@ -22,6 +22,7 @@ the "core remains importable and testable without Qt" rule intact.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
 import threading
 from typing import Any
@@ -37,6 +38,7 @@ from aida.config.settings import Settings
 from aida.mcp.manager import McpManager
 from aida.persistence.recorder import ConversationNotFoundError
 from aida.ui.qt._qt import QObject, QThread, Signal
+from aida.workspace.safety import ConfirmationRequest
 
 _STARTUP_ERRORS = (UnknownProfileError, UnknownWorkspaceError, UnknownMcpServerError, ConversationNotFoundError)
 
@@ -92,6 +94,13 @@ class ChatBridge(QObject):
     turn_failed = Signal(str)
     profile_switched = Signal(str)
     profile_switch_failed = Signal(str)
+    # Phase 6: emitted from the background asyncio thread whenever a
+    # SafetyGuard-gated tool needs a yes/no answer. The second argument is a
+    # plain concurrent.futures.Future the receiver (MainWindow, on the Qt
+    # thread) must resolve with a bool by calling future.set_result(...) —
+    # see ChatBridge._confirm's docstring for why a plain Future (not a Qt
+    # signal-based reply) is what bridges the two threads here.
+    confirmation_requested = Signal(object, object)  # (ConfirmationRequest, concurrent.futures.Future[bool])
 
     def __init__(self, loop_thread: AsyncLoopThread, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -106,8 +115,32 @@ class ChatBridge(QObject):
         the background loop. Fires ``session_ready`` on success or
         ``startup_failed`` (with a human-readable message) on any of the
         known startup errors — never lets one reach the Qt thread as a
-        raised exception."""
+        raised exception.
+
+        Unless the caller already supplied one, ``confirm_callback`` is
+        defaulted to ``self._confirm`` — a real modal dialog on the Qt
+        thread, per PLAN.md's "GUI: confirmation flow uses a real dialog"
+        requirement (the CLI's own default, ``aida.cli.chat.cli_confirm``,
+        would just block invisibly on stdin here since the GUI has no
+        terminal)."""
+        start_session_kwargs.setdefault("confirm_callback", self._confirm)
         asyncio.run_coroutine_threadsafe(self._start(settings, start_session_kwargs), self._loop_thread.loop)
+
+    async def _confirm(self, request: ConfirmationRequest) -> bool:
+        """The GUI's ``ConfirmCallback`` (Phase 6). Runs on the background
+        asyncio thread (it's called from inside a tool coroutine that
+        ``SafetyGuard`` is awaiting) but the actual yes/no decision has to
+        come from a real modal dialog on the Qt thread. Bridges the two via
+        a plain ``concurrent.futures.Future`` (thread-safe by design, unlike
+        an ``asyncio.Future``): emitting ``confirmation_requested`` onto a
+        Qt-thread-owned receiver is automatically a thread-safe queued
+        delivery (same mechanism ``event_received`` already relies on — see
+        this module's docstring), and ``asyncio.wrap_future`` lets this
+        coroutine ``await`` the plain ``Future`` the Qt-side handler
+        resolves once the user answers the dialog."""
+        future: concurrent.futures.Future = concurrent.futures.Future()
+        self.confirmation_requested.emit(request, future)
+        return await asyncio.wrap_future(future)
 
     async def _start(self, settings: Settings, kwargs: dict[str, Any]) -> None:
         try:

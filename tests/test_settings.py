@@ -47,6 +47,14 @@ def test_app_config_roundtrip(aida_home: Path):
     assert loaded.config_version == 1
 
 
+def test_app_config_allowed_folders_roundtrip(aida_home: Path):
+    cfg = AppConfig(allowed_folders=["/tmp/shared-a", "/tmp/shared-b"])
+    save_app_config(cfg, aida_home)
+
+    loaded = load_app_config(aida_home)
+    assert loaded.allowed_folders == ["/tmp/shared-a", "/tmp/shared-b"]
+
+
 def test_old_config_missing_fields_gets_defaults(aida_home: Path):
     """pyIrena rule: old configs must always load."""
     partial = {"config_version": 1}  # no log_level, no records_dir, ...

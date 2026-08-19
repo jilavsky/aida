@@ -14,7 +14,13 @@ from pathlib import Path
 
 from aida.artifacts.store import ArtifactStore
 from aida.config.paths import ensure_records_dir, skills_dir
-from aida.config.settings import McpConfig, McpServerConfig, Settings, load_settings
+from aida.config.settings import (
+    McpConfig,
+    McpServerConfig,
+    Settings,
+    WorkspaceConfig,
+    load_settings,
+)
 from aida.core.agent import AgentLoop
 from aida.core.context import build_system_message, load_skill_texts
 from aida.core.events import (
@@ -31,17 +37,30 @@ from aida.core.events import (
     UsageInfo,
 )
 from aida.core.tools import NativeTool, default_native_tools
+from aida.documents.tools import default_document_tools
 from aida.mcp.groups import resolve_explicit, resolve_group
 from aida.mcp.manager import McpManager
 from aida.persistence.recorder import ConversationNotFoundError, ConversationRecorder
 from aida.persistence.store import ConversationStore
 from aida.providers.base import CompletionSettings, Message
 from aida.providers.profiles import build_provider
+from aida.workspace.files import default_file_tools
+from aida.workspace.safety import ConfirmationRequest, ConfirmCallback, SafetyGuard
 from aida.workspace.workspaces import (
     get_workspace,
     resolve_workspace_environment,
     validate_workspace,
 )
+
+
+async def cli_confirm(request: ConfirmationRequest) -> bool:
+    """The CLI's default ``ConfirmCallback`` (Phase 6): blocks on a real
+    terminal prompt via ``asyncio.to_thread(input, ...)`` so it doesn't
+    freeze the event loop out from under any concurrently-streaming output.
+    The GUI (``aida.ui.qt.bridge.ChatBridge``) passes its own callback that
+    shows a modal dialog instead — see ``start_session``'s docstring."""
+    answer = await asyncio.to_thread(input, f"\n[confirm] {request.detail} [y/N] ")
+    return answer.strip().lower() in ("y", "yes")
 
 
 class UnknownMcpServerError(Exception):
@@ -282,6 +301,7 @@ async def start_session(
     mcp_group: str = "",
     mcp_names: list[str] | None = None,
     resume_conversation_id: str | None = None,
+    confirm_callback: ConfirmCallback | None = None,
 ) -> tuple[ChatSession, McpManager | None]:
     """Shared session-startup logic for ``aida chat`` and
     ``aida conversations resume`` — resolves the workspace (if any), starts
@@ -290,7 +310,14 @@ async def start_session(
     ``ChatSession``. Raises ``UnknownProfileError`` / ``UnknownWorkspaceError``
     / ``UnknownMcpServerError`` / ``ConversationNotFoundError`` — callers
     print and exit(1) rather than letting a traceback through.
+
+    ``confirm_callback`` (Phase 6) is handed to the ``SafetyGuard`` built
+    below for the native file/document tools; ``None`` (the CLI's default)
+    means ``cli_confirm`` — a real blocking terminal prompt. The GUI
+    (``aida.ui.qt.bridge.ChatBridge``) always passes its own callback that
+    shows a modal dialog instead.
     """
+    confirm_callback = confirm_callback or cli_confirm
     store = ConversationStore()
     artifact_store = ArtifactStore()
     records_dir = ensure_records_dir(Path(settings.app.records_dir) if settings.app.records_dir else None)
@@ -310,6 +337,7 @@ async def start_session(
     system_prompt: str | None = None
     mcp_servers: list[McpServerConfig] = []
     explicit_mcp = bool(mcp_group or mcp_names)
+    workspace: WorkspaceConfig | None = None
 
     if effective_workspace_name:
         workspace = get_workspace(settings, effective_workspace_name)
@@ -348,8 +376,18 @@ async def start_session(
             "No profile given: pass --profile NAME, or --workspace NAME with a profile configured."
         )
 
+    guard = SafetyGuard.for_workspace(
+        source_folders=workspace.source_folders if workspace else [],
+        target_folder=workspace.target_folder if workspace else None,
+        global_allowed_folders=settings.app.allowed_folders,
+        mode=workspace.safety if workspace else settings.app.default_safety_mode,
+        confirm_callback=confirm_callback,
+    )
+
     mcp_manager: McpManager | None = None
     tools = default_native_tools()
+    tools.update(default_file_tools(guard))
+    tools.update(default_document_tools(guard, artifact_store, sidecar_dirname=sidecar_dirname))
     if mcp_servers:
         mcp_manager = McpManager(mcp_servers, artifact_store=artifact_store)
         mcp_tools = await mcp_manager.start_all()

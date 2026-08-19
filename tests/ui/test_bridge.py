@@ -7,11 +7,13 @@ new here.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from aida.config.settings import ProviderProfile, load_settings
-from aida.providers.mock import MockProvider, MockTurn
+from aida.providers.mock import MockProvider, MockToolCall, MockTurn
 from aida.ui.qt.bridge import ChatBridge
+from aida.workspace.safety import ConfirmationRequest
 from tests.ui._qt_test_utils import pump_until
 
 
@@ -197,3 +199,96 @@ def test_cancel_forwards_to_the_session(qapp, loop_thread, aida_home: Path, reco
 def test_cancel_before_session_ready_is_a_safe_noop(qapp, loop_thread, aida_home: Path, records_home: Path):
     bridge = ChatBridge(loop_thread)
     bridge.cancel()  # must not raise even with no session yet
+
+
+# --- confirmation_requested (Phase 6 SafetyGuard bridging) -------------------
+
+
+def test_confirm_bridges_signal_to_a_resolvable_future(qapp, loop_thread, aida_home: Path, records_home: Path):
+    """``ChatBridge._confirm`` runs on the background asyncio thread; this
+    pins down that emitting confirmation_requested delivers (request,
+    future) to a Qt-thread receiver, and that resolving the plain
+    concurrent.futures.Future there is what unblocks the awaiting
+    coroutine — without going through a real tool call at all."""
+    bridge = ChatBridge(loop_thread)
+    received = []
+    bridge.confirmation_requested.connect(lambda request, future: received.append((request, future)))
+
+    request = ConfirmationRequest(action="write", path="/tmp/x", detail="Write /tmp/x?")
+    outer_future = asyncio.run_coroutine_threadsafe(bridge._confirm(request), loop_thread.loop)
+
+    assert pump_until(qapp, lambda: received), "confirmation_requested never fired"
+    inner_request, inner_future = received[0]
+    assert inner_request is request
+
+    inner_future.set_result(True)
+    assert pump_until(qapp, lambda: outer_future.done())
+    assert outer_future.result(timeout=1) is True
+
+
+def test_confirm_denial_resolves_false(qapp, loop_thread, aida_home: Path, records_home: Path):
+    bridge = ChatBridge(loop_thread)
+    received = []
+    bridge.confirmation_requested.connect(lambda request, future: received.append((request, future)))
+
+    request = ConfirmationRequest(action="delete", path="/tmp/x", detail="Delete /tmp/x?")
+    outer_future = asyncio.run_coroutine_threadsafe(bridge._confirm(request), loop_thread.loop)
+    assert pump_until(qapp, lambda: received)
+
+    received[0][1].set_result(False)
+    assert pump_until(qapp, lambda: outer_future.done())
+    assert outer_future.result(timeout=1) is False
+
+
+def test_start_defaults_confirm_callback_to_bridge_confirm(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    """End-to-end: a write_file tool call to a path outside the (empty)
+    allowed-folders set triggers SafetyGuard's confirmation, which — because
+    ChatBridge.start defaults confirm_callback to self._confirm — surfaces
+    as confirmation_requested rather than silently denying (the CLI's
+    deny_all-less default) or hanging."""
+    target = tmp_path / "note.txt"
+    monkeypatch.setattr(
+        "aida.cli.chat.build_provider",
+        lambda profile: MockProvider(
+            [
+                MockTurn(
+                    tool_calls=[
+                        MockToolCall(
+                            name="write_file",
+                            id="call_1",
+                            arguments={"path": str(target), "content": "hi"},
+                        )
+                    ]
+                ),
+                MockTurn(text="done"),
+            ]
+        ),
+    )
+    settings = _settings_with_profile()
+
+    bridge = ChatBridge(loop_thread)
+    ready = []
+    bridge.session_ready.connect(lambda: ready.append(True))
+    bridge.start(settings, profile_name="mock-profile")
+    assert pump_until(qapp, lambda: ready)
+
+    confirmations = []
+
+    def _approve(request, future):
+        confirmations.append(request)
+        future.set_result(True)
+
+    bridge.confirmation_requested.connect(_approve)
+
+    finished = []
+    bridge.turn_finished.connect(lambda: finished.append(True))
+    bridge.send("please write the file")
+    assert pump_until(qapp, lambda: finished), "turn_finished never fired"
+
+    assert len(confirmations) == 1
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "hi"
+
+    bridge.shutdown()

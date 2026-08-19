@@ -153,6 +153,64 @@ def test_cmd_list_shows_created_workspaces(aida_home: Path, records_home: Path, 
     assert "analysis" in out
 
 
+# --- Phase 6: one-time relaxed-mode warning ----------------------------------
+
+
+def test_cmd_new_with_relaxed_safety_prints_warning(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    rc = cmd_new(_parse("new", "ws1", "--profile", "p1", "--safety", "relaxed"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Relaxed mode" in out
+
+
+def test_cmd_new_with_confirm_safety_prints_no_relaxed_warning(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    rc = cmd_new(_parse("new", "ws1", "--profile", "p1", "--safety", "confirm"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Relaxed mode" not in out
+
+
+def test_cmd_edit_enabling_relaxed_prints_warning(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1", "--safety", "confirm"))
+    capsys.readouterr()
+
+    rc = cmd_edit(_parse("edit", "ws1", "--safety", "relaxed"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Relaxed mode" in out
+
+
+def test_cmd_edit_already_relaxed_does_not_reprint_warning(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    """The "one-time" part: re-saving an already-relaxed workspace (e.g.
+    editing an unrelated field) must not show the warning again."""
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1", "--safety", "relaxed"))
+    capsys.readouterr()
+
+    rc = cmd_edit(_parse("edit", "ws1", "--system-prompt", "still relaxed"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Relaxed mode" not in out
+
+
+def test_cmd_edit_switching_from_relaxed_to_confirm_prints_no_warning(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1", "--safety", "relaxed"))
+    capsys.readouterr()
+
+    rc = cmd_edit(_parse("edit", "ws1", "--safety", "confirm"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Relaxed mode" not in out
+
+
 def test_two_workspaces_resolve_to_different_environments(aida_home: Path, records_home: Path, capsys, monkeypatch):
     """Phase 4 acceptance criterion: two workspaces demonstrably load
     different provider/skills environments."""

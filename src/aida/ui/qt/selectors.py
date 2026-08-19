@@ -19,6 +19,7 @@ from aida.ui.qt._qt import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -109,16 +110,24 @@ class FolderDisplay(QGroupBox):
     """Shows the active workspace's source/target folders for *this*
     session, each with a Change button (native folder picker) — writes back
     only to the in-memory session state until "Save to Workspace" is
-    clicked, which persists it (``save_to_workspace_requested``)."""
+    clicked, which persists it (``save_to_workspace_requested``).
+
+    Phase 6 adds the sidecar folder name (where generated report images get
+    copied, relative to the target folder — see
+    ``aida.documents.writers.md_obsidian``) as a plain editable text field,
+    following the same "visible + editable, saved only on request" pattern
+    as the two folder pickers above it."""
 
     source_folders_changed = Signal(list)
     target_folder_changed = Signal(str)
+    sidecar_folder_name_changed = Signal(str)
     save_to_workspace_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Folders", parent)
         self._source_folders: list[str] = []
         self._target_folder: str | None = None
+        self._sidecar_folder_name: str = "figures"
 
         layout = QVBoxLayout(self)
 
@@ -138,15 +147,27 @@ class FolderDisplay(QGroupBox):
         target_row.addWidget(change_target_button)
         layout.addLayout(target_row)
 
+        sidecar_row = QHBoxLayout()
+        sidecar_row.addWidget(QLabel("Sidecar folder:", self))
+        self._sidecar_edit = QLineEdit(self._sidecar_folder_name, self)
+        self._sidecar_edit.editingFinished.connect(self._on_sidecar_edited)
+        sidecar_row.addWidget(self._sidecar_edit)
+        layout.addLayout(sidecar_row)
+
         self._save_button = QPushButton("Save to Workspace", self)
         self._save_button.clicked.connect(self.save_to_workspace_requested.emit)
         layout.addWidget(self._save_button)
 
-    def set_folders(self, *, source_folders: list[str], target_folder: str | None) -> None:
+    def set_folders(
+        self, *, source_folders: list[str], target_folder: str | None, sidecar_folder_name: str | None = None
+    ) -> None:
         self._source_folders = list(source_folders)
         self._target_folder = target_folder
         self._source_label.setText("Source: " + (", ".join(source_folders) or "(none)"))
         self._target_label.setText("Target: " + (target_folder or "(none)"))
+        if sidecar_folder_name is not None:
+            self._sidecar_folder_name = sidecar_folder_name
+            self._sidecar_edit.setText(sidecar_folder_name)
 
     @property
     def source_folders(self) -> list[str]:
@@ -155,6 +176,10 @@ class FolderDisplay(QGroupBox):
     @property
     def target_folder(self) -> str | None:
         return self._target_folder
+
+    @property
+    def sidecar_folder_name(self) -> str:
+        return self._sidecar_folder_name
 
     def _on_add_source_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Add Source Folder")
@@ -171,6 +196,14 @@ class FolderDisplay(QGroupBox):
         self._target_folder = folder
         self.set_folders(source_folders=self._source_folders, target_folder=folder)
         self.target_folder_changed.emit(folder)
+
+    def _on_sidecar_edited(self) -> None:
+        name = self._sidecar_edit.text().strip()
+        if not name or name == self._sidecar_folder_name:
+            self._sidecar_edit.setText(self._sidecar_folder_name)  # revert an empty/no-op edit
+            return
+        self._sidecar_folder_name = name
+        self.sidecar_folder_name_changed.emit(name)
 
 
 class McpQuickPanel(QGroupBox):

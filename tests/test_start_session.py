@@ -223,6 +223,136 @@ async def test_start_session_resume_unknown_conversation_raises(aida_home: Path,
         await start_session(settings, resume_conversation_id="does-not-exist")
 
 
+# --- Phase 6: SafetyGuard construction + file/document tool merging --------
+
+
+@pytest.mark.asyncio
+async def test_start_session_merges_file_and_document_tools_by_default(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """Even with no workspace configured, start_session always wires the
+    native file/document tools in (against an empty allowed-folders set —
+    everything just requires confirmation, per SafetyGuard's outside-bounds
+    behavior)."""
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    settings = _settings()
+
+    session, _mcp_manager = await start_session(settings, profile_name="mock-profile")
+    try:
+        for name in ("list_directory", "read_file", "write_file", "delete_file"):
+            assert name in session.tools
+        assert "write_markdown_report" in session.tools
+        assert "write_docx_report" in session.tools
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_relaxed_workspace_allows_writes_without_confirmation(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """The SafetyGuard built from the workspace's own source/target folders
+    + safety mode is what actually gates the merged file tools — a
+    'relaxed' workspace should let a write inside its own target folder
+    through without ever calling the confirm callback."""
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    target = tmp_path / "target"
+    target.mkdir()
+    ws = _workspace(target_folder=str(target), safety="relaxed")
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+
+    confirm_calls = []
+
+    async def _never_called(request):
+        confirm_calls.append(request)
+        return False
+
+    session, mcp_manager = await start_session(
+        settings, workspace_name="use-ws", confirm_callback=_never_called
+    )
+    try:
+        result = await session.tools["write_file"].func(
+            {"path": str(target / "note.txt"), "content": "hello"}
+        )
+        assert not result.is_error
+        assert (target / "note.txt").read_text(encoding="utf-8") == "hello"
+        assert confirm_calls == []  # relaxed mode + inside allowed folder -> no prompt
+    finally:
+        await session.aclose()
+        if mcp_manager is not None:
+            await mcp_manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_confirm_workspace_requires_confirmation_inside_folder(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """'confirm' mode (the default) gates writes even *inside* the
+    workspace's own allowed folders — the custom confirm_callback passed to
+    start_session must be the one consulted."""
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    target = tmp_path / "target"
+    target.mkdir()
+    ws = _workspace(target_folder=str(target), safety="confirm")
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+
+    confirm_calls = []
+
+    async def _approve(request):
+        confirm_calls.append(request)
+        return True
+
+    session, mcp_manager = await start_session(
+        settings, workspace_name="use-ws", confirm_callback=_approve
+    )
+    try:
+        result = await session.tools["write_file"].func(
+            {"path": str(target / "note.txt"), "content": "hello"}
+        )
+        assert not result.is_error
+        assert len(confirm_calls) == 1
+    finally:
+        await session.aclose()
+        if mcp_manager is not None:
+            await mcp_manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_global_allowed_folders_apply_without_workspace(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """settings.app.allowed_folders (Phase 6) is layered on even when no
+    workspace is in play at all."""
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    settings = _settings()
+    settings.app.allowed_folders = [str(shared)]
+    settings.app.default_safety_mode = "relaxed"
+
+    confirm_calls = []
+
+    async def _never_called(request):
+        confirm_calls.append(request)
+        return False
+
+    session, _mcp_manager = await start_session(
+        settings, profile_name="mock-profile", confirm_callback=_never_called
+    )
+    try:
+        result = await session.tools["write_file"].func(
+            {"path": str(shared / "note.txt"), "content": "hello"}
+        )
+        assert not result.is_error
+        assert confirm_calls == []
+    finally:
+        await session.aclose()
+
+
 def test_build_parser_accepts_workspace_flag():
     args = _build_parser().parse_args(["--workspace", "use-ws"])
     assert args.workspace == "use-ws"

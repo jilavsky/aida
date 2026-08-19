@@ -17,6 +17,7 @@ from pathlib import Path
 
 from aida.artifacts.base import ImageArtifact
 from aida.artifacts.store import ArtifactStore
+from aida.documents.writers.md_obsidian import copy_images_to_sidecar
 from aida.persistence.store import ArtifactRecord
 from aida.providers.base import Message
 
@@ -125,12 +126,18 @@ def write_transcript(
     target_dir = sidecar_dir(records_dir, sidecar_dirname, conversation_id)
 
     # In-memory Artifact objects aren't available here (only DB metadata
-    # rows are) — copy_to_target needs the real Artifact dataclass, so
-    # reconstruct just enough of one from the record for the file copy.
-    for art in artifacts:
-        if art.kind == "ImageArtifact" and art.path and Path(art.path).exists():
-            placeholder = ImageArtifact(data=b"", mime_type=art.mime_type or "", path=art.path)
-            artifact_store.copy_to_target(placeholder, target_dir)
+    # rows are) — reconstruct just enough of one from each record for the
+    # file copy. Phase 6: this now goes through the same
+    # copy_images_to_sidecar primitive aida.documents.writers.md_obsidian's
+    # write_markdown_document uses for freeform reports — "one writer" for
+    # the image-copying mechanics, even though a transcript's own text
+    # rendering (below, render_transcript) stays its own thing.
+    placeholders = [
+        ImageArtifact(data=b"", mime_type=art.mime_type or "", path=art.path)
+        for art in artifacts
+        if art.kind == "ImageArtifact" and art.path and Path(art.path).exists()
+    ]
+    copy_images_to_sidecar(placeholders, target_dir, artifact_store)
 
     text = render_transcript(
         conversation_id=conversation_id,

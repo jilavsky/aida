@@ -9,6 +9,7 @@ from aida.cli.chat import (
     UnknownMcpServerError,
     UnknownProfileError,
     _build_parser,
+    cli_confirm,
     print_event,
     resolve_mcp_servers,
     resolve_profile,
@@ -31,6 +32,7 @@ from aida.core.events import (
     ToolCallStarted,
 )
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
+from aida.workspace.safety import ConfirmationRequest
 
 
 def _settings_with_profile(name="mock-profile", **overrides) -> Settings:
@@ -149,6 +151,37 @@ def test_print_event_agent_error(capsys):
     assert "provider" in out
     assert "boom" in out
     assert "net down" in out
+
+
+# --- cli_confirm (Phase 6 default ConfirmCallback) --------------------------
+
+
+@pytest.mark.asyncio
+async def test_cli_confirm_yes_approves(monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+    request = ConfirmationRequest(action="write", path="/tmp/x", detail="Write /tmp/x?")
+    assert await cli_confirm(request) is True
+
+
+@pytest.mark.asyncio
+async def test_cli_confirm_blank_denies(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda prompt: "")
+    request = ConfirmationRequest(action="delete", path="/tmp/x", detail="Delete /tmp/x?")
+    assert await cli_confirm(request) is False
+
+
+@pytest.mark.asyncio
+async def test_cli_confirm_shows_the_request_detail(monkeypatch):
+    seen_prompts = []
+
+    def _fake_input(prompt):
+        seen_prompts.append(prompt)
+        return "no"
+
+    monkeypatch.setattr("builtins.input", _fake_input)
+    request = ConfirmationRequest(action="write", path="/tmp/x", detail="Write outside allowed folders: /tmp/x")
+    assert await cli_confirm(request) is False
+    assert "Write outside allowed folders: /tmp/x" in seen_prompts[0]
 
 
 # --- ChatSession -------------------------------------------------------------

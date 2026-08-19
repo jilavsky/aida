@@ -125,6 +125,7 @@ class MainWindow(QMainWindow):
 
     def _wire_ui_signals(self) -> None:
         self.input_box.send_requested.connect(self._on_send_requested)
+        self.input_box.folder_dropped.connect(self._on_folder_dropped)
         self.sidebar.resume_requested.connect(self._on_resume_requested)
         self.sidebar.delete_requested.connect(self._on_delete_requested)
         self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
@@ -132,6 +133,7 @@ class MainWindow(QMainWindow):
         self.profile_selector.profile_changed.connect(self._on_profile_changed)
         self.folder_display.source_folders_changed.connect(self._on_source_folders_changed)
         self.folder_display.target_folder_changed.connect(self._on_target_folder_changed)
+        self.folder_display.sidecar_folder_name_changed.connect(self._on_sidecar_folder_name_changed)
         self.folder_display.save_to_workspace_requested.connect(self._on_save_folders_to_workspace)
 
     def _wire_bridge_signals(self) -> None:
@@ -141,6 +143,7 @@ class MainWindow(QMainWindow):
         self.bridge.turn_started.connect(lambda: self.input_box.set_busy(True))
         self.bridge.turn_finished.connect(lambda: self.input_box.set_busy(False))
         self.bridge.turn_failed.connect(self._on_turn_failed)
+        self.bridge.confirmation_requested.connect(self._on_confirmation_requested)
         self.input_box.cancel_requested.connect(self.bridge.cancel)
         self.profile_selector.profile_changed.connect(self.bridge.switch_profile)
 
@@ -199,9 +202,92 @@ class MainWindow(QMainWindow):
     def _on_turn_failed(self, message: str) -> None:
         QMessageBox.warning(self, "Turn Failed", message)
 
+    def _on_confirmation_requested(self, request, future) -> None:
+        """Handles ``ChatBridge.confirmation_requested`` (Phase 6): shows a
+        real modal dialog for a ``SafetyGuard`` confirmation and resolves
+        the paired ``concurrent.futures.Future`` with the answer, unblocking
+        the background asyncio thread's ``await`` in ``ChatBridge._confirm``.
+        A plain ``concurrent.futures.Future`` is safe to resolve from this
+        (the Qt) thread — see that method's docstring."""
+        answer = QMessageBox.question(
+            self,
+            "Confirm Action",
+            request.detail,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        future.set_result(answer == QMessageBox.StandardButton.Yes)
+
     def _on_send_requested(self, text: str) -> None:
+        attachments = self.input_box.attached_paths()
+        self.input_box.clear_attachments()
         self.chat_panel.add_user_message(text)
-        self.bridge.send(text)
+        self.bridge.send(self._augment_with_attachments(text, attachments))
+
+    def _augment_with_attachments(self, text: str, attachments: list[str]) -> str:
+        """Drag & drop onto the chat -- "included in the next sent message"
+        (PLAN.md Phase 6): each attached path's content is read directly via
+        ``aida.documents.readers`` (dispatched by extension, same as the
+        agent's own ``read_file``/document tools) and appended to the
+        outgoing message text, so the model sees it without needing to call
+        a tool itself. Deliberately *not* run through ``SafetyGuard`` — these
+        are files the human explicitly picked via a native file dialog or
+        drag-and-drop from their own machine, not a path the agent is
+        choosing to access on its own; the safety model gates the agent's
+        own filesystem actions (PLAN.md's "always-confirm-outside-allowed"
+        rule), not a human manually attaching a file they already have
+        access to."""
+        if not attachments:
+            return text
+        sections = [text] if text else []
+        for path in attachments:
+            sections.append(self._read_attachment_for_model(path))
+        return "\n\n".join(sections)
+
+    def _read_attachment_for_model(self, path: str) -> str:
+        from aida.artifacts.policy import describe_for_model
+        from aida.documents.readers import UnsupportedDocumentFormatError, read_document
+
+        name = Path(path).name
+        try:
+            artifacts = read_document(path)
+        except (UnsupportedDocumentFormatError, OSError) as exc:
+            return f"--- Attached file: {name} ---\n[could not read: {exc}]\n--- End of {name} ---"
+        body = "\n\n".join(describe_for_model(a) for a in artifacts)
+        return f"--- Attached file: {name} ---\n{body}\n--- End of {name} ---"
+
+    def _on_folder_dropped(self, folder: str) -> None:
+        """A folder (rather than a file) dropped onto the chat: offer to add
+        it as a source folder, per PLAN.md's "folder drop -> confirmation
+        dialog offering 'add as allowed/source folder'". Persisting it
+        (and the running session's ``SafetyGuard`` actually honoring it)
+        both go through the same existing "Save to Workspace" + restart
+        path as any other folder edit here — see ``_on_save_folders_to_workspace``
+        and ``FolderDisplay``'s docstring."""
+        if self._current_workspace_config is None:
+            self.statusBar().showMessage(
+                "No active workspace — create or switch to one to add source folders", 5000
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Add Source Folder",
+            f"Add {folder!r} as a source folder for workspace {self._current_workspace_config.name!r}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if folder not in self._current_workspace_config.source_folders:
+            self._current_workspace_config.source_folders.append(folder)
+        self.folder_display.set_folders(
+            source_folders=self._current_workspace_config.source_folders,
+            target_folder=self._current_workspace_config.target_folder,
+            sidecar_folder_name=self._current_workspace_config.sidecar_folder_name,
+        )
+        self.statusBar().showMessage(
+            f"Added {folder} — click 'Save to Workspace', then switch/resume to apply it to this session", 8000
+        )
 
     # --- workspace / profile switching ------------------------------------
 
@@ -316,9 +402,10 @@ class MainWindow(QMainWindow):
             self.folder_display.set_folders(
                 source_folders=self._current_workspace_config.source_folders,
                 target_folder=self._current_workspace_config.target_folder,
+                sidecar_folder_name=self._current_workspace_config.sidecar_folder_name,
             )
         else:
-            self.folder_display.set_folders(source_folders=[], target_folder=None)
+            self.folder_display.set_folders(source_folders=[], target_folder=None, sidecar_folder_name="figures")
 
     def _on_source_folders_changed(self, folders: list[str]) -> None:
         if self._current_workspace_config is not None:
@@ -327,6 +414,10 @@ class MainWindow(QMainWindow):
     def _on_target_folder_changed(self, folder: str) -> None:
         if self._current_workspace_config is not None:
             self._current_workspace_config.target_folder = folder
+
+    def _on_sidecar_folder_name_changed(self, name: str) -> None:
+        if self._current_workspace_config is not None:
+            self._current_workspace_config.sidecar_folder_name = name
 
     def _on_save_folders_to_workspace(self) -> None:
         if self._current_workspace_config is None:

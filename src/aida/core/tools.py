@@ -9,6 +9,7 @@ phases (PLAN.md §10).
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -40,6 +41,36 @@ class ToolResult:
 ToolFunc = Callable[[dict[str, Any]], Awaitable[ToolResult]]
 
 
+def wrap_tool_errors(*expected: type[BaseException]) -> Callable[[ToolFunc], ToolFunc]:
+    """Decorator factory (Phase 6): wraps a tool coroutine so any of
+    ``expected`` exception types raised inside it become a normal
+    ``ToolResult(is_error=True, content=str(exc))`` instead of propagating.
+
+    ``AgentLoop._run_turns`` already has its own blanket ``try/except
+    Exception`` one level up that turns *any* tool crash into an error
+    result (see its docstring) — this decorator doesn't replace that, it's
+    a stricter, self-documenting inner boundary for a tool's *expected*,
+    named failure modes (a declined confirmation, a missing file, a
+    timeout, ...) so the tool's contract is "always returns a ToolResult"
+    and can be unit-tested by calling ``tool.func(...)`` directly, without
+    needing a full ``AgentLoop`` harness just to see an expected failure
+    turned into a result. Used by ``aida.workspace.files`` and
+    ``aida.documents.tools``.
+    """
+
+    def decorator(func: ToolFunc) -> ToolFunc:
+        @functools.wraps(func)
+        async def wrapper(arguments: dict[str, Any]) -> ToolResult:
+            try:
+                return await func(arguments)
+            except expected as exc:
+                return ToolResult(content=str(exc), is_error=True)
+
+        return wrapper
+
+    return decorator
+
+
 @dataclass
 class NativeTool:
     """A tool schema (offered to the model) paired with its implementation."""
@@ -68,4 +99,4 @@ def default_native_tools() -> dict[str, NativeTool]:
     return {GET_CURRENT_TIME.schema.name: GET_CURRENT_TIME}
 
 
-__all__ = ["GET_CURRENT_TIME", "NativeTool", "ToolFunc", "ToolResult", "default_native_tools"]
+__all__ = ["GET_CURRENT_TIME", "NativeTool", "ToolFunc", "ToolResult", "default_native_tools", "wrap_tool_errors"]

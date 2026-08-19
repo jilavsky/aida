@@ -103,6 +103,65 @@ def test_folder_display_save_to_workspace_emits_signal(qapp):
     assert requested == [True]
 
 
+# --- Phase 6: sidecar folder name field ---------------------------------
+
+
+def test_folder_display_sidecar_defaults_to_figures(qapp):
+    display = FolderDisplay()
+    assert display.sidecar_folder_name == "figures"
+    assert display._sidecar_edit.text() == "figures"
+
+
+def test_folder_display_set_folders_updates_sidecar_name(qapp):
+    display = FolderDisplay()
+    display.set_folders(source_folders=[], target_folder=None, sidecar_folder_name="images")
+    assert display.sidecar_folder_name == "images"
+    assert display._sidecar_edit.text() == "images"
+
+
+def test_folder_display_set_folders_without_sidecar_arg_leaves_it_unchanged(qapp):
+    display = FolderDisplay()
+    display.set_folders(source_folders=[], target_folder=None, sidecar_folder_name="images")
+    display.set_folders(source_folders=["/a"], target_folder="/out")  # no sidecar_folder_name this time
+    assert display.sidecar_folder_name == "images"
+
+
+def test_folder_display_editing_sidecar_name_emits_signal(qapp):
+    display = FolderDisplay()
+    changed = []
+    display.sidecar_folder_name_changed.connect(changed.append)
+
+    display._sidecar_edit.setText("plots")
+    display._sidecar_edit.editingFinished.emit()
+
+    assert display.sidecar_folder_name == "plots"
+    assert changed == ["plots"]
+
+
+def test_folder_display_editing_sidecar_name_to_blank_reverts(qapp):
+    display = FolderDisplay()
+    changed = []
+    display.sidecar_folder_name_changed.connect(changed.append)
+
+    display._sidecar_edit.setText("   ")
+    display._sidecar_edit.editingFinished.emit()
+
+    assert display.sidecar_folder_name == "figures"  # reverted, not blanked
+    assert display._sidecar_edit.text() == "figures"
+    assert changed == []
+
+
+def test_folder_display_editing_sidecar_name_no_change_does_not_emit(qapp):
+    display = FolderDisplay()
+    changed = []
+    display.sidecar_folder_name_changed.connect(changed.append)
+
+    display._sidecar_edit.setText("figures")  # same as the default — no real change
+    display._sidecar_edit.editingFinished.emit()
+
+    assert changed == []
+
+
 def test_mcp_quick_panel_shows_group_and_checkboxes(qapp):
     panel = McpQuickPanel()
     panel.set_servers(["pyirena", "bait"], enabled=["pyirena"], group_name="pyirena-analysis")

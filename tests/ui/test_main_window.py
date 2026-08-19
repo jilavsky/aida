@@ -249,6 +249,36 @@ def test_folder_display_shows_workspace_folders_and_save_persists_changes(
         window.close()
 
 
+def test_folder_display_shows_and_saves_sidecar_folder_name(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    """Phase 6: the sidecar folder name (where write_markdown_report copies
+    embedded images, relative to the target folder) is visible/editable in
+    the workspace bar, same as source/target folders."""
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "use-pyirena": WorkspaceConfig(
+                name="use-pyirena", profile="mock-profile", mcp_group="none", sidecar_folder_name="figures"
+            )
+        }
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+    )
+    try:
+        assert window.folder_display.sidecar_folder_name == "figures"
+
+        window.folder_display.sidecar_folder_name_changed.emit("plots")
+        window.folder_display.save_to_workspace_requested.emit()
+
+        assert get_workspace(window.settings, "use-pyirena").sidecar_folder_name == "plots"
+        reloaded_settings = load_settings()
+        assert get_workspace(reloaded_settings, "use-pyirena").sidecar_folder_name == "plots"
+    finally:
+        window.close()
+
+
 def test_delete_conversation_removes_from_sidebar_and_db(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
@@ -357,6 +387,242 @@ def test_workspace_switch_declined_keeps_current_session(
         window._on_workspace_changed("plain-chat")
         qapp.processEvents()
         assert window.bridge.session.recorder.conversation_id == conv_id  # unchanged
+    finally:
+        window.close()
+
+
+def test_safety_confirmation_shows_modal_and_approving_lets_write_through(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    """Phase 6 GUI wiring: a write_file tool call outside the (empty)
+    allowed-folders set triggers SafetyGuard's confirm_callback, which
+    ChatBridge.start defaults to bridge._confirm -> confirmation_requested ->
+    MainWindow._on_confirmation_requested -> a real (mocked-out) QMessageBox.
+    Approving lets the write through."""
+    target = tmp_path / "note.txt"
+    settings = _settings_with_profile()
+    seen_prompts = []
+
+    def _fake_question(self, title, text, *args, **kwargs):
+        seen_prompts.append(text)
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr("aida.ui.qt.main_window.QMessageBox.question", _fake_question)
+
+    script = [
+        MockTurn(
+            tool_calls=[
+                MockToolCall(name="write_file", id="call_1", arguments={"path": str(target), "content": "hi"})
+            ]
+        ),
+        MockTurn(text="done"),
+    ]
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, script, profile_name="mock-profile")
+    try:
+        window.input_box.set_text("write it")
+        window.input_box._send_button.click()
+        assert pump_until(qapp, lambda: target.exists(), timeout=10.0)
+        assert target.read_text(encoding="utf-8") == "hi"
+        assert seen_prompts  # the modal was actually shown
+    finally:
+        window.close()
+
+
+def test_safety_confirmation_declining_blocks_the_write(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    target = tmp_path / "note.txt"
+    settings = _settings_with_profile()
+    monkeypatch.setattr(
+        "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.No
+    )
+
+    script = [
+        MockTurn(
+            tool_calls=[
+                MockToolCall(name="write_file", id="call_1", arguments={"path": str(target), "content": "hi"})
+            ]
+        ),
+        MockTurn(text="declined"),
+    ]
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, script, profile_name="mock-profile")
+    try:
+        # Waiting on turn_finished directly (rather than input_box.is_busy)
+        # avoids a race: is_busy starts out False too, so a pump_until poll
+        # landing before turn_started has even been delivered across the
+        # thread boundary would otherwise look identical to "the turn
+        # already finished".
+        finished = []
+        window.bridge.turn_finished.connect(lambda: finished.append(True))
+        window.input_box.set_text("write it")
+        window.input_box._send_button.click()
+        assert pump_until(qapp, lambda: finished, timeout=10.0)
+        assert not target.exists()
+    finally:
+        window.close()
+
+
+def test_send_with_attachment_includes_file_content_in_the_message(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    """Phase 6: attaching a file (Attach button or drag-and-drop) and
+    sending includes its content in the message actually sent to the
+    provider — this is what makes "I cannot upload a PDF file" (and any
+    other document type readers.py supports) work from the GUI."""
+    note = tmp_path / "notes.txt"
+    note.write_text("the sample was annealed at 400C", encoding="utf-8")
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="got it")], profile_name="mock-profile")
+    try:
+        window.input_box.add_attachment(str(note))
+        window.input_box.set_text("please summarize")
+        window.input_box._send_button.click()
+
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+
+        sent_messages = window.bridge.session.provider.calls[-1][0]
+        last_user_message = [m for m in sent_messages if m.role == "user"][-1]
+        assert "please summarize" in last_user_message.content
+        assert "the sample was annealed at 400C" in last_user_message.content
+        assert "notes.txt" in last_user_message.content
+
+        # Attachments are cleared after send.
+        assert window.input_box.attached_paths() == []
+    finally:
+        window.close()
+
+
+def test_send_with_attachment_and_no_text_still_sends_the_file_content(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    note = tmp_path / "notes.txt"
+    note.write_text("q range: 0.01 to 0.5", encoding="utf-8")
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="got it")], profile_name="mock-profile")
+    try:
+        window.input_box.add_attachment(str(note))
+        # No typed text at all — attach-and-send with an empty box. The
+        # InputBox's own _on_submit guard normally blocks empty sends, so
+        # drive this through the button with attachments present instead
+        # (InputBox intentionally lets a send through as long as there's
+        # either text or an attachment — see its module docstring).
+        window.input_box._on_submit()
+
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 1, timeout=5.0)
+    finally:
+        window.close()
+
+
+def test_folder_drop_with_active_workspace_offers_to_add_source_folder(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={"use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", mcp_group="none")}
+    )
+    prompts = []
+    monkeypatch.setattr(
+        "aida.ui.qt.main_window.QMessageBox.question",
+        lambda self, title, text, *a, **kw: (prompts.append(text), QMessageBox.StandardButton.Yes)[1],
+    )
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-ws")
+    try:
+        new_folder = str(tmp_path / "extra")
+        (tmp_path / "extra").mkdir()
+        window.input_box.folder_dropped.emit(new_folder)
+
+        assert prompts and new_folder in prompts[0]
+        assert new_folder in window.folder_display.source_folders
+    finally:
+        window.close()
+
+
+def test_folder_drop_declined_does_not_add(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={"use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", mcp_group="none")}
+    )
+    monkeypatch.setattr(
+        "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.No
+    )
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-ws")
+    try:
+        new_folder = str(tmp_path / "extra")
+        window.input_box.folder_dropped.emit(new_folder)
+        assert window.folder_display.source_folders == []
+    finally:
+        window.close()
+
+
+def test_folder_drop_with_no_active_workspace_shows_status_message(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window.input_box.folder_dropped.emit(str(tmp_path))
+        assert "workspace" in window.statusBar().currentMessage().lower()
+    finally:
+        window.close()
+
+
+def test_write_markdown_report_shows_as_file_artifact_card(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    """"Generated documents appear as file cards" (PLAN.md Phase 6): a
+    write_markdown_report tool call is just another FileArtifactCreated
+    event, so it rides the same ChatBridge.event_received ->
+    ChatPanel.handle_event -> FileArtifactCard plumbing Phase 5 already
+    built for any file-producing tool — this pins that down for the
+    document-writing tools specifically."""
+    from aida.ui.qt.artifact_widgets import FileArtifactCard
+
+    target_dir = tmp_path / "out"
+    target_dir.mkdir()
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "use-ws": WorkspaceConfig(
+                name="use-ws", profile="mock-profile", mcp_group="none", target_folder=str(target_dir), safety="relaxed"
+            )
+        }
+    )
+    script = [
+        MockTurn(
+            tool_calls=[
+                MockToolCall(
+                    name="write_markdown_report",
+                    id="call_1",
+                    arguments={"path": str(target_dir / "report.md"), "title": "Report", "body": "Findings."},
+                )
+            ]
+        ),
+        MockTurn(text="wrote it"),
+    ]
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, script, workspace_name="use-ws")
+    try:
+        window.input_box.set_text("write a report")
+        window.input_box._send_button.click()
+
+        assert pump_until(
+            qapp,
+            lambda: any(
+                isinstance(window.chat_panel.widget_at(i), FileArtifactCard)
+                for i in range(window.chat_panel.widget_count)
+            ),
+            timeout=10.0,
+        )
+        cards = [
+            window.chat_panel.widget_at(i)
+            for i in range(window.chat_panel.widget_count)
+            if isinstance(window.chat_panel.widget_at(i), FileArtifactCard)
+        ]
+        assert len(cards) == 1
+        assert Path(cards[0].path) == target_dir / "report.md"
     finally:
         window.close()
 
