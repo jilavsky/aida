@@ -100,7 +100,7 @@ safety mode into one switchable environment.
       resulting profiles, tool sets, and system-prompt content differ.
 - [x] Deleting a conversation leaves no orphan artifacts or record files —
       `tests/test_persistence_cleanup.py`, real files on a real filesystem.
-- [x] CI green — not run on GitHub Actions itself from this sandbox; the workflow
+- [ ] CI green — not run on GitHub Actions itself from this sandbox; the workflow
       (`.github/workflows/ci.yml`) runs exactly `pip install -e ".[dev]"`,
       `ruff check .`, `pytest -v` on ubuntu/macos/windows × Python 3.11/3.13. What
       *is* verified here: the full suite (270 tests) and `ruff check .` both pass

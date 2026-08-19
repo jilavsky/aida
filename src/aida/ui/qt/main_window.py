@@ -1,0 +1,357 @@
+"""``MainWindow`` (PLAN.md Phase 5): assembles every widget built so far
+into the actual application window and is the one place allowed to know
+about both Qt *and* the session/config/persistence layers at once — every
+other widget in ``aida.ui.qt`` only knows plain data and signals.
+
+Responsibilities, each mapping directly to a Phase 5 acceptance criterion:
+
+- start a session via ``ChatBridge`` on construction and wire its signals
+  to ``ChatPanel``/``InputBox`` (the flagship demo path)
+- workspace switch -> confirm -> start a *new* conversation in that
+  workspace
+- profile switch -> ``ChatBridge.switch_profile`` (history carries over)
+- conversations sidebar -> resume/delete/cleanup, backed by
+  ``aida.persistence``
+- Settings dialog -> font size takes effect immediately, without restart
+- window geometry/font size persisted to ``AppConfig`` on close
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from aida.config.paths import ensure_records_dir
+from aida.config.settings import Settings, save_app_config
+from aida.mcp.groups import resolve_group
+from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
+from aida.persistence.store import ArtifactRecord, ConversationStore
+from aida.ui.qt._qt import (
+    QAction,
+    QApplication,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
+    Qt,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
+from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
+from aida.ui.qt.bridge import AsyncLoopThread, ChatBridge
+from aida.ui.qt.chat_panel import ChatPanel
+from aida.ui.qt.conversations_sidebar import ConversationsSidebar
+from aida.ui.qt.icon import app_icon
+from aida.ui.qt.input_box import InputBox
+from aida.ui.qt.selectors import FolderDisplay, McpQuickPanel, ProfileSelector, WorkspaceSelector
+from aida.ui.qt.settings_dialog import SettingsDialog
+from aida.ui.qt.window_state import apply_font_size, apply_window_state, capture_window_state
+from aida.workspace.workspaces import (
+    WorkspaceConfig,
+    get_workspace,
+    list_workspace_names,
+    save_workspace,
+)
+
+
+class MainWindow(QMainWindow):
+    def __init__(
+        self,
+        settings: Settings,
+        loop_thread: AsyncLoopThread,
+        *,
+        start_kwargs: dict | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.settings = settings
+        self._loop_thread = loop_thread
+        self._current_workspace_config: WorkspaceConfig | None = None
+        self.setWindowTitle("AIDA")
+        self.setWindowIcon(app_icon())
+
+        self._build_ui()
+        self._wire_ui_signals()
+
+        self.bridge = ChatBridge(loop_thread, self)
+        self._wire_bridge_signals()
+        self.bridge.start(settings, **(start_kwargs or {}))
+
+        apply_window_state(self, settings.app)
+        self._refresh_conversations_sidebar()
+        self._refresh_workspace_selector()
+        self._refresh_profile_selector()
+
+    # --- construction ----------------------------------------------------
+
+    def _build_ui(self) -> None:
+        toolbar = QToolBar("Session", self)
+        self.addToolBar(toolbar)
+        self.workspace_selector = WorkspaceSelector(self)
+        toolbar.addWidget(self.workspace_selector)
+        self.profile_selector = ProfileSelector(self)
+        toolbar.addWidget(self.profile_selector)
+
+        settings_action = QAction("Settings…", self)
+        settings_action.triggered.connect(self.open_settings_dialog)
+        toolbar.addAction(settings_action)
+
+        self.sidebar = ConversationsSidebar(self)
+        self.chat_panel = ChatPanel(self)
+        self.input_box = InputBox(self)
+        self.folder_display = FolderDisplay(self)
+        self.mcp_panel = McpQuickPanel(self)
+
+        chat_column = QWidget(self)
+        chat_layout = QVBoxLayout(chat_column)
+        chat_layout.setContentsMargins(0, 0, 0, 0)
+        chat_layout.addWidget(self.chat_panel, stretch=1)
+        chat_layout.addWidget(self.input_box)
+
+        session_column = QWidget(self)
+        session_layout = QVBoxLayout(session_column)
+        session_layout.setContentsMargins(0, 0, 0, 0)
+        session_layout.addWidget(self.folder_display)
+        session_layout.addWidget(self.mcp_panel)
+        session_layout.addStretch(1)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        splitter.addWidget(self.sidebar)
+        splitter.addWidget(chat_column)
+        splitter.addWidget(session_column)
+        splitter.setStretchFactor(1, 1)  # chat column gets the extra space
+        self.setCentralWidget(splitter)
+
+        self.statusBar().showMessage("Starting session…")
+
+    def _wire_ui_signals(self) -> None:
+        self.input_box.send_requested.connect(self._on_send_requested)
+        self.sidebar.resume_requested.connect(self._on_resume_requested)
+        self.sidebar.delete_requested.connect(self._on_delete_requested)
+        self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
+        self.workspace_selector.workspace_changed.connect(self._on_workspace_changed)
+        self.profile_selector.profile_changed.connect(self._on_profile_changed)
+        self.folder_display.source_folders_changed.connect(self._on_source_folders_changed)
+        self.folder_display.target_folder_changed.connect(self._on_target_folder_changed)
+        self.folder_display.save_to_workspace_requested.connect(self._on_save_folders_to_workspace)
+
+    def _wire_bridge_signals(self) -> None:
+        self.bridge.session_ready.connect(self._on_session_ready)
+        self.bridge.startup_failed.connect(self._on_startup_failed)
+        self.bridge.event_received.connect(self.chat_panel.handle_event)
+        self.bridge.turn_started.connect(lambda: self.input_box.set_busy(True))
+        self.bridge.turn_finished.connect(lambda: self.input_box.set_busy(False))
+        self.bridge.turn_failed.connect(self._on_turn_failed)
+        self.input_box.cancel_requested.connect(self.bridge.cancel)
+        self.profile_selector.profile_changed.connect(self.bridge.switch_profile)
+
+    # --- session lifecycle -----------------------------------------------
+
+    def _on_session_ready(self) -> None:
+        session = self.bridge.session
+        self.statusBar().showMessage(f"Ready — {session.profile_name}", 5000)
+        if session.recorder is not None:
+            history = [m for m in session.messages if m.role != "system"]
+            if history:
+                self.chat_panel.load_history(history)
+                self._load_resumed_artifacts(session.recorder.conversation_id)
+        self._refresh_mcp_panel()
+        self._refresh_folder_display()
+        self._refresh_conversations_sidebar()
+
+    def _load_resumed_artifacts(self, conversation_id: str) -> None:
+        """Acceptance criterion "resume yesterday's conversation... images
+        still display": ``ChatPanel.load_history`` only replays the text
+        messages (see its docstring) since the original streaming
+        ``ImageArtifactCreated``/``FileArtifactCreated`` events aren't
+        persisted/replayed — artifact *metadata* is, in the ``artifacts``
+        table, so this re-derives one widget per still-present file
+        directly from there. v1 simplicity: appended after the whole text
+        history rather than interleaved at each artifact's original
+        position (``ArtifactRecord`` has no ``seq``/position to interleave
+        by); still satisfies "images still display" on resume."""
+        store = ConversationStore()
+        try:
+            records: list[ArtifactRecord] = store.load_artifacts(conversation_id)
+        finally:
+            store.close()
+        for record in records:
+            if not record.path or not Path(record.path).exists():
+                continue  # sidecar file moved/deleted since it was recorded
+            if record.kind == "ImageArtifact":
+                widget = InlineImageWidget(
+                    path=record.path,
+                    artifact_id=record.id,
+                    mime_type=record.mime_type or "image/png",
+                    parent=self.chat_panel,
+                )
+            elif record.kind == "FileArtifact":
+                widget = FileArtifactCard(
+                    path=record.path, artifact_id=record.id, mime_type=record.mime_type, parent=self.chat_panel
+                )
+            else:
+                continue
+            self.chat_panel.add_artifact_widget(widget)
+
+    def _on_startup_failed(self, message: str) -> None:
+        self.statusBar().showMessage("Startup failed", 5000)
+        QMessageBox.critical(self, "Could Not Start Session", message)
+
+    def _on_turn_failed(self, message: str) -> None:
+        QMessageBox.warning(self, "Turn Failed", message)
+
+    def _on_send_requested(self, text: str) -> None:
+        self.chat_panel.add_user_message(text)
+        self.bridge.send(text)
+
+    # --- workspace / profile switching ------------------------------------
+
+    def _on_workspace_changed(self, name: str) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Switch Workspace",
+            f"Switch to workspace {name or '(no workspace)'}? This starts a new conversation.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self._refresh_workspace_selector()  # revert the dropdown to the current workspace
+            return
+        self._restart_session(workspace_name=name or None, profile_name=None, resume_conversation_id=None)
+
+    def _on_profile_changed(self, name: str) -> None:
+        # aida.ui.qt.bridge.ChatBridge.switch_profile already does the
+        # actual work (connected directly in _wire_bridge_signals); nothing
+        # else to do here — kept as its own handler for symmetry/future use
+        # (e.g. updating a "current profile" status label).
+        pass
+
+    def _restart_session(
+        self, *, workspace_name: str | None, profile_name: str | None, resume_conversation_id: str | None
+    ) -> None:
+        self.bridge.shutdown()
+        self.chat_panel.clear()
+        self.statusBar().showMessage("Starting session…")
+        self.bridge = ChatBridge(self._loop_thread, self)
+        self._wire_bridge_signals()
+        kwargs: dict = {}
+        if workspace_name:
+            kwargs["workspace_name"] = workspace_name
+        if profile_name:
+            kwargs["profile_name"] = profile_name
+        if resume_conversation_id:
+            kwargs["resume_conversation_id"] = resume_conversation_id
+        self.bridge.start(self.settings, **kwargs)
+
+    # --- conversations sidebar ---------------------------------------------
+
+    def _refresh_conversations_sidebar(self) -> None:
+        store = ConversationStore()
+        try:
+            self.sidebar.set_conversations(store.list_conversations())
+        finally:
+            store.close()
+
+    def _on_resume_requested(self, conversation_id: str) -> None:
+        self._restart_session(workspace_name=None, profile_name=None, resume_conversation_id=conversation_id)
+
+    def _on_delete_requested(self, conversation_id: str) -> None:
+        store = ConversationStore()
+        try:
+            records_dir = ensure_records_dir(self.settings.app.records_dir)
+            delete_conversation(store, conversation_id, records_dir=records_dir)
+        finally:
+            store.close()
+        self._refresh_conversations_sidebar()
+
+    def _on_cleanup_requested(self, days: int) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        store = ConversationStore()
+        try:
+            records_dir = ensure_records_dir(self.settings.app.records_dir)
+            stale = list_conversations_older_than(store, cutoff)
+            for summary in stale:
+                delete_conversation(store, summary.id, records_dir=records_dir)
+        finally:
+            store.close()
+        self._refresh_conversations_sidebar()
+
+    # --- selectors / panels ------------------------------------------------
+
+    def _refresh_workspace_selector(self) -> None:
+        current = self.bridge.session.recorder.workspace_name if self.bridge.session else None
+        self.workspace_selector.set_workspaces(list_workspace_names(self.settings), current=current)
+
+    def _refresh_profile_selector(self) -> None:
+        current = self.bridge.session.profile_name if self.bridge.session else None
+        self.profile_selector.set_profiles(sorted(self.settings.providers.profiles), current=current)
+
+    def _refresh_mcp_panel(self) -> None:
+        session = self.bridge.session
+        workspace_name = session.recorder.workspace_name if session and session.recorder else None
+        group_name = None
+        enabled: list[str] = []
+        if workspace_name:
+            workspace = get_workspace(self.settings, workspace_name)
+            if workspace is not None:
+                group_name = workspace.mcp_group
+                enabled = [s.name for s in resolve_group(self.settings.mcp, workspace.mcp_group)]
+        all_server_names = sorted(self.settings.mcp.servers)
+        self.mcp_panel.set_servers(all_server_names, enabled=enabled, group_name=group_name)
+
+    def _refresh_folder_display(self) -> None:
+        """Loads the active workspace's actual source/target folders into
+        ``FolderDisplay`` (previously constructed but never populated — a
+        real gap in the "Source/target folder display" task item, caught by
+        actually reading this file end-to-end rather than trusting the
+        widget's own passing unit tests). No workspace active ->
+        ``_current_workspace_config`` is ``None`` and the panel just shows
+        empty placeholders; ``Change``/``Save to Workspace`` edit an
+        in-memory copy of that ``WorkspaceConfig`` until explicitly saved."""
+        session = self.bridge.session
+        workspace_name = session.recorder.workspace_name if session and session.recorder else None
+        self._current_workspace_config = get_workspace(self.settings, workspace_name) if workspace_name else None
+        if self._current_workspace_config is not None:
+            self.folder_display.set_folders(
+                source_folders=self._current_workspace_config.source_folders,
+                target_folder=self._current_workspace_config.target_folder,
+            )
+        else:
+            self.folder_display.set_folders(source_folders=[], target_folder=None)
+
+    def _on_source_folders_changed(self, folders: list[str]) -> None:
+        if self._current_workspace_config is not None:
+            self._current_workspace_config.source_folders = list(folders)
+
+    def _on_target_folder_changed(self, folder: str) -> None:
+        if self._current_workspace_config is not None:
+            self._current_workspace_config.target_folder = folder
+
+    def _on_save_folders_to_workspace(self) -> None:
+        if self._current_workspace_config is None:
+            self.statusBar().showMessage("No active workspace to save folders to", 5000)
+            return
+        save_workspace(self.settings, self._current_workspace_config)
+        self.statusBar().showMessage(f"Saved folders to workspace {self._current_workspace_config.name}", 5000)
+
+    # --- settings ------------------------------------------------------------
+
+    def open_settings_dialog(self) -> None:
+        dialog = SettingsDialog(self.settings.app, self.settings.providers.profiles, self)
+        if not dialog.exec():
+            return
+        self.settings.app = dialog.updated_app_config()
+        apply_font_size(QApplication.instance(), self.settings.app)  # takes effect immediately, no restart
+        save_app_config(self.settings.app)
+
+    # --- shutdown ----------------------------------------------------------
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        capture_window_state(self, self.settings.app)
+        save_app_config(self.settings.app)
+        self.bridge.shutdown()
+        super().closeEvent(event)
+
+
+__all__ = ["MainWindow"]

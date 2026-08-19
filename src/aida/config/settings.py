@@ -31,13 +31,24 @@ CURRENT_CONFIG_VERSION = 1
 
 @dataclass
 class AppConfig:
-    """General settings: paths, safety default, UI prefs, log level."""
+    """General settings: paths, safety default, UI prefs, log level.
+
+    ``window_*``/``font_size`` (Phase 5): the Qt GUI's persisted window
+    state — ``None`` for any ``window_*`` field means "let Qt pick" (first
+    run, or a monitor arrangement that no longer fits), so the GUI never
+    fails to launch on a stale/foreign geometry.
+    """
 
     config_version: int = CURRENT_CONFIG_VERSION
     records_dir: str | None = None  # None -> aida.config.paths.default_records_dir()
     log_level: str = "INFO"
     default_safety_mode: str = "confirm"  # "relaxed" | "confirm"
     theme: str = "system"
+    window_width: int | None = None
+    window_height: int | None = None
+    window_x: int | None = None
+    window_y: int | None = None
+    font_size: int = 11
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -52,6 +63,11 @@ class AppConfig:
             "log_level": self.log_level,
             "default_safety_mode": self.default_safety_mode,
             "theme": self.theme,
+            "window_width": self.window_width,
+            "window_height": self.window_height,
+            "window_x": self.window_x,
+            "window_y": self.window_y,
+            "font_size": self.font_size,
         }
 
 

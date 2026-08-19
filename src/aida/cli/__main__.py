@@ -1,9 +1,15 @@
-"""Entry point for the ``aida`` console script (and ``aida-gui`` stub).
+"""Entry point for the ``aida`` console script and the ``aida-gui`` script.
 
 Dispatch is deliberately not one shared ``argparse`` parser: each subcommand
 (``doctor``, ``chat``, ``run``, ``config``) owns its own argument parsing so
 it stays independently testable and ``aida chat --profile foo --skills a,b``
 can grow chat-specific flags without touching this file.
+
+``main_gui`` imports ``aida.ui.qt.app`` lazily, inside the function body —
+PySide6 is an optional dependency (the ``gui`` extra); nothing under
+``aida.cli``/``aida.core``/etc. may require it just to be imported, so this
+module stays importable (and every other console script keeps working)
+even when it isn't installed.
 """
 
 from __future__ import annotations
@@ -75,10 +81,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def main_gui() -> int:
-    """Stub for the ``aida-gui`` entry point; the real GUI arrives in Phase 5."""
-    print("aida-gui: not yet implemented (arrives in Phase 5 — see PLAN.md §10).")
-    print("Use `aida doctor` or `aida chat` (Phase 2) for now.")
-    return 1
+    """The ``aida-gui`` entry point (Phase 5). ``argv`` isn't threaded
+    through explicitly — ``aida.ui.qt.app.main()`` reads ``sys.argv``
+    itself, same as every other console-script entry point in this file."""
+    try:
+        from aida.ui.qt.app import main as gui_main
+    except ImportError:
+        print("aida-gui: PySide6 isn't installed. Run `pip install -e '.[gui]'` (or `pip install aida-workbench[gui]`).")
+        return 1
+    return gui_main()
 
 
 if __name__ == "__main__":

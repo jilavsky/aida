@@ -1,0 +1,243 @@
+"""``ChatPanel`` (PLAN.md Phase 5): "Conversation view: user/assistant
+turns, streamed text appended live, Markdown rendering (Qt rich text)... /
+Tool-call indicators... / Error display distinguishes layer".
+
+This is the widget ``aida.ui.qt.bridge.ChatBridge.event_received`` is meant
+to be connected to — one ``handle_event(event)`` call per
+``aida.core.events.AgentEvent``, dispatching exactly like
+``aida.cli.chat.print_event`` does for the CLI, just building/updating
+widgets instead of printing lines. Nothing here knows about ``ChatBridge``
+or asyncio at all — it only consumes plain ``AgentEvent`` values, so it can
+be driven directly in tests without a real bridge/session.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+from aida.providers.base import Message
+from aida.ui.qt._qt import (
+    QFrame,
+    QGuiApplication,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
+from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
+from aida.ui.qt.tool_call_widget import ToolCallRow
+
+
+class MessageBubble(QFrame):
+    """One user/assistant turn. Assistant turns are built incrementally
+    (``append_delta`` per ``TextDelta``, ``set_text`` with the final full
+    text on ``TextFinished``); a user turn or a resumed history message is
+    just ``set_text`` once."""
+
+    def __init__(self, role: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.role = role
+        self._raw_text = ""
+        self.setFrameShape(QFrame.Shape.NoFrame)
+
+        layout = QVBoxLayout(self)
+        header = QHBoxLayout()
+        role_label = QLabel(role.capitalize(), self)
+        role_label.setStyleSheet("font-weight: bold; color: gray; font-size: 10px;")
+        header.addWidget(role_label)
+        header.addStretch(1)
+        # "code blocks monospaced with copy button" (PLAN.md): Qt's rich
+        # text engine renders Markdown code fences monospaced on its own,
+        # but doesn't expose per-block widgets to attach a button to
+        # without hand-rolling text-object embedding — one whole-message
+        # Copy button (copies the raw source, code fences included) is v1's
+        # pragmatic equivalent, same trade-off as everywhere else in this
+        # phase that favors a plain callable method over a fragile
+        # click-simulation-only affordance.
+        self._copy_button = QPushButton("Copy", self)
+        self._copy_button.setFixedWidth(50)
+        self._copy_button.clicked.connect(self.copy_to_clipboard)
+        header.addWidget(self._copy_button)
+        layout.addLayout(header)
+
+        self._view = QTextBrowser(self)
+        self._view.setReadOnly(True)
+        self._view.setOpenExternalLinks(True)
+        layout.addWidget(self._view)
+
+    def copy_to_clipboard(self) -> None:
+        QGuiApplication.clipboard().setText(self._raw_text)
+
+    def set_text(self, text: str) -> None:
+        self._raw_text = text
+        self._view.setMarkdown(text)
+
+    def append_delta(self, text: str) -> None:
+        self._raw_text += text
+        self._view.setMarkdown(self._raw_text)
+
+    @property
+    def text(self) -> str:
+        return self._raw_text
+
+    @property
+    def rendered_plain_text(self) -> str:
+        return self._view.toPlainText()
+
+
+class ErrorBanner(QFrame):
+    """One ``AgentError``, tagged with which layer failed — "diagnostics
+    are a feature" (PLAN.md): the layer name is always visible, never just
+    a bare message."""
+
+    def __init__(self, *, layer: str, message: str, detail: str | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.layer = layer
+        self.message = message
+        self.detail = detail
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("background-color: #ffe5e5;")
+
+        layout = QVBoxLayout(self)
+        text = f"[{layer}] {message}"
+        if detail:
+            text += f" — {detail}"
+        label = QLabel(text, self)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+
+
+class ChatPanel(QWidget):
+    """A scrollable, append-only transcript of one conversation, built by
+    feeding it ``AgentEvent``s (live) or ``Message``s (resumed history)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        self._scroll_area = QScrollArea(self)
+        self._scroll_area.setWidgetResizable(True)
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.addStretch(1)  # keeps turns pinned to the top as they grow downward
+        self._scroll_area.setWidget(self._content)
+        outer.addWidget(self._scroll_area)
+
+        self._current_assistant_bubble: MessageBubble | None = None
+        self._tool_rows: dict[str, ToolCallRow] = {}
+
+    # --- internal helpers --------------------------------------------------
+
+    def _append_widget(self, widget: QWidget) -> None:
+        self._content_layout.insertWidget(self._content_layout.count() - 1, widget)
+        self._scroll_to_bottom()
+
+    def _scroll_to_bottom(self) -> None:
+        bar = self._scroll_area.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    @property
+    def widget_count(self) -> int:
+        """Number of turn/row/artifact/error widgets currently shown (not
+        counting the trailing layout stretch) — mainly for tests."""
+        return self._content_layout.count() - 1
+
+    def widget_at(self, index: int) -> QWidget:
+        return self._content_layout.itemAt(index).widget()
+
+    # --- public API ----------------------------------------------------------
+
+    def add_user_message(self, text: str) -> MessageBubble:
+        bubble = MessageBubble("user", self._content)
+        bubble.set_text(text)
+        self._append_widget(bubble)
+        return bubble
+
+    def add_artifact_widget(self, widget: QWidget) -> None:
+        """Append an already-built artifact widget (``InlineImageWidget``/
+        ``FileArtifactCard``) directly — used by ``MainWindow`` when
+        re-displaying a resumed conversation's artifacts from
+        ``aida.persistence`` metadata rather than from a live
+        ``ImageArtifactCreated``/``FileArtifactCreated`` event (see
+        ``load_history``'s docstring)."""
+        widget.setParent(self._content)
+        self._append_widget(widget)
+
+    def handle_event(self, event: object) -> None:
+        """Dispatch one ``AgentEvent`` — mirrors
+        ``aida.cli.chat.print_event``'s if/elif chain, one widget update per
+        branch instead of one ``print()``."""
+        name = type(event).__name__
+
+        if name == "TextStarted":
+            self._current_assistant_bubble = MessageBubble("assistant", self._content)
+            self._append_widget(self._current_assistant_bubble)
+        elif name == "TextDelta":
+            if self._current_assistant_bubble is not None:
+                self._current_assistant_bubble.append_delta(event.text)
+                self._scroll_to_bottom()
+        elif name == "TextFinished":
+            if self._current_assistant_bubble is not None:
+                self._current_assistant_bubble.set_text(event.text)
+            self._current_assistant_bubble = None
+        elif name == "ToolCallStarted":
+            row = ToolCallRow(
+                call_id=event.call_id, tool_name=event.tool_name, arguments=event.arguments, parent=self._content
+            )
+            self._tool_rows[event.call_id] = row
+            self._append_widget(row)
+        elif name == "ToolCallFinished":
+            row = self._tool_rows.get(event.call_id)
+            if row is not None:
+                row.mark_finished(result=event.result, is_error=event.is_error)
+        elif name == "ImageArtifactCreated":
+            if event.path:
+                widget = InlineImageWidget(
+                    path=event.path, artifact_id=event.artifact_id, mime_type=event.mime_type, parent=self._content
+                )
+                self._append_widget(widget)
+        elif name == "FileArtifactCreated":
+            widget = FileArtifactCard(
+                path=event.path, artifact_id=event.artifact_id, mime_type=event.mime_type, parent=self._content
+            )
+            self._append_widget(widget)
+        elif name == "MessageFinished":
+            pass  # no widget of its own — TextFinished/tool rows already reflect it
+        elif name == "UsageInfo":
+            pass  # not shown by default in v1 (matches the CLI); a future settings toggle could surface it
+        elif name == "AgentError":
+            banner = ErrorBanner(layer=event.layer, message=event.message, detail=event.detail, parent=self._content)
+            self._append_widget(banner)
+
+    def load_history(self, messages: Iterable[Message]) -> None:
+        """Render already-persisted messages (resume path) directly, since
+        the individual streaming/tool events that originally produced them
+        aren't replayed — one bubble per user/assistant/tool message, in
+        order. Artifacts referenced by a resumed tool message are shown as
+        their text-policy description only in v1 (re-displaying resumed
+        images inline is Phase 5 acceptance criterion "resume yesterday's
+        conversation... images still display", covered by
+        ``aida.ui.qt.main_window`` re-loading artifact rows from the
+        conversation store, not by this method)."""
+        for message in messages:
+            if message.role == "system":
+                continue
+            bubble = MessageBubble(message.role, self._content)
+            bubble.set_text(message.content or "")
+            self._append_widget(bubble)
+
+    def clear(self) -> None:
+        while self._content_layout.count() > 1:
+            item = self._content_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._current_assistant_bubble = None
+        self._tool_rows.clear()
+
+
+__all__ = ["ChatPanel", "ErrorBanner", "MessageBubble"]

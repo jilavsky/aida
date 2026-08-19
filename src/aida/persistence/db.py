@@ -30,8 +30,16 @@ from aida.config.paths import db_path
 CURRENT_SCHEMA_VERSION = 1
 
 _MIGRATIONS: dict[int, str] = {
+    # "IF NOT EXISTS" everywhere, deliberately: two connections can race to
+    # be the first to ever open this DB file (e.g. the Phase 5 GUI starts a
+    # session on a background thread while its own main thread independently
+    # opens a ConversationStore for the sidebar) and both may read
+    # PRAGMA user_version as 0 before either commits — idempotent DDL means
+    # the loser of that race just re-declares the same schema instead of
+    # crashing on "table already exists". See tests/ui/test_main_window.py's
+    # concurrent-startup coverage.
     1: """
-    CREATE TABLE conversations (
+    CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
         title TEXT,
         workspace_name TEXT,
@@ -42,7 +50,7 @@ _MIGRATIONS: dict[int, str] = {
         record_path TEXT
     );
 
-    CREATE TABLE messages (
+    CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         conversation_id TEXT NOT NULL REFERENCES conversations(id),
         seq INTEGER NOT NULL,
@@ -55,7 +63,7 @@ _MIGRATIONS: dict[int, str] = {
         UNIQUE(conversation_id, seq)
     );
 
-    CREATE TABLE artifacts (
+    CREATE TABLE IF NOT EXISTS artifacts (
         id TEXT PRIMARY KEY,
         conversation_id TEXT NOT NULL REFERENCES conversations(id),
         call_id TEXT,
@@ -65,8 +73,8 @@ _MIGRATIONS: dict[int, str] = {
         created_at TEXT NOT NULL
     );
 
-    CREATE INDEX idx_messages_conversation ON messages(conversation_id, seq);
-    CREATE INDEX idx_artifacts_conversation ON artifacts(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_conversation ON artifacts(conversation_id);
     """,
 }
 
@@ -78,6 +86,12 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path or db_path())
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # The Phase 5 GUI opens more than one connection to this file from
+    # different threads (a background session + the main thread's own
+    # sidebar/cleanup queries) — a short busy timeout means a connection
+    # that finds the file momentarily locked waits and retries instead of
+    # raising "database is locked" immediately.
+    conn.execute("PRAGMA busy_timeout = 5000")
     _migrate(conn)
     return conn
 

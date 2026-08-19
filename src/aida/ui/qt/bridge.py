@@ -1,0 +1,183 @@
+"""Event-stream -> Qt bridge (PLAN.md Phase 5): drives a
+``aida.cli.chat.ChatSession`` (an async API) from Qt's synchronous,
+single-threaded GUI event loop, re-emitting every
+``aida.core.events.AgentEvent`` as a Qt signal.
+
+Design: a dedicated background thread runs its own asyncio event loop for
+the lifetime of the app (``_AsyncLoopThread``); ``ChatBridge`` (a
+``QObject`` that lives on the *Qt* thread, not the asyncio one) schedules
+coroutines onto that loop via ``asyncio.run_coroutine_threadsafe`` and
+re-emits results as signals. Qt signal emission is thread-safe *by
+construction* here: emitting a signal from the background thread onto a
+receiver object that lives on the Qt thread is automatically delivered via
+a queued connection — no manual locking needed, and no widget code ever
+touches asyncio directly.
+
+Nothing in ``aida.core``/``aida.cli`` knows this module exists — it only
+imports ``aida.cli.chat``'s public API (``start_session``, the error
+classes) and ``aida.core.events``, both already Qt-free. That is what keeps
+the "core remains importable and testable without Qt" rule intact.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import threading
+from typing import Any
+
+from aida.cli.chat import (
+    ChatSession,
+    UnknownMcpServerError,
+    UnknownProfileError,
+    UnknownWorkspaceError,
+    start_session,
+)
+from aida.config.settings import Settings
+from aida.mcp.manager import McpManager
+from aida.persistence.recorder import ConversationNotFoundError
+from aida.ui.qt._qt import QObject, QThread, Signal
+
+_STARTUP_ERRORS = (UnknownProfileError, UnknownWorkspaceError, UnknownMcpServerError, ConversationNotFoundError)
+
+
+class AsyncLoopThread(QThread):
+    """Owns one asyncio event loop, running for as long as this thread is
+    alive. One instance serves the whole GUI process — asyncio loops aren't
+    meant to be created per-request."""
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self._ready = threading.Event()
+
+    def run(self) -> None:  # noqa: D102 - QThread override, not a public API
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        self._ready.set()
+        try:
+            self.loop.run_forever()
+        finally:
+            self.loop.close()
+
+    def wait_until_ready(self, timeout: float = 5.0) -> None:
+        if not self._ready.wait(timeout):
+            raise TimeoutError("asyncio loop thread did not start in time")
+
+    def stop(self) -> None:
+        """Ask the loop to stop and block until the thread has exited.
+        Safe to call even if the loop was never started."""
+        if self.loop is not None:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        self.wait()
+
+
+class ChatBridge(QObject):
+    """Owns one ``ChatSession`` and drives it on an ``AsyncLoopThread``,
+    turning its async generator API into Qt signals a widget can connect to
+    without ever awaiting anything itself.
+
+    Every ``AgentEvent`` a turn produces is re-emitted individually via
+    ``event_received`` (in order — ``ChatSession.send`` already streams
+    them in order) so a chat panel can render exactly the same way
+    ``aida.cli.chat.print_event`` does for the CLI, just via a signal
+    instead of a synchronous loop.
+    """
+
+    session_ready = Signal()
+    startup_failed = Signal(str)
+    turn_started = Signal()
+    event_received = Signal(object)  # AgentEvent
+    turn_finished = Signal()
+    turn_failed = Signal(str)
+    profile_switched = Signal(str)
+    profile_switch_failed = Signal(str)
+
+    def __init__(self, loop_thread: AsyncLoopThread, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._loop_thread = loop_thread
+        self.session: ChatSession | None = None
+        self.mcp_manager: McpManager | None = None
+
+    # --- startup -----------------------------------------------------------
+
+    def start(self, settings: Settings, **start_session_kwargs: Any) -> None:
+        """Kick off ``start_session(settings, **start_session_kwargs)`` on
+        the background loop. Fires ``session_ready`` on success or
+        ``startup_failed`` (with a human-readable message) on any of the
+        known startup errors — never lets one reach the Qt thread as a
+        raised exception."""
+        asyncio.run_coroutine_threadsafe(self._start(settings, start_session_kwargs), self._loop_thread.loop)
+
+    async def _start(self, settings: Settings, kwargs: dict[str, Any]) -> None:
+        try:
+            session, mcp_manager = await start_session(settings, **kwargs)
+        except _STARTUP_ERRORS as exc:
+            self.startup_failed.emit(str(exc))
+            return
+        self.session = session
+        self.mcp_manager = mcp_manager
+        self.session_ready.emit()
+
+    # --- turns ---------------------------------------------------------------
+
+    def send(self, user_text: str) -> None:
+        """Start a new turn. No-op if the session hasn't finished starting
+        yet — callers (the input box) should be disabled until
+        ``session_ready``."""
+        if self.session is None:
+            return
+        asyncio.run_coroutine_threadsafe(self._drain(user_text), self._loop_thread.loop)
+
+    async def _drain(self, user_text: str) -> None:
+        self.turn_started.emit()
+        try:
+            async for event in self.session.send(user_text):
+                self.event_received.emit(event)
+        except Exception as exc:  # noqa: BLE001 - must never crash the loop thread
+            self.turn_failed.emit(str(exc))
+        finally:
+            self.turn_finished.emit()
+
+    def cancel(self) -> None:
+        """Request cancellation of the in-flight turn. ``ChatSession.cancel``
+        is a plain synchronous flag-set (see its docstring) — safe to call
+        directly from the Qt thread, no scheduling onto the loop needed."""
+        if self.session is not None:
+            self.session.cancel()
+
+    # --- profile switching -----------------------------------------------
+
+    def switch_profile(self, name: str) -> None:
+        if self.session is None:
+            return
+        asyncio.run_coroutine_threadsafe(self._switch_profile(name), self._loop_thread.loop)
+
+    async def _switch_profile(self, name: str) -> None:
+        try:
+            await self.session.switch_profile(name)
+        except UnknownProfileError as exc:
+            self.profile_switch_failed.emit(str(exc))
+            return
+        self.profile_switched.emit(name)
+
+    # --- shutdown ------------------------------------------------------------
+
+    def shutdown(self, timeout: float = 5.0) -> None:
+        """Close the session's provider/recorder/MCP connections on the
+        background loop and block until done (or ``timeout``) — call this
+        before the app quits, from the Qt thread. Swallows errors: a failed
+        cleanup must never block the app from closing."""
+        if self.session is None:
+            return
+        future = asyncio.run_coroutine_threadsafe(self._shutdown(), self._loop_thread.loop)
+        with contextlib.suppress(Exception):  # best-effort cleanup on the way out
+            future.result(timeout=timeout)
+
+    async def _shutdown(self) -> None:
+        await self.session.aclose()
+        if self.mcp_manager is not None:
+            await self.mcp_manager.aclose()
+
+
+__all__ = ["AsyncLoopThread", "ChatBridge"]
