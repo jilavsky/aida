@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
@@ -72,8 +73,13 @@ def test_reveal_in_file_manager_opens_containing_folder(qapp, tmp_path: Path, mo
     widget = InlineImageWidget(path=str(png_path), artifact_id="a1", mime_type="image/png")
 
     opened_urls = []
+    # normpath: QUrl.toLocalFile() returns Qt-style forward-slash paths even
+    # on Windows (a documented Qt quirk, not a bug in reveal_in_file_manager
+    # — QDesktopServices.openUrl/the real OS file manager both handle it
+    # fine) — normalize before comparing to a native `str(tmp_path)`.
     monkeypatch.setattr(
-        "aida.ui.qt.artifact_widgets.QDesktopServices.openUrl", lambda url: opened_urls.append(url.toLocalFile())
+        "aida.ui.qt.artifact_widgets.QDesktopServices.openUrl",
+        lambda url: opened_urls.append(os.path.normpath(url.toLocalFile())),
     )
     widget.reveal_in_file_manager()
     assert opened_urls == [str(tmp_path)]
@@ -93,7 +99,8 @@ def test_file_artifact_card_open_uses_desktop_services(qapp, tmp_path: Path, mon
 
     opened = []
     monkeypatch.setattr(
-        "aida.ui.qt.artifact_widgets.QDesktopServices.openUrl", lambda url: opened.append(url.toLocalFile())
+        "aida.ui.qt.artifact_widgets.QDesktopServices.openUrl",
+        lambda url: opened.append(os.path.normpath(url.toLocalFile())),
     )
     card.open_file()
     assert opened == [str(path)]
@@ -106,7 +113,8 @@ def test_file_artifact_card_reveal_opens_containing_folder(qapp, tmp_path: Path,
 
     opened = []
     monkeypatch.setattr(
-        "aida.ui.qt.artifact_widgets.QDesktopServices.openUrl", lambda url: opened.append(url.toLocalFile())
+        "aida.ui.qt.artifact_widgets.QDesktopServices.openUrl",
+        lambda url: opened.append(os.path.normpath(url.toLocalFile())),
     )
     card.reveal_in_file_manager()
     assert opened == [str(tmp_path)]

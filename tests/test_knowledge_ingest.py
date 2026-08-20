@@ -167,6 +167,17 @@ def test_normalize_source_folder_leaves_plain_path_alone():
     assert normalize_source_folder("  /Users/jan/notes  ") == "/Users/jan/notes"
 
 
+def test_normalize_source_folder_strips_leading_slash_from_windows_drive_uri():
+    """A Windows file URI is `file:///C:/Users/...` — urlparse().path keeps
+    the leading slash, giving "/C:/Users/..." which PureWindowsPath parses
+    as a *relative* path with a literal folder named "C:", not the C:
+    drive. Must be stripped so a Windows user's pasted URI round-trips to a
+    real absolute path instead of silently failing the same way the
+    un-normalized URI did before this module existed."""
+    assert normalize_source_folder("file:///C:/Users/jan/notes") == "C:/Users/jan/notes"
+    assert normalize_source_folder("file:///C:/Users/jan/USAXS%20notes") == "C:/Users/jan/USAXS notes"
+
+
 @pytest.mark.asyncio
 async def test_rebuild_ingests_a_folder_configured_as_a_file_uri(tmp_path: Path):
     corpus = tmp_path / "corpus"

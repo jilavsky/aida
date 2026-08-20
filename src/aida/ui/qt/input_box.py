@@ -23,6 +23,7 @@ something this widget can decide on its own.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from aida.ui.qt._qt import (
@@ -142,6 +143,14 @@ class InputBox(QWidget):
         self._refresh_attachment_chips()
 
     def add_attachment(self, path: str) -> None:
+        # Windows CI regression: Qt's own APIs (QFileDialog's return values,
+        # QUrl.toLocalFile()) hand back "Qt-style" paths using forward
+        # slashes even on Windows — a long-documented Qt quirk, not a bug in
+        # this code, but every caller comparing against a native
+        # (backslash) path failed. normpath() converts to the OS's native
+        # separator (a no-op on POSIX) without touching drive letters or
+        # relative segments in a way that changes what the path points at.
+        path = os.path.normpath(path)
         if path in self._attachments:
             return
         self._attachments.append(path)
@@ -186,6 +195,7 @@ class InputBox(QWidget):
             local_path = url.toLocalFile()
             if not local_path:
                 continue
+            local_path = os.path.normpath(local_path)  # see add_attachment's docstring
             if Path(local_path).is_dir():
                 self.folder_dropped.emit(local_path)
             else:

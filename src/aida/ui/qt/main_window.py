@@ -372,7 +372,12 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(
             self,
             "Add Source Folder",
-            f"Add {folder!r} as a source folder for workspace {self._current_workspace_config.name!r}?",
+            # Windows CI regression: `{folder!r}` calls repr() on a path, which
+            # *escapes* backslashes — a Windows path like "C:\Users\...\extra"
+            # rendered as "'C:\\Users\\...\\extra'", doubled backslashes shown
+            # right in the dialog text. A path never needs Python's repr()
+            # quoting; a plain manual single-quote wrap shows the real path.
+            f"Add '{folder}' as a source folder for workspace {self._current_workspace_config.name!r}?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

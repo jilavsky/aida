@@ -10,6 +10,7 @@ returns.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -82,6 +83,9 @@ def _extract_text(path: Path) -> str:
     return "\n\n".join(parts)
 
 
+_WINDOWS_DRIVE_URI_PATH = re.compile(r"^/[A-Za-z]:/")
+
+
 def normalize_source_folder(raw: str) -> str:
     """Accept a plain filesystem path or a ``file://`` URI. Several file
     managers' "Copy as URI"/"Copy Path" actions (Obsidian's among them)
@@ -90,10 +94,22 @@ def normalize_source_folder(raw: str) -> str:
     silently fails ``.is_dir()`` (it's not a valid relative path, but it's
     not an error either), so the whole folder was skipped with zero
     indication why. Percent-decoded too, since a real OS-generated URI
-    encodes spaces/unicode in the path."""
+    encodes spaces/unicode in the path.
+
+    A Windows file URI (``file:///C:/Users/...``) needs one more step:
+    ``urlparse().path`` keeps the URI's leading slash, giving
+    ``/C:/Users/...`` — ``PureWindowsPath`` parses that as a *relative*
+    path with a folder literally named ``C:``, not the ``C:`` drive, since
+    the leading slash isn't a drive marker. Stripped here so a Windows
+    user's pasted URI round-trips to a real absolute path instead of
+    silently becoming un-discoverable the same way the un-normalized URI
+    used to be."""
     raw = raw.strip()
     if raw.startswith("file://"):
-        return unquote(urlparse(raw).path)
+        path = unquote(urlparse(raw).path)
+        if _WINDOWS_DRIVE_URI_PATH.match(path):
+            path = path[1:]
+        return path
     return raw
 
 

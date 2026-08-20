@@ -226,9 +226,13 @@ def test_copy_to_target_keeps_both_when_content_differs(tmp_path: Path):
     a = store.save_image(ImageArtifact(data=b"figure-a", mime_type="image/png", filename="plot.png"))
     b = store.save_image(ImageArtifact(data=b"figure-b", mime_type="image/png", filename="plot.png"))
     # Force the collision at the *target* even though the store already
-    # uniquified the sources.
+    # uniquified the sources. Path.replace() (not .rename()) because the
+    # destination already exists here (it's `a`'s own stored file) —
+    # os.rename()/Path.rename() only overwrite an existing destination on
+    # POSIX; on Windows it raises FileExistsError instead. Path.replace()
+    # wraps os.replace(), documented to overwrite atomically on both.
     dest_a = store.copy_to_target(a, target)
-    Path(b.path).rename(Path(b.path).parent / dest_a.name)
+    Path(b.path).replace(Path(b.path).parent / dest_a.name)
     b.path = str(Path(b.path).parent / dest_a.name)
     dest_b = store.copy_to_target(b, target)
 
@@ -248,7 +252,10 @@ def test_transcript_links_point_at_the_real_sidecar_filenames(tmp_path: Path):
     a = artifact_store.save_image(ImageArtifact(data=b"aaa", mime_type="image/png", filename="plot.png"))
     b = artifact_store.save_image(ImageArtifact(data=b"bbb", mime_type="image/png", filename="plot.png"))
     Path(b.path).rename(Path(b.path).parent / "plot.png_tmp")
-    (Path(b.path).parent / "plot.png_tmp").rename(Path(a.path).parent / "plot.png")
+    # Path.replace(), not .rename(): the destination (a's own "plot.png")
+    # already exists — see test_copy_to_target_keeps_both_when_content_differs's
+    # comment for why .rename() alone fails on Windows here.
+    (Path(b.path).parent / "plot.png_tmp").replace(Path(a.path).parent / "plot.png")
     # both artifacts now claim the basename "plot.png" from different dirs
     b.path = str(Path(a.path).parent / "plot.png")
 

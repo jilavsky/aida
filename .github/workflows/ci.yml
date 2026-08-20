@@ -22,6 +22,24 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # PySide6's QtGui module dynamically links these at import time even
+      # under QT_QPA_PLATFORM=offscreen (set in tests/ui/conftest.py) — the
+      # offscreen platform plugin avoids needing a real display, but the
+      # shared libraries themselves still have to be present. A bare
+      # ubuntu-latest runner has none of them, so tests/ui's whole
+      # collection failed at `import PySide6.QtGui` with
+      # "ImportError: libEGL.so.1: cannot open shared object file".
+      - name: Install Qt runtime libraries (Linux, headless)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 \
+            libxkbcommon0 libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+            libdbus-1-3
+
       - name: Install package (dev, gui, docs extras)
         run: pip install -e ".[dev,gui,docs]"
 

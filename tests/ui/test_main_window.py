@@ -75,7 +75,12 @@ def test_session_starts_and_completes_a_turn(qapp, loop_thread, aida_home: Path,
         window.input_box.set_text("hi there")
         window.input_box._send_button.click()
 
-        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+        # Race fixed for Windows CI: widget_count reaching 2 (event_received
+        # building the final bubble) and turn_finished (which flips is_busy
+        # back off) are two separate signals emitted moments apart — on a
+        # slower runner, waiting on widget_count alone could observe
+        # is_busy still True for one more event-loop turn. Wait for both.
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2 and not window.input_box.is_busy)
         assert isinstance(window.chat_panel.widget_at(0), MessageBubble)
         assert window.chat_panel.widget_at(0).text == "hi there"
         assert window.chat_panel.widget_at(1).text == "hello from mock"
