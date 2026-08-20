@@ -16,6 +16,7 @@ from aida.workspace.workspaces import (
     delete_workspace,
     get_workspace,
     list_workspace_names,
+    resolve_system_prompt,
     resolve_workspace_environment,
     save_workspace,
     validate_workspace,
@@ -109,6 +110,76 @@ def test_validate_workspace_unknown_safety_mode_warns(aida_home: Path, records_h
     settings = _settings()
     result = validate_workspace(settings, _workspace(safety="yolo"))
     assert any("yolo" in w for w in result.warnings)
+
+
+# --- system_prompt file-reference support ---------------------------------
+# PLAN.md's own illustrative workspaces.yaml uses `system_prompt:
+# prompts/pyirena.md` — a relative *file reference*, not literal text — but
+# the code only ever treated system_prompt as literal text, silently. A
+# hand-edited config following that example got the literal string
+# "prompts/pyirena.md" as its system prompt with no warning at all.
+
+
+def test_resolve_system_prompt_none_passthrough():
+    assert resolve_system_prompt(None) is None
+
+
+def test_resolve_system_prompt_literal_text_passthrough_when_no_matching_file():
+    assert resolve_system_prompt("You are a USAXS expert.") == "You are a USAXS expert."
+
+
+def test_resolve_system_prompt_loads_relative_file_under_aida_home(aida_home: Path, records_home: Path):
+    prompt_file = aida_home / "prompts" / "pyirena.md"
+    prompt_file.parent.mkdir(parents=True)
+    prompt_file.write_text("You are a pyIrena SAXS analysis assistant.", encoding="utf-8")
+
+    assert resolve_system_prompt("prompts/pyirena.md") == "You are a pyIrena SAXS analysis assistant."
+
+
+def test_resolve_system_prompt_loads_absolute_file(tmp_path: Path, aida_home: Path, records_home: Path):
+    prompt_file = tmp_path / "custom-prompt.txt"
+    prompt_file.write_text("Custom prompt content.", encoding="utf-8")
+
+    assert resolve_system_prompt(str(prompt_file)) == "Custom prompt content."
+
+
+def test_resolve_system_prompt_falls_back_to_literal_when_file_missing(aida_home: Path, records_home: Path):
+    # Exactly the user-reported scenario: a workspaces.yaml copied from
+    # PLAN.md's example, but the referenced file was never created.
+    assert resolve_system_prompt("prompts/pyirena.md") == "prompts/pyirena.md"
+
+
+def test_validate_workspace_warns_on_missing_system_prompt_file(aida_home: Path, records_home: Path):
+    settings = _settings()
+    result = validate_workspace(settings, _workspace(system_prompt="prompts/pyirena.md"))
+    assert result.ok is True
+    assert any("system_prompt" in w and "prompts/pyirena.md" in w for w in result.warnings)
+
+
+def test_validate_workspace_no_warning_when_system_prompt_file_exists(aida_home: Path, records_home: Path):
+    prompt_file = aida_home / "prompts" / "pyirena.md"
+    prompt_file.parent.mkdir(parents=True)
+    prompt_file.write_text("You are a pyIrena SAXS analysis assistant.", encoding="utf-8")
+
+    settings = _settings()
+    result = validate_workspace(settings, _workspace(system_prompt="prompts/pyirena.md"))
+    assert result.warnings == []
+
+
+def test_validate_workspace_no_warning_for_plain_literal_prompt_text(aida_home: Path, records_home: Path):
+    settings = _settings()
+    result = validate_workspace(settings, _workspace(system_prompt="You are a USAXS expert."))
+    assert result.warnings == []
+
+
+def test_resolve_workspace_environment_loads_system_prompt_file(aida_home: Path, records_home: Path):
+    prompt_file = aida_home / "prompts" / "pyirena.md"
+    prompt_file.parent.mkdir(parents=True)
+    prompt_file.write_text("You are a pyIrena SAXS analysis assistant.", encoding="utf-8")
+
+    settings = _settings()
+    env = resolve_workspace_environment(settings, _workspace(system_prompt="prompts/pyirena.md"))
+    assert env.system_prompt == "You are a pyIrena SAXS analysis assistant."
 
 
 def test_resolve_workspace_environment_pulls_mcp_servers_from_group(aida_home: Path, records_home: Path):

@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from aida.config.paths import skills_dir
+from aida.config.paths import config_dir, skills_dir
 from aida.config.settings import McpServerConfig, Settings, WorkspaceConfig, save_workspaces_config
 from aida.core.context import skill_exists
 from aida.mcp.groups import known_group_names, resolve_group
@@ -32,6 +32,51 @@ class WorkspaceValidation:
     ok: bool
     detail: str
     warnings: list[str] = field(default_factory=list)
+
+
+_PROMPT_FILE_EXTENSIONS = (".md", ".txt")
+
+
+def _looks_like_system_prompt_file_reference(value: str) -> bool:
+    """Heuristic for "this ``system_prompt`` value was probably meant to be
+    a file reference, not literal prompt text": PLAN.md's own illustrative
+    ``workspaces.yaml`` example uses ``system_prompt: prompts/pyirena.md`` —
+    a relative path with a path separator and a text-file extension — and a
+    hand-edited config is likely to follow that example literally. Plain
+    literal prompt text ("You are a USAXS expert.") won't match this
+    shape, so the false-positive rate should be low."""
+    return value.endswith(_PROMPT_FILE_EXTENSIONS) and ("/" in value or "\\" in value)
+
+
+def _system_prompt_file_path(value: str) -> Path:
+    """Where a ``system_prompt`` file reference resolves to: absolute/``~``
+    paths are used as-is, anything else is resolved relative to
+    ``~/.aida/`` (``config_dir()``) — the same directory ``workspaces.yaml``
+    itself lives in, matching PLAN.md's example layout."""
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = config_dir() / candidate
+    return candidate
+
+
+def resolve_system_prompt(system_prompt: str | None) -> str | None:
+    """A workspace's ``system_prompt`` can be either literal text (what
+    ``aida workspace new --system-prompt`` documents: "Extra system prompt
+    text for this workspace") or a reference to a file — PLAN.md's own
+    illustrative ``workspaces.yaml`` uses ``system_prompt: prompts/pyirena.md``,
+    a file reference, and a hand-edited config is likely to follow that
+    example. Previously this was always treated as literal text, silently:
+    a workspace with ``system_prompt: prompts/pyirena.md`` and no such file
+    got exactly that string, verbatim, as its system prompt — not an error,
+    just quietly wrong. If the value resolves to an existing file (see
+    ``_system_prompt_file_path``), its contents are used as the prompt;
+    otherwise the value itself is used verbatim, unchanged from before."""
+    if not system_prompt:
+        return system_prompt
+    path = _system_prompt_file_path(system_prompt)
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
+    return system_prompt
 
 
 def validate_workspace(settings: Settings, workspace: WorkspaceConfig) -> WorkspaceValidation:
@@ -72,6 +117,15 @@ def validate_workspace(settings: Settings, workspace: WorkspaceConfig) -> Worksp
     if workspace.safety not in ("relaxed", "confirm"):
         warnings.append(f"unknown safety mode {workspace.safety!r} (expected 'relaxed' or 'confirm')")
 
+    if workspace.system_prompt and _looks_like_system_prompt_file_reference(workspace.system_prompt):
+        prompt_path = _system_prompt_file_path(workspace.system_prompt)
+        if not prompt_path.is_file():
+            warnings.append(
+                f"system_prompt {workspace.system_prompt!r} looks like a file reference but no "
+                f"such file was found (expected {prompt_path}) — its literal text will be used as "
+                f"the prompt instead, which is likely not what you want"
+            )
+
     detail = "ok" if not warnings else f"ok, {len(warnings)} warning(s)"
     return WorkspaceValidation(name=workspace.name, ok=True, detail=detail, warnings=warnings)
 
@@ -101,7 +155,7 @@ def resolve_workspace_environment(settings: Settings, workspace: WorkspaceConfig
         profile_name=workspace.profile,
         mcp_servers=mcp_servers,
         skill_names=list(workspace.skills),
-        system_prompt=workspace.system_prompt,
+        system_prompt=resolve_system_prompt(workspace.system_prompt),
         sidecar_folder_name=workspace.sidecar_folder_name,
         safety=workspace.safety,
     )
