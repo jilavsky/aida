@@ -109,7 +109,16 @@ def normalize_source_folder(raw: str) -> str:
         path = unquote(urlparse(raw).path)
         if _WINDOWS_DRIVE_URI_PATH.match(path):
             path = path[1:]
-        return path
+        # A malformed file:// string can leave urlparse with an empty
+        # path — found via a Windows CI test bug (f"file://{windows_path}"
+        # glues backslashes straight onto the scheme with no "/" boundary,
+        # so urlparse reads the whole remainder as netloc, not path).
+        # Path("") silently resolves to the current working directory —
+        # returning the original string instead means it fails
+        # _folder_is_usable and gets reported as missing, rather than
+        # silently ingesting whatever directory the process happens to be
+        # running in.
+        return path or raw
     return raw
 
 
@@ -118,14 +127,18 @@ def _resolved_folder(folder: str) -> Path:
 
 
 def _folder_is_usable(root: Path) -> bool:
-    """A folder is usable if it exists *and* can actually be listed. A
-    cloud-synced vault (iCloud Drive, OneDrive, ...) can pass ``is_dir()``
-    while still raising a permission error the moment something tries to
-    enumerate it — a placeholder-mount quirk, or a folder the OS hasn't
-    granted this process access to (macOS TCC being the common case).
-    Treated the same as "doesn't exist" — both end in "nothing was indexed
-    from this folder", and the fix (grant access / check the path) is the
-    same shape either way."""
+    """A source entry is usable if it's a listable directory *or* an
+    individual readable file — ``source_folders`` accepts either (a real
+    request: "index just this one file" shouldn't require making a folder
+    for it). A cloud-synced folder (iCloud Drive, OneDrive, ...) can pass
+    ``is_dir()`` while still raising a permission error the moment
+    something tries to enumerate it — a placeholder-mount quirk, or a
+    folder the OS hasn't granted this process access to (macOS TCC being
+    the common case). Treated the same as "doesn't exist" — both end in
+    "nothing was indexed from this entry", and the fix (grant access /
+    check the path) is the same shape either way."""
+    if root.is_file():
+        return True
     if not root.is_dir():
         return False
     try:
@@ -136,8 +149,9 @@ def _folder_is_usable(root: Path) -> bool:
 
 
 def _missing_source_folders(source_folders: list[str]) -> list[str]:
-    """Which configured source folders don't resolve to a real, listable
-    directory — see ``IngestResult.missing_folders``'s docstring."""
+    """Which configured source entries don't resolve to a real, listable
+    directory or readable file — see ``IngestResult.missing_folders``'s
+    docstring."""
     return [folder for folder in source_folders if not _folder_is_usable(_resolved_folder(folder))]
 
 
@@ -145,6 +159,10 @@ def _discover_files(source_folders: list[str]) -> list[Path]:
     files: list[Path] = []
     for folder in source_folders:
         root = _resolved_folder(folder)
+        if root.is_file():
+            if root.suffix.lower() in INGESTIBLE_SUFFIXES:
+                files.append(root)
+            continue
         if not _folder_is_usable(root):
             continue
         try:

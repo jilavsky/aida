@@ -254,7 +254,8 @@ def cmd_query(args: argparse.Namespace) -> int:
 def _add_kb_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -> None:
     parser.add_argument(
         "--source-folders", default="" if defaults else None,
-        help="Comma-separated folders to index (an Obsidian vault is just a folder of .md files)",
+        help="Comma-separated folders and/or individual files to index "
+        "(an Obsidian vault is just a folder of .md files)",
     )
     parser.add_argument(
         "--embedding-profile", default=None,

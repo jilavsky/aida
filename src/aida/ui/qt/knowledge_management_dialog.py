@@ -80,7 +80,7 @@ class KnowledgeBaseFormDialog(QDialog):
 
         self._folders_edit = QPlainTextEdit("\n".join(kb.source_folders) if kb else "", self)
         self._folders_edit.setPlaceholderText(
-            "One folder per line — an Obsidian vault is just a folder of .md files"
+            "One folder or individual file per line — an Obsidian vault is just a folder of .md files"
         )
         form.addRow("Source folders:", self._folders_edit)
 

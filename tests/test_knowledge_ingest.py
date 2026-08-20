@@ -39,6 +39,64 @@ async def test_rebuild_ingests_every_discovered_file(tmp_path: Path):
     conn.close()
 
 
+# --- a source_folders entry pointing at a single file, not a folder --------
+# (real request: "index just this one file" without making a folder for it —
+# previously reported as a missing folder even though the file existed.)
+
+
+@pytest.mark.asyncio
+async def test_rebuild_ingests_a_single_file_source_entry(tmp_path: Path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    single_file = corpus / "0 Instrument devise notes.md"
+    single_file.write_text("# Instrument\n\nDevice notes content.")
+
+    conn = kb_index.connect(tmp_path / "kb.db")
+    result = await rebuild(conn, _kb(single_file), MockEmbeddings())
+
+    assert result.missing_folders == []
+    assert result.added_files == [str(single_file)]
+    assert result.chunk_count == 1
+    conn.close()
+
+
+@pytest.mark.asyncio
+async def test_rebuild_reports_a_single_file_entry_with_a_non_ingestible_suffix_as_missing(tmp_path: Path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    image = corpus / "diagram.png"
+    image.write_bytes(b"\x89PNG")
+
+    conn = kb_index.connect(tmp_path / "kb.db")
+    result = await rebuild(conn, _kb(image), MockEmbeddings())
+
+    # The path itself exists — it's just not a text format this can chunk —
+    # so it's not reported as "missing"; it simply contributes no chunks.
+    assert result.missing_folders == []
+    assert result.added_files == []
+    assert result.chunk_count == 0
+    conn.close()
+
+
+@pytest.mark.asyncio
+async def test_update_skips_an_unchanged_single_file_entry(tmp_path: Path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    single_file = corpus / "notes.md"
+    single_file.write_text("# Notes\n\nContent.")
+
+    conn = kb_index.connect(tmp_path / "kb.db")
+    kb = _kb(single_file)
+    await rebuild(conn, kb, MockEmbeddings())
+
+    embedder = MockEmbeddings()
+    result = await update(conn, kb, embedder)
+
+    assert result.added_files == []
+    assert embedder.calls == [], "an unchanged single-file entry must not be re-embedded"
+    conn.close()
+
+
 @pytest.mark.asyncio
 async def test_rebuild_prunes_files_no_longer_present(tmp_path: Path):
     corpus = tmp_path / "corpus"
@@ -178,6 +236,18 @@ def test_normalize_source_folder_strips_leading_slash_from_windows_drive_uri():
     assert normalize_source_folder("file:///C:/Users/jan/USAXS%20notes") == "C:/Users/jan/USAXS notes"
 
 
+def test_normalize_source_folder_never_silently_falls_back_to_the_cwd():
+    """A malformed file:// string — found via a Windows CI test bug where
+    f"file://{windows_path}" glued backslashes straight onto the scheme
+    with no "/" boundary — leaves urlparse() with an empty path component.
+    Path("") silently resolves to the current working directory; returning
+    the unmodified original string instead means the entry fails
+    _folder_is_usable and gets reported as missing, rather than silently
+    ingesting whatever directory happens to be the cwd."""
+    malformed = "file://C:\\Users\\runneradmin\\AppData\\Local\\Temp\\corpus"
+    assert normalize_source_folder(malformed) == malformed
+
+
 @pytest.mark.asyncio
 async def test_rebuild_ingests_a_folder_configured_as_a_file_uri(tmp_path: Path):
     corpus = tmp_path / "corpus"
@@ -185,7 +255,15 @@ async def test_rebuild_ingests_a_folder_configured_as_a_file_uri(tmp_path: Path)
     (corpus / "a.md").write_text("# A\n\nContent A.")
 
     conn = kb_index.connect(tmp_path / "kb.db")
-    kb = _kb(corpus, source_folders=[f"file://{corpus}"])
+    # Path.as_uri() (not f"file://{corpus}") — a real file:// URI needs
+    # forward slashes and, on Windows, a leading slash before the drive
+    # letter ("file:///C:/Users/..."); naively f-stringing a WindowsPath
+    # produces "file://C:\\Users\\..." which urlparse can't parse into a
+    # path at all (no "/" after the scheme means the whole remainder is
+    # read as netloc, not path) — normalize_source_folder silently fell
+    # back to "" -> the current working directory, and ingest picked up
+    # the entire repo (169 files) instead of the fixture corpus.
+    kb = _kb(corpus, source_folders=[corpus.as_uri()])
     result = await rebuild(conn, kb, MockEmbeddings())
 
     assert len(result.added_files) == 1

@@ -382,14 +382,22 @@ class McpConfig:
 
 @dataclass
 class KnowledgeBaseConfig:
-    """One RAG knowledge base: which folders to index and with which
-    embedding profile. An Obsidian vault is just a folder of ``.md`` files
-    here — no separate "vault" source type; heading-aware Markdown chunking
+    """One RAG knowledge base: which folders (or individual files — see
+    ``source_folders``) to index and with which embedding profile. An
+    Obsidian vault is just a folder of ``.md`` files here — no separate
+    "vault" source type; heading-aware Markdown chunking
     (``aida.knowledge.rag.chunking``) already handles that structure, so a
     vault needs nothing beyond listing its path in ``source_folders``.
     """
 
     name: str
+    #: Each entry may be a folder (walked recursively) or a path to one
+    #: individual file — "index just this one file" is a real request that
+    #: shouldn't require making a folder for it
+    #: (``aida.knowledge.rag.ingest._discover_files``). Kept as a single
+    #: list/field named after the common case rather than splitting into
+    #: two fields; a `.md`-file entry chunks the same heading-aware way a
+    #: folder's `.md` files do.
     source_folders: list[str] = field(default_factory=list)
     embedding_profile: str | None = None
     chunk_size: int = 1000
