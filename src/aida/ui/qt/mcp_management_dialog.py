@@ -31,6 +31,7 @@ planning/phase07_mcp_management.md's review notes.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -58,6 +59,7 @@ from aida.ui.qt._qt import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     Qt,
     QTabWidget,
     QTextBrowser,
@@ -519,13 +521,26 @@ class McpManagementDialog(QDialog):
         details_layout.addStretch(1)
         self._tabs.addTab(self._details_box, "Details")
 
+        tools_tab = QWidget(self)
+        tools_tab_layout = QVBoxLayout(tools_tab)
+        tools_save = QPushButton("Save Tool Permissions", self)
+        tools_save.clicked.connect(self._on_save_tool_permissions)
+        tools_tab_layout.addWidget(tools_save)
+
+        # A real pyIrena server can expose 100+ tools — without a scroll
+        # area, one checkbox row per tool grew the tab (and the whole
+        # dialog) tall enough to be unusable ("scales the panel as high as
+        # list of tools"). The Save button stays outside the scroll area so
+        # it's always reachable without scrolling back up.
         self._tools_container = QWidget(self)
         self._tools_layout = QVBoxLayout(self._tools_container)
         self._tools_layout.addStretch(1)
-        tools_save = QPushButton("Save Tool Permissions", self)
-        tools_save.clicked.connect(self._on_save_tool_permissions)
-        self._tools_layout.insertWidget(0, tools_save)
-        self._tabs.addTab(self._tools_container, "Tools")
+        tools_scroll = QScrollArea(self)
+        tools_scroll.setWidgetResizable(True)
+        tools_scroll.setWidget(self._tools_container)
+        tools_tab_layout.addWidget(tools_scroll)
+
+        self._tabs.addTab(tools_tab, "Tools")
 
         self._log_list = QListWidget(self)
         self._log_list.itemDoubleClicked.connect(self._on_log_double_clicked)
@@ -541,6 +556,37 @@ class McpManagementDialog(QDialog):
             self._bridge.mcp_connection_tested.connect(self._on_connection_tested)
 
         self._refresh_server_list()
+
+    def done(self, result: int) -> None:
+        """Disconnect from ``self._bridge`` before closing.
+
+        Bug report: "Test connection spawns 4 dialogs with OK button, not
+        just one." Root cause: `MainWindow.open_mcp_management_dialog`
+        constructs a *new* `McpManagementDialog` every time the toolbar
+        action is clicked, and each instance connected itself to the
+        long-lived `bridge`'s signals in `__init__` — but nothing ever
+        disconnected a closed dialog. A signal connection keeps the bound
+        method's `self` (the dialog) alive, so every previously-opened,
+        already-closed dialog instance stayed subscribed forever; opening
+        the dialog N times and then clicking "Test Connection" once popped
+        N modal message boxes, one per leaked instance, all reacting to the
+        same single `mcp_connection_tested` emission. Same class of bug
+        `aida.ui.qt.main_window.MainWindow._unwire_bridge_signals` already
+        exists to prevent for bridge replacement; this is the equivalent
+        fix for a dialog's own lifetime instead.
+        """
+        if self._bridge is not None:
+            # Each disconnect is independently guarded — done() can
+            # re-enter, and one signal already being disconnected must not
+            # short-circuit the other two.
+            for signal, slot in (
+                (self._bridge.mcp_server_status_changed, self._on_status_changed),
+                (self._bridge.mcp_server_action_failed, self._on_action_failed),
+                (self._bridge.mcp_connection_tested, self._on_connection_tested),
+            ):
+                with contextlib.suppress(TypeError, RuntimeError):
+                    signal.disconnect(slot)
+        super().done(result)
 
     # --- rendering -----------------------------------------------------------
 
@@ -612,7 +658,7 @@ class McpManagementDialog(QDialog):
         known_names = sorted(set(self._live_tool_names(server.name)) | set(server.disabled_tools) | set(server.confirm_tools))
         if not known_names:
             hint = QLabel("Start or Test Connection to discover this server's tools.", self._tools_container)
-            self._tools_layout.insertWidget(1, hint)
+            self._tools_layout.insertWidget(self._tools_layout.count() - 1, hint)
             self._tool_rows.append(hint)  # reused as a "row" purely so _clear_tool_rows tears it down too
             return
         for tool_name in known_names:

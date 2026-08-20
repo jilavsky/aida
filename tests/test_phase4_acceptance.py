@@ -72,7 +72,7 @@ async def test_kill_mid_turn_then_resume_continues_sensibly_with_image_artifact(
     IN_FLIGHT_TEXT = "here is the plot you asked for and a full write-up that never finishes"
     provider_before_kill = MockProvider(
         [
-            MockTurn(text="let me get that plot", tool_calls=[MockToolCall(name="mock-mcp.get_image", id="call_1")]),
+            MockTurn(text="let me get that plot", tool_calls=[MockToolCall(name="mock-mcp__get_image", id="call_1")]),
             MockTurn(text=IN_FLIGHT_TEXT),
         ]
     )
@@ -210,9 +210,9 @@ async def test_two_workspaces_load_different_provider_mcp_skills_environments(
         assert session_a.profile_name == "mock-profile"
         assert session_b.profile_name == "plain-profile"
 
-        assert mcp_a is not None and "mock-mcp.get_image" in session_a.tools
+        assert mcp_a is not None and "mock-mcp__get_image" in session_a.tools
         assert mcp_b is None
-        assert "mock-mcp.get_image" not in session_b.tools
+        assert "mock-mcp__get_image" not in session_b.tools
 
         assert "small-angle X-ray scattering" in session_a.messages[0].content
         assert session_b.messages == [] or session_b.messages[0].role != "system" or (

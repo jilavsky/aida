@@ -3,7 +3,7 @@
 ``McpManager`` takes an already-resolved list of server configs (see
 ``aida.mcp.groups``), launches only those (lazy start — a server not in the
 active group/list is never spawned), namespaces every discovered tool as
-``server.tool`` so name collisions across servers can't happen, and wraps
+``server__tool`` so name collisions across servers can't happen, and wraps
 each as an agent-loop-compatible ``NativeTool``. Every call result is run
 through ``aida.mcp.results.convert_result`` so images/files reach the agent
 loop as typed artifacts, never flattened text (PLAN.md hard rule 3) — this
@@ -28,7 +28,18 @@ from aida.mcp.results import convert_result
 from aida.mcp.server import McpServerError, McpServerHandle, ToolCallRecord
 from aida.providers.base import ToolSchema
 
-NAMESPACE_SEPARATOR = "."
+# A "." separator looked natural but is invalid: both Anthropic and
+# OpenAI-compatible tool-calling APIs require a tool's name to match
+# ^[a-zA-Z0-9_-]{1,128}$ (Anthropic's error, verified against a real Argo
+# call: "tools.13.custom.name: String should match pattern
+# '^[a-zA-Z0-9_-]{1,128}$'") — a dot is not in that character class. Since
+# every namespaced MCP tool name has always contained one, a real MCP
+# server with at least one tool broke *every* Anthropic-backed chat the
+# moment its tools were sent, while every automated test here used
+# MockProvider, which never validates tool names — nothing caught this
+# until a real pyirena-mcp session against Argo did. "__" is in the
+# allowed set for both providers.
+NAMESPACE_SEPARATOR = "__"
 
 
 def namespaced_tool_name(server_name: str, tool_name: str) -> str:
@@ -100,6 +111,18 @@ class McpManager:
                 if skill not in seen:
                     seen.append(skill)
         return seen
+
+    def server_instructions(self) -> dict[str, str]:
+        """``{server_name: instructions}`` for every *running* server that
+        declared one via the MCP ``initialize`` handshake
+        (``McpServerHandle.instructions``) — a FastMCP server author's own
+        LLM-facing usage guidance for their tools (e.g. pyirena-mcp ships a
+        detailed workflow description), which AIDA previously discarded
+        entirely (see ``McpServerHandle``'s docstring note). Servers with
+        no ``instructions`` are simply omitted, not included as empty
+        strings — ``aida.cli.chat.start_session`` folds each entry into the
+        session's system context alongside skills text."""
+        return {name: handle.instructions for name, handle in self._handles.items() if handle.instructions}
 
     async def start_all(self) -> dict[str, NativeTool]:
         """Launch every enabled server and return namespaced ``NativeTool``s

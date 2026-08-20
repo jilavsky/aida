@@ -23,7 +23,7 @@ from aida.config.settings import (
     load_settings,
 )
 from aida.core.agent import AgentLoop
-from aida.core.context import build_system_message, load_skill_texts
+from aida.core.context import build_system_message, build_workspace_context_block, load_skill_texts
 from aida.core.events import (
     AgentError,
     AgentEvent,
@@ -40,7 +40,7 @@ from aida.core.events import (
 from aida.core.tools import NativeTool, default_native_tools
 from aida.documents.tools import default_document_tools
 from aida.mcp.groups import resolve_explicit, resolve_group
-from aida.mcp.manager import McpManager
+from aida.mcp.manager import NAMESPACE_SEPARATOR, McpManager
 from aida.persistence.recorder import ConversationNotFoundError, ConversationRecorder
 from aida.persistence.store import ConversationStore
 from aida.providers.base import CompletionSettings, Message
@@ -152,6 +152,7 @@ class ChatSession:
         system_prompt: str | None = None,
         recorder: ConversationRecorder | None = None,
         initial_messages: list[Message] | None = None,
+        extra_context_texts: list[str] | None = None,
     ) -> None:
         self.settings = settings
         self.tools = tools if tools is not None else default_native_tools()
@@ -163,7 +164,7 @@ class ChatSession:
         self.recorder = recorder
 
         skill_texts = load_skill_texts(skills_dir(), skill_names or [])
-        system_message = build_system_message(system_prompt, skill_texts)
+        system_message = build_system_message(system_prompt, skill_texts, extra_texts=extra_context_texts)
         history = list(initial_messages) if initial_messages else []
         self.messages: list[Message] = ([system_message] if system_message.content else []) + history
 
@@ -420,13 +421,31 @@ async def start_session(
             "No profile given: pass --profile NAME, or --workspace NAME with a profile configured."
         )
 
+    effective_safety_mode = workspace.safety if workspace else settings.app.default_safety_mode
     guard = SafetyGuard.for_workspace(
         source_folders=workspace.source_folders if workspace else [],
         target_folder=workspace.target_folder if workspace else None,
         global_allowed_folders=settings.app.allowed_folders,
-        mode=workspace.safety if workspace else settings.app.default_safety_mode,
+        mode=effective_safety_mode,
         confirm_callback=confirm_callback,
     )
+
+    # Bug report: "Agent seems to have no understanding of Source and
+    # Target folders" — nothing previously told the model what a
+    # workspace's actual configured paths were; it could only learn them if
+    # the user typed them out. Skills files can't fix this either (static
+    # Markdown shared across every workspace that lists it, not
+    # per-workspace user data). Generated fresh here instead.
+    extra_context_texts: list[str] = []
+    folder_context = build_workspace_context_block(
+        source_folders=workspace.source_folders if workspace else [],
+        target_folder=workspace.target_folder if workspace else None,
+        global_allowed_folders=settings.app.allowed_folders,
+        sidecar_dirname=sidecar_dirname,
+        safety_mode=effective_safety_mode,
+    )
+    if folder_context:
+        extra_context_texts.append(folder_context)
 
     mcp_manager: McpManager | None = None
     tools = default_native_tools()
@@ -448,8 +467,16 @@ async def start_session(
         for skill in mcp_manager.skills():
             if skill not in all_skill_names:
                 all_skill_names.append(skill)
+        # A FastMCP server author can write `instructions=` specifically to
+        # teach an LLM how to use *that* server's own tools (pyirena-mcp
+        # ships a detailed one covering its whole read/fit/plot workflow) —
+        # AIDA used to call session.initialize() and throw the result away
+        # entirely, so this never reached the model even though the server
+        # had already provided it.
+        for name, instructions in mcp_manager.server_instructions().items():
+            extra_context_texts.append(f"# {name} — server instructions\n\n{instructions}")
         for name in mcp_manager.running_server_names:
-            count = sum(1 for t in mcp_tools if t.startswith(f"{name}."))
+            count = sum(1 for t in mcp_tools if t.startswith(f"{name}{NAMESPACE_SEPARATOR}"))
             print(f"[mcp] {name}: {count} tool(s)")
             logger.debug("mcp server %r started with %d tool(s)", name, count)
         for name, error in mcp_manager.start_errors.items():
@@ -482,6 +509,7 @@ async def start_session(
             system_prompt=system_prompt,
             recorder=recorder,
             initial_messages=initial_messages,
+            extra_context_texts=extra_context_texts,
         )
     except UnknownProfileError:
         if mcp_manager is not None:

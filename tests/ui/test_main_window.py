@@ -105,7 +105,7 @@ def test_flagship_demo_tool_call_produces_inline_image(
     )
 
     script = [
-        MockTurn(text="let me get that plot", tool_calls=[MockToolCall(name="mock-mcp.get_image", id="call_1")]),
+        MockTurn(text="let me get that plot", tool_calls=[MockToolCall(name="mock-mcp__get_image", id="call_1")]),
         MockTurn(text="here is the plot"),
     ]
     window = _make_window(qapp, loop_thread, settings, monkeypatch, script, workspace_name="use-pyirena")
@@ -175,7 +175,7 @@ def test_resume_conversation_redisplays_prior_image_artifact(
         }
     )
     script = [
-        MockTurn(text="let me get that plot", tool_calls=[MockToolCall(name="mock-mcp.get_image", id="call_1")]),
+        MockTurn(text="let me get that plot", tool_calls=[MockToolCall(name="mock-mcp__get_image", id="call_1")]),
         MockTurn(text="here is the plot"),
     ]
     first = _make_window(qapp, loop_thread, settings, monkeypatch, script, workspace_name="use-pyirena")

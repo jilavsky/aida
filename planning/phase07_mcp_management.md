@@ -282,3 +282,63 @@ prior review pass) fixed the same way.
 
 **Verification:** 649 tests passing (`pytest -q`, up from 566 at the start of
 this phase), `ruff check .` clean, in this environment.
+
+---
+
+## Post-delivery bug fixes (real pyIrena-mcp usage against Argo)
+
+The user installed Phase 7 and tried it against a real, already-configured
+pyIrena MCP server through the Argo/Anthropic profile (not `MockProvider` —
+the first time this phase's MCP code path ran against a real model). Three
+issues surfaced, all fixed with regression tests.
+
+1. **Every pyIrena tool call failed: `API error (200) — invalid_request_error:
+   tools.13.custom.name: String should match pattern
+   '^[a-zA-Z0-9_-]{1,128}$'`.** Root cause: `aida.mcp.manager.
+   NAMESPACE_SEPARATOR` was `"."` — AIDA namespaces every MCP tool as
+   `server.tool` to prevent name collisions across servers, but a dot is not
+   in the character class Anthropic (and OpenAI-compatible APIs) require a
+   tool name to match. `MockProvider`, used by every automated test in this
+   codebase, never validates tool names, so nothing caught this until a real
+   pyIrena server (with more than a handful of tools — tool index 13 in the
+   request is what tripped the pattern check) actually sent its tool list to
+   a real model. Fixed by changing the separator to `"__"` (double
+   underscore — in the allowed set for both providers) in
+   `aida.mcp.manager.namespaced_tool_name`, plus one hardcoded `"."` in
+   `aida.cli.chat`'s tool-count logging. New regression test:
+   `test_namespaced_tool_name_matches_the_provider_required_pattern`, using
+   the exact pattern from the real error message — the kind of test that
+   should have existed from Phase 3. Every test literal that hardcoded a
+   namespaced tool name (`"mock-mcp.echo_text"` etc., across
+   `test_mcp_manager.py`, `test_phase4_acceptance.py`,
+   `test_keystone_image_roundtrip.py`, `test_main_window.py`,
+   `test_mcp_management_dialog.py`) was updated to the new separator.
+2. **"Test connection spawns 4 dialogs with OK button, not just one."** Root
+   cause: `MainWindow.open_mcp_management_dialog` constructs a *new*
+   `McpManagementDialog` on every toolbar click, and each instance connected
+   itself to the long-lived `ChatBridge`'s `mcp_server_status_changed`/
+   `mcp_server_action_failed`/`mcp_connection_tested` signals in `__init__` —
+   but nothing ever disconnected a closed dialog. A live Qt signal
+   connection keeps the bound slot's `self` (the dialog) alive, so every
+   previously-opened, already-closed dialog instance stayed subscribed
+   forever; the *N*th time the dialog was opened, one "Test Connection"
+   click fired the same single signal at all *N* still-connected instances,
+   each popping its own modal. Same class of bug
+   `aida.ui.qt.main_window.MainWindow._unwire_bridge_signals` already exists
+   to prevent for bridge *replacement* — this is the equivalent for a
+   dialog's own lifetime: `McpManagementDialog.done()` now disconnects from
+   the bridge before the dialog actually closes. Regression test:
+   `test_closing_the_dialog_disconnects_it_from_the_bridge` (opens two
+   dialog instances, closes the first, confirms exactly one modal fires from
+   the second).
+3. **"When I open pyIrena's Tools list, it scales the panel as high as list
+   of tools (100+ lines) — unusable."** The Tools tab put one checkbox row
+   per discovered tool directly into a plain `QVBoxLayout` with no scroll
+   container, so the tab (and the whole dialog) grew to fit however many
+   tools a real server exposed. Wrapped the row list in a `QScrollArea`
+   (`setWidgetResizable(True)`), with the "Save Tool Permissions" button
+   kept outside the scroll area so it's always reachable without scrolling
+   back up. Regression test: `test_tools_tab_is_scrollable_not_ever_growing`
+   (150 synthetic tools, asserts a `QScrollArea` wraps the row container).
+
+**Verification:** 652 tests passing (`pytest -q`), `ruff check .` clean.

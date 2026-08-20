@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aida.core.context import build_system_message, estimate_tokens, load_skill_texts, trim_history
+from aida.core.context import (
+    build_system_message,
+    build_workspace_context_block,
+    estimate_tokens,
+    load_skill_texts,
+    trim_history,
+)
 from aida.providers.base import Message
 
 
@@ -23,6 +29,63 @@ def test_build_system_message_combines_prompt_and_skills():
 def test_build_system_message_empty_when_nothing_given():
     msg = build_system_message(None, [])
     assert msg.content == ""
+
+
+def test_build_system_message_extra_texts_sit_between_prompt_and_skills():
+    msg = build_system_message("Be concise.", ["skill text"], extra_texts=["folder facts"])
+    order = [msg.content.index(p) for p in ("Be concise.", "folder facts", "skill text")]
+    assert order == sorted(order), "extra_texts must land between system_prompt and skill_texts"
+
+
+# --- build_workspace_context_block (regression: "agent seems to have no
+# understanding of Source and Target folders") -----------------------------
+
+
+def test_workspace_context_block_none_when_nothing_configured():
+    assert (
+        build_workspace_context_block(
+            source_folders=[], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
+            safety_mode="confirm",
+        )
+        is None
+    )
+
+
+def test_workspace_context_block_lists_source_and_target_folders():
+    block = build_workspace_context_block(
+        source_folders=["/data/USAXS_2026"],
+        target_folder="/Users/me/out",
+        global_allowed_folders=[],
+        sidecar_dirname="figures",
+        safety_mode="relaxed",
+    )
+    assert block is not None
+    assert "/data/USAXS_2026" in block
+    assert "/Users/me/out" in block
+    assert "figures" in block
+    assert "relaxed" in block.lower()
+
+
+def test_workspace_context_block_confirm_mode_wording_differs_from_relaxed():
+    relaxed = build_workspace_context_block(
+        source_folders=["/x"], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
+        safety_mode="relaxed",
+    )
+    confirm = build_workspace_context_block(
+        source_folders=["/x"], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
+        safety_mode="confirm",
+    )
+    assert "without asking" in relaxed
+    assert "will be asked to approve" in confirm
+
+
+def test_workspace_context_block_mentions_global_allowed_folders_even_with_no_workspace():
+    block = build_workspace_context_block(
+        source_folders=[], target_folder=None, global_allowed_folders=["/shared/reference"],
+        sidecar_dirname="figures", safety_mode="confirm",
+    )
+    assert block is not None
+    assert "/shared/reference" in block
 
 
 def test_load_skill_texts_flat_file(tmp_path: Path):

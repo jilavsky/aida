@@ -43,6 +43,10 @@ class _FakeMcpManager:
     assert on precedence."""
 
     instances: list[_FakeMcpManager] = []
+    #: Settable per-test (reset by the autouse fixture below) so a test can
+    #: prove start_session actually folds McpManager.server_instructions()
+    #: into the session's system message.
+    instructions_to_report: dict[str, str] = {}
 
     def __init__(self, servers, *, artifact_store=None, confirm_callback=None) -> None:
         self.servers = servers
@@ -59,6 +63,9 @@ class _FakeMcpManager:
     def skills(self) -> list[str]:
         return []
 
+    def server_instructions(self) -> dict[str, str]:
+        return _FakeMcpManager.instructions_to_report
+
     async def aclose(self) -> None:
         self.closed = True
 
@@ -66,8 +73,10 @@ class _FakeMcpManager:
 @pytest.fixture(autouse=True)
 def _reset_fake_mcp_instances():
     _FakeMcpManager.instances.clear()
+    _FakeMcpManager.instructions_to_report = {}
     yield
     _FakeMcpManager.instances.clear()
+    _FakeMcpManager.instructions_to_report = {}
 
 
 def _settings(**overrides) -> Settings:
@@ -150,6 +159,51 @@ async def test_start_session_workspace_supplies_profile_prompt_and_mcp(
         assert "workspace assistant" in session.messages[0].content
         assert mcp_manager is not None
         assert [s.name for s in mcp_manager.servers] == ["ws-server"]
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_tells_the_model_its_source_and_target_folders(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """Regression: "Agent seems to have no understanding of Source and
+    Target folders" — the system message must actually name them."""
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    source = tmp_path / "usaxs_data"
+    target = tmp_path / "out"
+    ws = _workspace(source_folders=[str(source)], target_folder=str(target), safety="relaxed")
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        content = session.messages[0].content
+        assert str(source) in content
+        assert str(target) in content
+        assert "relaxed" in content.lower()
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_folds_mcp_server_instructions_into_system_message(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """Regression: session.initialize()'s ``instructions`` field (a FastMCP
+    server author's own LLM-facing usage guidance — pyirena-mcp ships a
+    detailed one) used to be discarded entirely; it must now reach the
+    model via McpManager.server_instructions()."""
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+    _FakeMcpManager.instructions_to_report = {"ws-server": "Call pyirena_summarize_folder first."}
+
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert "Call pyirena_summarize_folder first." in session.messages[0].content
+        assert "ws-server" in session.messages[0].content
     finally:
         await session.aclose()
 

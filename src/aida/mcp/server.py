@@ -194,6 +194,16 @@ class McpServerHandle:
         self.call_timeout_seconds = call_timeout_seconds
         self.stderr: StderrCapture | None = None
         self.calls: list[ToolCallRecord] = []
+        #: The server's own ``instructions`` string from the MCP
+        #: ``initialize`` handshake (``mcp.types.InitializeResult.
+        #: instructions``), or ``None`` if it didn't declare one. A FastMCP
+        #: server author can write this specifically to teach an LLM how to
+        #: use *that* server's tools (pyirena-mcp ships a detailed one) —
+        #: AIDA used to call ``session.initialize()`` and discard the
+        #: result entirely, so this was never seen by the model even though
+        #: the server had already provided it. See
+        #: ``aida.mcp.manager.McpManager.server_instructions``.
+        self.instructions: str | None = None
         self._session: ClientSession | None = None
         self._tools: dict[str, Tool] = {}
         self._serve_task: asyncio.Task[None] | None = None
@@ -243,11 +253,12 @@ class McpServerHandle:
                 stdio_client(params, errlog=stderr) as (read_stream, write_stream),
                 ClientSession(read_stream, write_stream) as session,
             ):
-                await session.initialize()
+                init_result = await session.initialize()
                 tools_result = await session.list_tools()
 
                 self._session = session
                 self._tools = {t.name: t for t in tools_result.tools}
+                self.instructions = init_result.instructions
                 self.stderr = stderr
                 ready.set()
 
@@ -263,6 +274,7 @@ class McpServerHandle:
         finally:
             self._session = None
             self._tools = {}
+            self.instructions = None
             stderr.close()
             self.stderr = None
 

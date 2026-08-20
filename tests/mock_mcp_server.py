@@ -17,7 +17,13 @@ import os
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.types import ImageContent, TextContent
 
-mcp = FastMCP("mock-mcp")
+mcp = FastMCP(
+    "mock-mcp",
+    instructions=(
+        "Mock server instructions: use echo_text to test round-tripping text, "
+        "get_image for image content."
+    ),
+)
 
 # A minimal valid 1x1 transparent PNG (67 bytes), used so image-decoding
 # tests exercise real, decodable image bytes rather than placeholder junk.

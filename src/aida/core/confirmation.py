@@ -51,7 +51,7 @@ class ConfirmationRequest:
     ``action``/``path`` were named for the original file-safety use case
     (``"read"``/``"write"``/``"delete"`` and a filesystem path) but the
     shape is generic enough for a second caller: an MCP per-tool confirm
-    uses ``action="tool_call"`` and ``path="server.tool"`` (the namespaced
+    uses ``action="tool_call"`` and ``path="server__tool"`` (the namespaced
     tool name) rather than inventing a parallel request type.
     """
 

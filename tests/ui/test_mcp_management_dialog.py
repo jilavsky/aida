@@ -234,7 +234,7 @@ def test_start_and_stop_a_server_updates_status_and_tools(
 
         dialog._on_start()
         assert pump_until(qapp, lambda: "running" in dialog._server_list.item(0).text(), timeout=10.0)
-        assert any(k.startswith("mock-mcp.") for k in bridge.session.tools), "live tools merged into the session"
+        assert any(k.startswith("mock-mcp__") for k in bridge.session.tools), "live tools merged into the session"
 
         dialog._server_list.setCurrentRow(0)
         assert pump_until(
@@ -243,7 +243,7 @@ def test_start_and_stop_a_server_updates_status_and_tools(
 
         dialog._on_stop()
         assert pump_until(qapp, lambda: "stopped" in dialog._server_list.item(0).text(), timeout=10.0)
-        assert not any(k.startswith("mock-mcp.") for k in bridge.session.tools), "tools removed from the live session"
+        assert not any(k.startswith("mock-mcp__") for k in bridge.session.tools), "tools removed from the live session"
     finally:
         bridge.shutdown()
 
@@ -257,7 +257,7 @@ def test_disabled_tool_is_absent_from_the_next_turns_schemas(
     settings.mcp = McpConfig(servers={"mock-mcp": _mock_server_config()})
     bridge = _make_bridge(
         qapp, loop_thread, settings, monkeypatch,
-        [MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp.echo_text", id="c1")]), MockTurn(text="done")],
+        [MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp__echo_text", id="c1")]), MockTurn(text="done")],
     )
     dialog = McpManagementDialog(settings, bridge, aida_home / "skills")
     try:
@@ -274,7 +274,7 @@ def test_disabled_tool_is_absent_from_the_next_turns_schemas(
         assert "always_fails" in settings.mcp.servers["mock-mcp"].disabled_tools
         assert pump_until(
             qapp,
-            lambda: "mock-mcp.always_fails" not in bridge.session.tools and "mock-mcp.echo_text" in bridge.session.tools,
+            lambda: "mock-mcp__always_fails" not in bridge.session.tools and "mock-mcp__echo_text" in bridge.session.tools,
             timeout=10.0,
         )
     finally:
@@ -303,7 +303,7 @@ def test_confirm_flagged_tool_triggers_the_modal_even_in_relaxed_workspace(
     monkeypatch.setattr(
         "aida.cli.chat.build_provider",
         lambda profile: MockProvider(
-            [MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp.echo_text", id="c1")]), MockTurn(text="done")]
+            [MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp__echo_text", id="c1")]), MockTurn(text="done")]
         ),
     )
     asked: list[str] = []
@@ -354,7 +354,7 @@ def test_raw_inspector_shows_image_content_for_a_plot_call(
     settings.mcp = McpConfig(servers={"mock-mcp": _mock_server_config()})
     bridge = _make_bridge(
         qapp, loop_thread, settings, monkeypatch,
-        [MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp.get_image", id="c1")]), MockTurn(text="done")],
+        [MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp__get_image", id="c1")]), MockTurn(text="done")],
     )
     dialog = McpManagementDialog(settings, bridge, aida_home / "skills")
     try:
@@ -379,5 +379,59 @@ def test_raw_inspector_shows_image_content_for_a_plot_call(
         assert image_entries[0]["mime_type"] == "image/png"
         assert image_entries[0]["base64_length"] > 0
         assert "base64" not in text.lower().split("base64_length")[0][-20:]  # never the raw data itself
+    finally:
+        bridge.shutdown()
+
+
+# --- regression: real pyIrena/Argo bug reports ------------------------------
+
+
+def test_tools_tab_is_scrollable_not_ever_growing(qapp, aida_home: Path):
+    """Bug report: opening a server's Tools tab with 100+ tools "scales
+    the panel as high as list of tools" — unusable. The tab's row list must
+    live inside a QScrollArea, not directly in a plain layout the tab
+    (and therefore the whole dialog) would grow to fit."""
+    from aida.ui.qt._qt import QScrollArea
+
+    settings = load_settings()
+    settings.mcp = McpConfig(
+        servers={"pyirena": McpServerConfig(name="pyirena", command="/x", disabled_tools=[f"tool_{i}" for i in range(150)])}
+    )
+    dialog = McpManagementDialog(settings, None, aida_home / "skills")
+    dialog._server_list.setCurrentRow(0)
+
+    assert len(dialog._tool_rows) == 150
+    scroll_areas = dialog._tabs.findChildren(QScrollArea)
+    assert scroll_areas, "the Tools tab must contain a QScrollArea"
+    assert scroll_areas[0].widget() is dialog._tools_container
+    assert scroll_areas[0].widgetResizable() is True
+
+
+def test_closing_the_dialog_disconnects_it_from_the_bridge(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "Test connection spawns 4 dialogs with OK button, not
+    just one" — opening the MCP Servers dialog repeatedly (without closing
+    it disconnecting from the bridge first) left every previous instance
+    still subscribed to mcp_connection_tested, so one Test Connection click
+    popped one modal per still-connected leaked dialog. A closed dialog
+    must stop reacting to bridge signals entirely."""
+    settings = _settings_with_profile()
+    settings.mcp = McpConfig(servers={"mock-mcp": _mock_server_config()})
+    bridge = _make_bridge(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")])
+    try:
+        first = McpManagementDialog(settings, bridge, aida_home / "skills")
+        first.done(0)  # simulate closing it, same hook QDialog.exec()/close() go through
+        second = McpManagementDialog(settings, bridge, aida_home / "skills")
+
+        popped: list[str] = []
+        monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: popped.append("info"))
+        monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: popped.append("warn"))
+
+        second._server_list.setCurrentRow(0)
+        second._on_test()
+        assert pump_until(qapp, lambda: len(popped) >= 1, timeout=10.0)
+
+        assert len(popped) == 1, f"expected exactly one dialog, got {len(popped)}"
     finally:
         bridge.shutdown()

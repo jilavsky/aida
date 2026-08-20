@@ -63,13 +63,13 @@ async def test_keystone_mcp_image_round_trip(tmp_path):
 
     try:
         mcp_tools = await manager.start_all()
-        assert "mock-mcp.get_image" in mcp_tools
+        assert "mock-mcp__get_image" in mcp_tools
 
         provider = MockProvider(
             [
                 MockTurn(
                     text="let me get that plot",
-                    tool_calls=[MockToolCall(name="mock-mcp.get_image", id="call_1")],
+                    tool_calls=[MockToolCall(name="mock-mcp__get_image", id="call_1")],
                 ),
                 MockTurn(text="here is the plot you asked for"),
             ]
@@ -137,7 +137,7 @@ async def test_keystone_artifact_type_is_real_image_artifact_not_text(tmp_path):
     manager = McpManager([server_config], artifact_store=store)
     try:
         tools = await manager.start_all()
-        result = await tools["mock-mcp.get_image"].func({})
+        result = await tools["mock-mcp__get_image"].func({})
 
         assert len(result.artifacts) == 1
         artifact = result.artifacts[0]

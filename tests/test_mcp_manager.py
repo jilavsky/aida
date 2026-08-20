@@ -6,6 +6,7 @@ test_mcp_server.py.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -18,6 +19,16 @@ from aida.mcp.manager import McpManager, namespaced_tool_name
 
 MOCK_SERVER_PATH = Path(__file__).parent / "mock_mcp_server.py"
 
+#: The exact character class both Anthropic's and OpenAI's tool-calling
+#: APIs require a tool name to match (Anthropic's error, verified against a
+#: real Argo call: "tools.13.custom.name: String should match pattern
+#: '^[a-zA-Z0-9_-]{1,128}$'"). A "." separator violates this — every real
+#: MCP server with at least one tool broke every Anthropic-backed chat the
+#: moment its tools were sent, while every test here used MockProvider,
+#: which never validates names, so nothing caught it until a real
+#: pyirena-mcp session against Argo did.
+VALID_TOOL_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
+
 
 def _mock_server_config(name: str = "mock-mcp", *, skills: list[str] | None = None) -> McpServerConfig:
     return McpServerConfig(
@@ -29,7 +40,12 @@ def _mock_server_config(name: str = "mock-mcp", *, skills: list[str] | None = No
 
 
 def test_namespaced_tool_name():
-    assert namespaced_tool_name("pyirena", "plot_saxs") == "pyirena.plot_saxs"
+    assert namespaced_tool_name("pyirena", "plot_saxs") == "pyirena__plot_saxs"
+
+
+def test_namespaced_tool_name_matches_the_provider_required_pattern():
+    assert VALID_TOOL_NAME_RE.match(namespaced_tool_name("pyirena", "plot_saxs"))
+    assert VALID_TOOL_NAME_RE.match(namespaced_tool_name("pyirena-mcp", "find_and_plot_2"))
 
 
 @pytest.mark.asyncio
@@ -37,9 +53,9 @@ async def test_start_all_returns_namespaced_tools(tmp_path):
     manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
     try:
         tools = await manager.start_all()
-        assert "mock-mcp.echo_text" in tools
-        assert "mock-mcp.get_image" in tools
-        assert tools["mock-mcp.echo_text"].schema.name == "mock-mcp.echo_text"
+        assert "mock-mcp__echo_text" in tools
+        assert "mock-mcp__get_image" in tools
+        assert tools["mock-mcp__echo_text"].schema.name == "mock-mcp__echo_text"
         assert manager.running_server_names == ["mock-mcp"]
     finally:
         await manager.aclose()
@@ -50,7 +66,7 @@ async def test_echo_text_tool_round_trips(tmp_path):
     manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
     try:
         tools = await manager.start_all()
-        result = await tools["mock-mcp.echo_text"].func({"message": "hi"})
+        result = await tools["mock-mcp__echo_text"].func({"message": "hi"})
         assert result.is_error is False
         assert "echo: hi" in result.content
     finally:
@@ -62,7 +78,7 @@ async def test_get_image_tool_saves_artifact_and_returns_path(tmp_path):
     manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
     try:
         tools = await manager.start_all()
-        result = await tools["mock-mcp.get_image"].func({})
+        result = await tools["mock-mcp__get_image"].func({})
 
         assert result.is_error is False
         images = [a for a in result.artifacts if isinstance(a, ImageArtifact)]
@@ -83,7 +99,7 @@ async def test_always_fails_tool_is_error(tmp_path):
     manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
     try:
         tools = await manager.start_all()
-        result = await tools["mock-mcp.always_fails"].func({})
+        result = await tools["mock-mcp__always_fails"].func({})
         assert result.is_error is True
     finally:
         await manager.aclose()
@@ -96,8 +112,8 @@ async def test_failing_server_is_isolated_not_fatal(tmp_path):
     manager = McpManager([good, bad], artifact_store=ArtifactStore(base_dir=tmp_path))
     try:
         tools = await manager.start_all()
-        assert any(name.startswith("mock-mcp.") for name in tools)
-        assert not any(name.startswith("broken.") for name in tools)
+        assert any(name.startswith("mock-mcp__") for name in tools)
+        assert not any(name.startswith("broken__") for name in tools)
         assert "broken" in manager.start_errors
         assert manager.running_server_names == ["mock-mcp"]
     finally:
@@ -108,7 +124,7 @@ async def test_failing_server_is_isolated_not_fatal(tmp_path):
 async def test_calling_tool_after_aclose_reports_not_running(tmp_path):
     manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
     tools = await manager.start_all()
-    tool = tools["mock-mcp.echo_text"]
+    tool = tools["mock-mcp__echo_text"]
     await manager.aclose()
 
     result = await tool.func({"message": "hi"})
@@ -124,6 +140,24 @@ def test_skills_deduplicated_across_servers():
         ]
     )
     assert manager.skills() == ["saxs-basics", "shared", "waxs-basics"]
+
+
+@pytest.mark.asyncio
+async def test_server_instructions_collected_from_running_servers(tmp_path):
+    manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
+    try:
+        await manager.start_all()
+        instructions = manager.server_instructions()
+        assert "mock-mcp" in instructions
+        assert "mock server instructions" in instructions["mock-mcp"].lower()
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_server_instructions_empty_before_start(tmp_path):
+    manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
+    assert manager.server_instructions() == {}
 
 
 def test_enabled_server_names_reflects_construction_not_start():
@@ -142,8 +176,8 @@ async def test_disabled_tool_is_excluded_from_start_all(tmp_path):
     manager = McpManager([config], artifact_store=ArtifactStore(base_dir=tmp_path))
     try:
         tools = await manager.start_all()
-        assert "mock-mcp.always_fails" not in tools
-        assert "mock-mcp.echo_text" in tools, "other tools on the same server are unaffected"
+        assert "mock-mcp__always_fails" not in tools
+        assert "mock-mcp__echo_text" in tools, "other tools on the same server are unaffected"
     finally:
         await manager.aclose()
 
@@ -164,10 +198,10 @@ async def test_confirm_flagged_tool_calls_the_confirm_callback(tmp_path):
     manager = McpManager([config], artifact_store=ArtifactStore(base_dir=tmp_path), confirm_callback=confirm)
     try:
         tools = await manager.start_all()
-        result = await tools["mock-mcp.echo_text"].func({"message": "hi"})
+        result = await tools["mock-mcp__echo_text"].func({"message": "hi"})
         assert result.is_error is False
         assert len(calls) == 1
-        assert calls[0].path == "mock-mcp.echo_text"
+        assert calls[0].path == "mock-mcp__echo_text"
     finally:
         await manager.aclose()
 
@@ -183,7 +217,7 @@ async def test_confirm_denied_produces_an_error_result_not_a_raised_exception(tm
     manager = McpManager([config], artifact_store=ArtifactStore(base_dir=tmp_path), confirm_callback=deny)
     try:
         tools = await manager.start_all()
-        result = await tools["mock-mcp.echo_text"].func({"message": "hi"})
+        result = await tools["mock-mcp__echo_text"].func({"message": "hi"})
         assert result.is_error is True
         assert "declined" in result.content
     finally:
@@ -202,7 +236,7 @@ async def test_tool_without_confirm_flag_never_calls_the_confirm_callback(tmp_pa
     manager = McpManager([config], artifact_store=ArtifactStore(base_dir=tmp_path), confirm_callback=confirm)
     try:
         tools = await manager.start_all()
-        await tools["mock-mcp.echo_text"].func({"message": "hi"})
+        await tools["mock-mcp__echo_text"].func({"message": "hi"})
         assert called == []
     finally:
         await manager.aclose()
@@ -217,7 +251,7 @@ async def test_default_confirm_callback_denies(tmp_path):
     manager = McpManager([config], artifact_store=ArtifactStore(base_dir=tmp_path))
     try:
         tools = await manager.start_all()
-        result = await tools["mock-mcp.echo_text"].func({"message": "hi"})
+        result = await tools["mock-mcp__echo_text"].func({"message": "hi"})
         assert result.is_error is True
     finally:
         await manager.aclose()
@@ -231,7 +265,7 @@ async def test_start_server_then_stop_server(tmp_path):
     manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
     try:
         tools = await manager.start_server("mock-mcp")
-        assert "mock-mcp.echo_text" in tools
+        assert "mock-mcp__echo_text" in tools
         assert manager.running_server_names == ["mock-mcp"]
 
         await manager.stop_server("mock-mcp")
@@ -274,7 +308,7 @@ async def test_restart_server_recovers_tools(tmp_path):
     try:
         await manager.start_server("mock-mcp")
         tools = await manager.restart_server("mock-mcp")
-        assert "mock-mcp.echo_text" in tools
+        assert "mock-mcp__echo_text" in tools
         assert manager.running_server_names == ["mock-mcp"]
     finally:
         await manager.aclose()
@@ -290,7 +324,7 @@ async def test_add_server_config_then_start_it_live(tmp_path):
         manager.add_server_config(_mock_server_config())
         assert manager.enabled_server_names == ["mock-mcp"]
         tools = await manager.start_server("mock-mcp")
-        assert "mock-mcp.echo_text" in tools
+        assert "mock-mcp__echo_text" in tools
     finally:
         await manager.aclose()
 
@@ -361,7 +395,7 @@ async def test_recent_calls_are_most_recent_first_across_servers(tmp_path):
     manager = McpManager([_mock_server_config("a")], artifact_store=ArtifactStore(base_dir=tmp_path))
     try:
         tools = await manager.start_all()
-        await tools["a.echo_text"].func({"message": "first"})
+        await tools["a__echo_text"].func({"message": "first"})
 
         fake_b = McpServerHandle(_mock_server_config("b"))
         fake_b.calls.append(
@@ -371,7 +405,7 @@ async def test_recent_calls_are_most_recent_first_across_servers(tmp_path):
         )
         manager._handles["b"] = fake_b
 
-        await tools["a.echo_text"].func({"message": "third"})
+        await tools["a__echo_text"].func({"message": "third"})
 
         calls = manager.recent_calls()
         messages = [record.arguments.get("message") for _server, record in calls]
@@ -387,7 +421,7 @@ async def test_recent_calls_respects_limit(tmp_path):
     try:
         tools = await manager.start_all()
         for i in range(5):
-            await tools["mock-mcp.echo_text"].func({"message": str(i)})
+            await tools["mock-mcp__echo_text"].func({"message": str(i)})
         assert len(manager.recent_calls(limit=2)) == 2
     finally:
         await manager.aclose()
@@ -400,7 +434,7 @@ async def test_recent_calls_content_preview_has_no_raw_image_bytes(tmp_path):
     manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
     try:
         tools = await manager.start_all()
-        await tools["mock-mcp.get_image"].func({})
+        await tools["mock-mcp__get_image"].func({})
         _server, record = manager.recent_calls()[0]
         image_preview = next(p for p in record.content_preview if p["type"] == "image")
         assert image_preview["mime_type"] == "image/png"

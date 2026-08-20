@@ -94,10 +94,87 @@ def load_skill_texts(skills_dir: Path, skill_names: list[str]) -> list[str]:
     return texts
 
 
-def build_system_message(system_prompt: str | None, skill_texts: list[str]) -> Message:
-    """Combine an optional system prompt with any loaded skill texts into a
-    single system ``Message``."""
-    parts = [p for p in ([system_prompt] if system_prompt else []) + skill_texts if p]
+def build_workspace_context_block(
+    *,
+    source_folders: list[str],
+    target_folder: str | None,
+    global_allowed_folders: list[str],
+    sidecar_dirname: str,
+    safety_mode: str,
+) -> str | None:
+    """A short, factual block telling the model exactly which folders this
+    session gives it access to, and what its safety mode means for them.
+
+    Bug report: "Agent seems to have no understanding of Source and Target
+    folders." Before this existed, nothing in the system context ever
+    mentioned a workspace's actual configured paths — the model could only
+    learn them if the user typed them out, or by guessing a starting point
+    for ``list_directory``/``find_files`` with nothing to guess from. This
+    is not something a skills file can fix: a skill is static Markdown
+    shared across every workspace that lists it, but these paths are
+    per-workspace, user-configured data (a different data folder for every
+    real session), so they have to be generated fresh at session-start time
+    instead of hand-authored.
+
+    Returns ``None`` when there is nothing to say (no source/target/global
+    folders configured at all — e.g. a bare ``--profile`` chat with no
+    workspace and nothing globally allowed).
+    """
+    if not source_folders and not target_folder and not global_allowed_folders:
+        return None
+
+    lines = ["# Workspace folders"]
+    if source_folders:
+        lines.append("")
+        lines.append("Source folder(s) — read data from here (list_directory/find_files/search_text/read_file):")
+        lines.extend(f"- {folder}" for folder in source_folders)
+    if target_folder:
+        lines.append("")
+        lines.append(f"Target folder — write generated reports and files here: {target_folder}")
+        lines.append(
+            f"Images you embed in a report are copied into a `{sidecar_dirname}` sidecar folder next "
+            "to it automatically — pass their artifact ids to write_markdown_report/write_docx_report, "
+            "don't manage that folder yourself."
+        )
+    if global_allowed_folders:
+        lines.append("")
+        lines.append("Also allowed, in every workspace:")
+        lines.extend(f"- {folder}" for folder in global_allowed_folders)
+
+    lines.append("")
+    if safety_mode == "relaxed":
+        lines.append(
+            "Safety mode: relaxed — you may read, write, move, and delete files inside the folders "
+            "above without asking first. Anything outside them still requires confirmation."
+        )
+    else:
+        lines.append(
+            "Safety mode: confirm — the user will be asked to approve each write/delete inside the "
+            "folders above, and anything outside them, before it happens."
+        )
+    return "\n".join(lines)
+
+
+def build_system_message(
+    system_prompt: str | None, skill_texts: list[str], *, extra_texts: list[str] | None = None
+) -> Message:
+    """Combine an optional system prompt, dynamically-generated context
+    blocks, and any loaded skill texts into a single system ``Message``.
+
+    ``extra_texts`` sits between ``system_prompt`` and ``skill_texts`` —
+    generated fresh at session-start time rather than loaded from a file
+    (``aida.cli.chat.start_session`` uses it for
+    ``build_workspace_context_block``'s output and for each connected MCP
+    server's own ``instructions`` from its initialize handshake, via
+    ``aida.mcp.manager.McpManager.server_instructions``). Foundational
+    operational facts belong before domain skill guidance, so this
+    ordering is deliberate.
+    """
+    parts = [
+        p
+        for p in ([system_prompt] if system_prompt else []) + (extra_texts or []) + skill_texts
+        if p
+    ]
     return Message(role="system", content="\n\n---\n\n".join(parts))
 
 
@@ -131,6 +208,7 @@ def trim_history(
 __all__ = [
     "SkillInfo",
     "build_system_message",
+    "build_workspace_context_block",
     "estimate_tokens",
     "list_skills",
     "load_skill_texts",

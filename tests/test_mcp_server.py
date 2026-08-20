@@ -66,6 +66,26 @@ async def test_start_discovers_all_tools():
 
 
 @pytest.mark.asyncio
+async def test_start_captures_server_instructions():
+    """A FastMCP server can declare `instructions=` specifically to teach
+    an LLM how to use its own tools (pyirena-mcp ships a detailed one) —
+    AIDA used to call session.initialize() and discard the result
+    entirely, so this was never captured anywhere."""
+    async with _running_handle() as handle:
+        assert handle.instructions is not None
+        assert "mock server instructions" in handle.instructions.lower()
+
+
+@pytest.mark.asyncio
+async def test_instructions_cleared_after_stop():
+    handle = McpServerHandle(_mock_config(), call_timeout_seconds=5.0)
+    await handle.start()
+    assert handle.instructions is not None
+    await handle.stop()
+    assert handle.instructions is None
+
+
+@pytest.mark.asyncio
 async def test_start_is_idempotent():
     async with _running_handle() as handle:
         first = {t.name for t in handle.list_tools()}
