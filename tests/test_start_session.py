@@ -44,9 +44,10 @@ class _FakeMcpManager:
 
     instances: list[_FakeMcpManager] = []
 
-    def __init__(self, servers, *, artifact_store=None) -> None:
+    def __init__(self, servers, *, artifact_store=None, confirm_callback=None) -> None:
         self.servers = servers
         self.artifact_store = artifact_store
+        self.confirm_callback = confirm_callback
         self.running_server_names: list[str] = [s.name for s in servers]
         self.start_errors: dict[str, str] = {}
         self.closed = False
@@ -149,6 +150,28 @@ async def test_start_session_workspace_supplies_profile_prompt_and_mcp(
         assert "workspace assistant" in session.messages[0].content
         assert mcp_manager is not None
         assert [s.name for s in mcp_manager.servers] == ["ws-server"]
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_passes_confirm_callback_to_mcp_manager(monkeypatch, aida_home: Path, records_home: Path):
+    """Regression: McpManager's own per-tool "confirm before run" gate
+    (Phase 7) is only reachable in real usage if start_session actually
+    hands it the session's confirm_callback — the same one SafetyGuard
+    gets. Before this was wired up, McpManager fell back to its own
+    deny_all default, silently refusing every confirm-flagged MCP tool no
+    matter what the user answered."""
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    async def my_confirm(_request):
+        return True
+
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws", confirm_callback=my_confirm)
+    try:
+        assert mcp_manager.confirm_callback is my_confirm
     finally:
         await session.aclose()
 

@@ -34,11 +34,12 @@ from aida.cli.chat import (
     UnknownWorkspaceError,
     start_session,
 )
-from aida.config.settings import Settings
-from aida.mcp.manager import McpManager
+from aida.config.settings import McpServerConfig, Settings
+from aida.core.confirmation import ConfirmationRequest
+from aida.mcp.manager import NAMESPACE_SEPARATOR, McpManager
+from aida.mcp.server import McpServerError
 from aida.persistence.recorder import ConversationNotFoundError
 from aida.ui.qt._qt import QObject, QThread, Signal
-from aida.workspace.safety import ConfirmationRequest
 
 _STARTUP_ERRORS = (UnknownProfileError, UnknownWorkspaceError, UnknownMcpServerError, ConversationNotFoundError)
 
@@ -101,6 +102,14 @@ class ChatBridge(QObject):
     # see ChatBridge._confirm's docstring for why a plain Future (not a Qt
     # signal-based reply) is what bridges the two threads here.
     confirmation_requested = Signal(object, object)  # (ConfirmationRequest, concurrent.futures.Future[bool])
+    # Phase 7: MCP management dialog live-control signals. A single
+    # "changed"/"failed" pair per action rather than one signal per verb
+    # (start/stop/restart/register/unregister) — the dialog just refreshes
+    # its whole server list on any of them, the same "re-render from
+    # current state" pattern MainWindow already uses for session_ready.
+    mcp_server_status_changed = Signal(str)  # server name
+    mcp_server_action_failed = Signal(str, str)  # (server name, error message)
+    mcp_connection_tested = Signal(str, object)  # (server name, ConnectionTestResult)
 
     def __init__(self, loop_thread: AsyncLoopThread, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -216,6 +225,100 @@ class ChatBridge(QObject):
             self.profile_switch_failed.emit(str(exc))
             return
         self.profile_switched.emit(name)
+
+    # --- MCP server live control (Phase 7 management dialog) ---------------
+
+    def _ensure_mcp_manager(self) -> McpManager:
+        """Every live-control action needs an ``McpManager`` to act on, but
+        a session with zero MCP servers configured never builds one (lazy
+        start — see ``aida.cli.chat.start_session``). Creating one on first
+        use here is what lets "Add Server" + "Start" work the very first
+        time a server is ever added in a session, with nothing configured
+        beforehand."""
+        if self.mcp_manager is None:
+            # Same confirm channel start_session wires into a manager built
+            # at session-start time — a server added live (via the MCP
+            # management dialog, before any MCP server had ever been used
+            # this session) must not fall back to McpManager's own
+            # deny_all default, or a confirm-flagged tool on it would
+            # always silently refuse.
+            self.mcp_manager = McpManager([], confirm_callback=self._confirm)
+        return self.mcp_manager
+
+    def _drop_server_tools_from_session(self, name: str) -> None:
+        """Remove every namespaced tool belonging to ``name`` from the live
+        session's tool dict. ``ChatSession.tools`` and ``AgentLoop.tools``
+        are the same dict object (``AgentLoop.__init__`` stores the passed
+        dict by reference), so this is immediately visible to the running
+        agent loop with no other plumbing."""
+        if self.session is None:
+            return
+        prefix = f"{name}{NAMESPACE_SEPARATOR}"
+        for key in [k for k in self.session.tools if k.startswith(prefix)]:
+            del self.session.tools[key]
+
+    def register_mcp_server(self, config: McpServerConfig) -> None:
+        """Make a brand-new (or freshly-edited) server config known to the
+        live session's manager, without starting it — the GUI's "Add
+        Server"/"Edit" dialogs call this so a subsequent "Start" in the
+        same session works without restarting the whole chat session."""
+        asyncio.run_coroutine_threadsafe(self._register_mcp_server(config), self._loop_thread.loop)
+
+    async def _register_mcp_server(self, config: McpServerConfig) -> None:
+        self._ensure_mcp_manager().add_server_config(config)
+        self.mcp_server_status_changed.emit(config.name)
+
+    def unregister_mcp_server(self, name: str) -> None:
+        asyncio.run_coroutine_threadsafe(self._unregister_mcp_server(name), self._loop_thread.loop)
+
+    async def _unregister_mcp_server(self, name: str) -> None:
+        if self.mcp_manager is not None:
+            await self.mcp_manager.remove_server_config(name)
+        self._drop_server_tools_from_session(name)
+        self.mcp_server_status_changed.emit(name)
+
+    def start_mcp_server(self, name: str) -> None:
+        asyncio.run_coroutine_threadsafe(self._start_mcp_server(name), self._loop_thread.loop)
+
+    async def _start_mcp_server(self, name: str) -> None:
+        try:
+            new_tools = await self._ensure_mcp_manager().start_server(name)
+        except McpServerError as exc:
+            self.mcp_server_action_failed.emit(name, str(exc))
+            return
+        if self.session is not None:
+            self.session.tools.update(new_tools)
+        self.mcp_server_status_changed.emit(name)
+
+    def stop_mcp_server(self, name: str) -> None:
+        asyncio.run_coroutine_threadsafe(self._stop_mcp_server(name), self._loop_thread.loop)
+
+    async def _stop_mcp_server(self, name: str) -> None:
+        if self.mcp_manager is not None:
+            await self.mcp_manager.stop_server(name)
+        self._drop_server_tools_from_session(name)
+        self.mcp_server_status_changed.emit(name)
+
+    def restart_mcp_server(self, name: str) -> None:
+        asyncio.run_coroutine_threadsafe(self._restart_mcp_server(name), self._loop_thread.loop)
+
+    async def _restart_mcp_server(self, name: str) -> None:
+        self._drop_server_tools_from_session(name)  # its tool list may change on restart
+        try:
+            new_tools = await self._ensure_mcp_manager().restart_server(name)
+        except McpServerError as exc:
+            self.mcp_server_action_failed.emit(name, str(exc))
+            return
+        if self.session is not None:
+            self.session.tools.update(new_tools)
+        self.mcp_server_status_changed.emit(name)
+
+    def test_mcp_connection(self, config: McpServerConfig) -> None:
+        asyncio.run_coroutine_threadsafe(self._test_mcp_connection(config), self._loop_thread.loop)
+
+    async def _test_mcp_connection(self, config: McpServerConfig) -> None:
+        result = await self._ensure_mcp_manager().test_connection(config)
+        self.mcp_connection_tested.emit(config.name, result)
 
     # --- shutdown ------------------------------------------------------------
 

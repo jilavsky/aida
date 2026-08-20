@@ -21,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from aida.config.logging_setup import configure_logging, get_logger
-from aida.config.paths import ensure_records_dir
+from aida.config.paths import ensure_records_dir, skills_dir
 from aida.config.settings import Settings, save_app_config
 from aida.mcp.groups import resolve_group
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
@@ -43,6 +43,7 @@ from aida.ui.qt.chat_panel import ChatPanel
 from aida.ui.qt.conversations_sidebar import ConversationsSidebar
 from aida.ui.qt.icon import app_icon
 from aida.ui.qt.input_box import InputBox
+from aida.ui.qt.mcp_management_dialog import McpManagementDialog
 from aida.ui.qt.selectors import FolderDisplay, McpQuickPanel, ProfileSelector, WorkspaceSelector
 from aida.ui.qt.settings_dialog import SettingsDialog
 from aida.ui.qt.window_state import apply_font_size, apply_window_state, capture_window_state
@@ -92,6 +93,10 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.workspace_selector)
         self.profile_selector = ProfileSelector(self)
         toolbar.addWidget(self.profile_selector)
+
+        mcp_action = QAction("MCP Servers…", self)
+        mcp_action.triggered.connect(self.open_mcp_management_dialog)
+        toolbar.addAction(mcp_action)
 
         settings_action = QAction("Settings…", self)
         settings_action.triggered.connect(self.open_settings_dialog)
@@ -530,6 +535,19 @@ class MainWindow(QMainWindow):
             return
         save_workspace(self.settings, self._current_workspace_config)
         self.statusBar().showMessage(f"Saved folders to workspace {self._current_workspace_config.name}", 5000)
+
+    # --- MCP management (Phase 7) -------------------------------------------
+
+    def open_mcp_management_dialog(self) -> None:
+        """Opens with ``self.bridge`` even if it's still mid-startup or has
+        zero MCP servers configured yet — the dialog handles a ``None``
+        ``bridge.mcp_manager`` gracefully (every server shows "stopped",
+        every live action is a no-op until a manager exists), and
+        ``ChatBridge._ensure_mcp_manager`` creates one lazily the moment
+        "Add Server" + "Start" is actually used."""
+        dialog = McpManagementDialog(self.settings, self.bridge, skills_dir(), self)
+        dialog.exec()
+        self._refresh_mcp_panel()
 
     # --- settings ------------------------------------------------------------
 

@@ -15,12 +15,17 @@ def test_commands_table_includes_phase4_subcommands():
     assert "workspace" in _COMMANDS
 
 
+def test_commands_table_includes_phase7_mcp_subcommand():
+    assert "mcp" in _COMMANDS
+
+
 def test_top_level_help_lists_new_commands(capsys):
     rc = main([])
     out = capsys.readouterr().out
     assert rc == 0
     assert "conversations" in out
     assert "workspace" in out
+    assert "mcp" in out
 
 
 def test_dispatches_to_conversations_list(aida_home: Path, records_home: Path, capsys):
@@ -35,6 +40,13 @@ def test_dispatches_to_workspace_list(aida_home: Path, records_home: Path, capsy
     out = capsys.readouterr().out
     assert rc == 0
     assert "No workspaces configured." in out
+
+
+def test_dispatches_to_mcp_server_list(aida_home: Path, records_home: Path, capsys):
+    rc = main(["mcp", "server", "list"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No MCP servers configured." in out
 
 
 def test_unknown_command_reports_error(capsys):

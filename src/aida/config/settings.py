@@ -227,17 +227,53 @@ class WorkspacesConfig:
 # --------------------------------------------------------------------------
 
 
+#: Keys ``McpServerConfig`` models explicitly — everything else in a raw
+#: server dict is preserved verbatim in ``extra`` rather than discarded.
+_KNOWN_SERVER_KEYS = {"command", "args", "env", "groups", "skills", "disabled_tools", "confirm_tools"}
+
+
 @dataclass
 class McpServerConfig:
+    """One MCP server's config. ``groups``/``skills``/``disabled_tools``/
+    ``confirm_tools`` are AIDA's own extensions to the standard-style
+    ``mcp.json`` shape (PLAN.md §4: "AIDA-specific keys live in a parallel
+    section or per-server extension block that other clients ignore").
+
+    ``extra`` (Phase 7) holds every key a real-world ``mcp.json`` entry may
+    carry that AIDA doesn't model — a Claude-Desktop-exported config
+    routinely has ``disabled``, ``autoApprove``, ``type``, ``cwd``, etc.
+    Before this field existed, ``from_dict``/``to_dict`` only round-tripped
+    the 5 (now 7) known keys: loading such a file never errored
+    (``test_existing_claude_desktop_mcp_json_loads_unmodified``), but the
+    *first* GUI/CLI save afterward silently deleted every key it didn't
+    recognize — a real bug given Phase 7's own acceptance criteria
+    ("Config roundtrip: GUI edits -> mcp.json -> reload identical" and
+    "Import an existing Claude Desktop mcp.json"). ``to_dict`` starts from
+    ``extra`` and layers the modeled fields on top, so a real edit to a
+    known field always wins over stale extra data, but nothing unknown is
+    ever destroyed by a round trip through AIDA.
+    """
+
     name: str
     command: str = ""
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     groups: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
+    #: Tool names never offered to the model — its schema isn't even sent
+    #: (`aida.mcp.manager.McpManager`), so a disabled tool is invisible to
+    #: the LLM entirely, not merely refused if called.
+    disabled_tools: list[str] = field(default_factory=list)
+    #: Tool names that require a confirm_callback approval before every
+    #: call, even in a "relaxed" workspace — independent of
+    #: `aida.workspace.safety.SafetyGuard`'s own mode, for tools whose risk
+    #: isn't about the filesystem (e.g. an instrument-control write).
+    confirm_tools: list[str] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> McpServerConfig:
+        extra = {k: v for k, v in data.items() if k not in _KNOWN_SERVER_KEYS}
         return cls(
             name=name,
             command=data.get("command", ""),
@@ -245,15 +281,21 @@ class McpServerConfig:
             env=dict(data.get("env", {})),
             groups=list(data.get("groups", [])),
             skills=list(data.get("skills", [])),
+            disabled_tools=list(data.get("disabled_tools", [])),
+            confirm_tools=list(data.get("confirm_tools", [])),
+            extra=extra,
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            **self.extra,
             "command": self.command,
             "args": self.args,
             "env": self.env,
             "groups": self.groups,
             "skills": self.skills,
+            "disabled_tools": self.disabled_tools,
+            "confirm_tools": self.confirm_tools,
         }
 
 

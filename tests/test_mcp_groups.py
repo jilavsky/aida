@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 
 from aida.config.settings import McpConfig, McpServerConfig
-from aida.mcp.groups import known_group_names, resolve_explicit, resolve_group
+from aida.mcp.groups import (
+    delete_group,
+    known_group_names,
+    rename_group,
+    resolve_explicit,
+    resolve_group,
+)
 
 
 def _config() -> McpConfig:
@@ -58,3 +64,47 @@ def test_resolve_explicit_empty_list_returns_empty():
 
 def test_known_group_names_sorted_and_deduplicated():
     assert known_group_names(_config()) == ["analysis", "full"]
+
+
+# --- rename_group / delete_group (Phase 7 groups editor) --------------------
+
+
+def test_rename_group_updates_every_referencing_server():
+    cfg = _config()
+    updated = rename_group(cfg, "full", "everything")
+    assert updated == 2
+    assert cfg.servers["pyirena"].groups == ["analysis", "everything"]
+    assert cfg.servers["bait"].groups == ["everything"]
+    assert cfg.servers["notes"].groups == []
+
+
+def test_rename_group_deduplicates_if_new_name_already_present():
+    cfg = _config()
+    cfg.servers["pyirena"].groups = ["analysis", "full", "analysis"]  # already has target name too
+    rename_group(cfg, "full", "analysis")
+    assert cfg.servers["pyirena"].groups == ["analysis"]
+
+
+def test_rename_group_is_a_noop_for_an_unreferenced_name():
+    cfg = _config()
+    assert rename_group(cfg, "does-not-exist", "new-name") == 0
+    assert cfg.servers["pyirena"].groups == ["analysis", "full"]
+
+
+def test_rename_group_same_name_is_a_noop():
+    cfg = _config()
+    assert rename_group(cfg, "full", "full") == 0
+
+
+def test_delete_group_removes_from_every_referencing_server():
+    cfg = _config()
+    updated = delete_group(cfg, "full")
+    assert updated == 2
+    assert cfg.servers["pyirena"].groups == ["analysis"]
+    assert cfg.servers["bait"].groups == []
+    assert known_group_names(cfg) == ["analysis"]
+
+
+def test_delete_group_is_a_noop_for_an_unreferenced_name():
+    cfg = _config()
+    assert delete_group(cfg, "does-not-exist") == 0

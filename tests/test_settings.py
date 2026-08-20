@@ -195,3 +195,71 @@ def test_existing_claude_desktop_mcp_json_loads_unmodified(aida_home: Path):
     # AIDA-only extras simply default — no error, no data loss.
     assert server.groups == []
     assert server.skills == []
+
+
+def test_unknown_mcp_server_keys_survive_a_save_and_reload(aida_home: Path):
+    """Regression (Phase 7): loading an unknown key like ``disabled`` never
+    errored (see the test above), but nothing previously proved it
+    *survived a save* — before ``McpServerConfig.extra`` existed, the very
+    first GUI/CLI edit that re-saved mcp.json silently deleted every key
+    AIDA didn't model. A real Claude-Desktop export carries exactly these:
+    ``disabled``, ``autoApprove``, ``type``, ``cwd``."""
+
+    raw = {
+        "mcpServers": {
+            "pyirena": {
+                "command": "/opt/pyirena-mcp",
+                "disabled": False,
+                "autoApprove": ["plot_saxs"],
+                "type": "stdio",
+                "cwd": "/data",
+            }
+        }
+    }
+    aida_home.mkdir(parents=True, exist_ok=True)
+    (aida_home / "mcp.json").write_text(json.dumps(raw), encoding="utf-8")
+
+    loaded = load_mcp_config(aida_home)
+    assert loaded.servers["pyirena"].extra == {
+        "disabled": False,
+        "autoApprove": ["plot_saxs"],
+        "type": "stdio",
+        "cwd": "/data",
+    }
+
+    # A round-trip through AIDA (e.g. an edit made from the GUI/CLI that
+    # re-saves the whole file) must not lose any of those unknown keys.
+    save_mcp_config(loaded, aida_home)
+    reloaded = load_mcp_config(aida_home)
+    assert reloaded.servers["pyirena"].extra == loaded.servers["pyirena"].extra
+    assert reloaded.servers["pyirena"].command == "/opt/pyirena-mcp"
+
+
+def test_disabled_and_confirm_tools_roundtrip(aida_home: Path):
+    from aida.config.settings import McpServerConfig
+
+    cfg = McpConfig(
+        servers={
+            "bait": McpServerConfig(
+                name="bait",
+                command="/opt/bait-mcp",
+                disabled_tools=["dangerous_tool"],
+                confirm_tools=["move_stage"],
+            )
+        }
+    )
+    save_mcp_config(cfg, aida_home)
+    loaded = load_mcp_config(aida_home)
+    assert loaded.servers["bait"].disabled_tools == ["dangerous_tool"]
+    assert loaded.servers["bait"].confirm_tools == ["move_stage"]
+
+
+def test_a_real_edit_to_a_known_field_wins_over_stale_extra_data(aida_home: Path):
+    """If ``extra`` ever contained a value for a key AIDA *does* model
+    (shouldn't normally happen since ``from_dict`` excludes known keys from
+    ``extra`` in the first place, but ``to_dict`` must be robust either
+    way), the dataclass's own field always wins on save."""
+    from aida.config.settings import McpServerConfig
+
+    server = McpServerConfig(name="x", command="/real/command", extra={"command": "/stale/command"})
+    assert server.to_dict()["command"] == "/real/command"

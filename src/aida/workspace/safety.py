@@ -36,44 +36,28 @@ turns this off).
 from __future__ import annotations
 
 import shutil
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from aida.config.logging_setup import get_logger
 from aida.config.paths import unique_destination
+from aida.core.confirmation import (
+    ConfirmationDenied,
+    ConfirmationRequest,
+    ConfirmCallback,
+    deny_all,
+)
 
 logger = get_logger("safety")
 
-
-class ConfirmationDenied(Exception):
-    """Raised when a confirmation-gated file operation is declined — or
-    when no real ``confirm_callback`` was wired in at all (``deny_all``),
-    since silently proceeding without anyone able to answer would defeat
-    the whole safety model. This is a plain exception, not a new
-    ``ToolResult`` error path: ``aida.core.agent.AgentLoop`` already wraps
-    every tool-func call in a generic ``try/except Exception`` and turns it
-    into an error-flagged ``ToolResult`` (see its docstring) — no agent-loop
-    changes are needed for this to surface cleanly as a normal tool error."""
-
-
-@dataclass(frozen=True)
-class ConfirmationRequest:
-    """What a ``confirm_callback`` is asked to approve or deny."""
-
-    action: str  # "read" | "write" | "delete"
-    path: str
-    detail: str
-
-
-ConfirmCallback = Callable[[ConfirmationRequest], Awaitable[bool]]
-
-
-async def deny_all(_request: ConfirmationRequest) -> bool:
-    """The safe default when no real callback is wired in — e.g. a
-    headless/test caller that never intended to allow anything beyond
-    what's already implicitly allowed by the allowed-folders set."""
-    return False
+# ConfirmationDenied/ConfirmationRequest/ConfirmCallback/deny_all are
+# imported above and re-exported here (still in this module's __all__) so
+# existing importers — aida.workspace.files, aida.documents.tools,
+# aida.cli.chat, aida.ui.qt.bridge/main_window, tests — keep working
+# unchanged. The definitions moved to the dependency-free
+# aida.core.confirmation so aida.mcp.manager can share them too, for a
+# per-tool "confirm before run" flag, without an import cycle; see that
+# module's docstring for why the cycle is real, not hypothetical.
 
 
 def normalize_path(path: str | Path) -> Path:

@@ -433,7 +433,16 @@ async def start_session(
     tools.update(default_file_tools(guard))
     tools.update(default_document_tools(guard, artifact_store, sidecar_dirname=sidecar_dirname))
     if mcp_servers:
-        mcp_manager = McpManager(mcp_servers, artifact_store=artifact_store)
+        # Same confirm_callback SafetyGuard just got, above — a per-tool
+        # "confirm before run" flag (Phase 7) reuses the identical
+        # human-in-the-loop channel (real terminal prompt / real GUI modal)
+        # as file-safety confirmations, independent of the workspace's
+        # relaxed/confirm mode. Passing `deny_all` here (the default this
+        # used to fall back to implicitly) would make every confirm-flagged
+        # MCP tool always refuse, silently — this is the wiring that makes
+        # the feature actually reachable in a real session, not just in
+        # McpManager's own unit tests.
+        mcp_manager = McpManager(mcp_servers, artifact_store=artifact_store, confirm_callback=confirm_callback)
         mcp_tools = await mcp_manager.start_all()
         tools.update(mcp_tools)
         for skill in mcp_manager.skills():
