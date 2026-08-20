@@ -342,3 +342,48 @@ async def test_mock_provider_text_is_chunked():
 def test_text_finished_used_for_history_not_deltas():
     # Sanity: TextFinished exists distinctly from TextDelta in the event enum.
     assert TextFinished is not TextDelta
+
+
+# --- debug logging (bug report: "may be add more console debug errors
+# which we can disable later?") ---------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tool_dispatch_logs_call_and_result_at_debug(caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG, logger="aida.agent")
+    provider = MockProvider(
+        [
+            MockTurn(text="checking the time", tool_calls=[MockToolCall(name="get_current_time", id="call_1")]),
+            MockTurn(text="it's time"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"get_current_time": TIME_TOOL})
+    messages = [Message(role="user", content="what time is it?")]
+
+    _ = [e async for e in loop.run(messages)]
+
+    messages_logged = [r.message for r in caplog.records if r.name == "aida.agent"]
+    assert any("tool call: get_current_time" in m for m in messages_logged)
+    assert any("finished ok" in m for m in messages_logged)
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_call_logs_a_warning(caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="aida.agent")
+    provider = MockProvider(
+        [
+            MockTurn(text="calling ghost tool", tool_calls=[MockToolCall(name="does_not_exist", id="call_1")]),
+            MockTurn(text="done"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={})
+    messages = [Message(role="user", content="hi")]
+
+    _ = [e async for e in loop.run(messages)]
+
+    messages_logged = [r.message for r in caplog.records if r.name == "aida.agent"]
+    assert any("unknown tool" in m.lower() for m in messages_logged)

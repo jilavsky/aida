@@ -20,6 +20,7 @@ from aida.cli.chat import (
     UnknownProfileError,
     UnknownWorkspaceError,
     _build_parser,
+    _ensure_workspace_folders,
     start_session,
 )
 from aida.config.settings import (
@@ -365,3 +366,79 @@ def test_build_parser_profile_optional_when_workspace_given():
     args = _build_parser().parse_args([])
     assert args.profile == ""
     assert args.workspace == ""
+
+
+# --- Phase 6 bugfix: auto-create a workspace's source/target folders ------
+# ("Can we create the folders if they do not exist? I need to populate them
+# at some point.")
+
+
+@pytest.mark.asyncio
+async def test_start_session_creates_missing_source_and_target_folders(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    source = tmp_path / "not-yet-created-source"
+    target = tmp_path / "not-yet-created-target"
+    assert not source.exists()
+    assert not target.exists()
+
+    ws = _workspace(source_folders=[str(source)], target_folder=str(target), safety="relaxed")
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert source.is_dir()
+        assert target.is_dir()
+    finally:
+        await session.aclose()
+        if mcp_manager is not None:
+            await mcp_manager.aclose()
+
+
+def test_ensure_workspace_folders_warns_instead_of_raising_on_failure(tmp_path: Path, capsys):
+    # A folder whose *parent path component* is an existing plain file can
+    # never be created — mkdir(parents=True) raises NotADirectoryError (an
+    # OSError subclass). This must warn, not propagate and abort session
+    # startup.
+    blocked_file = tmp_path / "blocked_file"
+    blocked_file.write_text("not a directory", encoding="utf-8")
+    unreachable = blocked_file / "sub"
+    ws = _workspace(source_folders=[str(unreachable)], target_folder=None)
+
+    _ensure_workspace_folders(ws)  # must not raise
+
+    captured = capsys.readouterr()
+    assert "warning: could not create folder" in captured.out
+    assert str(unreachable) in captured.out
+
+
+def test_ensure_workspace_folders_ignores_unset_target(tmp_path: Path):
+    ws = _workspace(source_folders=[], target_folder=None)
+    _ensure_workspace_folders(ws)  # no folders configured -> nothing to do, no error
+
+
+@pytest.mark.asyncio
+async def test_start_session_leaves_already_existing_folders_alone(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    target = tmp_path / "already-there"
+    target.mkdir()
+    marker = target / "keep-me.txt"
+    marker.write_text("hello", encoding="utf-8")
+
+    ws = _workspace(target_folder=str(target), safety="relaxed")
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert marker.read_text(encoding="utf-8") == "hello"  # untouched
+    finally:
+        await session.aclose()
+        if mcp_manager is not None:
+            await mcp_manager.aclose()

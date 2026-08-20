@@ -13,6 +13,7 @@ import asyncio
 from pathlib import Path
 
 from aida.artifacts.store import ArtifactStore
+from aida.config.logging_setup import get_logger
 from aida.config.paths import ensure_records_dir, skills_dir
 from aida.config.settings import (
     McpConfig,
@@ -61,6 +62,9 @@ async def cli_confirm(request: ConfirmationRequest) -> bool:
     shows a modal dialog instead — see ``start_session``'s docstring."""
     answer = await asyncio.to_thread(input, f"\n[confirm] {request.detail} [y/N] ")
     return answer.strip().lower() in ("y", "yes")
+
+
+logger = get_logger("session")
 
 
 class UnknownMcpServerError(Exception):
@@ -292,6 +296,34 @@ async def _repl_loop(session: ChatSession) -> None:
             print("\n[cancelled]")
 
 
+def _ensure_workspace_folders(workspace: WorkspaceConfig) -> None:
+    """"Can we create the folders if they do not exist? I need to populate
+    them at some point" (bug report): source/target folders previously only
+    ever *warned* when missing (``validate_workspace``) — a freshly-created
+    workspace pointed at folders that don't exist yet made starting a
+    session with it awkward, since the user had to go create each one by
+    hand first, outside AIDA, before it would stop warning. Creates each one
+    (parents included) now, on every session start, so a workspace is usable
+    the moment it's defined. A creation failure (permissions, a path that
+    collides with an existing file, a not-yet-mounted network drive, ...)
+    only warns — same "don't crash on a folder problem" policy as
+    ``validate_workspace`` — since ``SafetyGuard``'s own reachability
+    checks still apply on top of this either way."""
+    for folder in [*workspace.source_folders, workspace.target_folder]:
+        if not folder:
+            continue
+        path = Path(folder).expanduser()
+        if path.exists():
+            continue
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            print(f"[workspace] created folder: {path}")
+            logger.info("created workspace folder: %s", path)
+        except OSError as exc:
+            print(f"[workspace] warning: could not create folder {path}: {exc}")
+            logger.warning("could not create workspace folder %s: %s", path, exc)
+
+
 async def start_session(
     settings: Settings,
     *,
@@ -317,6 +349,16 @@ async def start_session(
     (``aida.ui.qt.bridge.ChatBridge``) always passes its own callback that
     shows a modal dialog instead.
     """
+    logger.debug(
+        "start_session(profile_name=%r, workspace_name=%r, skill_names=%r, mcp_group=%r, "
+        "mcp_names=%r, resume_conversation_id=%r)",
+        profile_name,
+        workspace_name,
+        skill_names,
+        mcp_group,
+        mcp_names,
+        resume_conversation_id,
+    )
     confirm_callback = confirm_callback or cli_confirm
     store = ConversationStore()
     artifact_store = ArtifactStore()
@@ -350,6 +392,7 @@ async def start_session(
         validation = validate_workspace(settings, workspace)
         for warning in validation.warnings:
             print(f"[workspace] warning: {warning}")
+            logger.warning("workspace %r: %s", workspace.name, warning)
         if not validation.ok:
             store.close()
             raise UnknownProfileError(f"workspace {effective_workspace_name!r}: {validation.detail}")
@@ -362,6 +405,7 @@ async def start_session(
         all_skill_names = list(dict.fromkeys(env.skill_names + all_skill_names))
         system_prompt = env.system_prompt
         sidecar_dirname = env.sidecar_folder_name
+        _ensure_workspace_folders(workspace)
 
     if explicit_mcp:
         try:
@@ -398,8 +442,10 @@ async def start_session(
         for name in mcp_manager.running_server_names:
             count = sum(1 for t in mcp_tools if t.startswith(f"{name}."))
             print(f"[mcp] {name}: {count} tool(s)")
+            logger.debug("mcp server %r started with %d tool(s)", name, count)
         for name, error in mcp_manager.start_errors.items():
             print(f"[mcp] {name}: FAILED to start — {error}")
+            logger.warning("mcp server %r failed to start: %s", name, error)
 
     if resume_conversation_id:
         recorder = ConversationRecorder(

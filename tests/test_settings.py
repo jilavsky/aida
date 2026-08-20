@@ -55,6 +55,24 @@ def test_app_config_allowed_folders_roundtrip(aida_home: Path):
     assert loaded.allowed_folders == ["/tmp/shared-a", "/tmp/shared-b"]
 
 
+def test_app_config_last_workspace_and_profile_roundtrip(aida_home: Path):
+    cfg = AppConfig(last_workspace_name="use-pyirena", last_profile_name="local-lmstudio")
+    save_app_config(cfg, aida_home)
+
+    loaded = load_app_config(aida_home)
+    assert loaded.last_workspace_name == "use-pyirena"
+    assert loaded.last_profile_name == "local-lmstudio"
+
+
+def test_app_config_last_workspace_defaults_to_none(aida_home: Path):
+    cfg = AppConfig()
+    save_app_config(cfg, aida_home)
+
+    loaded = load_app_config(aida_home)
+    assert loaded.last_workspace_name is None
+    assert loaded.last_profile_name is None
+
+
 def test_old_config_missing_fields_gets_defaults(aida_home: Path):
     """pyIrena rule: old configs must always load."""
     partial = {"config_version": 1}  # no log_level, no records_dir, ...

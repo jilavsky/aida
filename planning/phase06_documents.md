@@ -212,3 +212,130 @@ completion in the sandbox.
 
 Shell/python command execution (Phase 9); RAG ingestion of documents (Phase 8 —
 this phase reads files into context directly); web fetch/search (Phase 9).
+
+---
+
+## Post-delivery bug fixes (user report, after installing this phase)
+
+The user installed Phase 6, ran it against real usage (real GUI, real attached
+PDF, real workspace), and reported 7 issues. All 7 are addressed below, each
+with new/updated automated tests; the root-cause diagnosis for the most
+confusing one (#3) is worth reading in full since it explains a fairly subtle
+failure chain.
+
+1. **"Can't remove a source_folder except by hand-editing the YAML."** —
+   `FolderDisplay` (`aida/ui/qt/selectors.py`) only ever showed a single
+   read-only concatenated label for source folders; there was no removal UI
+   at all. Redesigned into a per-folder row (`_RemovableFolderRow`) with its
+   own "Remove" button, same visual pattern as the attachment chips already
+   used in `InputBox`. Tests: `tests/ui/test_selectors.py` (4 new tests:
+   remove button removes the right folder, removing the last one restores
+   the "(none)" placeholder, removing an unknown path is a no-op, adding the
+   same folder twice is idempotent).
+
+2. **"No state saving — last workspace isn't reopened, none is selected on
+   start."** — `aida-gui` had no persisted "what was I last using" state at
+   all; every launch with no `--workspace`/`--profile` flag hit "No profile
+   given". Added `last_workspace_name`/`last_profile_name` to `AppConfig`
+   (`aida/config/settings.py`), saved by `MainWindow._save_last_session_
+   selection()` every time a session actually starts or a profile is
+   switched (immediately, not just on window close, so it survives a
+   crash), and read back as the fallback in `aida.ui.qt.app._resolve_start_
+   kwargs()` when no CLI flag overrides it. Tests: `tests/test_settings.py`
+   (roundtrip + defaults-to-None) and `tests/ui/test_app.py` (5 tests
+   covering the fallback-vs-explicit-flag precedence).
+
+3. **"Attached a PDF, asked to review it, got repeated confusing 'allow read
+   outside allowed folders' prompts — looks like the agent searched the
+   whole filesystem."** This was the most concerning report and the root
+   cause was a silent crash, not a safety-model bug. `aida.documents.readers`
+   imports each optional format library (`pymupdf`, `python-docx`,
+   `openpyxl`, `python-pptx`) *lazily*, inside the function that reads that
+   format — so on a machine without the `docs` extra installed, reading an
+   attached PDF raises a bare `ModuleNotFoundError` at read time. The old
+   `MainWindow._read_attachment_for_model` only caught
+   `(UnsupportedDocumentFormatError, OSError)`, so that `ModuleNotFoundError`
+   propagated straight up through the Qt "Send" handler, uncaught. The
+   augmented message (user text + PDF content) never reached
+   `ChatBridge.send` — nothing was sent to the model — but the user's own
+   typed text had already been added to the chat panel *before* that crash,
+   so it looked exactly like a normal successful send. The model then
+   received a plain-text "review this paper" with zero file context, and
+   tried to *find* "the paper" itself via its own `read_file`/`find_files`
+   tool calls against guessed paths (home directory, `/`, ...) — each one
+   gated by `SafetyGuard`'s outside-allowed-folders confirmation, which is
+   exactly the "keeps asking, unclear what for" pattern reported. Fix:
+   `_read_attachment_for_model` now catches `Exception` broadly (never
+   raises), returns `(rendered_text, ok)`; a failed read still gets an
+   inline `[could not read: ...]` note appended to the outgoing message (so
+   the model and the user both see plainly that it failed, instead of it
+   silently vanishing), plus a status-bar notice. An `ImportError`
+   specifically gets an actionable hint appended: install the `docs` extra.
+   `_on_send_requested` also gained an outer `try/except` as a last-resort
+   guard against any *other* unexpected exception in the augmentation path,
+   so a send can never again silently disappear. **Action needed on your
+   end:** confirm your real "aida" conda environment has the `docs` extra
+   installed (`pip install -e ".[docs]"`, or `".[dev,gui,docs]"`) — I
+   can't check that environment directly since it's a different machine
+   from the one connected to this session.
+
+4. **"May be related to the skill folder not existing?"** — Not actually
+   the cause of #3 (that was the PDF `ModuleNotFoundError` above), but a
+   real, separate rough edge worth fixing on its own: the skills *directory*
+   always exists (`skills_dir()` self-creates it), only the specific skill
+   file referenced by a workspace (`review-checklist`, in your case) was
+   missing. The warning now spells out exactly where AIDA looked for it —
+   `skill file(s) not found (will be skipped): review-checklist (expected
+   <skills_dir>/review-checklist.md or <skills_dir>/review-checklist/
+   SKILL.md)` — so it's actionable instead of just "not found". Drop a
+   `review-checklist.md` (or a `review-checklist/SKILL.md`) into your skills
+   folder at that exact path and the warning goes away.
+
+5. **"Can we create the folders if they do not exist?"** — Source/target
+   folders previously only ever *warned* when missing; nothing created them.
+   `aida.cli.chat._ensure_workspace_folders()` now creates each of a
+   workspace's source folders and its target folder (parents included) on
+   every session start — used by both `aida chat` and `aida-gui`, since both
+   go through the same `start_session()`. A creation failure (permissions, a
+   path colliding with an existing file, an unmounted network drive) only
+   warns, same "don't crash on a folder problem" policy the rest of
+   workspace validation already follows. Tests: `tests/test_start_
+   session.py` (4 new tests — creates missing source+target, leaves an
+   already-existing folder's contents untouched, warns without raising on a
+   genuine OS-level failure, no-op when nothing's configured).
+
+6. **"More console debug — and let me change the level to help with a
+   console report?"** — The logging infrastructure
+   (`aida.config.logging_setup`) already existed (rotating file handler +
+   console handler, log level already exposed in the Settings dialog) but
+   nothing in the codebase actually called it — no `logger.debug(...)`
+   anywhere. Added real logging at the key decision points a bug report
+   like this one needs: `SafetyGuard._authorize` (every read/write/delete
+   decision — inside/outside allowed roots, which roots, confirm-callback
+   approve/deny outcome), `AgentLoop`'s tool dispatch (every tool call with
+   its arguments, unknown-tool warnings, crash tracebacks, and
+   success/error outcome), and `start_session`'s workspace resolution
+   (validation warnings, folder auto-creation, MCP server start/failure).
+   Also fixed a related gap: changing the log level in the Settings dialog
+   previously had no effect until the next launch — `open_settings_dialog`
+   now calls `configure_logging()` again immediately (it's designed to be
+   safe to call repeatedly — see its docstring) so a level change takes
+   effect on the spot, the same way the font-size change next to it already
+   did. Logs land in the rotating file at `<aida data dir>/logs/aida.log`
+   as well as the console, so a "console report" can also just be that
+   file. Tests: `tests/test_workspace_safety.py` (2 new caplog-based
+   tests), `tests/test_agent_loop.py` (2 new caplog-based tests).
+
+7. **"Can you edit files in place? You have access to the repo folder."** —
+   Yes: with your Aida repo connected via the device bridge, all of the
+   above fixes were written directly onto your real files at
+   `/Users/ilavsky/GitHub/Aida` (not just delivered as a patch) — see the
+   commit message in your `git log` / `git status` for exactly what
+   changed. I never ran `git commit`/`git push` on your machine; the
+   working tree is left with the changes unstaged so you can review and
+   commit them yourself.
+
+**Verification:** 520 tests passing (`pytest -q`), `ruff check .` clean, in
+the sandbox — a net +8 tests over the count in the completion summary above
+(4 from folder-create, 4 from removable source-folder rows, plus the
+settings/app/logging tests already counted per-item above).

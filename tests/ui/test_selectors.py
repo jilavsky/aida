@@ -62,11 +62,15 @@ def test_folder_display_shows_none_by_default(qapp):
 def test_folder_display_set_folders_updates_labels(qapp):
     display = FolderDisplay()
     display.set_folders(source_folders=["/data/a", "/data/b"], target_folder="/out")
-    assert "/data/a" in display._source_label.text()
-    assert "/data/b" in display._source_label.text()
     assert "/out" in display._target_label.text()
     assert display.source_folders == ["/data/a", "/data/b"]
     assert display.target_folder == "/out"
+    assert display._source_label.isHidden()  # "(none)" placeholder hidden once non-empty
+
+    row_paths = [
+        display._source_rows_layout.itemAt(i).widget().path for i in range(display._source_rows_layout.count())
+    ]
+    assert row_paths == ["/data/a", "/data/b"]
 
 
 def test_folder_display_add_source_folder_via_dialog(qapp, monkeypatch, tmp_path):
@@ -92,6 +96,62 @@ def test_folder_display_dialog_cancelled_does_nothing(qapp, monkeypatch):
     display._on_add_source_folder()
 
     assert display.source_folders == []
+    assert changed == []
+
+
+def test_folder_display_add_source_folder_is_idempotent(qapp, monkeypatch, tmp_path):
+    display = FolderDisplay()
+    monkeypatch.setattr(
+        "aida.ui.qt.selectors.QFileDialog.getExistingDirectory", lambda *a, **kw: str(tmp_path)
+    )
+    changed = []
+    display.source_folders_changed.connect(changed.append)
+
+    display._on_add_source_folder()
+    display._on_add_source_folder()  # picking the same folder again is a no-op
+
+    assert display.source_folders == [str(tmp_path)]
+    assert changed == [[str(tmp_path)]]
+
+
+# --- Phase 6 bugfix: removing a source folder (previously only possible by
+# hand-editing workspaces.yaml) ------------------------------------------
+
+
+def test_folder_display_remove_button_removes_the_folder(qapp):
+    display = FolderDisplay()
+    display.set_folders(source_folders=["/data/a", "/data/b"], target_folder=None)
+    changed = []
+    display.source_folders_changed.connect(changed.append)
+
+    row = display._source_rows_layout.itemAt(0).widget()
+    assert row.path == "/data/a"
+    row.remove_requested.emit("/data/a")
+
+    assert display.source_folders == ["/data/b"]
+    assert changed == [["/data/b"]]
+
+
+def test_folder_display_remove_last_folder_shows_none_placeholder_again(qapp):
+    display = FolderDisplay()
+    display.set_folders(source_folders=["/data/a"], target_folder=None)
+
+    display._on_remove_source_folder("/data/a")
+
+    assert display.source_folders == []
+    assert display._source_rows_layout.count() == 0
+    assert not display._source_label.isHidden()
+
+
+def test_folder_display_remove_unknown_folder_is_a_noop(qapp):
+    display = FolderDisplay()
+    display.set_folders(source_folders=["/data/a"], target_folder=None)
+    changed = []
+    display.source_folders_changed.connect(changed.append)
+
+    display._on_remove_source_folder("/does/not/exist")
+
+    assert display.source_folders == ["/data/a"]
     assert changed == []
 
 

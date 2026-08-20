@@ -40,6 +40,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from aida.config.logging_setup import get_logger
+
+logger = get_logger("safety")
+
 
 class ConfirmationDenied(Exception):
     """Raised when a confirmation-gated file operation is declined — or
@@ -150,8 +154,17 @@ class SafetyGuard:
     async def _authorize(self, action: str, path: str | Path, *, always_confirm_in_bounds: bool) -> Path:
         candidate = normalize_path(path)
         inside = self._containing_root(candidate) is not None
+        logger.debug(
+            "authorize %s %s (inside_allowed_roots=%s mode=%s allowed_roots=%s)",
+            action,
+            candidate,
+            inside,
+            self.mode,
+            [str(r) for r in self.allowed_roots],
+        )
 
         if not inside:
+            logger.info("%s outside allowed folders, requesting confirmation: %s", action, candidate)
             approved = await self.confirm_callback(
                 ConfirmationRequest(
                     action=action,
@@ -159,6 +172,7 @@ class SafetyGuard:
                     detail=f"{action} outside the allowed folders: {candidate}",
                 )
             )
+            logger.info("%s outside allowed folders %s: %s", action, "approved" if approved else "denied", candidate)
             if not approved:
                 raise ConfirmationDenied(f"{action} outside allowed folders declined: {candidate}")
             return candidate
@@ -167,6 +181,7 @@ class SafetyGuard:
             approved = await self.confirm_callback(
                 ConfirmationRequest(action=action, path=str(candidate), detail=f"{action.capitalize()} {candidate}?")
             )
+            logger.debug("%s inside allowed folders %s: %s", action, "approved" if approved else "denied", candidate)
             if not approved:
                 raise ConfirmationDenied(f"{action} declined: {candidate}")
 

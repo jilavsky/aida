@@ -106,17 +106,37 @@ class ProfileSelector(QWidget):
             self.profile_changed.emit(text)
 
 
+class _RemovableFolderRow(QWidget):
+    """One "path × Remove" row in the source-folders list — the bug report
+    this addresses: "Do not seem to be able to remove source_folder [any
+    way] other than manually from yaml file"."""
+
+    remove_requested = Signal(str)
+
+    def __init__(self, path: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.path = path
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(QLabel(path, self), stretch=1)
+        remove_button = QPushButton("Remove", self)
+        remove_button.clicked.connect(lambda: self.remove_requested.emit(self.path))
+        layout.addWidget(remove_button)
+
+
 class FolderDisplay(QGroupBox):
     """Shows the active workspace's source/target folders for *this*
-    session, each with a Change button (native folder picker) — writes back
-    only to the in-memory session state until "Save to Workspace" is
+    session — each source folder gets its own row with a Remove button (no
+    other way existed to drop one short of hand-editing ``workspaces.yaml``);
+    the target folder gets a Change button (native folder picker). Writes
+    back only to the in-memory session state until "Save to Workspace" is
     clicked, which persists it (``save_to_workspace_requested``).
 
     Phase 6 adds the sidecar folder name (where generated report images get
     copied, relative to the target folder — see
     ``aida.documents.writers.md_obsidian``) as a plain editable text field,
     following the same "visible + editable, saved only on request" pattern
-    as the two folder pickers above it."""
+    as the folder pickers above it."""
 
     source_folders_changed = Signal(list)
     target_folder_changed = Signal(str)
@@ -131,13 +151,14 @@ class FolderDisplay(QGroupBox):
 
         layout = QVBoxLayout(self)
 
-        source_row = QHBoxLayout()
-        self._source_label = QLabel("Source: (none)", self)
-        source_row.addWidget(self._source_label)
+        layout.addWidget(QLabel("Source folders:", self))
+        self._source_label = QLabel("(none)", self)  # shown only when the list is empty
+        layout.addWidget(self._source_label)
+        self._source_rows_layout = QVBoxLayout()
+        layout.addLayout(self._source_rows_layout)
         add_source_button = QPushButton("Add Source Folder…", self)
         add_source_button.clicked.connect(self._on_add_source_folder)
-        source_row.addWidget(add_source_button)
-        layout.addLayout(source_row)
+        layout.addWidget(add_source_button)
 
         target_row = QHBoxLayout()
         self._target_label = QLabel("Target: (none)", self)
@@ -163,11 +184,24 @@ class FolderDisplay(QGroupBox):
     ) -> None:
         self._source_folders = list(source_folders)
         self._target_folder = target_folder
-        self._source_label.setText("Source: " + (", ".join(source_folders) or "(none)"))
         self._target_label.setText("Target: " + (target_folder or "(none)"))
         if sidecar_folder_name is not None:
             self._sidecar_folder_name = sidecar_folder_name
             self._sidecar_edit.setText(sidecar_folder_name)
+        self._refresh_source_rows()
+
+    def _refresh_source_rows(self) -> None:
+        while self._source_rows_layout.count():
+            item = self._source_rows_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._source_label.setVisible(not self._source_folders)
+        self._source_label.setText("(none)")
+        for folder in self._source_folders:
+            row = _RemovableFolderRow(folder, self)
+            row.remove_requested.connect(self._on_remove_source_folder)
+            self._source_rows_layout.addWidget(row)
 
     @property
     def source_folders(self) -> list[str]:
@@ -185,7 +219,16 @@ class FolderDisplay(QGroupBox):
         folder = QFileDialog.getExistingDirectory(self, "Add Source Folder")
         if not folder:
             return
+        if folder in self._source_folders:
+            return
         self._source_folders.append(folder)
+        self.set_folders(source_folders=self._source_folders, target_folder=self._target_folder)
+        self.source_folders_changed.emit(self._source_folders)
+
+    def _on_remove_source_folder(self, folder: str) -> None:
+        if folder not in self._source_folders:
+            return
+        self._source_folders.remove(folder)
         self.set_folders(source_folders=self._source_folders, target_folder=self._target_folder)
         self.source_folders_changed.emit(self._source_folders)
 

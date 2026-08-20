@@ -332,3 +332,42 @@ def test_no_warning_when_already_relaxed():
 
 def test_no_warning_when_switching_to_confirm():
     assert relaxed_mode_warning_if_newly_enabled("relaxed", "confirm") is None
+
+
+# --- debug logging (bug report: "may be add more console debug errors
+# which we can disable later? ... change the debug level so I can help
+# with console report?") ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_authorize_outside_allowed_folders_logs_at_info(tmp_path: Path, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="aida.safety")
+    guard = SafetyGuard(allowed_roots=[tmp_path / "allowed"], confirm_callback=_approve_all())
+    outside = tmp_path / "elsewhere" / "note.txt"
+
+    await guard.authorize_read(outside)
+
+    messages = [r.message for r in caplog.records if r.name == "aida.safety"]
+    assert any("outside allowed folders" in m for m in messages)
+    assert any("approved" in m for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_authorize_inside_allowed_folders_logs_at_debug(tmp_path: Path, caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG, logger="aida.safety")
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    guard = SafetyGuard(allowed_roots=[allowed], mode="relaxed", confirm_callback=_approve_all())
+
+    # authorize_read bypasses _authorize entirely for in-bounds paths (reads
+    # inside allowed folders are never gated — see its docstring), so this
+    # exercises authorize_write, which always goes through _authorize and
+    # therefore always logs.
+    await guard.authorize_write(allowed / "note.txt")
+
+    messages = [r.message for r in caplog.records if r.name == "aida.safety"]
+    assert any("inside_allowed_roots=True" in m for m in messages)

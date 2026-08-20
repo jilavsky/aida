@@ -57,6 +57,15 @@ class AppConfig:
     window_x: int | None = None
     window_y: int | None = None
     font_size: int = 11
+    # GUI session-restore (bug report: "app does not seem to open with last
+    # set of settings"): the most recently active workspace/profile, updated
+    # every time a session actually starts successfully (MainWindow's
+    # _on_session_ready). aida-gui falls back to these when launched with no
+    # --workspace/--profile flag, so the app reopens where the user left off
+    # instead of landing on "No profile given". Either can be None (no
+    # workspace was active, or no session has ever started yet).
+    last_workspace_name: str | None = None
+    last_profile_name: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -79,6 +88,8 @@ class AppConfig:
             "window_x": self.window_x,
             "window_y": self.window_y,
             "font_size": self.font_size,
+            "last_workspace_name": self.last_workspace_name,
+            "last_profile_name": self.last_profile_name,
         }
 
 

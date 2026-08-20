@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from aida.config.logging_setup import configure_logging, get_logger
 from aida.config.paths import ensure_records_dir
 from aida.config.settings import Settings, save_app_config
 from aida.mcp.groups import resolve_group
@@ -64,6 +65,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__(parent)
         self.settings = settings
+        self._logger = get_logger("ui")
         self._loop_thread = loop_thread
         self._current_workspace_config: WorkspaceConfig | None = None
         self.setWindowTitle("AIDA")
@@ -144,6 +146,7 @@ class MainWindow(QMainWindow):
         self.bridge.turn_finished.connect(lambda: self.input_box.set_busy(False))
         self.bridge.turn_failed.connect(self._on_turn_failed)
         self.bridge.confirmation_requested.connect(self._on_confirmation_requested)
+        self.bridge.profile_switched.connect(self._on_profile_switched)
         self.input_box.cancel_requested.connect(self.bridge.cancel)
         self.profile_selector.profile_changed.connect(self.bridge.switch_profile)
 
@@ -160,6 +163,23 @@ class MainWindow(QMainWindow):
         self._refresh_mcp_panel()
         self._refresh_folder_display()
         self._refresh_conversations_sidebar()
+        self._save_last_session_selection()
+
+    def _save_last_session_selection(self) -> None:
+        """"App does not seem to open with last set of settings": persists
+        the now-active workspace/profile to ``AppConfig`` every time a
+        session actually starts, so the *next* launch of ``aida-gui`` (with
+        no --workspace/--profile flag — see ``aida.ui.qt.app.main``) reopens
+        the same one instead of landing on "No profile given". Saved
+        immediately rather than only on window close, so it survives a
+        crash or a force-quit."""
+        session = self.bridge.session
+        if session is None:
+            return
+        workspace_name = session.recorder.workspace_name if session.recorder else None
+        self.settings.app.last_workspace_name = workspace_name
+        self.settings.app.last_profile_name = session.profile_name
+        save_app_config(self.settings.app)
 
     def _load_resumed_artifacts(self, conversation_id: str) -> None:
         """Acceptance criterion "resume yesterday's conversation... images
@@ -222,9 +242,20 @@ class MainWindow(QMainWindow):
         attachments = self.input_box.attached_paths()
         self.input_box.clear_attachments()
         self.chat_panel.add_user_message(text)
-        self.bridge.send(self._augment_with_attachments(text, attachments))
+        try:
+            outgoing, failures = self._augment_with_attachments(text, attachments)
+        except Exception as exc:  # noqa: BLE001 - belt-and-suspenders: see _read_attachment_for_model's
+            # docstring for the real bug this whole two-layer defense is
+            # guarding against — a send must never silently vanish.
+            self._logger.error("unexpected error augmenting message with attachments %r: %s", attachments, exc)
+            QMessageBox.warning(self, "Attachment Not Sent", f"Could not prepare the message to send:\n\n{exc}")
+            return
+        if failures:
+            names = ", ".join(Path(p).name for p in failures)
+            self.statusBar().showMessage(f"Could not read attachment(s): {names} — see chat for details", 8000)
+        self.bridge.send(outgoing)
 
-    def _augment_with_attachments(self, text: str, attachments: list[str]) -> str:
+    def _augment_with_attachments(self, text: str, attachments: list[str]) -> tuple[str, list[str]]:
         """Drag & drop onto the chat -- "included in the next sent message"
         (PLAN.md Phase 6): each attached path's content is read directly via
         ``aida.documents.readers`` (dispatched by extension, same as the
@@ -236,25 +267,62 @@ class MainWindow(QMainWindow):
         choosing to access on its own; the safety model gates the agent's
         own filesystem actions (PLAN.md's "always-confirm-outside-allowed"
         rule), not a human manually attaching a file they already have
-        access to."""
-        if not attachments:
-            return text
-        sections = [text] if text else []
-        for path in attachments:
-            sections.append(self._read_attachment_for_model(path))
-        return "\n\n".join(sections)
+        access to.
 
-    def _read_attachment_for_model(self, path: str) -> str:
-        from aida.artifacts.policy import describe_for_model
-        from aida.documents.readers import UnsupportedDocumentFormatError, read_document
+        Returns ``(message_text, failed_paths)`` — a failed read still gets
+        an inline "could not read" note in the message (so both the human
+        and the model see it plainly) rather than being silently dropped or
+        aborting the whole send; ``failed_paths`` is just so the caller can
+        also flag it in the status bar without re-parsing the text."""
+        if not attachments:
+            return text, []
+        sections = [text] if text else []
+        failures: list[str] = []
+        for path in attachments:
+            rendered, ok = self._read_attachment_for_model(path)
+            sections.append(rendered)
+            if not ok:
+                failures.append(path)
+        return "\n\n".join(sections), failures
+
+    def _read_attachment_for_model(self, path: str) -> tuple[str, bool]:
+        """Returns ``(rendered_text, ok)`` — never raises. **Real bug this
+        guards against**: this used to catch only
+        ``(UnsupportedDocumentFormatError, OSError)``; an attached PDF on a
+        machine missing the optional ``docs`` extra (``pymupdf`` et al, only
+        imported lazily inside each reader) raised a bare
+        ``ModuleNotFoundError`` instead, which propagated all the way up
+        through the Qt slot handling Send, uncaught — the augmented message
+        never reached ``ChatBridge.send`` at all, so *nothing* was sent to
+        the model, yet the user's own text still appeared in the chat panel
+        (added before this ran) looking exactly like a normal sent message.
+        The user's next plain-text message then reached the model with zero
+        file context, and the model tried to *find* "the paper" itself via
+        read_file/find_files/search_text calls against guessed paths (home
+        directory, "/", ...) — each one gated by ``SafetyGuard``'s
+        outside-allowed-folders confirmation, which is what looked like a
+        confusing string of repeated confirmation prompts with no clear
+        file reference. Catching broadly here — and telling the model (and
+        the user, via the status bar) plainly that the read failed instead
+        of just not happening — is the fix."""
+        from aida.documents.readers import read_document
 
         name = Path(path).name
         try:
+            from aida.artifacts.policy import describe_for_model
+
             artifacts = read_document(path)
-        except (UnsupportedDocumentFormatError, OSError) as exc:
-            return f"--- Attached file: {name} ---\n[could not read: {exc}]\n--- End of {name} ---"
-        body = "\n\n".join(describe_for_model(a) for a in artifacts)
-        return f"--- Attached file: {name} ---\n{body}\n--- End of {name} ---"
+            body = "\n\n".join(describe_for_model(a) for a in artifacts)
+        except Exception as exc:  # noqa: BLE001 - see docstring: must never propagate past this method
+            self._logger.warning("could not read attachment %s: %s", path, exc, exc_info=True)
+            detail = str(exc)
+            if isinstance(exc, ImportError):
+                detail += (
+                    " — the optional 'docs' extra may not be installed; run "
+                    'pip install -e ".[docs]" (or ".[dev,gui,docs]") in your AIDA environment'
+                )
+            return f"--- Attached file: {name} ---\n[could not read: {detail}]\n--- End of {name} ---", False
+        return f"--- Attached file: {name} ---\n{body}\n--- End of {name} ---", True
 
     def _on_folder_dropped(self, folder: str) -> None:
         """A folder (rather than a file) dropped onto the chat: offer to add
@@ -310,6 +378,9 @@ class MainWindow(QMainWindow):
         # else to do here — kept as its own handler for symmetry/future use
         # (e.g. updating a "current profile" status label).
         pass
+
+    def _on_profile_switched(self, _name: str) -> None:
+        self._save_last_session_selection()
 
     def _restart_session(
         self, *, workspace_name: str | None, profile_name: str | None, resume_conversation_id: str | None
@@ -434,6 +505,13 @@ class MainWindow(QMainWindow):
             return
         self.settings.app = dialog.updated_app_config()
         apply_font_size(QApplication.instance(), self.settings.app)  # takes effect immediately, no restart
+        # "Change the debug level so I can help with console report" (bug
+        # report): configure_logging is safe to call again — it only
+        # adjusts the "aida" logger tree's level, doesn't duplicate
+        # handlers (see its docstring) — so a log-level change here takes
+        # effect immediately, same as the font size above, instead of only
+        # applying on the next launch.
+        configure_logging(self.settings.app.log_level)
         save_app_config(self.settings.app)
 
     # --- shutdown ----------------------------------------------------------

@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from aida.artifacts.base import Artifact, FileArtifact, ImageArtifact
+from aida.config.logging_setup import get_logger
 from aida.core.events import (
     AgentError,
     AgentEvent,
@@ -30,6 +31,8 @@ from aida.core.tools import NativeTool
 from aida.providers.base import CompletionSettings, LLMProvider, Message, ToolCall, ToolSchema
 
 DEFAULT_MAX_ITERATIONS = 10
+
+logger = get_logger("agent")
 
 
 def _stringify(value: object) -> str:
@@ -148,9 +151,11 @@ class AgentLoop:
 
                 tool = self.tools.get(tc.name)
                 result_artifacts: list[Artifact] = []
+                logger.debug("tool call: %s(%r)", tc.name, tc.arguments)
                 if tool is None:
                     result_content: object = f"Unknown tool: {tc.name}"
                     is_error = True
+                    logger.warning("tool call to unknown tool %r (arguments=%r)", tc.name, tc.arguments)
                 else:
                     try:
                         result = await tool.func(tc.arguments)
@@ -160,6 +165,12 @@ class AgentLoop:
                     except Exception as exc:  # noqa: BLE001 - a tool crash must not kill the loop
                         result_content = str(exc)
                         is_error = True
+                        logger.warning("tool %s(%r) raised: %s", tc.name, tc.arguments, exc, exc_info=True)
+
+                if is_error:
+                    logger.info("tool %s finished with error: %s", tc.name, result_content)
+                else:
+                    logger.debug("tool %s finished ok", tc.name)
 
                 yield ToolCallFinished(
                     call_id=tc.id, tool_name=tc.name, result=result_content, is_error=is_error

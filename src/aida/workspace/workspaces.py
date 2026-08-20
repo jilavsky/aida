@@ -54,7 +54,13 @@ def validate_workspace(settings: Settings, workspace: WorkspaceConfig) -> Worksp
 
     missing_skills = [s for s in workspace.skills if not skill_exists(skills_dir(), s)]
     if missing_skills:
-        warnings.append(f"skill file(s) not found (will be skipped): {', '.join(missing_skills)}")
+        # Actionable, not just "not found" (bug report: "may be related to
+        # the fact the skill folder does not exist?" — the *directory*
+        # always exists, ``skills_dir()`` self-creates it; what's actually
+        # missing is the specific skill file, so spell out exactly where
+        # each one is expected so the user can drop it in and move on).
+        expected = ", ".join(f"{s} (expected {skills_dir() / f'{s}.md'} or {skills_dir() / s / 'SKILL.md'})" for s in missing_skills)
+        warnings.append(f"skill file(s) not found (will be skipped): {expected}")
 
     for folder in workspace.source_folders:
         if not Path(folder).expanduser().exists():
