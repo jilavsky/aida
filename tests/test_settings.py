@@ -7,6 +7,7 @@ import yaml
 
 from aida.config.settings import (
     AppConfig,
+    KnowledgeConfig,
     McpConfig,
     ProvidersConfig,
     WorkspacesConfig,
@@ -29,11 +30,13 @@ def test_load_settings_first_run_writes_defaults(aida_home: Path):
     assert (aida_home / "providers.yaml").exists()
     assert (aida_home / "workspaces.yaml").exists()
     assert (aida_home / "mcp.json").exists()
+    assert (aida_home / "knowledge.yaml").exists()
 
     assert settings.app.config_version == 1
     assert settings.providers.profiles == {}
     assert settings.workspaces.workspaces == {}
     assert settings.mcp.servers == {}
+    assert settings.knowledge.knowledge_bases == {}
 
 
 def test_app_config_roundtrip(aida_home: Path):
@@ -263,3 +266,94 @@ def test_a_real_edit_to_a_known_field_wins_over_stale_extra_data(aida_home: Path
 
     server = McpServerConfig(name="x", command="/real/command", extra={"command": "/stale/command"})
     assert server.to_dict()["command"] == "/real/command"
+
+
+# --- Phase 8: embedding profiles / knowledge bases --------------------------
+
+
+def test_embedding_profile_roundtrip(aida_home: Path):
+    from aida.config.settings import EmbeddingProfile
+
+    cfg = ProvidersConfig(
+        embedding_profiles={
+            "argo-embed": EmbeddingProfile(
+                name="argo-embed",
+                base_url="https://apps.inside.anl.gov/argoapi/",
+                model="text-embedding-3-small",
+                secret_ref="argo-claude",
+            )
+        }
+    )
+    save_providers_config(cfg, aida_home)
+    loaded = load_providers_config(aida_home)
+    profile = loaded.embedding_profiles["argo-embed"]
+    assert profile.model == "text-embedding-3-small"
+    assert profile.secret_ref == "argo-claude"
+
+    # No secret value anywhere in the file on disk (same guarantee as
+    # ProviderProfile).
+    raw = (aida_home / "providers.yaml").read_text()
+    assert "secret_ref" in raw
+    assert "sk-" not in raw
+
+
+def test_old_providers_yaml_without_embedding_profiles_loads_fine(aida_home: Path):
+    """Old configs must always load (pyIrena rule) — a providers.yaml
+    written before Phase 8 has no `embedding_profiles` key at all."""
+    aida_home.mkdir(parents=True, exist_ok=True)
+    (aida_home / "providers.yaml").write_text("config_version: 1\nprofiles: {}\n", encoding="utf-8")
+    loaded = load_providers_config(aida_home)
+    assert loaded.embedding_profiles == {}
+
+
+def test_knowledge_config_roundtrip(aida_home: Path):
+    from aida.config.settings import (
+        KnowledgeBaseConfig,
+        load_knowledge_config,
+        save_knowledge_config,
+    )
+
+    cfg = KnowledgeConfig(
+        knowledge_bases={
+            "usaxs-docs": KnowledgeBaseConfig(
+                name="usaxs-docs",
+                source_folders=["/data/usaxs-instructions"],
+                embedding_profile="argo-embed",
+                chunk_size=800,
+                chunk_overlap=100,
+            )
+        }
+    )
+    save_knowledge_config(cfg, aida_home)
+    loaded = load_knowledge_config(aida_home)
+    kb = loaded.knowledge_bases["usaxs-docs"]
+    assert kb.source_folders == ["/data/usaxs-instructions"]
+    assert kb.embedding_profile == "argo-embed"
+    assert kb.chunk_size == 800
+    assert kb.chunk_overlap == 100
+
+
+def test_knowledge_config_defaults_when_file_missing(aida_home: Path):
+    from aida.config.settings import load_knowledge_config
+
+    loaded = load_knowledge_config(aida_home)
+    assert loaded.knowledge_bases == {}
+
+
+def test_workspace_knowledge_bases_roundtrip(aida_home: Path):
+    from aida.config.settings import WorkspaceConfig
+
+    cfg = WorkspacesConfig(
+        workspaces={
+            "beamline-help": WorkspaceConfig(name="beamline-help", knowledge_bases=["usaxs-docs", "pyirena-docs"])
+        }
+    )
+    save_workspaces_config(cfg, aida_home)
+    loaded = load_workspaces_config(aida_home)
+    assert loaded.workspaces["beamline-help"].knowledge_bases == ["usaxs-docs", "pyirena-docs"]
+
+
+def test_settings_bundle_includes_knowledge(aida_home: Path):
+    settings = load_settings()
+    assert settings.knowledge is not None
+    assert (aida_home / "knowledge.yaml").exists()

@@ -73,6 +73,24 @@ def db_path() -> Path:
     return app_dir() / "aida.db"
 
 
+def knowledge_dir() -> Path:
+    """Directory holding one SQLite file per RAG knowledge base
+    (``<kb_name>.db``, created lazily by ``aida.knowledge.rag.index``) —
+    PLAN.md Phase 8: "index stored under ``~/.aida/`` per knowledge base"."""
+    d = app_dir() / "knowledge"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def knowledge_db_path(kb_name: str) -> Path:
+    """Path to one knowledge base's own SQLite index file. A deliberately
+    separate file per KB (not shared with ``aida.db`` or with each other)
+    so deleting/rebuilding one knowledge base can never touch another's
+    data, or the conversations DB — same isolation reasoning as the
+    per-conversation sidecar folders in ``aida.persistence.records``."""
+    return knowledge_dir() / f"{kb_name}.db"
+
+
 def default_records_dir() -> Path:
     """Default location for human-readable conversation records.
 

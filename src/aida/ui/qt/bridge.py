@@ -34,11 +34,17 @@ from aida.cli.chat import (
     UnknownWorkspaceError,
     start_session,
 )
-from aida.config.settings import McpServerConfig, Settings
+from aida.config.paths import knowledge_db_path
+from aida.config.settings import EmbeddingProfile, KnowledgeBaseConfig, McpServerConfig, Settings
 from aida.core.confirmation import ConfirmationRequest
+from aida.knowledge.rag import index as kb_index
+from aida.knowledge.rag.ingest import IngestResult
+from aida.knowledge.rag.ingest import rebuild as ingest_rebuild
+from aida.knowledge.rag.ingest import update as ingest_update
 from aida.mcp.manager import NAMESPACE_SEPARATOR, McpManager
 from aida.mcp.server import McpServerError
 from aida.persistence.recorder import ConversationNotFoundError
+from aida.providers.profiles import UnknownProviderKindError, build_embeddings_provider
 from aida.ui.qt._qt import QObject, QThread, Signal
 
 _STARTUP_ERRORS = (UnknownProfileError, UnknownWorkspaceError, UnknownMcpServerError, ConversationNotFoundError)
@@ -110,6 +116,13 @@ class ChatBridge(QObject):
     mcp_server_status_changed = Signal(str)  # server name
     mcp_server_action_failed = Signal(str, str)  # (server name, error message)
     mcp_connection_tested = Signal(str, object)  # (server name, ConnectionTestResult)
+    # Phase 8: Knowledge management dialog build/update — same "one
+    # finished/failed pair, dialog re-renders from current state" shape as
+    # the MCP live-control signals above. Runs on the background loop
+    # (embedding calls are real network I/O) so the Qt thread never blocks
+    # on a rebuild of a large corpus.
+    kb_ingest_finished = Signal(str, object)  # (kb name, IngestResult)
+    kb_ingest_failed = Signal(str, str)  # (kb name, error message)
 
     def __init__(self, loop_thread: AsyncLoopThread, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -319,6 +332,44 @@ class ChatBridge(QObject):
     async def _test_mcp_connection(self, config: McpServerConfig) -> None:
         result = await self._ensure_mcp_manager().test_connection(config)
         self.mcp_connection_tested.emit(config.name, result)
+
+    # --- knowledge base build/update (Phase 8 management dialog) -----------
+
+    def rebuild_knowledge_base(self, kb: KnowledgeBaseConfig, embedding_profile: EmbeddingProfile) -> None:
+        """Full re-ingest of ``kb``: every discovered file is re-chunked and
+        re-embedded. Takes the configs directly (not a name to look up)
+        the same way ``register_mcp_server`` does — the dialog already has
+        them from ``settings``, and this keeps the bridge from needing to
+        hold a ``Settings`` reference of its own."""
+        asyncio.run_coroutine_threadsafe(self._run_kb_ingest(kb, embedding_profile, rebuild=True), self._loop_thread.loop)
+
+    def update_knowledge_base(self, kb: KnowledgeBaseConfig, embedding_profile: EmbeddingProfile) -> None:
+        """Incremental re-ingest of ``kb``: only files changed since the
+        last build/update are re-embedded."""
+        asyncio.run_coroutine_threadsafe(self._run_kb_ingest(kb, embedding_profile, rebuild=False), self._loop_thread.loop)
+
+    async def _run_kb_ingest(self, kb: KnowledgeBaseConfig, embedding_profile: EmbeddingProfile, *, rebuild: bool) -> None:
+        try:
+            embeddings_provider = build_embeddings_provider(embedding_profile)
+        except UnknownProviderKindError as exc:
+            self.kb_ingest_failed.emit(kb.name, str(exc))
+            return
+
+        conn = kb_index.connect(knowledge_db_path(kb.name))
+        try:
+            ingest_fn = ingest_rebuild if rebuild else ingest_update
+            result: IngestResult = await ingest_fn(conn, kb, embeddings_provider)
+        except Exception as exc:  # noqa: BLE001 - a bad individual file is already handled inside ingest;
+            # this catches provider-level failures (auth, network, a
+            # misconfigured base_url) that must reach the dialog as a
+            # message rather than crash the background loop.
+            self.kb_ingest_failed.emit(kb.name, str(exc))
+            return
+        finally:
+            conn.close()
+            await embeddings_provider.aclose()
+
+        self.kb_ingest_finished.emit(kb.name, result)
 
     # --- shutdown ------------------------------------------------------------
 

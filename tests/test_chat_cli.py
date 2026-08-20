@@ -25,13 +25,18 @@ from aida.core.events import (
     AgentError,
     FileArtifactCreated,
     ImageArtifactCreated,
+    RetrievalPerformed,
     TextDelta,
     TextFinished,
     TextStarted,
     ToolCallFinished,
     ToolCallStarted,
 )
+from aida.knowledge.rag import index as kb_index
+from aida.knowledge.rag.chunking import Chunk
+from aida.knowledge.rag.retrieval import ActiveKnowledgeBase
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
+from aida.providers.mock_embeddings import MockEmbeddings
 from aida.workspace.safety import ConfirmationRequest
 
 
@@ -306,3 +311,89 @@ async def test_chat_session_tool_round_trip_with_default_tools(monkeypatch, aida
     finished = next(e for e in events if isinstance(e, ToolCallFinished))
     assert finished.tool_name == "get_current_time"
     assert "utc_iso" in finished.result
+
+
+# --- ChatSession.send() retrieval injection (Phase 8 RAG) -------------------
+
+
+async def _seeded_active_kb(tmp_path: Path, *, name: str = "kb", text: str = "Unified Fit models a SAXS curve.") -> ActiveKnowledgeBase:
+    """A ready-to-query ActiveKnowledgeBase backed by a real (tmp-file)
+    index with one chunk in it — mirrors test_knowledge_retrieval.py's
+    seeding helper, at the granularity ChatSession actually consumes."""
+    conn = kb_index.connect(tmp_path / f"{name}.db")
+    embedder = MockEmbeddings()
+    vector = (await embedder.embed([text]))[0]
+    kb_index.replace_file_chunks(
+        conn,
+        source_path="/docs/fit.md",
+        mtime=1.0,
+        chunks_with_embeddings=[(Chunk(text=text, heading="Fitting", chunk_index=0), vector)],
+        embedding_profile="mock",
+    )
+    return ActiveKnowledgeBase(name=name, connection=conn, embeddings_provider=embedder, embedding_profile_name="mock")
+
+
+@pytest.mark.asyncio
+async def test_send_injects_retrieved_context_for_a_configured_kb(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    settings = _settings_with_profile()
+    provider = MockProvider([MockTurn(text="here is the answer")])
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+
+    kb = await _seeded_active_kb(tmp_path)
+    session = ChatSession(settings, "mock-profile", active_knowledge_bases=[kb])
+    events = [e async for e in session.send("How does Unified Fit work?")]
+
+    retrieval_events = [e for e in events if isinstance(e, RetrievalPerformed)]
+    assert len(retrieval_events) == 1
+    assert "kb" in retrieval_events[0].passages_by_kb
+    assert "Unified Fit" in retrieval_events[0].passages_by_kb["kb"][0]["text"]
+
+    # The model actually saw the retrieved context this turn: it appears in
+    # the message sent to the (mock) provider.
+    sent_messages, _tools, _settings = provider.calls[0]
+    assert any("Unified Fit models a SAXS curve" in m.content for m in sent_messages)
+
+    await kb.embeddings_provider.aclose()
+    kb.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_send_never_persists_the_ephemeral_context_message_and_it_does_not_accumulate(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    settings = _settings_with_profile()
+    provider = MockProvider([MockTurn(text="answer 1"), MockTurn(text="answer 2")])
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+
+    kb = await _seeded_active_kb(tmp_path)
+    session = ChatSession(settings, "mock-profile", active_knowledge_bases=[kb])
+
+    _ = [e async for e in session.send("How does Unified Fit work?")]
+    after_first_turn = list(session.messages)
+    assert not any("# Retrieved context for this question" in m.content for m in after_first_turn)
+
+    _ = [e async for e in session.send("Tell me more about Unified Fit.")]
+    after_second_turn = session.messages
+    # Only ever the real user/assistant messages accumulate — the ephemeral
+    # retrieval-context message from turn 1 never lingered into turn 2.
+    assert not any("# Retrieved context for this question" in m.content for m in after_second_turn)
+    assert len(after_second_turn) == len(after_first_turn) + 2  # +1 user, +1 assistant
+
+    await kb.embeddings_provider.aclose()
+    kb.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_send_with_no_active_knowledge_bases_performs_no_retrieval(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    settings = _settings_with_profile()
+    provider = MockProvider([MockTurn(text="hi there")])
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+
+    session = ChatSession(settings, "mock-profile")  # no active_knowledge_bases at all
+    events = [e async for e in session.send("hello")]
+
+    assert not any(isinstance(e, RetrievalPerformed) for e in events)

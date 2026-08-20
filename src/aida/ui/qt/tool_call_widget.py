@@ -22,9 +22,26 @@ from aida.ui.qt._qt import (
     QWidget,
 )
 
+#: Bug report: a tool call with a long argument list (e.g. plotting many
+#: datasets at once — a `paths=[...]` list with dozens of file paths)
+#: rendered as one unbroken line, and the collapsed row's QLabel had no
+#: word wrap, so its minimum size hint was the full unwrapped text width —
+#: with that label inside a plain QHBoxLayout (no width constraint of its
+#: own), the row demanded that full width from its parents all the way up
+#: to the QMainWindow, growing the whole app window "to semi-infinite
+#: size" rather than staying put and letting the text wrap. Word-wrapping
+#: the label (below) fixes the propagation; capping the *summary* line
+#: length here on top of that keeps the collapsed view scannable even for
+#: a genuinely huge argument dict — the full, untruncated arguments are
+#: always available via "Details" (mark_finished stores them verbatim).
+_MAX_SUMMARY_ARGS_CHARS = 300
+
 
 def _format_arguments(arguments: dict) -> str:
-    return ", ".join(f"{k}={v!r}" for k, v in arguments.items())
+    text = ", ".join(f"{k}={v!r}" for k, v in arguments.items())
+    if len(text) > _MAX_SUMMARY_ARGS_CHARS:
+        return text[: _MAX_SUMMARY_ARGS_CHARS - 1] + "…"
+    return text
 
 
 class ToolCallRow(QFrame):
@@ -48,7 +65,16 @@ class ToolCallRow(QFrame):
         outer = QVBoxLayout(self)
         header = QHBoxLayout()
         self._summary_label = QLabel(self)
-        header.addWidget(self._summary_label)
+        # Word-wrap is the actual fix for the reported bug: a QLabel
+        # without it has a minimum size hint equal to its full, unwrapped
+        # text width, which a plain QHBoxLayout propagates straight up to
+        # the enclosing QMainWindow as a hard width floor — this is what
+        # forced the whole app window wider for a long tool-call argument
+        # list. With word wrap on, the label's minimum shrinks to its
+        # longest unbreakable token, so it wraps to fit whatever width the
+        # window actually has instead of demanding more.
+        self._summary_label.setWordWrap(True)
+        header.addWidget(self._summary_label, stretch=1)
         self._toggle_button = QPushButton("Details", self)
         self._toggle_button.clicked.connect(self.toggle_expanded)
         header.addWidget(self._toggle_button)

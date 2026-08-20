@@ -25,6 +25,7 @@ _COMMANDS = {
     "conversations": "List/resume/delete/export persisted conversations (Phase 4)",
     "workspace": "List/show/create/edit named workspaces (Phase 4)",
     "mcp": "Manage MCP servers, groups, and per-tool permissions (Phase 7)",
+    "kb": "Manage RAG knowledge bases: config, build/update indexes, query (Phase 8)",
     "run": "Run a stored workflow headlessly (Phase 10)",
     "config": "Show on-device config locations; `config secret set/get/delete` manages OS-keychain secrets",
 }
@@ -75,6 +76,10 @@ def main(argv: list[str] | None = None) -> int:
         from aida.cli.mcp_cmds import main as mcp_main
 
         return mcp_main(rest)
+    if command == "kb":
+        from aida.cli.kb_cmds import main as kb_main
+
+        return kb_main(rest)
     if command == "run":
         from aida.cli.run import main as run_main
 

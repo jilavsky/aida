@@ -29,6 +29,7 @@ from aida.ui.qt._qt import (
     QWidget,
 )
 from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
+from aida.ui.qt.retrieval_widget import RetrievalRow
 from aida.ui.qt.tool_call_widget import ToolCallRow
 
 
@@ -283,6 +284,9 @@ class ChatPanel(QWidget):
                 path=event.path, artifact_id=event.artifact_id, mime_type=event.mime_type, parent=self._content
             )
             self._append_widget(widget)
+        elif name == "RetrievalPerformed":
+            row = RetrievalRow(passages_by_kb=event.passages_by_kb, parent=self._content)
+            self._append_widget(row)
         elif name == "MessageFinished":
             pass  # no widget of its own — TextFinished/tool rows already reflect it
         elif name == "UsageInfo":

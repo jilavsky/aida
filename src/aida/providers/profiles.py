@@ -10,10 +10,12 @@ import contextlib
 from dataclasses import dataclass
 
 from aida.config.secrets import get_secret
-from aida.config.settings import ProviderProfile
+from aida.config.settings import EmbeddingProfile, ProviderProfile
 from aida.providers.anthropic_ import AnthropicProvider
 from aida.providers.base import LLMProvider
+from aida.providers.embeddings_base import EmbeddingsProvider
 from aida.providers.openai_compat import OpenAICompatProvider
+from aida.providers.openai_compat_embeddings import OpenAICompatEmbeddings
 
 
 class UnknownProviderKindError(ValueError):
@@ -36,6 +38,23 @@ def build_provider(profile: ProviderProfile) -> LLMProvider:
     raise UnknownProviderKindError(
         f"profile {profile.name!r} has unknown kind {profile.kind!r} "
         "(expected 'openai_compat' or 'anthropic')"
+    )
+
+
+def build_embeddings_provider(profile: EmbeddingProfile) -> EmbeddingsProvider:
+    """Instantiate the right ``EmbeddingsProvider`` for an embedding
+    profile — same secret-resolution pattern as ``build_provider``. Only
+    one ``kind`` exists today (Anthropic has no first-party embeddings
+    API), but this mirrors ``build_provider``'s shape rather than being a
+    bare constructor call, so a second kind slots in the same way a second
+    ``LLMProvider`` kind would."""
+    api_key = get_secret(profile.secret_ref) if profile.secret_ref else None
+
+    if profile.kind == "openai_compat":
+        return OpenAICompatEmbeddings(model=profile.model, base_url=profile.base_url, api_key=api_key)
+
+    raise UnknownProviderKindError(
+        f"embedding profile {profile.name!r} has unknown kind {profile.kind!r} (expected 'openai_compat')"
     )
 
 
@@ -97,10 +116,48 @@ async def validate_profile(
     )
 
 
+async def validate_embedding_profile(
+    profile: EmbeddingProfile, *, timeout: float = DEFAULT_PING_TIMEOUT_SECONDS
+) -> ProfileValidation:
+    """Same doctor-style check as ``validate_profile``, for an embedding
+    profile — kept as a separate function rather than a generic helper
+    since the two build different provider types via different exception
+    messages, but the timeout/never-raises/always-close contract is
+    identical."""
+    try:
+        provider = build_embeddings_provider(profile)
+    except UnknownProviderKindError as exc:
+        return ProfileValidation(name=profile.name, ok=False, detail=str(exc))
+
+    try:
+        reachable = await asyncio.wait_for(provider.ping(), timeout=timeout)
+    except TimeoutError:
+        return ProfileValidation(
+            name=profile.name,
+            ok=False,
+            detail=f"no response within {timeout:g}s ({profile.kind}, {profile.base_url or 'SDK default URL'})",
+        )
+    finally:
+        with contextlib.suppress(Exception):
+            await provider.aclose()
+
+    if reachable:
+        return ProfileValidation(
+            name=profile.name, ok=True, detail=f"reachable ({profile.kind}, model={profile.model or 'unset'})"
+        )
+    return ProfileValidation(
+        name=profile.name,
+        ok=False,
+        detail=f"not reachable ({profile.kind}, {profile.base_url or 'SDK default URL'})",
+    )
+
+
 __all__ = [
     "DEFAULT_PING_TIMEOUT_SECONDS",
     "ProfileValidation",
     "UnknownProviderKindError",
+    "build_embeddings_provider",
     "build_provider",
+    "validate_embedding_profile",
     "validate_profile",
 ]

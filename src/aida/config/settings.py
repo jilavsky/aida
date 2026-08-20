@@ -131,9 +131,50 @@ class ProviderProfile:
 
 
 @dataclass
+class EmbeddingProfile:
+    """A named embedding profile (Phase 8) — mirrors ``ProviderProfile``
+    field-for-field rather than reusing it: embedding profiles have a
+    different capability (turning text into vectors, not chat) and a
+    different validation site (``aida.knowledge.rag``), even though today
+    there's only one ``kind`` ("openai_compat" — covers Ollama, LM Studio,
+    OpenAI, and Argo's cloud embeddings proxy, the same ``base_url``
+    override pattern ``AnthropicProvider``/``OpenAICompatProvider`` already
+    use). NO secrets inline here either — ``secret_ref`` only.
+    """
+
+    name: str
+    kind: str = "openai_compat"
+    base_url: str | None = None
+    model: str = ""
+    secret_ref: str | None = None
+    capability_notes: str = ""
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict[str, Any]) -> EmbeddingProfile:
+        return cls(
+            name=name,
+            kind=data.get("kind", "openai_compat"),
+            base_url=data.get("base_url"),
+            model=data.get("model", ""),
+            secret_ref=data.get("secret_ref"),
+            capability_notes=data.get("capability_notes", ""),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "base_url": self.base_url,
+            "model": self.model,
+            "secret_ref": self.secret_ref,
+            "capability_notes": self.capability_notes,
+        }
+
+
+@dataclass
 class ProvidersConfig:
     config_version: int = CURRENT_CONFIG_VERSION
     profiles: dict[str, ProviderProfile] = field(default_factory=dict)
+    embedding_profiles: dict[str, EmbeddingProfile] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProvidersConfig:
@@ -142,15 +183,21 @@ class ProvidersConfig:
             name: ProviderProfile.from_dict(name, pdata)
             for name, pdata in (data.get("profiles") or {}).items()
         }
+        embedding_profiles = {
+            name: EmbeddingProfile.from_dict(name, pdata)
+            for name, pdata in (data.get("embedding_profiles") or {}).items()
+        }
         return cls(
             config_version=data.get("config_version", CURRENT_CONFIG_VERSION),
             profiles=profiles,
+            embedding_profiles=embedding_profiles,
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "config_version": self.config_version,
             "profiles": {name: p.to_dict() for name, p in self.profiles.items()},
+            "embedding_profiles": {name: p.to_dict() for name, p in self.embedding_profiles.items()},
         }
 
 
@@ -170,6 +217,9 @@ class WorkspaceConfig:
     skills: list[str] = field(default_factory=list)
     system_prompt: str | None = None
     safety: str = "confirm"  # "relaxed" | "confirm"
+    #: Names into KnowledgeConfig.knowledge_bases (Phase 8) — same
+    #: "referenced by name, resolved at session-start" pattern as `skills`.
+    knowledge_bases: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> WorkspaceConfig:
@@ -183,6 +233,7 @@ class WorkspaceConfig:
             skills=list(data.get("skills", [])),
             system_prompt=data.get("system_prompt"),
             safety=data.get("safety", "confirm"),
+            knowledge_bases=list(data.get("knowledge_bases", [])),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -195,6 +246,7 @@ class WorkspaceConfig:
             "skills": self.skills,
             "system_prompt": self.system_prompt,
             "safety": self.safety,
+            "knowledge_bases": self.knowledge_bases,
         }
 
 
@@ -324,6 +376,69 @@ class McpConfig:
 
 
 # --------------------------------------------------------------------------
+# knowledge.yaml (Phase 8)
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class KnowledgeBaseConfig:
+    """One RAG knowledge base: which folders to index and with which
+    embedding profile. An Obsidian vault is just a folder of ``.md`` files
+    here — no separate "vault" source type; heading-aware Markdown chunking
+    (``aida.knowledge.rag.chunking``) already handles that structure, so a
+    vault needs nothing beyond listing its path in ``source_folders``.
+    """
+
+    name: str
+    source_folders: list[str] = field(default_factory=list)
+    embedding_profile: str | None = None
+    chunk_size: int = 1000
+    chunk_overlap: int = 150
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict[str, Any]) -> KnowledgeBaseConfig:
+        return cls(
+            name=name,
+            source_folders=list(data.get("source_folders", [])),
+            embedding_profile=data.get("embedding_profile"),
+            chunk_size=data.get("chunk_size", 1000),
+            chunk_overlap=data.get("chunk_overlap", 150),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_folders": self.source_folders,
+            "embedding_profile": self.embedding_profile,
+            "chunk_size": self.chunk_size,
+            "chunk_overlap": self.chunk_overlap,
+        }
+
+
+@dataclass
+class KnowledgeConfig:
+    config_version: int = CURRENT_CONFIG_VERSION
+    knowledge_bases: dict[str, KnowledgeBaseConfig] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> KnowledgeConfig:
+        data = data or {}
+        knowledge_bases = {
+            name: KnowledgeBaseConfig.from_dict(name, kdata)
+            for name, kdata in (data.get("knowledge_bases") or {}).items()
+        }
+        return cls(
+            config_version=data.get("config_version", CURRENT_CONFIG_VERSION),
+            knowledge_bases=knowledge_bases,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "config_version": self.config_version,
+            "knowledge_bases": {name: k.to_dict() for name, k in self.knowledge_bases.items()},
+        }
+
+
+# --------------------------------------------------------------------------
 # Loading / saving
 # --------------------------------------------------------------------------
 
@@ -399,6 +514,17 @@ def save_mcp_config(cfg: McpConfig, base_dir: Path | None = None) -> Path:
     return path
 
 
+def load_knowledge_config(base_dir: Path | None = None) -> KnowledgeConfig:
+    path = (base_dir or config_dir()) / "knowledge.yaml"
+    return KnowledgeConfig.from_dict(_read_yaml(path))
+
+
+def save_knowledge_config(cfg: KnowledgeConfig, base_dir: Path | None = None) -> Path:
+    path = (base_dir or config_dir()) / "knowledge.yaml"
+    _write_yaml(path, cfg.to_dict())
+    return path
+
+
 @dataclass
 class Settings:
     """Bundle of everything loaded from ``~/.aida`` for one process."""
@@ -407,10 +533,11 @@ class Settings:
     providers: ProvidersConfig
     workspaces: WorkspacesConfig
     mcp: McpConfig
+    knowledge: KnowledgeConfig
 
 
 def load_settings(base_dir: Path | None = None) -> Settings:
-    """Load all four config files, defaulting anything missing.
+    """Load all five config files, defaulting anything missing.
 
     Also ensures the files exist on disk on first run (writing out the
     defaults), per the Phase 1 acceptance criterion "first run creates
@@ -421,6 +548,7 @@ def load_settings(base_dir: Path | None = None) -> Settings:
     providers = load_providers_config(base)
     workspaces = load_workspaces_config(base)
     mcp = load_mcp_config(base)
+    knowledge = load_knowledge_config(base)
 
     if not (base / "config.yaml").exists():
         save_app_config(app, base)
@@ -430,5 +558,7 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         save_workspaces_config(workspaces, base)
     if not (base / "mcp.json").exists():
         save_mcp_config(mcp, base)
+    if not (base / "knowledge.yaml").exists():
+        save_knowledge_config(knowledge, base)
 
-    return Settings(app=app, providers=providers, workspaces=workspaces, mcp=mcp)
+    return Settings(app=app, providers=providers, workspaces=workspaces, mcp=mcp, knowledge=knowledge)

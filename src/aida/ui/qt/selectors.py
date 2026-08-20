@@ -118,7 +118,14 @@ class _RemovableFolderRow(QWidget):
         self.path = path
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(QLabel(path, self), stretch=1)
+        # Same fix as aida.ui.qt.tool_call_widget.ToolCallRow's summary
+        # label: without word wrap, a long real-world source-folder path
+        # (this lab's own paths routinely run 80-100+ characters) has a
+        # minimum size hint equal to its full unwrapped width, which this
+        # QHBoxLayout propagates straight up to the main window.
+        path_label = QLabel(path, self)
+        path_label.setWordWrap(True)
+        layout.addWidget(path_label, stretch=1)
         remove_button = QPushButton("Remove", self)
         remove_button.clicked.connect(lambda: self.remove_requested.emit(self.path))
         layout.addWidget(remove_button)
@@ -162,7 +169,8 @@ class FolderDisplay(QGroupBox):
 
         target_row = QHBoxLayout()
         self._target_label = QLabel("Target: (none)", self)
-        target_row.addWidget(self._target_label)
+        self._target_label.setWordWrap(True)
+        target_row.addWidget(self._target_label, stretch=1)
         change_target_button = QPushButton("Change Target Folder…", self)
         change_target_button.clicked.connect(self._on_change_target_folder)
         target_row.addWidget(change_target_button)

@@ -43,6 +43,7 @@ from aida.ui.qt.chat_panel import ChatPanel
 from aida.ui.qt.conversations_sidebar import ConversationsSidebar
 from aida.ui.qt.icon import app_icon
 from aida.ui.qt.input_box import InputBox
+from aida.ui.qt.knowledge_management_dialog import KnowledgeManagementDialog
 from aida.ui.qt.mcp_management_dialog import McpManagementDialog
 from aida.ui.qt.selectors import FolderDisplay, McpQuickPanel, ProfileSelector, WorkspaceSelector
 from aida.ui.qt.settings_dialog import SettingsDialog
@@ -97,6 +98,10 @@ class MainWindow(QMainWindow):
         mcp_action = QAction("MCP Servers…", self)
         mcp_action.triggered.connect(self.open_mcp_management_dialog)
         toolbar.addAction(mcp_action)
+
+        knowledge_action = QAction("Knowledge Bases…", self)
+        knowledge_action.triggered.connect(self.open_knowledge_management_dialog)
+        toolbar.addAction(knowledge_action)
 
         settings_action = QAction("Settings…", self)
         settings_action.triggered.connect(self.open_settings_dialog)
@@ -548,6 +553,12 @@ class MainWindow(QMainWindow):
         dialog = McpManagementDialog(self.settings, self.bridge, skills_dir(), self)
         dialog.exec()
         self._refresh_mcp_panel()
+
+    # --- Knowledge base management (Phase 8) --------------------------------
+
+    def open_knowledge_management_dialog(self) -> None:
+        dialog = KnowledgeManagementDialog(self.settings, self.bridge, self)
+        dialog.exec()
 
     # --- settings ------------------------------------------------------------
 

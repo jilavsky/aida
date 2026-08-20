@@ -122,6 +122,61 @@ def test_cmd_edit_only_overwrites_passed_fields(aida_home: Path, records_home: P
     assert ws.system_prompt == "original prompt"  # left alone
 
 
+# --- Phase 8: --knowledge-bases (v1 GUI-less editing surface for RAG) -------
+
+
+def test_cmd_new_sets_knowledge_bases(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1", "--knowledge-bases", "usaxs-docs,obsidian-vault"))
+    capsys.readouterr()
+
+    ws = load_workspaces_config(aida_home).workspaces["ws1"]
+    assert ws.knowledge_bases == ["usaxs-docs", "obsidian-vault"]
+
+
+def test_cmd_new_defaults_knowledge_bases_to_empty(aida_home: Path, records_home: Path, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1"))
+
+    ws = load_workspaces_config(aida_home).workspaces["ws1"]
+    assert ws.knowledge_bases == []
+
+
+def test_cmd_edit_updates_knowledge_bases_leaving_other_fields_alone(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1", "--knowledge-bases", "usaxs-docs", "--skills", "a"))
+    capsys.readouterr()
+
+    cmd_edit(_parse("edit", "ws1", "--knowledge-bases", "usaxs-docs,obsidian-vault"))
+    capsys.readouterr()
+
+    ws = load_workspaces_config(aida_home).workspaces["ws1"]
+    assert ws.knowledge_bases == ["usaxs-docs", "obsidian-vault"]  # changed
+    assert ws.skills == ["a"]  # left alone
+
+
+def test_cmd_edit_without_knowledge_bases_flag_leaves_it_unchanged(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1", "--knowledge-bases", "usaxs-docs"))
+    capsys.readouterr()
+
+    cmd_edit(_parse("edit", "ws1", "--safety", "relaxed"))
+    capsys.readouterr()
+
+    ws = load_workspaces_config(aida_home).workspaces["ws1"]
+    assert ws.knowledge_bases == ["usaxs-docs"]
+
+
+def test_cmd_show_includes_knowledge_bases(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1", "--knowledge-bases", "usaxs-docs"))
+    capsys.readouterr()
+
+    cmd_show(_parse("show", "ws1"))
+    out = capsys.readouterr().out
+    assert "knowledge_bases:    usaxs-docs" in out
+
+
 def test_cmd_edit_updates_profile(aida_home: Path, records_home: Path, capsys, monkeypatch):
     def _settings_with_two_profiles():
         settings = load_settings()

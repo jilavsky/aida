@@ -340,5 +340,36 @@ issues surfaced, all fixed with regression tests.
    kept outside the scroll area so it's always reachable without scrolling
    back up. Regression test: `test_tools_tab_is_scrollable_not_ever_growing`
    (150 synthetic tools, asserts a `QScrollArea` wraps the row container).
+4. **"Agent seems to have no understanding of Source and Target folders."**
+   Not a skills gap (skills are static Markdown shared across every
+   workspace that lists one — they can't carry per-workspace, user-
+   configured paths) — nothing in the system context ever told the model
+   its configured folders at all. Fixed with
+   `aida.core.context.build_workspace_context_block`, generated fresh at
+   session-start and injected into the system message. While investigating
+   this, found a second, larger issue: `McpServerHandle.start()` called
+   `session.initialize()` and discarded the `InitializeResult` entirely —
+   including its `instructions` field, which a FastMCP server author can
+   write specifically to teach an LLM how to use *that* server's own tools
+   (pyirena-mcp ships a detailed one covering its whole read/fit/plot
+   workflow). Now captured (`McpServerHandle.instructions`) and surfaced
+   (`McpManager.server_instructions()`) into the same system context. Three
+   draft skills added under `skills/` (`saxs-basics.md`, `pyirena-usage.md`,
+   `review-checklist.md`) for the user to copy/symlink into `~/.aida/skills/`
+   — `pyirena-usage.md` is written to complement the now-surfaced server
+   instructions, not duplicate them.
+5. **"The chat window gets VERY wide... potentially to semi-infinite
+   size"** when a tool call's arguments are long (e.g. plotting many
+   datasets at once). Root cause: `ToolCallRow`'s collapsed summary
+   `QLabel` had no word wrap — a `QLabel` without it has a minimum size
+   hint equal to its full, unwrapped text width, which the plain
+   `QHBoxLayout` it sits in propagates straight up through
+   `ChatPanel`/the splitter to the `QMainWindow` as a hard width floor.
+   Fixed with `setWordWrap(True)` (shrinks the minimum size hint down to
+   the longest unbreakable token) plus a length cap on the *collapsed*
+   summary line (300 chars, "…") — the full untruncated arguments remain
+   available via "Details". Found and fixed the same latent bug in
+   `aida.ui.qt.selectors.FolderDisplay`'s source-folder and target-folder
+   labels (this lab's real folder paths run 80-100+ characters).
 
-**Verification:** 652 tests passing (`pytest -q`), `ruff check .` clean.
+**Verification:** 666 tests passing (`pytest -q`), `ruff check .` clean.

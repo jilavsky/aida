@@ -143,6 +143,30 @@ class UsageInfo:
 
 
 @dataclass(frozen=True)
+class RetrievalPerformed:
+    """Emitted by ``aida.cli.chat.ChatSession.send()`` when a workspace's
+    knowledge base(s) (Phase 8) retrieved passages for this turn's
+    question, right before they're injected into the model's context —
+    "event carries retrieval info so the GUI can show 'used these
+    passages'" (planning/phase08_rag.md). Never emitted for a workspace
+    with no knowledge bases configured.
+
+    ``passages_by_kb`` maps knowledge base name to a list of plain dicts
+    (``text``, ``source_path``, ``heading``, ``score``) rather than
+    ``aida.knowledge.rag.retrieval.RetrievedPassage`` objects directly, so
+    this event stays a plain, JSON-serializable dataclass like every other
+    ``AgentEvent`` (PLAN.md hard rule 6) without ``aida.core.events``
+    needing to import ``aida.knowledge``'s dataclass shapes — the same
+    "typed internally, plain dicts on the event" boundary
+    ``ToolCallStarted.arguments`` already draws.
+    """
+
+    passages_by_kb: dict[str, list[dict[str, Any]]]
+
+    to_dict = _base_dict
+
+
+@dataclass(frozen=True)
 class AgentError:
     """A terminal error for the current ``complete()``/``run()`` call.
 
@@ -169,6 +193,7 @@ AgentEvent = (
     | FileArtifactCreated
     | MessageFinished
     | UsageInfo
+    | RetrievalPerformed
     | AgentError
 )
 
@@ -178,6 +203,7 @@ __all__ = [
     "FileArtifactCreated",
     "ImageArtifactCreated",
     "MessageFinished",
+    "RetrievalPerformed",
     "TextDelta",
     "TextFinished",
     "TextStarted",

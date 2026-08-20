@@ -363,7 +363,7 @@ demonstrated need.
 | Markdown render (GUI) | Qt rich text first; add a md lib only if needed | |
 | PDF read | `pymupdf` (extra: `docs`) | BeamlineAdvisor precedent |
 | DOCX/XLSX/PPTX | `python-docx`, `openpyxl`, `python-pptx` (extra: `docs`) | read + docx write |
-| RAG (Phase 8) | start minimal: chunking + embeddings + `sqlite-vec` or ChromaDB — decide in Phase 8 with a benchmark, don't pre-commit | LlamaIndex only if minimal path proves insufficient |
+| RAG (Phase 8) | **Decided:** plain SQLite (own schema, own file per knowledge base) + pure-Python cosine similarity — no vector DB. Realistic corpora here (instrument docs, one Obsidian vault) are hundreds to low thousands of chunks; brute-force ranking is tens of milliseconds at that scale, so `sqlite-vec`/ChromaDB add a second persistence engine for no measured benefit. See `planning/phase08_rag.md`. | LlamaIndex only if the minimal path proves insufficient at real corpus sizes |
 | Code editor (Phase 9) | Qt plain-text editor + syntax highlighting; consider `QScintilla` only if needed | |
 
 pyIrena is **not** an import dependency — AIDA talks to it only through

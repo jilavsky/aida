@@ -33,6 +33,7 @@ def _print_workspace(ws: WorkspaceConfig) -> None:
     print(f"profile:            {ws.profile or '(none)'}")
     print(f"mcp_group:          {ws.mcp_group}")
     print(f"skills:             {', '.join(ws.skills) or '(none)'}")
+    print(f"knowledge_bases:    {', '.join(ws.knowledge_bases) or '(none)'}")
     print(f"source_folders:     {', '.join(ws.source_folders) or '(none)'}")
     print(f"target_folder:      {ws.target_folder or '(none)'}")
     print(f"sidecar_folder_name: {ws.sidecar_folder_name}")
@@ -89,6 +90,7 @@ def cmd_new(args: argparse.Namespace) -> int:
         sidecar_folder_name=args.sidecar_folder_name,
         mcp_group=args.mcp_group,
         skills=_split_csv(args.skills),
+        knowledge_bases=_split_csv(args.knowledge_bases),
         system_prompt=args.system_prompt or None,
         safety=args.safety,
     )
@@ -118,6 +120,7 @@ def cmd_edit(args: argparse.Namespace) -> int:
         else existing.sidecar_folder_name,
         mcp_group=args.mcp_group if args.mcp_group is not None else existing.mcp_group,
         skills=_split_csv(args.skills) if args.skills is not None else existing.skills,
+        knowledge_bases=_split_csv(args.knowledge_bases) if args.knowledge_bases is not None else existing.knowledge_bases,
         system_prompt=args.system_prompt if args.system_prompt is not None else existing.system_prompt,
         safety=args.safety if args.safety is not None else existing.safety,
     )
@@ -154,6 +157,10 @@ def _add_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -> None:
         "--mcp-group", default="none" if defaults else None, help="Named MCP server group from mcp.json"
     )
     parser.add_argument("--skills", default="" if defaults else None, help="Comma-separated skill names")
+    parser.add_argument(
+        "--knowledge-bases", default="" if defaults else None,
+        help="Comma-separated knowledge base names from knowledge.yaml (Phase 8 RAG)",
+    )
     parser.add_argument("--system-prompt", default=None, help="Extra system prompt text for this workspace")
     parser.add_argument(
         "--safety",

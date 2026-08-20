@@ -12,6 +12,7 @@ from aida.core.events import (
     FileArtifactCreated,
     ImageArtifactCreated,
     MessageFinished,
+    RetrievalPerformed,
     TextDelta,
     TextFinished,
     TextStarted,
@@ -22,6 +23,7 @@ from aida.providers.base import Message
 from aida.ui.qt._qt import QGuiApplication
 from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
 from aida.ui.qt.chat_panel import ChatPanel, ErrorBanner, MessageBubble
+from aida.ui.qt.retrieval_widget import RetrievalRow
 from aida.ui.qt.tool_call_widget import ToolCallRow
 from tests.mock_mcp_server import TINY_PNG_BYTES
 
@@ -226,6 +228,29 @@ def test_load_history_renders_one_bubble_per_message_skipping_system(qapp):
     assert panel.widget_count == 2
     assert panel.widget_at(0).role == "user"
     assert panel.widget_at(1).role == "assistant"
+
+
+def test_retrieval_performed_renders_a_retrieval_row(qapp):
+    panel = ChatPanel()
+    panel.handle_event(
+        RetrievalPerformed(
+            passages_by_kb={
+                "usaxs-docs": [
+                    {"text": "Unified Fit models a SAXS curve.", "source_path": "/docs/fit.md", "heading": "Fitting", "score": 0.82}
+                ]
+            }
+        )
+    )
+    assert panel.widget_count == 1
+    row = panel.widget_at(0)
+    assert isinstance(row, RetrievalRow)
+    assert not row.is_expanded
+    assert "Retrieved 1 passage(s) from 1 knowledge base(s)" in row._summary_label.text()
+
+    row.toggle_expanded()
+    assert row.is_expanded
+    assert "Unified Fit models a SAXS curve." in row._detail_text.toPlainText()
+    assert "usaxs-docs" in row._detail_text.toPlainText()
 
 
 def test_clear_removes_all_widgets_and_resets_state(qapp):

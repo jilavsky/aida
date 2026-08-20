@@ -11,6 +11,7 @@ tests fast and to isolate start_session's own precedence logic.
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,9 @@ from aida.cli.chat import (
     start_session,
 )
 from aida.config.settings import (
+    EmbeddingProfile,
+    KnowledgeBaseConfig,
+    KnowledgeConfig,
     McpConfig,
     McpServerConfig,
     ProviderProfile,
@@ -34,6 +38,7 @@ from aida.config.settings import (
 )
 from aida.persistence.recorder import ConversationNotFoundError
 from aida.providers.mock import MockProvider, MockTurn
+from aida.providers.mock_embeddings import MockEmbeddings
 
 
 class _FakeMcpManager:
@@ -490,6 +495,198 @@ def test_ensure_workspace_folders_warns_instead_of_raising_on_failure(tmp_path: 
     captured = capsys.readouterr()
     assert "warning: could not create folder" in captured.out
     assert str(unreachable) in captured.out
+
+
+# --- Phase 8: resolving a workspace's knowledge_bases into ActiveKnowledgeBases
+
+
+@pytest.mark.asyncio
+async def test_start_session_resolves_workspace_knowledge_bases(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+    monkeypatch.setattr("aida.cli.chat.build_embeddings_provider", lambda profile: MockEmbeddings())
+
+    settings = _settings(
+        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}),
+        knowledge=KnowledgeConfig(
+            knowledge_bases={
+                "usaxs-docs": KnowledgeBaseConfig(
+                    name="usaxs-docs", source_folders=["/data/docs"], embedding_profile="embed-profile"
+                )
+            }
+        ),
+    )
+    settings.providers.embedding_profiles["embed-profile"] = EmbeddingProfile(
+        name="embed-profile", kind="openai_compat", model="embed-model"
+    )
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert [kb.name for kb in session.active_knowledge_bases] == ["usaxs-docs"]
+        assert session.active_knowledge_bases[0].embedding_profile_name == "embed-profile"
+    finally:
+        await session.aclose()
+        if mcp_manager is not None:
+            await mcp_manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_warns_and_skips_unknown_knowledge_base_name(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    settings = _settings(
+        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["does-not-exist"])}),
+    )
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert session.active_knowledge_bases == []
+        assert "unknown knowledge base 'does-not-exist'" in capsys.readouterr().out
+    finally:
+        await session.aclose()
+        if mcp_manager is not None:
+            await mcp_manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_warns_and_skips_knowledge_base_without_embedding_profile(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    settings = _settings(
+        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}),
+        knowledge=KnowledgeConfig(
+            knowledge_bases={"usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", source_folders=["/data/docs"])}
+        ),
+    )
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert session.active_knowledge_bases == []
+        assert "no embedding_profile configured" in capsys.readouterr().out
+    finally:
+        await session.aclose()
+        if mcp_manager is not None:
+            await mcp_manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_warns_and_skips_knowledge_base_with_unknown_embedding_profile(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    settings = _settings(
+        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}),
+        knowledge=KnowledgeConfig(
+            knowledge_bases={
+                "usaxs-docs": KnowledgeBaseConfig(
+                    name="usaxs-docs", source_folders=["/data/docs"], embedding_profile="does-not-exist"
+                )
+            }
+        ),
+    )
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert session.active_knowledge_bases == []
+        assert "unknown embedding profile 'does-not-exist'" in capsys.readouterr().out
+    finally:
+        await session.aclose()
+        if mcp_manager is not None:
+            await mcp_manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_warns_and_skips_knowledge_base_with_unbuildable_embedding_profile(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    settings = _settings(
+        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}),
+        knowledge=KnowledgeConfig(
+            knowledge_bases={
+                "usaxs-docs": KnowledgeBaseConfig(
+                    name="usaxs-docs", source_folders=["/data/docs"], embedding_profile="embed-profile"
+                )
+            }
+        ),
+    )
+    settings.providers.embedding_profiles["embed-profile"] = EmbeddingProfile(
+        name="embed-profile", kind="totally-unknown"
+    )
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert session.active_knowledge_bases == []
+        assert "totally-unknown" in capsys.readouterr().out
+    finally:
+        await session.aclose()
+        if mcp_manager is not None:
+            await mcp_manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_no_workspace_knowledge_bases_configured_resolves_nothing(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+
+    session, _mcp_manager = await start_session(_settings(), profile_name="mock-profile")
+    try:
+        assert session.active_knowledge_bases == []
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_aclose_closes_active_knowledge_base_resources(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    closed = []
+
+    class _TrackingEmbeddings(MockEmbeddings):
+        async def aclose(self):
+            closed.append(True)
+
+    monkeypatch.setattr("aida.cli.chat.build_embeddings_provider", lambda profile: _TrackingEmbeddings())
+
+    settings = _settings(
+        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}),
+        knowledge=KnowledgeConfig(
+            knowledge_bases={
+                "usaxs-docs": KnowledgeBaseConfig(
+                    name="usaxs-docs", source_folders=["/data/docs"], embedding_profile="embed-profile"
+                )
+            }
+        ),
+    )
+    settings.providers.embedding_profiles["embed-profile"] = EmbeddingProfile(
+        name="embed-profile", kind="openai_compat", model="embed-model"
+    )
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    conn = session.active_knowledge_bases[0].connection
+    await session.aclose()
+    if mcp_manager is not None:
+        await mcp_manager.aclose()
+
+    assert closed == [True]
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")
 
 
 def test_ensure_workspace_folders_ignores_unset_target(tmp_path: Path):
