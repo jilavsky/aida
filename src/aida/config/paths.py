@@ -88,3 +88,28 @@ def ensure_records_dir(path: Path | None = None) -> Path:
     target = Path(path).expanduser() if path else default_records_dir()
     target.mkdir(parents=True, exist_ok=True)
     return target
+
+
+def unique_destination(path: Path) -> Path:
+    """Collision-safe destination: ``name.ext`` -> ``name (1).ext`` ->
+    ``name (2).ext`` ... — used by every writer that must never silently
+    clobber an existing file (trash moves, report/transcript writers, the
+    artifact store).
+
+    Lives in this leaf module rather than next to its most obvious caller
+    (``aida.workspace.safety``, which still re-exports it for compatibility)
+    only because ``aida.artifacts.store`` needs it too, and
+    ``artifacts -> workspace`` is a cycle: ``aida.workspace``'s package
+    ``__init__`` reaches ``aida.mcp``, which imports ``ArtifactStore``.
+    ``aida.config.paths`` imports nothing from AIDA at all, so everyone can
+    depend on it.
+    """
+    if not path.exists():
+        return path
+    stem, suffix, parent = path.stem, path.suffix, path.parent
+    counter = 1
+    while True:
+        candidate = parent / f"{stem} ({counter}){suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1

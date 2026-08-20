@@ -339,3 +339,100 @@ failure chain.
 the sandbox — a net +8 tests over the count in the completion summary above
 (4 from folder-create, 4 from removable source-folder rows, plus the
 settings/app/logging tests already counted per-item above).
+
+---
+
+## End-of-Phase-6 code review (before starting Phase 7)
+
+A full read-through of the codebase (not a user report — a deliberate review
+pass before opening Phase 7) turned up seven defects. Each was reproduced by
+running it first, then fixed with a regression test that fails without the
+fix. New tests live in `tests/test_regressions_phase6.py` (17) and
+`tests/ui/test_bridge_lifecycle.py` (4), plus 3 in `tests/test_doctor.py`.
+
+1. **Deleting a conversation deleted the user's own files.** *(data loss —
+   the one that mattered)* `aida.persistence.cleanup.delete_conversation`
+   unlinked every path in the `artifacts` table, but that table holds two
+   different kinds of path: copies AIDA made under `~/.aida/artifacts/`, and
+   references to files it does not own. `read_file` on a `.png` records an
+   `ImageArtifact` pointing at the user's **source** image (the reader
+   deliberately doesn't copy the bytes), and `write_file` /
+   `write_markdown_report` record a `FileArtifact` pointing at the report
+   just written into the user's **target** folder. Both are recorded on the
+   live path via `ChatSession.send`. So deleting one conversation hard-
+   deleted instrument data and finished reports out of the user's folders —
+   with no `_trash` fallback, and in bulk from the GUI's "delete
+   conversations older than N days" button. Deletion is now bounded to an
+   `artifacts_dir` argument (default `~/.aida/artifacts/`) plus the
+   conversation's own sidecar folder and `.md` record; anything else is left
+   alone and reported in `DeletionResult.skipped_external_files`, which
+   `aida conversations delete` now prints. Containment is checked on
+   resolved paths so a symlink can't launder a user file into looking
+   AIDA-owned.
+
+2. **Anthropic: parallel tool results were split across separate user
+   messages.** `to_anthropic_params` emitted one `{"role": "user"}` message
+   per `role="tool"` message. The API requires every `tool_result` for one
+   assistant turn's `tool_use` blocks in a *single* user message; splitting
+   them isn't a hard error (the API merges consecutive same-role messages)
+   but it trains the model to stop making parallel tool calls — precisely
+   the "plot all of these" fan-out pyIrena MCP work depends on. Consecutive
+   tool messages are now coalesced into one user message, order preserved,
+   and an empty result content (which the API rejects) becomes
+   `"(no output)"`.
+
+3. **Artifact filenames were trusted input.** An MCP server controls
+   `filename` (via `ResourceLink.name`, and the `audio.<subtype>` name
+   `aida.mcp.results` derives). `filename="../../escaped.txt"` wrote outside
+   `~/.aida/artifacts/` entirely; two artifacts sharing a name silently
+   overwrote each other, so an earlier image in a conversation rendered as a
+   later, unrelated one. Names now reduce to a bare basename
+   (`_safe_filename`) and destinations are collision-safe.
+
+4. **GUI: crash and leaked MCP subprocesses when a session restarts during
+   startup.** Switching workspace (or resuming, or closing) while
+   `start_session` was still launching MCP servers hit a `ChatBridge.shutdown()`
+   that short-circuited on `session is None` — the in-flight start then
+   completed *unowned*, leaking its MCP subprocesses and SQLite connection
+   for the life of the process, and emitted `session_ready` into a window
+   that had already replaced that bridge, where `_on_session_ready` read
+   `self.bridge.session` (`None`) and raised `AttributeError` out of a Qt
+   slot, leaving the window stuck on "Starting session…". `shutdown()` now
+   waits for an in-flight start and closes whatever it produced (idempotently),
+   `_restart_session` fully unwires the retired bridge in both directions,
+   and `_on_session_ready` guards defensively.
+
+5. **Two same-named figures collapsed to one image in a report.**
+   `ArtifactStore.copy_to_target` overwrote by basename. Fixed content-aware
+   rather than by always uniquifying, because the transcript writer re-copies
+   the *same* images into the sidecar on every export (after every message) —
+   unconditional uniquifying would grow `fig (1).png`, `fig (2).png`, ...
+   without bound. Identical content reuses the existing file; different
+   content gets a fresh name. `render_transcript` now takes the real
+   `sidecar_filenames` mapping so links follow a renamed copy.
+
+6. **`aida doctor` never actually checked providers.** It sent a bare
+   `urllib` HEAD at each `base_url` and called any non-2xx "unreachable" —
+   which reports a healthy Ollama or LM Studio as broken (they answer 404/405
+   to a HEAD on `/v1`) and says nothing about whether the model name or key
+   work. `aida.providers.profiles.validate_profile` has done this properly
+   through each SDK's own client since Phase 2 and was simply never wired in;
+   its docstring still claimed "Phase 1 ships no provider layer". Now wired
+   in, with a per-profile timeout (an off-site Argo proxy black-holes rather
+   than refusing) and the provider closed afterwards. The `records_dir` check
+   also honored the *default* location rather than the configured
+   `records_dir` override, so it reported on a directory the user's config
+   never touches.
+
+7. **`search_text` dropped its truncation marker** when the match cap was
+   filled by the last candidate file, handing the model a silently-capped
+   result set that looked complete.
+
+**Also moved:** `unique_destination` now lives in the dependency-free
+`aida.config.paths` (re-exported from `aida.workspace.safety` for existing
+importers) because `aida.artifacts.store` needs it and
+`artifacts -> workspace` is an import cycle — `aida.workspace`'s package
+`__init__` reaches `aida.mcp`, which imports `ArtifactStore`.
+
+**Verification:** 566 tests passing (`pytest -q`), `ruff check .` clean, in
+this environment — net +24 over the 542 at the start of the review.

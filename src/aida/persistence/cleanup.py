@@ -7,6 +7,25 @@ rows. Every deletion path in this module removes all four, in an order
 that's safe to re-run if it's ever interrupted partway (DB rows are deleted
 last, so a partial failure just means "some files were already gone" on
 retry, never a DB row pointing at nothing).
+
+**"No orphans" means no orphans of files AIDA itself created** — a bound
+this module now enforces explicitly, because not every path in the
+``artifacts`` table belongs to AIDA. An ``ImageArtifact`` can point at the
+*user's own* file rather than at a copy in AIDA's store: ``read_file`` on a
+``.png`` yields an ``ImageArtifact`` whose ``path`` is the source image in
+the user's folder (``aida.documents.readers._read_image_file`` deliberately
+doesn't load or copy the bytes), and ``write_file`` /
+``write_markdown_report`` yield ``FileArtifact``s pointing at the report
+just written into the user's *target* folder. Both are recorded on the live
+path (``aida.cli.chat.ChatSession.send`` records every
+``ImageArtifactCreated``/``FileArtifactCreated`` event), so a naive
+"unlink every recorded artifact path" would hard-delete instrument data and
+finished reports out of the user's own directories — in bulk, and with no
+``_trash`` fallback, from the GUI's "delete conversations older than N
+days" button. Deletion is therefore scoped to ``artifacts_dir`` (AIDA's own
+``~/.aida/artifacts/``) plus the conversation's sidecar folder and Markdown
+record under ``records_dir``; anything outside those is left untouched and
+reported in ``skipped_external_files``.
 """
 
 from __future__ import annotations
@@ -15,8 +34,21 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from aida.config.paths import artifacts_dir as default_artifacts_dir
 from aida.persistence.records import sidecar_dir
 from aida.persistence.store import ConversationStore, ConversationSummary
+
+
+def _is_inside(candidate: Path, root: Path) -> bool:
+    """Containment check on resolved paths, so neither a symlink nor a
+    ``..`` segment can make a user-owned file look like an AIDA-owned one.
+    ``strict=False`` because a recorded path may no longer exist."""
+    try:
+        resolved = candidate.expanduser().resolve(strict=False)
+        resolved_root = root.expanduser().resolve(strict=False)
+    except OSError:
+        return False
+    return resolved == resolved_root or resolved_root in resolved.parents
 
 
 @dataclass
@@ -27,6 +59,12 @@ class DeletionResult:
     deleted_artifact_files: list[str] = field(default_factory=list)
     deleted_sidecar_dir: bool = False
     deleted_record_file: bool = False
+    #: Recorded artifact paths that live outside AIDA's own storage — the
+    #: user's source files and the reports written into their target
+    #: folder. Left on disk on purpose (see the module docstring); surfaced
+    #: so a CLI/GUI can say "kept N of your own files" rather than staying
+    #: silent about the distinction.
+    skipped_external_files: list[str] = field(default_factory=list)
 
 
 def list_conversations_by_age(store: ConversationStore, *, oldest_first: bool = True) -> list[ConversationSummary]:
@@ -47,24 +85,40 @@ def list_conversations_older_than(store: ConversationStore, cutoff_iso: str) -> 
 
 
 def delete_conversation(
-    store: ConversationStore, conversation_id: str, *, records_dir: Path
+    store: ConversationStore,
+    conversation_id: str,
+    *,
+    records_dir: Path,
+    artifacts_dir: Path | None = None,
 ) -> DeletionResult:
-    """Delete a conversation's DB rows, its artifact files, its sidecar
-    image folder, and its Markdown record — in that order, DB rows last, so
-    a conversation is never left DB-referenced-but-files-gone or vice versa
-    for longer than necessary. Deleting a conversation that has already had
-    some of its files removed (e.g. a prior interrupted delete) is safe:
-    missing files are simply skipped rather than raising."""
+    """Delete a conversation's DB rows, its AIDA-owned artifact files, its
+    sidecar image folder, and its Markdown record — in that order, DB rows
+    last, so a conversation is never left DB-referenced-but-files-gone or
+    vice versa for longer than necessary. Deleting a conversation that has
+    already had some of its files removed (e.g. a prior interrupted delete)
+    is safe: missing files are simply skipped rather than raising.
+
+    ``artifacts_dir`` is the boundary of what this function may unlink,
+    defaulting to AIDA's own ``~/.aida/artifacts/``. Recorded paths outside
+    it are the user's own files, never deleted — see the module docstring
+    for why the ``artifacts`` table contains both kinds.
+    """
+    owned_root = artifacts_dir if artifacts_dir is not None else default_artifacts_dir()
     conversation = store.get_conversation(conversation_id)
     artifacts = store.load_artifacts(conversation_id)
 
     deleted_files: list[str] = []
+    skipped_files: list[str] = []
     for artifact in artifacts:
-        if artifact.path:
-            path = Path(artifact.path)
-            if path.exists():
-                path.unlink()
-                deleted_files.append(str(path))
+        if not artifact.path:
+            continue
+        path = Path(artifact.path)
+        if not _is_inside(path, owned_root):
+            skipped_files.append(str(path))
+            continue
+        if path.exists():
+            path.unlink()
+            deleted_files.append(str(path))
 
     deleted_sidecar = False
     deleted_record = False
@@ -89,6 +143,7 @@ def delete_conversation(
         deleted_artifact_files=deleted_files,
         deleted_sidecar_dir=deleted_sidecar,
         deleted_record_file=deleted_record,
+        skipped_external_files=skipped_files,
     )
 
 

@@ -5,6 +5,8 @@ secret store, and validate profiles with a doctor-style ping.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from dataclasses import dataclass
 
 from aida.config.secrets import get_secret
@@ -47,23 +49,58 @@ class ProfileValidation:
     detail: str
 
 
-async def validate_profile(profile: ProviderProfile) -> ProfileValidation:
+DEFAULT_PING_TIMEOUT_SECONDS = 10.0
+
+
+async def validate_profile(
+    profile: ProviderProfile, *, timeout: float = DEFAULT_PING_TIMEOUT_SECONDS
+) -> ProfileValidation:
     """Doctor-style check: can we even build and reach this profile's provider?
 
-    Never raises — construction errors (bad kind) and reachability failures
-    (ping() returning False) both come back as a non-ok ``ProfileValidation``.
+    Never raises — construction errors (bad kind), an unreachable endpoint
+    (``ping()`` returning False) and a hung one (no answer within
+    ``timeout``) all come back as a non-ok ``ProfileValidation``. The
+    timeout matters for the endpoints this is actually pointed at: a
+    not-running Ollama refuses fast, but an on-VPN-only host like the ANL
+    Argo proxy black-holes the connection when you're off-site, and
+    ``aida doctor`` must not hang there.
+
+    The provider is always closed before returning — it owns an ``httpx``
+    client, and leaving one open per validated profile produces spurious
+    "unclosed client" noise when the event loop tears down.
     """
     try:
         provider = build_provider(profile)
     except UnknownProviderKindError as exc:
         return ProfileValidation(name=profile.name, ok=False, detail=str(exc))
 
-    reachable = await provider.ping()
+    try:
+        reachable = await asyncio.wait_for(provider.ping(), timeout=timeout)
+    except TimeoutError:
+        return ProfileValidation(
+            name=profile.name,
+            ok=False,
+            detail=f"no response within {timeout:g}s ({profile.kind}, {profile.base_url or 'SDK default URL'})",
+        )
+    finally:
+        with contextlib.suppress(Exception):  # closing must never mask the result
+            await provider.aclose()
+
     if reachable:
-        return ProfileValidation(name=profile.name, ok=True, detail=f"reachable ({profile.kind})")
+        return ProfileValidation(
+            name=profile.name, ok=True, detail=f"reachable ({profile.kind}, model={profile.model or 'unset'})"
+        )
     return ProfileValidation(
-        name=profile.name, ok=False, detail=f"not reachable ({profile.kind}, {profile.base_url})"
+        name=profile.name,
+        ok=False,
+        detail=f"not reachable ({profile.kind}, {profile.base_url or 'SDK default URL'})",
     )
 
 
-__all__ = ["ProfileValidation", "UnknownProviderKindError", "build_provider", "validate_profile"]
+__all__ = [
+    "DEFAULT_PING_TIMEOUT_SECONDS",
+    "ProfileValidation",
+    "UnknownProviderKindError",
+    "build_provider",
+    "validate_profile",
+]

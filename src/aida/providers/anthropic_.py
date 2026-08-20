@@ -56,10 +56,32 @@ def to_anthropic_params(messages: list[Message]) -> tuple[str | None, list[dict[
     Anthropic takes the system prompt as a separate top-level parameter, not
     as a message in the list — any ``role="system"`` messages are pulled out
     and joined.
+
+    **Parallel tool calls are coalesced.** One assistant turn may contain
+    several ``tool_use`` blocks; AIDA's internal format then carries one
+    ``role="tool"`` ``Message`` per result, and the Anthropic API requires
+    every one of those results to come back in a *single* user message
+    holding several ``tool_result`` blocks. Emitting one user message per
+    result (which is what this did before) is not a hard API error — the
+    API combines consecutive same-role messages — but it does train the
+    model to stop issuing parallel tool calls at all, which matters here
+    precisely because pyIrena MCP work is full of "plot all of these"
+    fan-outs. So consecutive ``role="tool"`` messages are merged into one
+    user message, in order.
     """
     system_parts: list[str] = []
     out: list[dict[str, Any]] = []
+    pending_tool_results: list[dict[str, Any]] = []
+
+    def flush_tool_results() -> None:
+        if pending_tool_results:
+            out.append({"role": "user", "content": list(pending_tool_results)})
+            pending_tool_results.clear()
+
     for m in messages:
+        if m.role != "tool":
+            flush_tool_results()
+
         if m.role == "system":
             if m.content:
                 system_parts.append(m.content)
@@ -73,20 +95,20 @@ def to_anthropic_params(messages: list[Message]) -> tuple[str | None, list[dict[
                 )
             out.append({"role": "assistant", "content": content})
         elif m.role == "tool":
-            out.append(
+            pending_tool_results.append(
                 {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": m.tool_call_id,
-                            "content": m.content,
-                        }
-                    ],
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_call_id,
+                    # An empty tool_result content block is rejected by the
+                    # API; a tool that legitimately returned nothing still
+                    # needs to say so.
+                    "content": m.content or "(no output)",
                 }
             )
         else:
             out.append({"role": m.role, "content": m.content})
+
+    flush_tool_results()
     system = "\n\n---\n\n".join(system_parts) if system_parts else None
     return system, out
 

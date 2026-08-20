@@ -10,13 +10,35 @@ inventing a new one.
 
 from __future__ import annotations
 
+import filecmp
 import mimetypes
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from aida.artifacts.base import FileArtifact, ImageArtifact
-from aida.config.paths import artifacts_dir
+from aida.config.paths import artifacts_dir, unique_destination
+
+
+def _safe_filename(name: str | None, fallback: str) -> str:
+    """Reduce an artifact's suggested filename to a bare, harmless basename.
+
+    An artifact's ``filename`` is **not** trusted input: it can come
+    straight from an MCP server's content block (``ResourceLink.name``, or
+    the mime-derived name ``aida.mcp.results`` builds for audio), and a
+    third-party server is free to put ``../../..`` or an absolute path in
+    it. Verified: without this, ``filename="../../escaped.txt"`` wrote
+    outside ``~/.aida/artifacts/`` entirely. Anything that doesn't reduce to
+    a usable single path component falls back to the artifact id.
+    """
+    if not name:
+        return fallback
+    # PureWindowsPath-style separators too: an MCP server on Windows may
+    # hand back "dir\\file.png", which POSIX Path treats as one component.
+    candidate = Path(name.replace("\\", "/")).name.strip()
+    if not candidate or candidate in (".", ".."):
+        return fallback
+    return candidate
 
 
 @dataclass
@@ -39,21 +61,30 @@ class ArtifactStore:
 
     def save_image(self, artifact: ImageArtifact) -> ImageArtifact:
         """Write image bytes to disk (unless already saved) and record it.
-        Mutates and returns the same artifact with ``path`` set."""
+        Mutates and returns the same artifact with ``path`` set.
+
+        The destination is uniquified rather than overwritten: two artifacts
+        can easily arrive with the same suggested ``filename`` (the audio
+        name ``aida.mcp.results`` derives is a fixed ``audio.<subtype>``, and
+        an MCP server may reuse ``plot.png`` for every figure), and silently
+        replacing the first one's bytes would make an earlier artifact in
+        the same conversation render as a later, unrelated image.
+        """
         if artifact.path is None:
             ext = mimetypes.guess_extension(artifact.mime_type) or ".bin"
-            filename = artifact.filename or f"{artifact.id}{ext}"
-            dest = self.base_dir / filename
+            filename = _safe_filename(artifact.filename, f"{artifact.id}{ext}")
+            dest = unique_destination(self.base_dir / filename)
             dest.write_bytes(artifact.data)
             artifact.path = str(dest)
         self._record(artifact.id, "ImageArtifact", artifact.path, artifact.mime_type)
         return artifact
 
     def save_file(self, artifact: FileArtifact) -> FileArtifact:
-        """Write file bytes to disk if not already on disk, and record it."""
+        """Write file bytes to disk if not already on disk, and record it.
+        Same sanitized, collision-safe naming as ``save_image``."""
         if artifact.path is None and artifact.data is not None:
-            filename = artifact.filename or artifact.id
-            dest = self.base_dir / filename
+            filename = _safe_filename(artifact.filename, artifact.id)
+            dest = unique_destination(self.base_dir / filename)
             dest.write_bytes(artifact.data)
             artifact.path = str(dest)
         self._record(artifact.id, "FileArtifact", artifact.path, artifact.mime_type)
@@ -61,11 +92,31 @@ class ArtifactStore:
 
     def copy_to_target(self, artifact: ImageArtifact | FileArtifact, target_dir: Path) -> Path:
         """Copy an already-saved artifact into a workspace's target folder
-        (PLAN.md §6: generated files should land where the user asked)."""
+        (PLAN.md §6: generated files should land where the user asked).
+
+        Collision handling has to satisfy two callers with opposite needs,
+        which is why it keys off content rather than just the name:
+
+        - ``aida.persistence.records.write_transcript`` re-copies *the same*
+          artifacts into the same sidecar folder on every single transcript
+          export (i.e. after every message). It must stay idempotent —
+          uniquifying unconditionally would grow ``fig (1).png``,
+          ``fig (2).png``, ... without bound as a conversation runs.
+        - ``aida.documents.writers.md_obsidian`` embeds *different* images
+          into one report. Two of them can share a basename, and
+          overwriting there silently drops a figure from the report.
+
+        So: an existing destination with identical content is reused as-is;
+        an existing destination with *different* content gets a fresh
+        collision-safe name.
+        """
         if artifact.path is None:
             raise ValueError(f"artifact {artifact.id!r} has no path to copy — save() it first")
         target_dir.mkdir(parents=True, exist_ok=True)
-        dest = target_dir / Path(artifact.path).name
+        dest = target_dir / _safe_filename(Path(artifact.path).name, artifact.id)
+        if dest.exists() and filecmp.cmp(artifact.path, dest, shallow=False):
+            return dest  # same bytes already there — re-export, not a collision
+        dest = unique_destination(dest)
         shutil.copy2(artifact.path, dest)
         return dest
 

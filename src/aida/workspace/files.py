@@ -132,11 +132,12 @@ def _search_text_sync(
 ) -> list[list[Any]]:
     needle = query if case_sensitive else query.lower()
     rows: list[list[Any]] = []
+    truncated = False
     candidates = root.rglob("*") if recursive else root.glob("*")
 
     for path in sorted(candidates):
         if len(rows) >= max_matches:
-            rows.append([f"... [more matches truncated at {max_matches}]", "", ""])
+            truncated = True
             break
         if _TRASH_DIRNAME in path.relative_to(root).parts:
             continue
@@ -153,8 +154,15 @@ def _search_text_sync(
             if needle in haystack:
                 rows.append([str(path.relative_to(root)), line_no, line.strip()[:300]])
                 if len(rows) >= max_matches:
+                    truncated = True
                     break
 
+    # Appended once, here, rather than at the top of the outer loop: filling
+    # the quota on the *last* candidate file left the loop with nothing
+    # after it to notice, so the model was handed a silently-capped result
+    # set that looked complete. Matches _list_directory_sync/_find_files_sync.
+    if truncated:
+        rows.append([f"... [more matches truncated at {max_matches}]", "", ""])
     return rows
 
 

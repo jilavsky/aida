@@ -99,6 +99,15 @@ def cmd_delete(args: argparse.Namespace) -> int:
             f"record file {'removed' if result.deleted_record_file else 'not present'}, "
             f"sidecar dir {'removed' if result.deleted_sidecar_dir else 'not present'}"
         )
+        if result.skipped_external_files:
+            # Say so explicitly rather than leaving the user to wonder
+            # whether their own files went with the conversation.
+            print(
+                f"Kept {len(result.skipped_external_files)} file(s) in your own folders "
+                "(source documents and generated reports are never deleted with a conversation):"
+            )
+            for path in result.skipped_external_files:
+                print(f"  {path}")
         return 0
     finally:
         store.close()

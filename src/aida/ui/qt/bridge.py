@@ -107,6 +107,20 @@ class ChatBridge(QObject):
         self._loop_thread = loop_thread
         self.session: ChatSession | None = None
         self.mcp_manager: McpManager | None = None
+        # Startup is asynchronous, so a bridge can be asked to shut down
+        # while its session is still being built (the user switches
+        # workspace, or closes the window, before MCP servers finish
+        # launching). These two track that window: `_start_future` lets
+        # shutdown wait for the in-flight start instead of walking away
+        # from it, and `_closing` tells `_start` not to announce a session
+        # nobody wants any more. Without them, `shutdown()` returned
+        # immediately (session was still None), the start then completed
+        # unowned — leaking its MCP subprocesses and SQLite connection for
+        # the rest of the process's life — and emitted `session_ready` into
+        # a window that had already moved on to a different bridge.
+        self._start_future: concurrent.futures.Future | None = None
+        self._closing = False
+        self._closed = False
 
     # --- startup -----------------------------------------------------------
 
@@ -124,7 +138,9 @@ class ChatBridge(QObject):
         would just block invisibly on stdin here since the GUI has no
         terminal)."""
         start_session_kwargs.setdefault("confirm_callback", self._confirm)
-        asyncio.run_coroutine_threadsafe(self._start(settings, start_session_kwargs), self._loop_thread.loop)
+        self._start_future = asyncio.run_coroutine_threadsafe(
+            self._start(settings, start_session_kwargs), self._loop_thread.loop
+        )
 
     async def _confirm(self, request: ConfirmationRequest) -> bool:
         """The GUI's ``ConfirmCallback`` (Phase 6). Runs on the background
@@ -146,10 +162,17 @@ class ChatBridge(QObject):
         try:
             session, mcp_manager = await start_session(settings, **kwargs)
         except _STARTUP_ERRORS as exc:
-            self.startup_failed.emit(str(exc))
+            if not self._closing:
+                self.startup_failed.emit(str(exc))
             return
         self.session = session
         self.mcp_manager = mcp_manager
+        if self._closing:
+            # Shut down while we were starting: hand the finished session
+            # straight to the teardown path (which is awaiting this
+            # coroutine) instead of announcing it. Cleanup itself stays in
+            # `_shutdown` so there is exactly one close path.
+            return
         self.session_ready.emit()
 
     # --- turns ---------------------------------------------------------------
@@ -199,16 +222,32 @@ class ChatBridge(QObject):
     def shutdown(self, timeout: float = 5.0) -> None:
         """Close the session's provider/recorder/MCP connections on the
         background loop and block until done (or ``timeout``) — call this
-        before the app quits, from the Qt thread. Swallows errors: a failed
-        cleanup must never block the app from closing."""
-        if self.session is None:
-            return
+        before the app quits or before replacing this bridge, from the Qt
+        thread. Swallows errors: a failed cleanup must never block the app
+        from closing.
+
+        Deliberately *not* short-circuited on ``self.session is None``: a
+        session still being built is exactly the case that used to leak
+        (see ``__init__``). ``_shutdown`` waits for any in-flight start and
+        then closes whatever it produced."""
+        self._closing = True
         future = asyncio.run_coroutine_threadsafe(self._shutdown(), self._loop_thread.loop)
         with contextlib.suppress(Exception):  # best-effort cleanup on the way out
             future.result(timeout=timeout)
 
     async def _shutdown(self) -> None:
-        await self.session.aclose()
+        if self._start_future is not None:
+            # Runs on the same loop the start was scheduled on, so awaiting
+            # it here just yields until it finishes; errors were already
+            # handled inside _start.
+            with contextlib.suppress(Exception):
+                await asyncio.wrap_future(self._start_future)
+            self._start_future = None
+        if self._closed:
+            return  # idempotent: repeated shutdown() calls must not double-close
+        self._closed = True
+        if self.session is not None:
+            await self.session.aclose()
         if self.mcp_manager is not None:
             await self.mcp_manager.aclose()
 

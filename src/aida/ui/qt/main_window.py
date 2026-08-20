@@ -150,10 +150,32 @@ class MainWindow(QMainWindow):
         self.input_box.cancel_requested.connect(self.bridge.cancel)
         self.profile_selector.profile_changed.connect(self.bridge.switch_profile)
 
+    def _unwire_bridge_signals(self, bridge: ChatBridge) -> None:
+        """Undo ``_wire_bridge_signals`` for a bridge being retired, in both
+        directions: ``bridge.disconnect(self)`` drops the bridge's own
+        signals into this window, and the two explicit calls drop the
+        widget-to-bridge connections, where the *bridge* is the receiver and
+        so isn't covered by that first call."""
+        bridge.disconnect(self)
+        self.input_box.cancel_requested.disconnect(bridge.cancel)
+        self.profile_selector.profile_changed.disconnect(bridge.switch_profile)
+
     # --- session lifecycle -----------------------------------------------
 
     def _on_session_ready(self) -> None:
         session = self.bridge.session
+        if session is None:
+            # Defensive: every handler here reads through self.bridge, so a
+            # signal that arrives while the current bridge has no session
+            # (a superseded bridge finishing its start, a test driving the
+            # handler directly) used to raise AttributeError straight out of
+            # a Qt slot — leaving the window stuck on "Starting session…"
+            # with the sidebar, MCP panel and folder display never
+            # refreshed. _restart_session now disconnects superseded
+            # bridges, so this should be unreachable; it stays as a guard
+            # because a crash in a Qt slot is silent to the user.
+            self._logger.debug("session_ready with no active session — ignoring")
+            return
         self.statusBar().showMessage(f"Ready — {session.profile_name}", 5000)
         if session.recorder is not None:
             history = [m for m in session.messages if m.role != "system"]
@@ -385,7 +407,19 @@ class MainWindow(QMainWindow):
     def _restart_session(
         self, *, workspace_name: str | None, profile_name: str | None, resume_conversation_id: str | None
     ) -> None:
-        self.bridge.shutdown()
+        old_bridge = self.bridge
+        old_bridge.shutdown()  # waits for an in-flight start, then closes it
+        # Retire the old bridge completely before the new one exists: its
+        # signals are still connected to these same handlers, and every
+        # handler resolves state through `self.bridge`. A superseded bridge
+        # that emitted afterwards would therefore drive the window from the
+        # *wrong* session's data. deleteLater() (rather than just leaving it
+        # parented to the window) also stops one ChatBridge accumulating per
+        # workspace switch for the life of the app.
+        self._unwire_bridge_signals(old_bridge)
+        old_bridge.setParent(None)
+        old_bridge.deleteLater()
+
         self.chat_panel.clear()
         self.statusBar().showMessage("Starting session…")
         self.bridge = ChatBridge(self._loop_thread, self)

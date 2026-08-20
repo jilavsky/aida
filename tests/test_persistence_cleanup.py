@@ -60,7 +60,9 @@ def test_delete_conversation_leaves_no_orphan_artifact_file(tmp_path: Path):
     store.append_artifact_from_object(conv_id, art, call_id="call_1", timestamp=T_NEW)
     assert Path(art.path).exists()
 
-    result = delete_conversation(store, conv_id, records_dir=tmp_path / "records")
+    result = delete_conversation(
+        store, conv_id, records_dir=tmp_path / "records", artifacts_dir=tmp_path / "aida-artifacts"
+    )
 
     assert str(art.path) in result.deleted_artifact_files
     assert not Path(art.path).exists()
@@ -96,7 +98,9 @@ def test_delete_conversation_leaves_no_orphan_record_or_sidecar(tmp_path: Path):
     assert path.exists()
     assert sidecar_copy.exists()
 
-    result = delete_conversation(store, conv_id, records_dir=records_dir)
+    result = delete_conversation(
+        store, conv_id, records_dir=records_dir, artifacts_dir=tmp_path / "aida-artifacts"
+    )
 
     assert result.deleted_record_file is True
     assert result.deleted_sidecar_dir is True
@@ -118,7 +122,7 @@ def test_delete_conversation_does_not_affect_other_conversations_files(tmp_path:
     store.append_artifact_from_object(conv_a, art_a, call_id="call_a", timestamp=T_NEW)
     store.append_artifact_from_object(conv_b, art_b, call_id="call_b", timestamp=T_NEW)
 
-    delete_conversation(store, conv_a, records_dir=records_dir)
+    delete_conversation(store, conv_a, records_dir=records_dir, artifacts_dir=tmp_path / "aida-artifacts")
 
     assert not Path(art_a.path).exists()
     assert Path(art_b.path).exists()
@@ -134,7 +138,9 @@ def test_delete_conversation_missing_files_does_not_raise(tmp_path: Path):
 
     Path(art.path).unlink()  # simulate a prior partial cleanup
 
-    result = delete_conversation(store, conv_id, records_dir=tmp_path / "records")
+    result = delete_conversation(
+        store, conv_id, records_dir=tmp_path / "records", artifacts_dir=tmp_path / "aida-artifacts"
+    )
     assert result.deleted_artifact_files == []  # nothing to delete, no crash
     assert store.get_conversation(conv_id) is None
 

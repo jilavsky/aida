@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from aida.config.logging_setup import get_logger
+from aida.config.paths import unique_destination
 
 logger = get_logger("safety")
 
@@ -84,19 +85,11 @@ def normalize_path(path: str | Path) -> Path:
     return Path(path).expanduser().resolve(strict=False)
 
 
-def unique_destination(path: Path) -> Path:
-    """Collision-safe destination: ``name.ext`` -> ``name (1).ext`` ->
-    ``name (2).ext`` ... — used for both trash moves and any writer that
-    must never silently clobber an existing file."""
-    if not path.exists():
-        return path
-    stem, suffix, parent = path.stem, path.suffix, path.parent
-    counter = 1
-    while True:
-        candidate = parent / f"{stem} ({counter}){suffix}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
+# ``unique_destination`` is imported above and re-exported here (it stays in
+# this module's __all__) so existing importers — aida.documents.writers.*,
+# the safety tests — keep working unchanged. The definition moved to the
+# dependency-free aida.config.paths so aida.artifacts.store can use it too
+# without an import cycle; see its docstring there.
 
 
 @dataclass

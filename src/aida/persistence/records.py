@@ -57,9 +57,19 @@ def render_transcript(
     messages: list[Message],
     artifacts: list[ArtifactRecord],
     sidecar_dirname: str,
+    sidecar_filenames: dict[str, str] | None = None,
 ) -> str:
     """Render the full Markdown transcript text (no file I/O — callers that
-    also need to copy artifact files use ``write_transcript`` instead)."""
+    also need to copy artifact files use ``write_transcript`` instead).
+
+    ``sidecar_filenames`` maps artifact id -> the filename that artifact
+    actually ended up with inside the sidecar folder. It matters because
+    ``ArtifactStore.copy_to_target`` renames on a genuine collision (two
+    different images sharing a basename), so the source path's name is not
+    always the copy's name; ``write_transcript`` passes the real mapping.
+    Omitting it falls back to the source basename, which is correct
+    whenever no collision occurred.
+    """
     artifacts_by_call: dict[str, list[ArtifactRecord]] = {}
     for art in artifacts:
         if art.call_id:
@@ -90,7 +100,8 @@ def render_transcript(
         if message.role == "tool" and message.tool_call_id:
             for art in artifacts_by_call.get(message.tool_call_id, []):
                 if art.kind == "ImageArtifact" and art.path:
-                    rel = f"{sidecar_dirname}/{conversation_id[:8]}/{Path(art.path).name}"
+                    name = (sidecar_filenames or {}).get(art.id) or Path(art.path).name
+                    rel = f"{sidecar_dirname}/{conversation_id[:8]}/{name}"
                     lines.append(f"![{art.id}]({rel})")
                     lines.append("")
 
@@ -133,11 +144,16 @@ def write_transcript(
     # the image-copying mechanics, even though a transcript's own text
     # rendering (below, render_transcript) stays its own thing.
     placeholders = [
-        ImageArtifact(data=b"", mime_type=art.mime_type or "", path=art.path)
+        ImageArtifact(data=b"", id=art.id, mime_type=art.mime_type or "", path=art.path)
         for art in artifacts
         if art.kind == "ImageArtifact" and art.path and Path(art.path).exists()
     ]
-    copy_images_to_sidecar(placeholders, target_dir, artifact_store)
+    # Keyed by the *record's* artifact id (hence id=art.id above — a fresh
+    # placeholder would otherwise get a brand-new random id and the link
+    # lookup in render_transcript would never match), so the links below
+    # point at the filename each image actually got in the sidecar folder.
+    copied = copy_images_to_sidecar(placeholders, target_dir, artifact_store)
+    sidecar_filenames = {artifact_id: path.name for artifact_id, path in copied.items()}
 
     text = render_transcript(
         conversation_id=conversation_id,
@@ -147,6 +163,7 @@ def write_transcript(
         messages=messages,
         artifacts=artifacts,
         sidecar_dirname=sidecar_dirname,
+        sidecar_filenames=sidecar_filenames,
     )
     path.write_text(text, encoding="utf-8")
     return path

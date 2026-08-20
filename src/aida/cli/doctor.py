@@ -6,10 +6,11 @@ Reports, per PLAN.md Phase 1 acceptance criteria:
 - config file status/validity (config.yaml, providers.yaml, workspaces.yaml,
   mcp.json)
 - keyring availability
-- reachable provider endpoints (ping only — Phase 1 has no provider layer
-  yet, so this is a placeholder that reports "not configured" rather than
-  failing)
-- writable dirs (``~/.aida`` and its subdirectories, records dir)
+- reachable provider endpoints — a real per-profile check through the
+  provider layer (``aida.providers.profiles.validate_profile``), each under
+  its own timeout
+- writable dirs (``~/.aida`` and its subdirectories, and the *configured*
+  records dir)
 
 Designed to be used both as a CLI command and importable for tests: the
 report is built as a list of ``CheckResult`` and formatting is separate from
@@ -18,6 +19,7 @@ checking, so tests can assert on structured results without parsing text.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +27,7 @@ from pathlib import Path
 from aida.config import paths
 from aida.config.secrets import keyring_available
 from aida.config.settings import Settings, load_settings
+from aida.providers.profiles import ProfileValidation, validate_profile
 
 
 @dataclass
@@ -81,12 +84,23 @@ def _check_keyring() -> CheckResult:
 
 
 def _check_provider_endpoints(settings: Settings | None) -> list[CheckResult]:
-    """Ping-only checks for configured provider profiles.
+    """Real reachability checks for configured provider profiles.
 
-    Phase 1 ships no provider layer, so with zero profiles configured this
-    reports an informational pass rather than a failure — providers arrive
-    in Phase 2. If settings failed to load at all, that is already reported
-    by the ``config_files`` check, so this is skipped rather than duplicated.
+    This used to send a bare ``urllib`` HEAD request at each profile's
+    ``base_url`` and call any non-2xx "unreachable" — which reports a
+    perfectly healthy Ollama or LM Studio as broken (they answer 404/405 to
+    a HEAD on ``/v1``), and told you nothing at all about whether the model
+    name or the API key actually work. It also predated the provider layer
+    entirely: ``aida.providers.profiles.validate_profile`` has done this
+    properly since Phase 2, through each SDK's own client
+    (``models.list()`` for OpenAI-compatible endpoints, a 1-token message
+    for Anthropic/Argo), and was simply never wired in here.
+
+    Still best-effort and never raising: an unreachable or hung endpoint is
+    a reported failed check, not an exception, and each profile is checked
+    under its own timeout so one dead host can't stall the whole report.
+    If settings failed to load at all, that is already reported by the
+    ``config_files`` check, so this is skipped rather than duplicated.
     """
     if settings is None:
         return []
@@ -97,30 +111,29 @@ def _check_provider_endpoints(settings: Settings | None) -> list[CheckResult]:
             CheckResult(
                 "provider_endpoints",
                 True,
-                "no provider profiles configured yet (expected before Phase 2)",
+                "no provider profiles configured yet — add one with `aida config profile add`",
             )
         ]
 
-    results: list[CheckResult] = []
-    for name, profile in profiles.items():
-        # Ping-only, best-effort: Phase 1 does not depend on network access,
-        # so a failed/absent connection is reported, not raised.
-        try:
-            import urllib.request
+    async def _validate_all() -> list[ProfileValidation]:
+        return [await validate_profile(profile) for profile in profiles.values()]
 
-            if not profile.base_url:
-                results.append(
-                    CheckResult(f"provider:{name}", True, "no base_url set (SDK default)")
-                )
-                continue
-            req = urllib.request.Request(profile.base_url, method="HEAD")
-            urllib.request.urlopen(req, timeout=2)  # noqa: S310
-            results.append(CheckResult(f"provider:{name}", True, f"reachable: {profile.base_url}"))
-        except Exception as exc:  # noqa: BLE001
-            results.append(
-                CheckResult(f"provider:{name}", False, f"unreachable: {profile.base_url} ({exc})")
-            )
-    return results
+    try:
+        validations = asyncio.run(_validate_all())
+    except Exception as exc:  # noqa: BLE001 - doctor must never crash on a provider problem
+        return [CheckResult("provider_endpoints", False, f"provider check failed to run: {exc}")]
+
+    return [CheckResult(f"provider:{v.name}", v.ok, v.detail) for v in validations]
+
+
+def _effective_records_dir(settings: Settings | None) -> Path:
+    """The records dir the app will actually use — honoring
+    ``config.yaml``'s ``records_dir`` override. Checking the *default*
+    location instead (what this did before) reports "writable" for a
+    directory the user's config never touches, and stays silent about the
+    one it does."""
+    configured = settings.app.records_dir if settings is not None else None
+    return paths.ensure_records_dir(Path(configured) if configured else None)
 
 
 def run_checks() -> list[CheckResult]:
@@ -130,7 +143,7 @@ def run_checks() -> list[CheckResult]:
     results.append(_check_writable("app_dir", paths.app_dir()))
     results.append(_check_writable("logs_dir", paths.logs_dir()))
     results.append(_check_writable("artifacts_dir", paths.artifacts_dir()))
-    results.append(_check_writable("records_dir", paths.ensure_records_dir()))
+    results.append(_check_writable("records_dir", _effective_records_dir(settings)))
     results.append(_check_keyring())
     results.extend(_check_provider_endpoints(settings))
     return results
