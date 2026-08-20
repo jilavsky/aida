@@ -192,3 +192,50 @@ into a later turn with stale passages.
 
 **Verification:** 769 tests passing (`pytest -q`, up from 721 at the start of
 this phase), `ruff check .` clean, in this environment.
+
+---
+
+## Post-delivery bug fixes (real Obsidian vault + LM Studio usage)
+
+The user configured a real knowledge base — an Obsidian vault synced via
+iCloud Drive, LM Studio as a local embedding server — and hit "Rebuild"
+against it. Result: "added 0, updated 0, removed 0 (0 chunks written this
+pass)", no error anywhere, no server activity at all (confirmed against both
+the local LM Studio profile and an Argo embedding profile — ruling out a
+provider-specific problem). Diagnosed by reading the user's actual
+`~/.aida/knowledge.yaml` rather than guessing.
+
+1. **Root cause: a `file://` URI in `source_folders`, not a plain path.**
+   `knowledge.yaml` held
+   `file:///Users/.../iCloud~md~obsidian/Documents/.../USAXS notes/` — Obsidian's
+   (and many file managers') "Copy as URI"/"Copy Path" action produces a URI,
+   not a filesystem path, and `Path("file:///Users/...")` doesn't raise or
+   warn — it just isn't a directory, so `_discover_files` silently skipped
+   the whole folder. Every code path (GUI rebuild, `aida kb build`) discovers
+   files the same way, so this affected both. Fixed with a new
+   `aida.knowledge.rag.ingest.normalize_source_folder` (strips a `file://`
+   scheme, percent-decodes) applied: (a) at ingest time in `_discover_files`,
+   so an *already-saved* `file://` path starts working on the very next
+   rebuild with no re-entry needed; (b) at save time in
+   `KnowledgeBaseFormDialog.result_config()` and `aida kb add/edit`, so newly
+   saved configs store a clean path instead of a URI going forward.
+2. **Silent failure was the bigger problem than the URI parsing itself.** A
+   folder that's missing, mistyped, or (found while verifying the fix)
+   *unreadable* — a cloud-synced folder (iCloud Drive/OneDrive placeholder
+   mounts are the common case) can pass `Path.is_dir()` while still raising
+   `PermissionError` the moment something actually tries to list it — used to
+   produce the exact same "added 0" with zero indication why, regardless of
+   the URI bug. `IngestResult` gained `missing_folders: list[str]`, populated
+   by a new `_folder_is_usable()` check (exists *and* actually listable, not
+   just `is_dir()`) run before every build/update pass and surfaced as: a
+   `WARNING —` block in `aida kb build/update`'s output, and a
+   `QMessageBox.warning` in `KnowledgeManagementDialog` alongside the
+   existing added/updated/removed counts in the status line.
+3. Regression tests added at every layer this touched:
+   `test_knowledge_ingest.py` (URI stripping, percent-decoding, a
+   `file://`-configured folder that now ingests correctly, a genuinely
+   missing folder reported via `missing_folders`, and a chmod-simulated
+   unreadable folder), `test_kb_cmds.py` (`add` normalizes a `file://` folder,
+   `build` prints the warning), `tests/ui/test_knowledge_management_dialog.py`
+   (the form normalizes a pasted `file://` folder, rebuild against a missing
+   folder pops the warning dialog).

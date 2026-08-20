@@ -3,6 +3,8 @@ deterministic MockEmbeddings fake embedder, no network."""
 
 from __future__ import annotations
 
+import os
+import sys
 import time
 from pathlib import Path
 
@@ -10,7 +12,7 @@ import pytest
 
 from aida.config.settings import KnowledgeBaseConfig
 from aida.knowledge.rag import index as kb_index
-from aida.knowledge.rag.ingest import INGESTIBLE_SUFFIXES, rebuild, update
+from aida.knowledge.rag.ingest import INGESTIBLE_SUFFIXES, normalize_source_folder, rebuild, update
 from aida.providers.mock_embeddings import MockEmbeddings
 
 
@@ -144,3 +146,88 @@ async def test_ingest_skips_unreadable_file_without_aborting_the_pass(tmp_path: 
 def test_ingestible_suffixes_cover_planned_formats():
     for suffix in [".md", ".txt", ".rst", ".py", ".pdf", ".docx"]:
         assert suffix in INGESTIBLE_SUFFIXES
+
+
+# --- real-use bug: a `file://` URI pasted into source_folders ---------------
+# (Obsidian's "Copy as URI"/a file manager's "Copy Path" produces this; a
+# knowledge base configured with one silently indexed zero files, with no
+# error anywhere, because Path("file:///Users/...").is_dir() is just False.)
+
+
+def test_normalize_source_folder_strips_file_uri_scheme():
+    assert normalize_source_folder("file:///Users/jan/notes") == "/Users/jan/notes"
+
+
+def test_normalize_source_folder_percent_decodes():
+    assert normalize_source_folder("file:///Users/jan/USAXS%20notes") == "/Users/jan/USAXS notes"
+
+
+def test_normalize_source_folder_leaves_plain_path_alone():
+    assert normalize_source_folder("/Users/jan/notes") == "/Users/jan/notes"
+    assert normalize_source_folder("  /Users/jan/notes  ") == "/Users/jan/notes"
+
+
+@pytest.mark.asyncio
+async def test_rebuild_ingests_a_folder_configured_as_a_file_uri(tmp_path: Path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "a.md").write_text("# A\n\nContent A.")
+
+    conn = kb_index.connect(tmp_path / "kb.db")
+    kb = _kb(corpus, source_folders=[f"file://{corpus}"])
+    result = await rebuild(conn, kb, MockEmbeddings())
+
+    assert len(result.added_files) == 1
+    assert result.missing_folders == []
+    conn.close()
+
+
+@pytest.mark.asyncio
+async def test_rebuild_reports_a_folder_that_does_not_exist(tmp_path: Path):
+    missing = tmp_path / "does-not-exist"
+    conn = kb_index.connect(tmp_path / "kb.db")
+    result = await rebuild(conn, _kb(missing), MockEmbeddings())
+
+    assert result.missing_folders == [str(missing)]
+    assert result.added_files == []
+    assert result.chunk_count == 0
+
+
+@pytest.mark.asyncio
+async def test_rebuild_with_one_good_and_one_missing_folder_ingests_the_good_one(tmp_path: Path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "a.md").write_text("# A\n\nContent A.")
+    missing = tmp_path / "does-not-exist"
+
+    conn = kb_index.connect(tmp_path / "kb.db")
+    kb = _kb(corpus, source_folders=[str(corpus), str(missing)])
+    result = await rebuild(conn, kb, MockEmbeddings())
+
+    assert len(result.added_files) == 1
+    assert result.missing_folders == [str(missing)]
+    conn.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="chmod-based permission denial isn't meaningful on Windows")
+@pytest.mark.asyncio
+async def test_rebuild_reports_a_folder_it_cannot_actually_list(tmp_path: Path):
+    """A folder can pass `is_dir()` while still being unreadable — the case
+    found investigating a real report: a cloud-synced (iCloud Drive)
+    Obsidian vault raised `PermissionError` the moment something tried to
+    enumerate it, well after the `file://` URI bug (fixed separately) had
+    already been ruled out. Simulated here with chmod rather than an actual
+    cloud mount."""
+    unreadable = tmp_path / "unreadable"
+    unreadable.mkdir()
+    (unreadable / "a.md").write_text("# A\n\nContent A.")
+    os.chmod(unreadable, 0o000)
+    try:
+        conn = kb_index.connect(tmp_path / "kb.db")
+        result = await rebuild(conn, _kb(unreadable), MockEmbeddings())
+
+        assert result.missing_folders == [str(unreadable)]
+        assert result.added_files == []
+        conn.close()
+    finally:
+        os.chmod(unreadable, 0o755)  # so tmp_path cleanup can actually remove it

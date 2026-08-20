@@ -23,7 +23,7 @@ import contextlib
 from aida.config.paths import knowledge_db_path
 from aida.config.settings import KnowledgeBaseConfig, Settings, save_knowledge_config
 from aida.knowledge.rag import index as kb_index
-from aida.knowledge.rag.ingest import IngestResult
+from aida.knowledge.rag.ingest import IngestResult, normalize_source_folder
 from aida.ui.qt._qt import (
     QAbstractItemView,
     QComboBox,
@@ -119,9 +119,18 @@ class KnowledgeBaseFormDialog(QDialog):
         self.accept()
 
     def result_config(self) -> KnowledgeBaseConfig:
+        # Bug report: a folder path pasted from a file manager's "Copy as
+        # URI" action (e.g. Obsidian) comes through as `file:///...`, which
+        # silently failed to resolve as a directory at ingest time with no
+        # error anywhere. Normalizing here means a saved config always
+        # holds a plain path — the "Details" panel and knowledge.yaml both
+        # show something a user recognizes, not a raw URI.
+        source_folders = [
+            normalize_source_folder(line) for line in self._folders_edit.toPlainText().splitlines() if line.strip()
+        ]
         return KnowledgeBaseConfig(
             name=self._name_edit.text().strip(),
-            source_folders=[line.strip() for line in self._folders_edit.toPlainText().splitlines() if line.strip()],
+            source_folders=source_folders,
             embedding_profile=self._profile_combo.currentText() or None,
             chunk_size=self._chunk_size_spin.value(),
             chunk_overlap=self._chunk_overlap_spin.value(),
@@ -327,6 +336,17 @@ class KnowledgeManagementDialog(QDialog):
             f"removed {len(result.removed_files)}, skipped {len(result.skipped_files)} "
             f"({result.chunk_count} chunk(s) written this pass)"
         )
+        if result.missing_folders:
+            # Real-use bug: a source folder that doesn't resolve to a real
+            # directory (typo, deleted folder, or a `file://` URI pasted
+            # from a file manager) used to fail with zero indication why —
+            # "added 0" and nothing else. This is the fix's user-facing half.
+            QMessageBox.warning(
+                self,
+                "Source Folder Not Found",
+                f"{name}: the following source folder(s) don't exist — nothing was indexed from them:\n\n"
+                + "\n".join(result.missing_folders),
+            )
         self._refresh_kb_list()
 
     def _on_ingest_failed(self, name: str, error: str) -> None:

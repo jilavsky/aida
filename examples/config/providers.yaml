@@ -30,3 +30,31 @@ profiles:
     model: "claude-sonnet"
     secret_ref: "claude-direct"  # `aida config secret set claude-direct <api key>`
     capability_notes: ""
+
+# Embedding profiles (Phase 8, RAG knowledge bases) — a separate list from
+# `profiles:` above because an embedding model isn't a chat model: it turns
+# text into vectors, it's what a knowledge base's `embedding_profile:` field
+# (in knowledge.yaml) points at, and re-querying an index with a *different*
+# embedding_profiles entry than the one that built it is refused (different
+# models' vector spaces aren't comparable). Only `kind: openai_compat` exists
+# today — it covers Ollama, LM Studio, OpenAI, and Argo's cloud embeddings
+# proxy alike, same as `profiles:` above for chat. There is no "anthropic"
+# embeddings kind: Anthropic has no first-party embeddings API.
+embedding_profiles:
+  # A local embedding model served through Ollama's OpenAI-compatible
+  # endpoint. Pull it once with `ollama pull nomic-embed-text`.
+  ollama-embed:
+    kind: openai_compat
+    base_url: "http://localhost:11434/v1"
+    model: "nomic-embed-text"
+    secret_ref: null            # local endpoints often need no key
+    capability_notes: "local embeddings — no data leaves the machine"
+
+  # OpenAI's own embeddings endpoint via the ANL Argo proxy (BeamlineAdvisor
+  # precedent: text-embedding-3-small via proxy).
+  argo-embed:
+    kind: openai_compat
+    base_url: "https://apps.inside.anl.gov/argoapi/v1"
+    model: "text-embedding-3-small"
+    secret_ref: "argo-embed"    # `aida config secret set argo-embed <ANL username>`
+    capability_notes: "cloud embeddings via institutional proxy"

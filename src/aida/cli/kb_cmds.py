@@ -22,14 +22,18 @@ from aida.config.settings import (
     save_knowledge_config,
 )
 from aida.knowledge.rag import index as kb_index
+from aida.knowledge.rag.ingest import normalize_source_folder
 from aida.knowledge.rag.ingest import rebuild as ingest_rebuild
 from aida.knowledge.rag.ingest import update as ingest_update
 from aida.knowledge.rag.retrieval import EmbeddingProfileMismatchError, retrieve
 from aida.providers.profiles import UnknownProviderKindError, build_embeddings_provider
 
 
-def _split_csv(value: str) -> list[str]:
-    return [item.strip() for item in value.split(",") if item.strip()]
+def _split_folders_csv(value: str) -> list[str]:
+    # Normalizes each entry — a folder pasted as a `file://` URI (a real
+    # bug report: Obsidian's "Copy as URI" action) used to silently ingest
+    # zero files with no error anywhere. See ingest.normalize_source_folder.
+    return [normalize_source_folder(item) for item in value.split(",") if item.strip()]
 
 
 def _get_kb(settings: Settings, name: str) -> KnowledgeBaseConfig | None:
@@ -83,7 +87,7 @@ def cmd_add(args: argparse.Namespace) -> int:
 
     kb = KnowledgeBaseConfig(
         name=args.name,
-        source_folders=_split_csv(args.source_folders or ""),
+        source_folders=_split_folders_csv(args.source_folders or ""),
         embedding_profile=args.embedding_profile or None,
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
@@ -103,7 +107,7 @@ def cmd_edit(args: argparse.Namespace) -> int:
 
     updated = KnowledgeBaseConfig(
         name=args.name,
-        source_folders=_split_csv(args.source_folders) if args.source_folders is not None else existing.source_folders,
+        source_folders=_split_folders_csv(args.source_folders) if args.source_folders is not None else existing.source_folders,
         embedding_profile=args.embedding_profile if args.embedding_profile is not None else existing.embedding_profile,
         chunk_size=args.chunk_size if args.chunk_size is not None else existing.chunk_size,
         chunk_overlap=args.chunk_overlap if args.chunk_overlap is not None else existing.chunk_overlap,
@@ -157,6 +161,10 @@ def _resolve_embeddings_provider(settings: Settings, kb: KnowledgeBaseConfig):
 
 
 def _print_ingest_result(result) -> None:
+    if result.missing_folders:
+        print(f"  WARNING — source folder(s) not found, nothing indexed from them ({len(result.missing_folders)}):")
+        for folder in result.missing_folders:
+            print(f"    {folder}")
     print(f"  added:   {len(result.added_files)}")
     print(f"  updated: {len(result.updated_files)}")
     print(f"  removed: {len(result.removed_files)}")

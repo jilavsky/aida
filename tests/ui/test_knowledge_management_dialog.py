@@ -173,6 +173,18 @@ def test_add_without_any_embedding_profile_configured_warns(qapp, aida_home: Pat
     assert dialog._kb_list.count() == 0
 
 
+def test_form_normalizes_a_file_uri_source_folder(qapp, aida_home: Path):
+    """Real-use bug: pasting a folder path copied via a file manager's
+    "Copy as URI" action (Obsidian's among them) came through as
+    `file:///Users/...`, which silently indexed zero files at build time
+    with no error anywhere. The form now normalizes it to a plain path at
+    save time, same as the CLI's `aida kb add/edit`."""
+    form = KnowledgeBaseFormDialog(embedding_profile_names=["embed-profile"])
+    form._folders_edit.setPlainText("file:///data/usaxs")
+    config = form.result_config()
+    assert config.source_folders == ["/data/usaxs"]
+
+
 # --- live rebuild/update against a real ChatBridge + MockEmbeddings ---------
 
 
@@ -240,6 +252,39 @@ def test_rebuild_with_unbuildable_embedding_profile_reports_failure(
         dialog._on_rebuild()
 
         assert pump_until(qapp, lambda: "FAILED" in dialog._status_label.text(), timeout=10.0)
+    finally:
+        bridge.shutdown()
+
+
+def test_rebuild_with_a_missing_source_folder_warns_instead_of_silently_no_oping(
+    qapp, loop_thread, aida_home: Path, records_home: Path, tmp_path: Path, monkeypatch
+):
+    """Real-use bug: a source folder that doesn't resolve to a real
+    directory (in the original report, a `file://` URI) used to produce
+    "added 0, updated 0" with zero indication why. A rebuild against a
+    knowledge base with a missing folder must now pop an explicit
+    warning."""
+    monkeypatch.setattr("aida.ui.qt.bridge.build_embeddings_provider", lambda profile: MockEmbeddings())
+    missing = tmp_path / "does-not-exist"
+
+    settings = _settings_with_embedding_profile()
+    settings.knowledge = KnowledgeConfig(
+        knowledge_bases={
+            "usaxs-docs": KnowledgeBaseConfig(
+                name="usaxs-docs", source_folders=[str(missing)], embedding_profile="embed-profile"
+            )
+        }
+    )
+    bridge = _make_bridge(qapp, loop_thread, settings, monkeypatch)
+    dialog = KnowledgeManagementDialog(settings, bridge)
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(True))
+    try:
+        dialog._kb_list.setCurrentRow(0)
+        dialog._on_rebuild()
+
+        assert pump_until(qapp, lambda: "added 0" in dialog._status_label.text(), timeout=10.0)
+        assert warned == [True]
     finally:
         bridge.shutdown()
 

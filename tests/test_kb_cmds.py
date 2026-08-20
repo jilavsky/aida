@@ -249,6 +249,29 @@ def test_query_unknown_kb(aida_home: Path, capsys):
     assert "Unknown knowledge base" in capsys.readouterr().out
 
 
+# --- real-use bug: a `file://` URI pasted into --source-folders ------------
+
+
+def test_add_normalizes_a_file_uri_source_folder(aida_home: Path):
+    main(["add", "usaxs-docs", "--source-folders", "file:///data/usaxs"])
+    kb = load_knowledge_config(aida_home).knowledge_bases["usaxs-docs"]
+    assert kb.source_folders == ["/data/usaxs"]
+
+
+def test_build_warns_about_a_missing_source_folder(monkeypatch, aida_home: Path, tmp_path: Path, capsys):
+    monkeypatch.setattr("aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings())
+    _configure_embedding_profile(aida_home)
+    missing = tmp_path / "does-not-exist"
+
+    main(["add", "usaxs-docs", "--source-folders", str(missing), "--embedding-profile", "embed-profile"])
+    rc = main(["build", "usaxs-docs"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert str(missing) in out
+    assert "added:   0" in out
+
+
 # --- required subcommand -----------------------------------------------------
 
 

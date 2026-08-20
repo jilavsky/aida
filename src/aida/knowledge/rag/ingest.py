@@ -13,6 +13,7 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from aida.artifacts.base import JsonArtifact, TableArtifact, TextArtifact
 from aida.config.settings import KnowledgeBaseConfig
@@ -52,6 +53,16 @@ class IngestResult:
     #: Unreadable files are recorded, not silently dropped — but don't
     #: abort the rest of the pass over one bad file.
     skipped_files: list[str] = field(default_factory=list)
+    #: Real-use bug: a configured source folder that doesn't resolve to a
+    #: real, listable directory — a typo, a folder later deleted/unmounted,
+    #: a permissions error on a cloud-synced folder (iCloud Drive/OneDrive
+    #: placeholder mounts are the common case), or — the case that actually
+    #: surfaced this — a `file://` URI pasted from a file manager's "Copy
+    #: as URI"/"Copy Path" action. All used to fail completely silently:
+    #: `_discover_files` just skipped the folder, so a build reported
+    #: "added 0, updated 0" with no indication why. Recorded here so the
+    #: CLI/GUI can print an actionable warning instead.
+    missing_folders: list[str] = field(default_factory=list)
     chunk_count: int = 0
 
 
@@ -71,16 +82,61 @@ def _extract_text(path: Path) -> str:
     return "\n\n".join(parts)
 
 
+def normalize_source_folder(raw: str) -> str:
+    """Accept a plain filesystem path or a ``file://`` URI. Several file
+    managers' "Copy as URI"/"Copy Path" actions (Obsidian's among them)
+    produce a ``file://...`` string rather than a plain path — pasted
+    verbatim into a source-folders field, ``Path("file:///Users/...")``
+    silently fails ``.is_dir()`` (it's not a valid relative path, but it's
+    not an error either), so the whole folder was skipped with zero
+    indication why. Percent-decoded too, since a real OS-generated URI
+    encodes spaces/unicode in the path."""
+    raw = raw.strip()
+    if raw.startswith("file://"):
+        return unquote(urlparse(raw).path)
+    return raw
+
+
+def _resolved_folder(folder: str) -> Path:
+    return Path(normalize_source_folder(folder)).expanduser()
+
+
+def _folder_is_usable(root: Path) -> bool:
+    """A folder is usable if it exists *and* can actually be listed. A
+    cloud-synced vault (iCloud Drive, OneDrive, ...) can pass ``is_dir()``
+    while still raising a permission error the moment something tries to
+    enumerate it — a placeholder-mount quirk, or a folder the OS hasn't
+    granted this process access to (macOS TCC being the common case).
+    Treated the same as "doesn't exist" — both end in "nothing was indexed
+    from this folder", and the fix (grant access / check the path) is the
+    same shape either way."""
+    if not root.is_dir():
+        return False
+    try:
+        next(root.iterdir(), None)
+    except OSError:
+        return False
+    return True
+
+
+def _missing_source_folders(source_folders: list[str]) -> list[str]:
+    """Which configured source folders don't resolve to a real, listable
+    directory — see ``IngestResult.missing_folders``'s docstring."""
+    return [folder for folder in source_folders if not _folder_is_usable(_resolved_folder(folder))]
+
+
 def _discover_files(source_folders: list[str]) -> list[Path]:
     files: list[Path] = []
     for folder in source_folders:
-        root = Path(folder).expanduser()
-        if not root.is_dir():
+        root = _resolved_folder(folder)
+        if not _folder_is_usable(root):
             continue
+        try:
+            candidates = sorted(root.rglob("*"))
+        except OSError:
+            continue  # a subfolder lost access mid-walk — reported via missing_folders, not raised here
         files.extend(
-            path
-            for path in sorted(root.rglob("*"))
-            if path.is_file() and path.suffix.lower() in INGESTIBLE_SUFFIXES
+            path for path in candidates if path.is_file() and path.suffix.lower() in INGESTIBLE_SUFFIXES
         )
     return files
 
@@ -118,6 +174,7 @@ async def _run_ingest(
     conn: sqlite3.Connection, kb: KnowledgeBaseConfig, embeddings_provider: EmbeddingsProvider, *, force: bool
 ) -> IngestResult:
     result = IngestResult()
+    result.missing_folders = _missing_source_folders(kb.source_folders)
     indexed_mtimes = kb_index.indexed_source_mtimes(conn)
     seen_paths: set[str] = set()
 
@@ -169,4 +226,4 @@ async def update(
     return await _run_ingest(conn, kb, embeddings_provider, force=False)
 
 
-__all__ = ["INGESTIBLE_SUFFIXES", "IngestResult", "rebuild", "update"]
+__all__ = ["INGESTIBLE_SUFFIXES", "IngestResult", "normalize_source_folder", "rebuild", "update"]
