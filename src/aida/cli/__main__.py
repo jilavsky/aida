@@ -25,7 +25,7 @@ _COMMANDS = {
     "conversations": "List/resume/delete/export persisted conversations (Phase 4)",
     "workspace": "List/show/create/edit named workspaces (Phase 4)",
     "run": "Run a stored workflow headlessly (Phase 10)",
-    "config": "Show on-device config locations",
+    "config": "Show on-device config locations; `config secret set/get/delete` manages OS-keychain secrets",
 }
 
 

@@ -71,6 +71,85 @@ def test_tool_call_started_then_finished_updates_same_row(qapp):
     assert row.is_error is False
 
 
+# --- bug report: no empty assistant bubble for a text-less tool-call turn -
+
+
+def test_text_less_tool_call_turn_produces_no_empty_bubble(qapp):
+    """Real streaming providers (e.g. Anthropic) emit TextStarted at the
+    top of every turn, even a turn that's purely a tool call — followed by
+    TextFinished(text=""). Previously this created an empty MessageBubble
+    before every single tool call; multiple tool calls in a row produced a
+    confusing string of empty boxes interleaved with the tool rows."""
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(ToolCallStarted(call_id="c1", tool_name="get_time", arguments={}))
+    panel.handle_event(TextFinished(message_id="m1", text=""))
+    panel.handle_event(MessageFinished(message_id="m1", stop_reason="tool_calls"))
+    panel.handle_event(ToolCallFinished(call_id="c1", tool_name="get_time", result="now", is_error=False))
+
+    panel.handle_event(TextStarted(message_id="m2"))
+    panel.handle_event(ToolCallStarted(call_id="c2", tool_name="get_date", arguments={}))
+    panel.handle_event(TextFinished(message_id="m2", text=""))
+    panel.handle_event(MessageFinished(message_id="m2", stop_reason="tool_calls"))
+    panel.handle_event(ToolCallFinished(call_id="c2", tool_name="get_date", result="today", is_error=False))
+
+    kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
+    assert kinds == ["ToolCallRow", "ToolCallRow"]  # no MessageBubble at all
+
+
+def test_text_finished_with_text_but_no_deltas_still_shows_a_bubble(qapp):
+    """Belt-and-suspenders for a hypothetical non-streaming provider path:
+    if TextFinished ever arrives with real text but no TextDelta preceded
+    it, that text must still be shown — only a genuinely empty turn should
+    produce nothing."""
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextFinished(message_id="m1", text="final answer, no deltas"))
+
+    assert panel.widget_count == 1
+    bubble = panel.widget_at(0)
+    assert isinstance(bubble, MessageBubble)
+    assert bubble.text == "final answer, no deltas"
+
+
+# --- bug report: borderless/continuous-flow styling, auto-height text -----
+
+
+def test_user_bubble_has_a_background_assistant_bubble_does_not(qapp):
+    panel = ChatPanel()
+    user_bubble = panel.add_user_message("hi")
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextDelta(message_id="m1", text="hello"))
+    panel.handle_event(TextFinished(message_id="m1", text="hello"))
+    assistant_bubble = panel.widget_at(1)
+
+    assert "background-color" in user_bubble.styleSheet()
+    assert "background-color" not in assistant_bubble.styleSheet()
+    assert "background: transparent" in assistant_bubble.styleSheet()
+
+
+def test_message_bubble_text_view_has_no_frame_or_internal_scrollbar(qapp):
+    from aida.ui.qt._qt import QFrame, Qt
+
+    panel = ChatPanel()
+    bubble = panel.add_user_message("hi")
+    assert bubble._view.frameShape() == QFrame.Shape.NoFrame
+    assert bubble._view.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+
+def test_message_bubble_view_grows_taller_for_more_content(qapp):
+    panel = ChatPanel()
+    short_bubble = panel.add_user_message("one line")
+    long_bubble = panel.add_user_message("line\n" * 40)
+
+    # Force a layout pass so the auto-height recalculation (tied to the
+    # document's layout, which needs a real width) has taken effect.
+    panel.show()
+    qapp.processEvents()
+
+    assert long_bubble._view.height() > short_bubble._view.height()
+
+
 def test_image_artifact_created_adds_inline_image(qapp, tmp_path: Path):
     png_path = tmp_path / "plot.png"
     png_path.write_bytes(TINY_PNG_BYTES)

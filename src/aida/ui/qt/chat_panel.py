@@ -23,6 +23,7 @@ from aida.ui.qt._qt import (
     QLabel,
     QPushButton,
     QScrollArea,
+    Qt,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -31,11 +32,56 @@ from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
 from aida.ui.qt.tool_call_widget import ToolCallRow
 
 
+class _AutoHeightTextBrowser(QTextBrowser):
+    """A ``QTextBrowser`` that grows to fit its content instead of
+    scrolling internally — bug report: "the box has a fixed height and if
+    the reply is larger, it is impossible to read without scrolling; make
+    the box automatically adjust the height." ``ChatPanel``'s own
+    ``QScrollArea`` already scrolls the whole conversation; a second,
+    internally-scrolling viewport per message just hides most of a long
+    reply behind a tiny fixed-size window and adds a confusing second
+    scrollbar. Also borderless/transparent by default (see ``MessageBubble``
+    below for why) — a plain ``QTextBrowser`` paints its own sunken-panel
+    frame and opaque background, which is the actual source of each
+    message looking like its own separate "box"."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
+        self.document().documentLayout().documentSizeChanged.connect(self._recalculate_height)
+        self._recalculate_height()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        # Word-wrapped text's height depends on the available width, so a
+        # width change (e.g. the user resizing the window/splitter) needs
+        # the same recalculation a content change does.
+        super().resizeEvent(event)
+        self._recalculate_height()
+
+    def _recalculate_height(self, *_args: object) -> None:
+        height = self.document().size().height()
+        margins = self.contentsMargins()
+        self.setFixedHeight(int(height) + margins.top() + margins.bottom() + 4)
+
+
 class MessageBubble(QFrame):
     """One user/assistant turn. Assistant turns are built incrementally
     (``append_delta`` per ``TextDelta``, ``set_text`` with the final full
     text on ``TextFinished``); a user turn or a resumed history message is
-    just ``set_text`` once."""
+    just ``set_text`` once.
+
+    Styling (bug report: "the box with agent reply... did not have borders
+    and was invisible to user. Just have user question/prompt to be
+    visibly different style, agent replies should look like continuous
+    flow of replies"): only the user's own turns get a background box;
+    assistant turns are fully transparent/borderless so consecutive
+    replies (interleaved with tool-call rows, images, etc.) read as one
+    continuous flow rather than a stack of separate panels. Uses Qt's
+    dynamic ``palette(...)`` roles rather than a hardcoded color so it
+    still looks right in both light and dark system themes."""
 
     def __init__(self, role: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -49,24 +95,37 @@ class MessageBubble(QFrame):
         role_label.setStyleSheet("font-weight: bold; color: gray; font-size: 10px;")
         header.addWidget(role_label)
         header.addStretch(1)
-        # "code blocks monospaced with copy button" (PLAN.md): Qt's rich
-        # text engine renders Markdown code fences monospaced on its own,
-        # but doesn't expose per-block widgets to attach a button to
-        # without hand-rolling text-object embedding — one whole-message
-        # Copy button (copies the raw source, code fences included) is v1's
-        # pragmatic equivalent, same trade-off as everywhere else in this
-        # phase that favors a plain callable method over a fragile
-        # click-simulation-only affordance.
-        self._copy_button = QPushButton("Copy", self)
-        self._copy_button.setFixedWidth(50)
+        # "code blocks monospaced with copy button" (PLAN.md), plus "is
+        # there a way to add that nice 'copy content' button" (bug
+        # report): a flat, borderless, low-visual-weight button — closer
+        # to the small icon-style copy affordance other chat UIs use than
+        # a boxy toolbar button — so it doesn't fight the "continuous
+        # flow, no boxes" styling above. Copies the raw Markdown source
+        # (code fences included), same v1 whole-message scope as before.
+        self._copy_button = QPushButton("⧉ Copy", self)
+        self._copy_button.setFlat(True)
+        self._copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_button.setStyleSheet(
+            "QPushButton { border: none; background: transparent; color: gray; font-size: 10px; }"
+            "QPushButton:hover { color: palette(text); text-decoration: underline; }"
+        )
         self._copy_button.clicked.connect(self.copy_to_clipboard)
         header.addWidget(self._copy_button)
         layout.addLayout(header)
 
-        self._view = QTextBrowser(self)
+        self._view = _AutoHeightTextBrowser(self)
         self._view.setReadOnly(True)
         self._view.setOpenExternalLinks(True)
         layout.addWidget(self._view)
+
+        if role == "user":
+            self.setStyleSheet(
+                "MessageBubble { background-color: palette(alternate-base); border-radius: 8px; }"
+            )
+            layout.setContentsMargins(10, 6, 10, 8)
+        else:
+            self.setStyleSheet("MessageBubble { background: transparent; border: none; }")
+            layout.setContentsMargins(2, 4, 2, 4)
 
     def copy_to_clipboard(self) -> None:
         QGuiApplication.clipboard().setText(self._raw_text)
@@ -174,15 +233,34 @@ class ChatPanel(QWidget):
         name = type(event).__name__
 
         if name == "TextStarted":
-            self._current_assistant_bubble = MessageBubble("assistant", self._content)
-            self._append_widget(self._current_assistant_bubble)
+            # Bug report: "if agent calls tools, I can see the call and
+            # then empty box when agent keeps calling multiple tools... it
+            # is impossible to follow." Real streaming providers always
+            # emit TextStarted at the top of *every* assistant turn (e.g.
+            # Anthropic's message_start), even a turn that's purely a tool
+            # call with no text at all — TextFinished then arrives with
+            # text="". Creating the bubble eagerly here meant a fresh empty
+            # box appeared before every single tool call. Deferred to the
+            # first TextDelta (or, failing that, TextFinished with actual
+            # text) instead — a text-less turn now produces no bubble at
+            # all, so multi-tool-call turns show only the tool rows.
+            self._current_assistant_bubble = None
         elif name == "TextDelta":
-            if self._current_assistant_bubble is not None:
-                self._current_assistant_bubble.append_delta(event.text)
-                self._scroll_to_bottom()
+            if self._current_assistant_bubble is None:
+                self._current_assistant_bubble = MessageBubble("assistant", self._content)
+                self._append_widget(self._current_assistant_bubble)
+            self._current_assistant_bubble.append_delta(event.text)
+            self._scroll_to_bottom()
         elif name == "TextFinished":
             if self._current_assistant_bubble is not None:
                 self._current_assistant_bubble.set_text(event.text)
+            elif event.text:
+                # No TextDelta arrived (a non-streaming provider path) but
+                # there's real final text — still show it, just not an
+                # empty bubble for a text-less tool-call turn.
+                bubble = MessageBubble("assistant", self._content)
+                bubble.set_text(event.text)
+                self._append_widget(bubble)
             self._current_assistant_bubble = None
         elif name == "ToolCallStarted":
             row = ToolCallRow(
