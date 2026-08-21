@@ -42,6 +42,7 @@ from aida.ui.qt._qt import (
 from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
 from aida.ui.qt.bridge import AsyncLoopThread, ChatBridge
 from aida.ui.qt.chat_panel import ChatPanel
+from aida.ui.qt.code_editor_dialog import CodeEditorDialog
 from aida.ui.qt.conversations_sidebar import ConversationsSidebar
 from aida.ui.qt.icon import app_icon
 from aida.ui.qt.input_box import InputBox
@@ -107,6 +108,11 @@ class MainWindow(QMainWindow):
         new_chat_action.triggered.connect(self._on_new_chat_requested)
         toolbar.addAction(new_chat_action)
 
+        # Phase 9: code templates/editor/execution.
+        code_editor_action = QAction("Code Editor…", self)
+        code_editor_action.triggered.connect(self.open_code_editor_dialog)
+        toolbar.addAction(code_editor_action)
+
         mcp_action = QAction("MCP Servers…", self)
         mcp_action.triggered.connect(self.open_mcp_management_dialog)
         toolbar.addAction(mcp_action)
@@ -160,6 +166,7 @@ class MainWindow(QMainWindow):
         self.sidebar.delete_requested.connect(self._on_delete_requested)
         self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
         self.sidebar.rename_requested.connect(self._on_rename_requested)
+        self.chat_panel.code_editor_requested.connect(self._on_code_editor_requested)
         self.workspace_selector.workspace_changed.connect(self._on_workspace_changed)
         self.profile_selector.profile_changed.connect(self._on_profile_changed)
         self.folder_display.source_folders_changed.connect(self._on_source_folders_changed)
@@ -639,6 +646,27 @@ class MainWindow(QMainWindow):
     def open_knowledge_management_dialog(self) -> None:
         dialog = KnowledgeManagementDialog(self.settings, self.bridge, self)
         dialog.exec()
+
+    # --- code editor (Phase 9) -------------------------------------------------
+
+    def open_code_editor_dialog(self, *, initial_text: str = "") -> None:
+        """Opens blank from the toolbar action, or pre-filled with a
+        message's first code block via ``_on_code_editor_requested``.
+        Saved-scripts location and interpreter come from the active
+        workspace, if any — both are optional (``CodeEditorDialog`` falls
+        back to the user's home folder / ``sys.executable``)."""
+        workspace = self._current_workspace_config
+        dialog = CodeEditorDialog(
+            initial_text=initial_text,
+            saved_scripts_dir=workspace.resolved_saved_scripts_dir() if workspace else None,
+            python_interpreter=workspace.python_interpreter if workspace else None,
+            bridge=self.bridge,
+            parent=self,
+        )
+        dialog.exec()
+
+    def _on_code_editor_requested(self, code: str) -> None:
+        self.open_code_editor_dialog(initial_text=code)
 
     # --- settings ------------------------------------------------------------
 

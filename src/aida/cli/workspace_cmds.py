@@ -39,6 +39,11 @@ def _print_workspace(ws: WorkspaceConfig) -> None:
     print(f"sidecar_folder_name: {ws.sidecar_folder_name}")
     print(f"safety:             {ws.safety}")
     print(f"system_prompt:      {ws.system_prompt or '(none)'}")
+    print(f"command_allowlist:  {', '.join(ws.command_allowlist) or '(none)'}")
+    print(f"python_interpreter: {ws.python_interpreter or '(default: sys.executable)'}")
+    print(f"scripting_enabled:  {ws.scripting_enabled}")
+    print(f"templates_dir:      {ws.templates_dir or '(none)'}")
+    print(f"saved_scripts_dir:  {ws.saved_scripts_dir or '(default: <target_folder>/saved_scripts)'}")
 
 
 def _print_validation(settings: Settings, ws: WorkspaceConfig) -> None:
@@ -93,6 +98,11 @@ def cmd_new(args: argparse.Namespace) -> int:
         knowledge_bases=_split_csv(args.knowledge_bases),
         system_prompt=args.system_prompt or None,
         safety=args.safety,
+        command_allowlist=_split_csv(args.command_allowlist),
+        python_interpreter=args.python_interpreter or None,
+        scripting_enabled=args.scripting_enabled,
+        templates_dir=args.templates_dir or None,
+        saved_scripts_dir=args.saved_scripts_dir or None,
     )
     save_workspace(settings, ws)
     print(f"Created workspace {args.name!r}.")
@@ -123,6 +133,13 @@ def cmd_edit(args: argparse.Namespace) -> int:
         knowledge_bases=_split_csv(args.knowledge_bases) if args.knowledge_bases is not None else existing.knowledge_bases,
         system_prompt=args.system_prompt if args.system_prompt is not None else existing.system_prompt,
         safety=args.safety if args.safety is not None else existing.safety,
+        command_allowlist=_split_csv(args.command_allowlist)
+        if args.command_allowlist is not None
+        else existing.command_allowlist,
+        python_interpreter=args.python_interpreter if args.python_interpreter is not None else existing.python_interpreter,
+        scripting_enabled=args.scripting_enabled if args.scripting_enabled is not None else existing.scripting_enabled,
+        templates_dir=args.templates_dir if args.templates_dir is not None else existing.templates_dir,
+        saved_scripts_dir=args.saved_scripts_dir if args.saved_scripts_dir is not None else existing.saved_scripts_dir,
     )
     save_workspace(settings, ws)
     print(f"Updated workspace {args.name!r}.")
@@ -168,6 +185,31 @@ def _add_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -> None:
         choices=["confirm", "relaxed"],
         help="'confirm' (ask before every write/delete) or 'relaxed' (only asks for actions outside the "
         "workspace's allowed folders)",
+    )
+    parser.add_argument(
+        "--command-allowlist",
+        default="" if defaults else None,
+        help="Comma-separated safe shell commands (Phase 9), e.g. 'git status,git log *'",
+    )
+    parser.add_argument(
+        "--python-interpreter",
+        default=None,
+        help="Path to a conda/venv env's python executable for run_python_script (Phase 9); "
+        "defaults to whatever AIDA itself runs under",
+    )
+    parser.add_argument(
+        "--scripting-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=True if defaults else None,
+        help="Enable run_python_script/run_command for this workspace (Phase 9, default: enabled)",
+    )
+    parser.add_argument(
+        "--templates-dir", default=None, help="Folder of .py code templates for this workspace (Phase 9)"
+    )
+    parser.add_argument(
+        "--saved-scripts-dir",
+        default=None,
+        help="Where the code editor saves scripts (Phase 9); defaults to <target_folder>/saved_scripts",
     )
 
 

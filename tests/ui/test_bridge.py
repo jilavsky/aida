@@ -292,3 +292,42 @@ def test_start_defaults_confirm_callback_to_bridge_confirm(
     assert target.read_text(encoding="utf-8") == "hi"
 
     bridge.shutdown()
+
+
+# --- run_script / cancel_script_run (Phase 9 code editor) -------------------
+
+
+def test_run_script_emits_finished_with_a_real_result(qapp, loop_thread, tmp_path: Path):
+    script = tmp_path / "hello.py"
+    script.write_text("print('hi')", encoding="utf-8")
+
+    bridge = ChatBridge(loop_thread)
+    finished = []
+    bridge.script_run_finished.connect(finished.append)
+    bridge.run_script(str(script), [], interpreter=None, cwd=str(tmp_path), timeout=10.0)
+
+    assert pump_until(qapp, lambda: finished)
+    assert not finished[0].timed_out
+    assert "hi" in finished[0].stdout
+
+
+def test_cancel_script_run_kills_a_sleeping_script(qapp, loop_thread, tmp_path: Path):
+    script = tmp_path / "sleep.py"
+    script.write_text("import time; time.sleep(30)", encoding="utf-8")
+
+    bridge = ChatBridge(loop_thread)
+    finished = []
+    bridge.script_run_finished.connect(finished.append)
+    bridge.run_script(str(script), [], interpreter=None, cwd=str(tmp_path), timeout=30.0)
+
+    # Give the subprocess a moment to actually start before killing it.
+    assert pump_until(qapp, lambda: bridge._running_script_proc is not None, timeout=5.0)
+    bridge.cancel_script_run()
+
+    assert pump_until(qapp, lambda: finished, timeout=10.0)
+    assert finished[0].returncode != 0
+
+
+def test_cancel_script_run_with_nothing_running_is_a_safe_noop(qapp, loop_thread):
+    bridge = ChatBridge(loop_thread)
+    bridge.cancel_script_run()  # must not raise

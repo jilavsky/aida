@@ -14,6 +14,8 @@ import contextlib
 from pathlib import Path
 
 from aida.artifacts.store import ArtifactStore
+from aida.coding.templates import load_templates, templates_context_text
+from aida.coding.tools import default_coding_tools
 from aida.config.logging_setup import get_logger
 from aida.config.paths import ensure_records_dir, knowledge_db_path, skills_dir
 from aida.config.settings import (
@@ -60,6 +62,7 @@ from aida.providers.profiles import (
 )
 from aida.workspace.files import default_file_tools
 from aida.workspace.safety import ConfirmationRequest, ConfirmCallback, SafetyGuard
+from aida.workspace.web import default_web_tools
 from aida.workspace.workspaces import (
     get_workspace,
     resolve_workspace_environment,
@@ -383,7 +386,10 @@ async def _run_repl(session: ChatSession) -> None:
     )
     if session.recorder is not None:
         print(f"[conversations] recording as {session.recorder.conversation_id}")
-    print("Type /exit to quit, /profile NAME to switch profiles mid-session.\n")
+    print(
+        "Type /exit to quit, /profile NAME to switch profiles mid-session, "
+        "/max-iterations N to raise the per-turn tool-call cap.\n"
+    )
 
     try:
         await _repl_loop(session)
@@ -408,6 +414,24 @@ async def _repl_loop(session: ChatSession) -> None:
             continue
         if line == "/exit":
             return
+        if line.startswith("/max-iterations "):
+            # Bug report: hit the iteration cap mid-session with no way to
+            # raise it short of quitting and re-editing AppConfig (the
+            # Settings-dialog control only reaches a *new* AgentLoop, and
+            # the CLI has no dialog at all). Mutating session.loop directly
+            # takes effect on the very next turn, no restart needed.
+            value_str = line.removeprefix("/max-iterations ").strip()
+            try:
+                value = int(value_str)
+            except ValueError:
+                print(f"Not a number: {value_str!r}")
+                continue
+            if value < 1:
+                print("Must be at least 1.")
+                continue
+            session.loop.max_iterations = value
+            print(f"Max tool-call iterations per turn set to {value} for this session.")
+            continue
         if line.startswith("/profile "):
             new_name = line.removeprefix("/profile ").strip()
             try:
@@ -568,6 +592,9 @@ async def start_session(
         global_allowed_folders=settings.app.allowed_folders,
         mode=effective_safety_mode,
         confirm_callback=confirm_callback,
+        # Phase 9: union'd the same way allowed folders already are — a
+        # workspace's own allowlist plus whatever's globally allowlisted.
+        command_allowlist=settings.app.command_allowlist + (workspace.command_allowlist if workspace else []),
     )
 
     # Bug report: "Agent seems to have no understanding of Source and
@@ -586,6 +613,15 @@ async def start_session(
     )
     if folder_context:
         extra_context_texts.append(folder_context)
+
+    # Phase 9: a workspace's code templates, surfaced as a compact
+    # name+docstring list (not full source — see templates_context_text's
+    # docstring) so the model follows the workspace's own conventions when
+    # generating instrument functions.
+    if workspace and workspace.templates_dir:
+        templates_context = templates_context_text(load_templates(Path(workspace.templates_dir)))
+        if templates_context:
+            extra_context_texts.append(templates_context)
 
     # Phase 8 (RAG): resolve each of the workspace's knowledge_bases names
     # into a ready-to-query ActiveKnowledgeBase (open index connection +
@@ -634,6 +670,8 @@ async def start_session(
     tools = default_native_tools()
     tools.update(default_file_tools(guard))
     tools.update(default_document_tools(guard, artifact_store, sidecar_dirname=sidecar_dirname))
+    tools.update(default_coding_tools(guard, workspace=workspace))
+    tools.update(default_web_tools(guard))
     if mcp_servers:
         # Same confirm_callback SafetyGuard just got, above — a per-tool
         # "confirm before run" flag (Phase 7) reuses the identical
@@ -730,6 +768,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="",
         help="Comma-separated MCP server names to enable directly, bypassing groups",
     )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=None,
+        help="Override the per-turn tool-call iteration cap (default: AppConfig.max_agent_iterations)",
+    )
     return parser
 
 
@@ -769,6 +813,10 @@ def main(argv: list[str] | None = None) -> int:
     mcp_names = [s.strip() for s in args.mcp.split(",") if s.strip()]
 
     settings = load_settings()
+    if args.max_iterations is not None:
+        # Per-invocation override, not persisted — same "session-scoped,
+        # not saved back to disk" treatment as --profile/--workspace above.
+        settings.app.max_agent_iterations = args.max_iterations
     return asyncio.run(
         _async_main(
             settings,

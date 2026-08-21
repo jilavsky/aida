@@ -80,6 +80,61 @@ def test_usage_info_appends_tokens_per_second_to_the_last_assistant_bubble(qapp)
     assert "25.0 tok/s" in bubble.meta_text
 
 
+def test_streamed_bubble_with_a_code_fence_shows_open_in_editor_button(qapp):
+    """Bug report/phase task: "Code blocks in chat get 'Open in editor'"."""
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextDelta(message_id="m1", text="Here:\n```python\nprint(1)\n```\n"))
+    panel.handle_event(TextFinished(message_id="m1", text="Here:\n```python\nprint(1)\n```\n"))
+    bubble = panel.widget_at(0)
+    assert not bubble._open_in_editor_button.isHidden()
+
+
+def test_plain_text_bubble_has_no_open_in_editor_button(qapp):
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextDelta(message_id="m1", text="just plain text"))
+    panel.handle_event(TextFinished(message_id="m1", text="just plain text"))
+    bubble = panel.widget_at(0)
+    assert bubble._open_in_editor_button.isHidden()
+
+
+def test_clicking_open_in_editor_emits_the_first_code_blocks_content(qapp):
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(
+        TextDelta(message_id="m1", text="```python\nprint('a')\n```\nand\n```python\nprint('b')\n```\n")
+    )
+    panel.handle_event(
+        TextFinished(message_id="m1", text="```python\nprint('a')\n```\nand\n```python\nprint('b')\n```\n")
+    )
+    bubble = panel.widget_at(0)
+
+    requested = []
+    panel.code_editor_requested.connect(requested.append)
+    bubble._open_in_editor_button.click()
+
+    assert requested == ["print('a')\n"]
+
+
+def test_user_message_with_code_fence_also_shows_the_button(qapp):
+    panel = ChatPanel()
+    bubble = panel.add_user_message("```python\nprint(1)\n```")
+    assert not bubble._open_in_editor_button.isHidden()
+
+
+def test_resumed_history_bubble_with_code_fence_shows_the_button_and_relays(qapp):
+    panel = ChatPanel()
+    panel.load_history([Message(role="assistant", content="```python\nprint(1)\n```")])
+    bubble = panel.widget_at(0)
+    assert not bubble._open_in_editor_button.isHidden()
+
+    requested = []
+    panel.code_editor_requested.connect(requested.append)
+    bubble._open_in_editor_button.click()
+    assert requested == ["print(1)\n"]
+
+
 def test_usage_info_with_no_bubble_does_not_raise(qapp):
     """A tool-call-only round has no visible bubble to attach to — must be
     a no-op, not a crash."""

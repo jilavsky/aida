@@ -74,6 +74,12 @@ class AppConfig:
     # must not import core (core.agent already imports
     # aida.config.logging_setup, so the reverse would cycle).
     max_agent_iterations: int = 10
+    # Phase 9: a short, user-editable list of safe shell/python invocations
+    # (PLAN.md §5) — union'd with each workspace's own command_allowlist by
+    # SafetyGuard.for_workspace, same "global + per-workspace, additive"
+    # pattern allowed_folders/source_folders already use. Empty by default
+    # (no command is allowlisted anywhere until the user adds one).
+    command_allowlist: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -81,6 +87,8 @@ class AppConfig:
         filtered = {k: v for k, v in (data or {}).items() if k in known}
         if "allowed_folders" in filtered:
             filtered["allowed_folders"] = list(filtered["allowed_folders"] or [])
+        if "command_allowlist" in filtered:
+            filtered["command_allowlist"] = list(filtered["command_allowlist"] or [])
         return cls(**filtered)
 
     def to_dict(self) -> dict[str, Any]:
@@ -99,6 +107,7 @@ class AppConfig:
             "last_workspace_name": self.last_workspace_name,
             "last_profile_name": self.last_profile_name,
             "max_agent_iterations": self.max_agent_iterations,
+            "command_allowlist": self.command_allowlist,
         }
 
 
@@ -229,6 +238,33 @@ class WorkspaceConfig:
     #: Names into KnowledgeConfig.knowledge_bases (Phase 8) — same
     #: "referenced by name, resolved at session-start" pattern as `skills`.
     knowledge_bases: list[str] = field(default_factory=list)
+    #: Phase 9: union'd with AppConfig.command_allowlist by
+    #: SafetyGuard.for_workspace — see that field's docstring.
+    command_allowlist: list[str] = field(default_factory=list)
+    #: Phase 9: path straight to a conda/venv env's python executable (e.g.
+    #: "~/miniconda3/envs/aievaluator/bin/python") — not a conda env *name*,
+    #: since AIDA would then need to know how to shell into `conda activate`
+    #: (fragile, shell/platform-dependent). None means "use whatever AIDA's
+    #: own process is running under" (sys.executable).
+    python_interpreter: str | None = None
+    #: Phase 9: per-workspace on/off switch for run_python_script/
+    #: run_command — a workspace with nothing to run in (or that shouldn't
+    #: run anything) can turn this off entirely, independent of the command
+    #: allowlist (an empty allowlist already blocks run_command; this also
+    #: blocks run_python_script, which isn't allowlist-gated the same way).
+    scripting_enabled: bool = True
+    #: Phase 9: a folder of plain .py files with docstrings (the
+    #: BeamlineAdvisor pattern — could point at an external templates repo,
+    #: e.g. bits-usaxs, not necessarily under target_folder). None means no
+    #: templates for this workspace.
+    templates_dir: str | None = None
+    #: Phase 9: where run_python_script-able scripts get saved from the
+    #: code editor. None means "<target_folder>/saved_scripts" — same
+    #: "configurable override, sensible default under target_folder"
+    #: shape as sidecar_folder_name, just a full path rather than a bare
+    #: name since a saved-scripts location may reasonably live outside
+    #: target_folder too.
+    saved_scripts_dir: str | None = None
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> WorkspaceConfig:
@@ -243,6 +279,11 @@ class WorkspaceConfig:
             system_prompt=data.get("system_prompt"),
             safety=data.get("safety", "confirm"),
             knowledge_bases=list(data.get("knowledge_bases", [])),
+            command_allowlist=list(data.get("command_allowlist", [])),
+            python_interpreter=data.get("python_interpreter"),
+            scripting_enabled=data.get("scripting_enabled", True),
+            templates_dir=data.get("templates_dir"),
+            saved_scripts_dir=data.get("saved_scripts_dir"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -256,7 +297,21 @@ class WorkspaceConfig:
             "system_prompt": self.system_prompt,
             "safety": self.safety,
             "knowledge_bases": self.knowledge_bases,
+            "command_allowlist": self.command_allowlist,
+            "python_interpreter": self.python_interpreter,
+            "scripting_enabled": self.scripting_enabled,
+            "templates_dir": self.templates_dir,
+            "saved_scripts_dir": self.saved_scripts_dir,
         }
+
+    def resolved_saved_scripts_dir(self) -> str | None:
+        """``saved_scripts_dir`` if set, else ``<target_folder>/saved_scripts``
+        — ``None`` if neither is configured (nowhere to save a script)."""
+        if self.saved_scripts_dir:
+            return self.saved_scripts_dir
+        if self.target_folder:
+            return str(Path(self.target_folder) / "saved_scripts")
+        return None
 
 
 @dataclass

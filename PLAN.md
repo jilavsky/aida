@@ -310,9 +310,27 @@ Premise (user decision): working folders are backed up; disaster recovery is
   commands not on the command allowlist; anything that sends local content to a
   network destination other than the configured LLM provider.
 - Command allowlist: a short, user-editable list of safe shell/python invocations
-  runnable inside allowed folders (Phase 9).
+  runnable inside allowed folders (Phase 9). `AppConfig.command_allowlist` (global)
+  and `WorkspaceConfig.command_allowlist` (per-workspace) union the same way
+  `allowed_folders`/`source_folders` already do. `SafetyGuard.authorize_execute`
+  requires *both* the working directory to be allowed *and* the command to match
+  the allowlist for relaxed/confirm mode to apply at all — either failing is an
+  always-confirm case, matching the rule above. Running a script that already
+  lives in an allowed folder (`run_python_script`) is mode-governed like any other
+  write/delete instead (`SafetyGuard.authorize_run_script`) — the allowlist is
+  specifically for raw shell command strings (`run_command`), not for content the
+  workspace's own folders already trust.
 - Deletions inside allowed folders prefer a `_trash/` move over true deletion where
   cheap to do.
+- **Web search (Phase 9): MCP-server based, not a built-in adapter.** AIDA already
+  has full MCP client infrastructure (Phase 3/7, `aida mcp add`) — `web_search` is
+  satisfied by pointing a workspace at an existing community search MCP server
+  (Brave/Tavily/etc., the user's own choice of vendor/API key), with zero new AIDA
+  dependency or secret-handling code. `McpServerConfig.disabled_tools`/
+  `confirm_tools` already give per-tool visibility/confirmation, and a workspace's
+  `mcp_group` already gives "enable per workspace" — no new config surface needed.
+  `fetch_url` (a plain URL fetch, not a search) is a small stdlib-only native tool
+  instead, always requiring confirmation (no folder concept applies to a URL).
 
 ---
 

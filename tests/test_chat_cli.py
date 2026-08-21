@@ -9,6 +9,7 @@ from aida.cli.chat import (
     UnknownMcpServerError,
     UnknownProfileError,
     _build_parser,
+    _repl_loop,
     cli_confirm,
     print_event,
     resolve_mcp_servers,
@@ -110,6 +111,16 @@ def test_parser_mcp_flags_default_empty():
     args = _build_parser().parse_args(["--profile", "p"])
     assert args.mcp_group == ""
     assert args.mcp == ""
+
+
+def test_parser_max_iterations_defaults_to_none():
+    args = _build_parser().parse_args(["--profile", "p"])
+    assert args.max_iterations is None
+
+
+def test_parser_max_iterations_accepts_an_override():
+    args = _build_parser().parse_args(["--profile", "p", "--max-iterations", "500"])
+    assert args.max_iterations == 500
 
 
 # --- print_event formatting -------------------------------------------------
@@ -343,6 +354,43 @@ async def test_chat_session_accumulates_usage_across_turns(monkeypatch, aida_hom
     _ = [e async for e in session.send("two")]
     assert session.total_input_tokens == 150
     assert session.total_output_tokens == 30
+
+
+@pytest.mark.asyncio
+async def test_repl_max_iterations_command_raises_the_cap_mid_session(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """Bug report: hit the iteration cap mid-session with no way to raise
+    it short of quitting and hand-editing AppConfig — the Settings-dialog
+    control (GUI) only reaches a *new* AgentLoop, and the CLI has no
+    dialog at all. /max-iterations must take effect on session.loop
+    immediately, without restarting."""
+    settings = _settings_with_profile()
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    session = ChatSession(settings, "mock-profile")
+    assert session.loop.max_iterations == 10
+
+    lines = iter(["/max-iterations 500", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(lines))
+
+    await _repl_loop(session)
+    assert session.loop.max_iterations == 500
+
+
+@pytest.mark.asyncio
+async def test_repl_max_iterations_command_rejects_non_numeric_input(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
+    settings = _settings_with_profile()
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    session = ChatSession(settings, "mock-profile")
+
+    lines = iter(["/max-iterations nope", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(lines))
+
+    await _repl_loop(session)
+    assert session.loop.max_iterations == 10  # unchanged
+    assert "Not a number" in capsys.readouterr().out
 
 
 def test_chat_session_unknown_profile_raises(aida_home: Path, records_home: Path):

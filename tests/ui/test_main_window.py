@@ -362,6 +362,75 @@ def test_settings_dialog_max_iterations_applies_to_the_running_session(
         window.close()
 
 
+def test_open_code_editor_dialog_uses_workspace_saved_scripts_dir_and_interpreter(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "ws1": WorkspaceConfig(
+                name="ws1",
+                profile="mock-profile",
+                mcp_group="none",
+                target_folder=str(tmp_path),
+                python_interpreter=sys.executable,
+            )
+        }
+    )
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="ws1")
+    try:
+        captured = {}
+
+        def _fake_exec(self):
+            captured["dialog"] = self
+            return QDialog.DialogCode.Rejected
+
+        monkeypatch.setattr("aida.ui.qt.code_editor_dialog.CodeEditorDialog.exec", _fake_exec)
+        window.open_code_editor_dialog(initial_text="print(1)")
+
+        dialog = captured["dialog"]
+        assert dialog.text() == "print(1)"
+        assert dialog._saved_scripts_dir == str(Path(tmp_path) / "saved_scripts")
+        assert dialog._python_interpreter == sys.executable
+    finally:
+        window.close()
+
+
+def test_clicking_open_in_editor_in_chat_opens_the_code_editor_dialog(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report/phase task: "Code blocks in chat get 'Open in editor'"
+    — end-to-end through the real ChatPanel -> MainWindow signal chain."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="```python\nprint(1)\n```")],
+        profile_name="mock-profile",
+    )
+    try:
+        captured = {}
+
+        def _fake_exec(self):
+            captured["dialog"] = self
+            return QDialog.DialogCode.Rejected
+
+        monkeypatch.setattr("aida.ui.qt.code_editor_dialog.CodeEditorDialog.exec", _fake_exec)
+
+        window.input_box.set_text("give me code")
+        window.input_box._send_button.click()
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+
+        bubble = window.chat_panel.widget_at(1)
+        bubble._open_in_editor_button.click()
+
+        assert captured["dialog"].text() == "print(1)\n"
+    finally:
+        window.close()
+
+
 def test_window_state_persisted_on_close(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
     settings = _settings_with_profile()
     window = _make_window(

@@ -34,6 +34,7 @@ from aida.cli.chat import (
     UnknownWorkspaceError,
     start_session,
 )
+from aida.coding.runner import run_python_script
 from aida.config.paths import knowledge_db_path
 from aida.config.settings import EmbeddingProfile, KnowledgeBaseConfig, McpServerConfig, Settings
 from aida.core.confirmation import ConfirmationRequest
@@ -67,6 +68,29 @@ class AsyncLoopThread(QThread):
         try:
             self.loop.run_forever()
         finally:
+            # Phase 9 (run_script/cancel_script_run) surfaced a pre-existing
+            # gap here: closing the loop right after run_forever() returns,
+            # with a still-pending task (e.g. a scheduled coroutine whose
+            # create_subprocess_exec hadn't finished when stop() was called)
+            # abandons that task mid-await — Python's GC then finalizes it
+            # at some arbitrary later point, surfacing as "coroutine ignored
+            # GeneratorExit" attributed to whatever unrelated test happens
+            # to be running when that GC finally runs. Cancelling pending
+            # tasks and giving the loop one more short, *bounded* run lets
+            # that cancellation usually propagate cleanly — bounded because
+            # an unconditional run_until_complete(gather(...)) here once
+            # hung the entire suite when some other feature's pending task
+            # didn't unwind on cancellation as quickly as expected; a stuck
+            # task delaying shutdown by at most this timeout is a much
+            # smaller risk than one hanging it forever.
+            pending = asyncio.all_tasks(self.loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                with contextlib.suppress(TimeoutError):
+                    self.loop.run_until_complete(
+                        asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=2.0)
+                    )
             self.loop.close()
 
     def wait_until_ready(self, timeout: float = 5.0) -> None:
@@ -123,6 +147,11 @@ class ChatBridge(QObject):
     # on a rebuild of a large corpus.
     kb_ingest_finished = Signal(str, object)  # (kb name, IngestResult)
     kb_ingest_failed = Signal(str, str)  # (kb name, error message)
+    # Phase 9: code editor Run/Kill — same "one finished/failed pair" shape
+    # as the KB ingest signals above. Runs on the background loop (a real
+    # subprocess) so the Qt thread never blocks while a script runs.
+    script_run_finished = Signal(object)  # RunResult
+    script_run_failed = Signal(str)  # error message
 
     def __init__(self, loop_thread: AsyncLoopThread, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -141,6 +170,10 @@ class ChatBridge(QObject):
         # the rest of the process's life — and emitted `session_ready` into
         # a window that had already moved on to a different bridge.
         self._start_future: concurrent.futures.Future | None = None
+        # Phase 9 code editor: the live subprocess of whatever script is
+        # currently running via run_script, so cancel_script_run has
+        # something to kill. None whenever nothing is running.
+        self._running_script_proc: asyncio.subprocess.Process | None = None
         self._closing = False
         self._closed = False
 
@@ -370,6 +403,49 @@ class ChatBridge(QObject):
             await embeddings_provider.aclose()
 
         self.kb_ingest_finished.emit(kb.name, result)
+
+    # --- code editor run/kill (Phase 9) ---------------------------------------
+
+    def run_script(
+        self, path: str, args: list[str], *, interpreter: str | None, cwd: str, timeout: float
+    ) -> None:
+        """Runs ``path`` on the background loop so a real subprocess never
+        blocks the Qt thread — same "schedule via run_coroutine_threadsafe,
+        report back via a signal" shape as ``rebuild_knowledge_base``."""
+        asyncio.run_coroutine_threadsafe(
+            self._run_script(path, args, interpreter=interpreter, cwd=cwd, timeout=timeout), self._loop_thread.loop
+        )
+
+    def cancel_script_run(self) -> None:
+        """Kills whatever script ``run_script`` currently has running, if
+        any — a no-op if nothing is running (already finished, or never
+        started). The actual ``.kill()`` call happens on the background
+        loop thread that owns the ``Process`` object; scheduling it there
+        rather than calling it directly from the Qt thread keeps every
+        touch of that object on the one thread that's actually driving it."""
+        asyncio.run_coroutine_threadsafe(self._cancel_running_script(), self._loop_thread.loop)
+
+    async def _cancel_running_script(self) -> None:
+        if self._running_script_proc is not None:
+            self._running_script_proc.kill()
+
+    async def _run_script(
+        self, path: str, args: list[str], *, interpreter: str | None, cwd: str, timeout: float
+    ) -> None:
+        def _on_started(proc) -> None:
+            self._running_script_proc = proc
+
+        try:
+            result = await run_python_script(
+                path, args, interpreter=interpreter, cwd=cwd, timeout=timeout, on_started=_on_started
+            )
+        except OSError as exc:
+            self.script_run_failed.emit(str(exc))
+            return
+        finally:
+            self._running_script_proc = None
+
+        self.script_run_finished.emit(result)
 
     # --- shutdown ------------------------------------------------------------
 

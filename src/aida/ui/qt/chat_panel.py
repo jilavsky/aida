@@ -13,6 +13,7 @@ be driven directly in tests without a real bridge/session.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from datetime import datetime
 
@@ -28,6 +29,7 @@ from aida.ui.qt._qt import (
     QTextBrowser,
     QVBoxLayout,
     QWidget,
+    Signal,
 )
 from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
 from aida.ui.qt.retrieval_widget import RetrievalRow
@@ -36,6 +38,9 @@ from aida.ui.qt.tool_call_widget import ToolCallRow
 
 def _now_str() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
+
+_CODE_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 
 
 class _AutoHeightTextBrowser(QTextBrowser):
@@ -89,6 +94,12 @@ class MessageBubble(QFrame):
     dynamic ``palette(...)`` roles rather than a hardcoded color so it
     still looks right in both light and dark system themes."""
 
+    #: Phase 9: "Code blocks in chat get 'Open in editor'". Carries the
+    #: *first* fenced code block's content — same "v1 whole-message scope"
+    #: simplification the Copy button already uses, not multi-block
+    #: selection.
+    code_editor_requested = Signal(str)
+
     def __init__(self, role: str, parent: QWidget | None = None, *, timestamp: str | None = None) -> None:
         super().__init__(parent)
         self.role = role
@@ -129,6 +140,19 @@ class MessageBubble(QFrame):
         )
         self._copy_button.clicked.connect(self.copy_to_clipboard)
         header.addWidget(self._copy_button)
+        # Phase 9: "Code blocks in chat get 'Open in editor'" — same flat/
+        # borderless styling as Copy, hidden until the message actually
+        # contains a fenced code block (see _update_open_in_editor_visibility).
+        self._open_in_editor_button = QPushButton("</> Open in Editor", self)
+        self._open_in_editor_button.setFlat(True)
+        self._open_in_editor_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._open_in_editor_button.setStyleSheet(
+            "QPushButton { border: none; background: transparent; color: gray; font-size: 10px; }"
+            "QPushButton:hover { color: palette(text); text-decoration: underline; }"
+        )
+        self._open_in_editor_button.setVisible(False)
+        self._open_in_editor_button.clicked.connect(self._on_open_in_editor_clicked)
+        header.addWidget(self._open_in_editor_button)
         layout.addLayout(header)
 
         self._view = _AutoHeightTextBrowser(self)
@@ -148,13 +172,27 @@ class MessageBubble(QFrame):
     def copy_to_clipboard(self) -> None:
         QGuiApplication.clipboard().setText(self._raw_text)
 
+    def first_code_block(self) -> str | None:
+        match = _CODE_FENCE_RE.search(self._raw_text)
+        return match.group(1) if match else None
+
+    def _on_open_in_editor_clicked(self) -> None:
+        code = self.first_code_block()
+        if code is not None:
+            self.code_editor_requested.emit(code)
+
+    def _update_open_in_editor_visibility(self) -> None:
+        self._open_in_editor_button.setVisible(self.first_code_block() is not None)
+
     def set_text(self, text: str) -> None:
         self._raw_text = text
         self._view.setMarkdown(text)
+        self._update_open_in_editor_visibility()
 
     def append_delta(self, text: str) -> None:
         self._raw_text += text
         self._view.setMarkdown(self._raw_text)
+        self._update_open_in_editor_visibility()
 
     def append_meta(self, text: str) -> None:
         """Adds a " · "-separated suffix to the header's timestamp label —
@@ -204,6 +242,11 @@ class ChatPanel(QWidget):
     """A scrollable, append-only transcript of one conversation, built by
     feeding it ``AgentEvent``s (live) or ``Message``s (resumed history)."""
 
+    #: Re-emitted from whichever MessageBubble's own "Open in Editor"
+    #: button was clicked — MainWindow connects this to
+    #: open_code_editor_dialog, one connection instead of one per bubble.
+    code_editor_requested = Signal(str)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         outer = QVBoxLayout(self)
@@ -231,6 +274,9 @@ class ChatPanel(QWidget):
         self._content_layout.insertWidget(self._content_layout.count() - 1, widget)
         self._scroll_to_bottom()
 
+    def _relay_code_editor_requests(self, bubble: MessageBubble) -> None:
+        bubble.code_editor_requested.connect(self.code_editor_requested.emit)
+
     def _scroll_to_bottom(self) -> None:
         bar = self._scroll_area.verticalScrollBar()
         bar.setValue(bar.maximum())
@@ -249,6 +295,7 @@ class ChatPanel(QWidget):
     def add_user_message(self, text: str) -> MessageBubble:
         bubble = MessageBubble("user", self._content, timestamp=_now_str())
         bubble.set_text(text)
+        self._relay_code_editor_requests(bubble)
         self._append_widget(bubble)
         return bubble
 
@@ -284,6 +331,7 @@ class ChatPanel(QWidget):
         elif name == "TextDelta":
             if self._current_assistant_bubble is None:
                 self._current_assistant_bubble = MessageBubble("assistant", self._content, timestamp=_now_str())
+                self._relay_code_editor_requests(self._current_assistant_bubble)
                 self._append_widget(self._current_assistant_bubble)
             self._current_assistant_bubble.append_delta(event.text)
             self._scroll_to_bottom()
@@ -297,6 +345,7 @@ class ChatPanel(QWidget):
                 # empty bubble for a text-less tool-call turn.
                 bubble = MessageBubble("assistant", self._content, timestamp=_now_str())
                 bubble.set_text(event.text)
+                self._relay_code_editor_requests(bubble)
                 self._append_widget(bubble)
                 self._last_assistant_bubble = bubble
             self._current_assistant_bubble = None
@@ -357,6 +406,7 @@ class ChatPanel(QWidget):
                 continue
             bubble = MessageBubble(message.role, self._content)
             bubble.set_text(message.content or "")
+            self._relay_code_editor_requests(bubble)
             self._append_widget(bubble)
 
     def clear(self) -> None:

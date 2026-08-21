@@ -47,6 +47,7 @@ from aida.core.confirmation import (
     ConfirmCallback,
     deny_all,
 )
+from aida.workspace.command_allowlist import CommandAllowlist
 
 logger = get_logger("safety")
 
@@ -89,6 +90,11 @@ class SafetyGuard:
     trash_enabled: bool = True
     trash_dirname: str = "_trash"
     confirm_callback: ConfirmCallback = field(default=deny_all)
+    #: Phase 9: gates authorize_execute independently of allowed_roots — a
+    #: command must be both inside an allowed folder *and* allowlisted for
+    #: the workspace's relaxed/confirm mode to apply at all; see
+    #: authorize_execute's docstring for the exact rule (PLAN.md §5).
+    command_allowlist: CommandAllowlist = field(default_factory=CommandAllowlist.empty)
 
     def __post_init__(self) -> None:
         self.allowed_roots = [normalize_path(p) for p in self.allowed_roots]
@@ -103,11 +109,16 @@ class SafetyGuard:
         mode: str = "confirm",
         confirm_callback: ConfirmCallback | None = None,
         trash_enabled: bool = True,
+        command_allowlist: list[str] | None = None,
     ) -> SafetyGuard:
         """Builds the allowed-roots union PLAN.md describes: a workspace's
         own source/target folders plus whatever's globally allowed —
         convenience constructor over the raw dataclass for the common case
-        (``start_session`` uses this directly)."""
+        (``start_session`` uses this directly). ``command_allowlist`` is the
+        same kind of union (global ``AppConfig.command_allowlist`` +
+        workspace's own), already merged by the caller before this is
+        called — mirrors how the folder lists are pre-merged by the caller
+        of ``source_folders``/``global_allowed_folders`` too."""
         roots: list[str] = list(source_folders or [])
         if target_folder:
             roots.append(target_folder)
@@ -117,6 +128,7 @@ class SafetyGuard:
             mode=mode,
             trash_enabled=trash_enabled,
             confirm_callback=confirm_callback or deny_all,
+            command_allowlist=CommandAllowlist(patterns=list(command_allowlist or [])),
         )
 
     def _containing_root(self, candidate: Path) -> Path | None:
@@ -178,6 +190,64 @@ class SafetyGuard:
 
     async def authorize_delete(self, path: str | Path) -> Path:
         return await self._authorize("delete", path, always_confirm_in_bounds=False)
+
+    async def authorize_run_script(self, path: str | Path) -> Path:
+        """Gates running a script that already lives in an allowed folder
+        (Phase 9: ``run_python_script``) — same rule as ``authorize_write``/
+        ``authorize_delete``: the workspace's relaxed/confirm mode governs
+        inside allowed folders, always confirm outside. Deliberately
+        *not* allowlist-gated: PLAN.md §5's allowlist rule names "shell
+        commands", not scripts already sitting in a folder the workspace
+        already trusts (the same trust ``write_file``/``delete_file``
+        already extend there) — that's what ``authorize_execute`` (below)
+        is for."""
+        return await self._authorize("execute", path, always_confirm_in_bounds=False)
+
+    async def authorize_execute(self, command: str, cwd: str | Path) -> Path:
+        """Gates a raw shell command (Phase 9: ``run_command``). Two
+        independent conditions must *both* hold for the workspace's
+        relaxed/confirm mode to apply at all: ``cwd``
+        must be inside ``allowed_roots``, and ``command`` must match
+        ``command_allowlist``. Either one failing means "always confirm,
+        regardless of mode" — PLAN.md §5's exact rule groups "shell commands
+        not on the command allowlist" with "paths outside allowed folders"
+        as the two always-confirm cases. Returns the resolved ``cwd`` (the
+        caller launches the subprocess there), same "authorize returns the
+        path to actually use" shape as ``authorize_read``/``authorize_write``."""
+        candidate = normalize_path(cwd)
+        inside = self._containing_root(candidate) is not None
+        allowlisted = self.command_allowlist.is_allowed(command)
+        logger.debug(
+            "authorize execute %r cwd=%s (inside_allowed_roots=%s allowlisted=%s mode=%s)",
+            command,
+            candidate,
+            inside,
+            allowlisted,
+            self.mode,
+        )
+
+        if not inside or not allowlisted:
+            reason = "outside the allowed folders" if not inside else "not on the command allowlist"
+            logger.info("execute %s, requesting confirmation: %r (cwd=%s)", reason, command, candidate)
+            approved = await self.confirm_callback(
+                ConfirmationRequest(
+                    action="execute",
+                    path=command,
+                    detail=f"Run {reason}: {command!r} (cwd={candidate})",
+                )
+            )
+            if not approved:
+                raise ConfirmationDenied(f"execute declined: {command!r} (cwd={candidate})")
+            return candidate
+
+        if self.mode == "confirm":
+            approved = await self.confirm_callback(
+                ConfirmationRequest(action="execute", path=command, detail=f"Run {command!r} (cwd={candidate})?")
+            )
+            if not approved:
+                raise ConfirmationDenied(f"execute declined: {command!r} (cwd={candidate})")
+
+        return candidate
 
     async def delete(self, path: str | Path) -> Path:
         """Authorizes, then moves to ``_trash`` (or hard-deletes if

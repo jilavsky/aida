@@ -373,3 +373,91 @@ def test_settings_bundle_includes_knowledge(aida_home: Path):
     settings = load_settings()
     assert settings.knowledge is not None
     assert (aida_home / "knowledge.yaml").exists()
+
+
+def test_workspace_coding_fields_roundtrip(aida_home: Path):
+    from aida.config.settings import WorkspaceConfig
+
+    cfg = WorkspacesConfig(
+        workspaces={
+            "instrument-ops": WorkspaceConfig(
+                name="instrument-ops",
+                command_allowlist=["git status", "git log *"],
+                python_interpreter="/opt/miniconda3/envs/aievaluator/bin/python",
+                scripting_enabled=False,
+            )
+        }
+    )
+    save_workspaces_config(cfg, aida_home)
+    loaded = load_workspaces_config(aida_home).workspaces["instrument-ops"]
+    assert loaded.command_allowlist == ["git status", "git log *"]
+    assert loaded.python_interpreter == "/opt/miniconda3/envs/aievaluator/bin/python"
+    assert loaded.scripting_enabled is False
+
+
+def test_workspace_coding_fields_default(aida_home: Path):
+    from aida.config.settings import WorkspaceConfig
+
+    cfg = WorkspacesConfig(workspaces={"plain": WorkspaceConfig(name="plain")})
+    save_workspaces_config(cfg, aida_home)
+    loaded = load_workspaces_config(aida_home).workspaces["plain"]
+    assert loaded.command_allowlist == []
+    assert loaded.python_interpreter is None
+    assert loaded.scripting_enabled is True
+    assert loaded.templates_dir is None
+    assert loaded.saved_scripts_dir is None
+
+
+def test_workspace_templates_and_saved_scripts_dir_roundtrip(aida_home: Path):
+    from aida.config.settings import WorkspaceConfig
+
+    cfg = WorkspacesConfig(
+        workspaces={
+            "instrument-ops": WorkspaceConfig(
+                name="instrument-ops",
+                templates_dir="/data/bits-usaxs/templates",
+                saved_scripts_dir="/data/scripts",
+            )
+        }
+    )
+    save_workspaces_config(cfg, aida_home)
+    loaded = load_workspaces_config(aida_home).workspaces["instrument-ops"]
+    assert loaded.templates_dir == "/data/bits-usaxs/templates"
+    assert loaded.saved_scripts_dir == "/data/scripts"
+
+
+def test_resolved_saved_scripts_dir_uses_explicit_override():
+    from aida.config.settings import WorkspaceConfig
+
+    ws = WorkspaceConfig(name="ws", target_folder="/data/target", saved_scripts_dir="/data/scripts")
+    assert ws.resolved_saved_scripts_dir() == "/data/scripts"
+
+
+def test_resolved_saved_scripts_dir_defaults_under_target_folder():
+    from aida.config.settings import WorkspaceConfig
+
+    ws = WorkspaceConfig(name="ws", target_folder="/data/target")
+    assert ws.resolved_saved_scripts_dir() == str(Path("/data/target") / "saved_scripts")
+
+
+def test_resolved_saved_scripts_dir_none_with_no_target_folder():
+    from aida.config.settings import WorkspaceConfig
+
+    ws = WorkspaceConfig(name="ws")
+    assert ws.resolved_saved_scripts_dir() is None
+
+
+def test_app_config_command_allowlist_roundtrip(aida_home: Path):
+    cfg = AppConfig(command_allowlist=["ls", "git status"])
+    save_app_config(cfg, aida_home)
+
+    loaded = load_app_config(aida_home)
+    assert loaded.command_allowlist == ["ls", "git status"]
+
+
+def test_app_config_command_allowlist_defaults_to_empty(aida_home: Path):
+    cfg = AppConfig()
+    save_app_config(cfg, aida_home)
+
+    loaded = load_app_config(aida_home)
+    assert loaded.command_allowlist == []

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from aida.workspace.command_allowlist import CommandAllowlist
 from aida.workspace.safety import (
     ConfirmationDenied,
     ConfirmationRequest,
@@ -371,3 +372,106 @@ async def test_authorize_inside_allowed_folders_logs_at_debug(tmp_path: Path, ca
 
     messages = [r.message for r in caplog.records if r.name == "aida.safety"]
     assert any("inside_allowed_roots=True" in m for m in messages)
+
+
+# --- authorize_run_script (Phase 9: mode-governed, no allowlist) -----------
+
+
+@pytest.mark.asyncio
+async def test_run_script_relaxed_mode_inside_allowed_needs_no_confirmation(tmp_path: Path):
+    guard = SafetyGuard(allowed_roots=[tmp_path], mode="relaxed", confirm_callback=deny_all)
+    cwd = await guard.authorize_run_script(tmp_path / "script.py")
+    assert cwd == (tmp_path / "script.py").resolve()
+
+
+@pytest.mark.asyncio
+async def test_run_script_confirm_mode_inside_allowed_asks_and_honors_approval(tmp_path: Path):
+    guard = SafetyGuard(allowed_roots=[tmp_path], mode="confirm", confirm_callback=_approve_all())
+    await guard.authorize_run_script(tmp_path / "script.py")
+
+
+@pytest.mark.asyncio
+async def test_run_script_confirm_mode_inside_allowed_raises_when_declined(tmp_path: Path):
+    guard = SafetyGuard(allowed_roots=[tmp_path], mode="confirm", confirm_callback=deny_all)
+    with pytest.raises(ConfirmationDenied):
+        await guard.authorize_run_script(tmp_path / "script.py")
+
+
+@pytest.mark.asyncio
+async def test_run_script_outside_allowed_folders_always_confirms(tmp_path: Path):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path / "elsewhere" / "script.py"
+    guard = SafetyGuard(allowed_roots=[allowed], mode="relaxed", confirm_callback=deny_all)
+    with pytest.raises(ConfirmationDenied):
+        await guard.authorize_run_script(outside)
+
+
+# --- authorize_execute (Phase 9: command allowlist) -------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_relaxed_mode_inside_allowed_and_allowlisted_needs_no_confirmation(tmp_path: Path):
+    guard = SafetyGuard(
+        allowed_roots=[tmp_path], mode="relaxed", confirm_callback=deny_all, command_allowlist=CommandAllowlist(["git status"])
+    )
+    cwd = await guard.authorize_execute("git status", tmp_path)
+    assert cwd == tmp_path.resolve()
+
+
+@pytest.mark.asyncio
+async def test_execute_confirm_mode_inside_allowed_and_allowlisted_asks_and_honors_approval(tmp_path: Path):
+    guard = SafetyGuard(
+        allowed_roots=[tmp_path],
+        mode="confirm",
+        confirm_callback=_approve_all(),
+        command_allowlist=CommandAllowlist(["git status"]),
+    )
+    cwd = await guard.authorize_execute("git status", tmp_path)
+    assert cwd == tmp_path.resolve()
+
+
+@pytest.mark.asyncio
+async def test_execute_confirm_mode_inside_allowed_and_allowlisted_raises_when_declined(tmp_path: Path):
+    guard = SafetyGuard(
+        allowed_roots=[tmp_path], mode="confirm", confirm_callback=deny_all, command_allowlist=CommandAllowlist(["git status"])
+    )
+    with pytest.raises(ConfirmationDenied):
+        await guard.authorize_execute("git status", tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_execute_outside_allowed_folders_always_confirms_even_in_relaxed_mode(tmp_path: Path):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    guard = SafetyGuard(
+        allowed_roots=[allowed],
+        mode="relaxed",
+        confirm_callback=deny_all,
+        command_allowlist=CommandAllowlist(["git status"]),
+    )
+    with pytest.raises(ConfirmationDenied):
+        await guard.authorize_execute("git status", outside)
+
+
+@pytest.mark.asyncio
+async def test_execute_not_allowlisted_always_confirms_even_in_relaxed_mode(tmp_path: Path):
+    guard = SafetyGuard(allowed_roots=[tmp_path], mode="relaxed", confirm_callback=deny_all)  # empty allowlist
+    with pytest.raises(ConfirmationDenied):
+        await guard.authorize_execute("rm -rf /", tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_execute_not_allowlisted_approved_still_runs(tmp_path: Path):
+    guard = SafetyGuard(allowed_roots=[tmp_path], mode="relaxed", confirm_callback=_approve_all())
+    cwd = await guard.authorize_execute("some-unlisted-command", tmp_path)
+    assert cwd == tmp_path.resolve()
+
+
+@pytest.mark.asyncio
+async def test_for_workspace_wires_command_allowlist():
+    guard = SafetyGuard.for_workspace(command_allowlist=["git status"])
+    assert guard.command_allowlist.is_allowed("git status")
+    assert not guard.command_allowlist.is_allowed("ls")

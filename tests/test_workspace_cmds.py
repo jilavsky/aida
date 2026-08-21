@@ -293,3 +293,97 @@ def test_two_workspaces_resolve_to_different_environments(aida_home: Path, recor
     assert env_b.profile_name == "p2"
     assert env_a.skill_names == ["saxs-basics"]
     assert env_b.skill_names == []
+
+
+# --- Phase 9: coding fields --------------------------------------------------
+
+
+def test_cmd_new_sets_coding_fields(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(
+        _parse(
+            "new",
+            "ws1",
+            "--profile",
+            "p1",
+            "--command-allowlist",
+            "git status,git log *",
+            "--python-interpreter",
+            "/opt/env/bin/python",
+            "--no-scripting-enabled",
+            "--templates-dir",
+            "/data/templates",
+            "--saved-scripts-dir",
+            "/data/scripts",
+        )
+    )
+    capsys.readouterr()
+
+    ws = load_workspaces_config(aida_home).workspaces["ws1"]
+    assert ws.command_allowlist == ["git status", "git log *"]
+    assert ws.python_interpreter == "/opt/env/bin/python"
+    assert ws.scripting_enabled is False
+    assert ws.templates_dir == "/data/templates"
+    assert ws.saved_scripts_dir == "/data/scripts"
+
+
+def test_cmd_new_defaults_coding_fields(aida_home: Path, records_home: Path, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1"))
+
+    ws = load_workspaces_config(aida_home).workspaces["ws1"]
+    assert ws.command_allowlist == []
+    assert ws.python_interpreter is None
+    assert ws.scripting_enabled is True
+    assert ws.templates_dir is None
+    assert ws.saved_scripts_dir is None
+
+
+def test_cmd_edit_updates_coding_fields_leaving_others_alone(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1", "--skills", "a"))
+    capsys.readouterr()
+
+    cmd_edit(_parse("edit", "ws1", "--command-allowlist", "ls", "--python-interpreter", "/opt/env/bin/python"))
+    capsys.readouterr()
+
+    ws = load_workspaces_config(aida_home).workspaces["ws1"]
+    assert ws.command_allowlist == ["ls"]
+    assert ws.python_interpreter == "/opt/env/bin/python"
+    assert ws.skills == ["a"]  # left alone
+
+
+def test_cmd_edit_without_coding_flags_leaves_them_unchanged(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1", "--command-allowlist", "ls"))
+    capsys.readouterr()
+
+    cmd_edit(_parse("edit", "ws1", "--safety", "relaxed"))
+    capsys.readouterr()
+
+    ws = load_workspaces_config(aida_home).workspaces["ws1"]
+    assert ws.command_allowlist == ["ls"]
+
+
+def test_cmd_edit_toggles_scripting_enabled(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1"))
+    capsys.readouterr()
+
+    cmd_edit(_parse("edit", "ws1", "--no-scripting-enabled"))
+    capsys.readouterr()
+    assert load_workspaces_config(aida_home).workspaces["ws1"].scripting_enabled is False
+
+    cmd_edit(_parse("edit", "ws1", "--scripting-enabled"))
+    capsys.readouterr()
+    assert load_workspaces_config(aida_home).workspaces["ws1"].scripting_enabled is True
+
+
+def test_cmd_show_includes_coding_fields(aida_home: Path, records_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
+    cmd_new(_parse("new", "ws1", "--profile", "p1", "--command-allowlist", "ls"))
+    capsys.readouterr()
+
+    cmd_show(_parse("show", "ws1"))
+    out = capsys.readouterr().out
+    assert "command_allowlist:  ls" in out
