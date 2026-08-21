@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -25,6 +26,10 @@ from aida.config.settings import McpServerConfig
 
 DEFAULT_CALL_TIMEOUT_SECONDS = 60.0
 _STDERR_TAIL_LINES = 200
+
+#: Per-process, strictly increasing — see ToolCallRecord.seq's docstring
+#: for why this exists instead of sorting by a clock reading.
+_next_call_seq = itertools.count().__next__
 
 
 class McpServerError(Exception):
@@ -92,10 +97,19 @@ class ToolCallRecord:
     error_message: str | None = None
     arguments: dict[str, Any] = field(default_factory=dict)
     content_preview: list[dict[str, Any]] = field(default_factory=list)
-    #: ``time.monotonic()`` at record time — comparable across every
-    #: ``McpServerHandle`` in the same process (unlike wall-clock time, it
-    #: never jumps), which is what lets ``McpManager.recent_calls`` merge
-    #: several servers' call logs into one correctly time-ordered list.
+    #: Monotonically increasing per-process sequence number, assigned at
+    #: record-construction time. ``McpManager.recent_calls`` sorts by this
+    #: (not ``recorded_at``) to merge several servers' call logs into one
+    #: correctly ordered list. A clock reading is *not* reliable for this:
+    #: real Windows CI flake — two real tool calls a few lines apart in a
+    #: fast-running test landed within the same tick of Python 3.11's
+    #: coarser ``time.monotonic()`` resolution on Windows (fixed in 3.13),
+    #: compared equal, and a stable sort then preserved insertion order
+    #: instead of the intended chronological order.
+    seq: int = field(default_factory=_next_call_seq)
+    #: ``time.monotonic()`` at record time — informational only (e.g. a
+    #: future "N seconds ago" display); ordering uses ``seq`` instead, see
+    #: its docstring above.
     recorded_at: float = field(default_factory=time.monotonic)
 
 

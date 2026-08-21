@@ -377,12 +377,12 @@ async def test_connection_test_reuses_an_already_running_server_instantly(tmp_pa
 
 @pytest.mark.asyncio
 async def test_recent_calls_are_most_recent_first_across_servers(tmp_path):
-    """``recent_calls`` merges + sorts by ``ToolCallRecord.recorded_at``
-    across *every* running handle, not just within one server's own
-    ``.calls`` list. A second server's history is simulated with a
-    synthetic, never-started ``McpServerHandle`` (rather than a second real
-    mock-mcp subprocess) deliberately: two concurrently-open real MCP
-    stdio subprocesses being closed together in one ``McpManager`` hits an
+    """``recent_calls`` merges + sorts by ``ToolCallRecord.seq`` across
+    *every* running handle, not just within one server's own ``.calls``
+    list. A second server's history is simulated with a synthetic,
+    never-started ``McpServerHandle`` (rather than a second real mock-mcp
+    subprocess) deliberately: two concurrently-open real MCP stdio
+    subprocesses being closed together in one ``McpManager`` hits an
     unrelated anyio/child-process-reaping cancel-scope error
     ("Attempted to exit a cancel scope that isn't the current task's
     current cancel scope") that's orthogonal to what's being tested here —
@@ -413,6 +413,44 @@ async def test_recent_calls_are_most_recent_first_across_servers(tmp_path):
         assert calls[0][0] == "a"
     finally:
         await manager.aclose()
+
+
+def test_recent_calls_orders_by_seq_even_when_recorded_at_ties(tmp_path):
+    """Windows CI flake: Python 3.11's ``time.monotonic()`` resolution on
+    Windows is coarse enough that two real tool calls a few lines apart in
+    a fast-running test compared *equal* — a stable sort then preserved
+    insertion order instead of the intended chronological order (fixed on
+    3.13's finer-grained clock, so this never reproduced there). Forces the
+    exact tie here so the fix (ToolCallRecord.seq, an explicit monotonic
+    counter independent of any clock) is verified directly, not just
+    incidentally by a real-timing test that could pass or fail depending on
+    how fast the CI runner's clock ticks."""
+    from aida.mcp.server import McpServerHandle, ToolCallRecord
+
+    manager = McpManager([_mock_server_config("a")], artifact_store=ArtifactStore(base_dir=tmp_path))
+    try:
+        tied_clock = 123.456
+        handle_a = McpServerHandle(_mock_server_config("a"))
+        handle_a.calls.append(
+            ToolCallRecord(tool_name="t", duration_seconds=0.0, is_error=False, arguments={"message": "first"})
+        )
+        handle_a.calls[-1].recorded_at = tied_clock
+        handle_b = McpServerHandle(_mock_server_config("b"))
+        handle_b.calls.append(
+            ToolCallRecord(tool_name="t", duration_seconds=0.0, is_error=False, arguments={"message": "second"})
+        )
+        handle_b.calls[-1].recorded_at = tied_clock
+        handle_a.calls.append(
+            ToolCallRecord(tool_name="t", duration_seconds=0.0, is_error=False, arguments={"message": "third"})
+        )
+        handle_a.calls[-1].recorded_at = tied_clock
+        manager._handles["a"] = handle_a
+        manager._handles["b"] = handle_b
+
+        messages = [record.arguments.get("message") for _server, record in manager.recent_calls()]
+        assert messages == ["third", "second", "first"]
+    finally:
+        manager._handles.clear()  # never-started handles — nothing real to close
 
 
 @pytest.mark.asyncio

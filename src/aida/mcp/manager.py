@@ -246,17 +246,18 @@ class McpManager:
 
     def recent_calls(self, limit: int = 200) -> list[tuple[str, ToolCallRecord]]:
         """Every running server's recorded calls, most recent first,
-        capped at ``limit``. Sorted by ``ToolCallRecord.recorded_at`` (not
-        just concatenated per-server) so calls from different servers
-        interleave in the order they actually happened. Diagnostics stay
-        session-scoped and in-memory — the same scope
-        ``McpServerHandle.calls`` itself already has — rather than
+        capped at ``limit``. Sorted by ``ToolCallRecord.seq`` (not just
+        concatenated per-server, and not by ``recorded_at`` — see that
+        field's docstring for why a clock reading isn't reliable here) so
+        calls from different servers interleave in the order they actually
+        happened. Diagnostics stay session-scoped and in-memory — the same
+        scope ``McpServerHandle.calls`` itself already has — rather than
         persisted to SQLite; a restart clears the log, same as restarting
         clears each handle's own ``.calls`` list."""
         merged = [
             (name, record) for name, handle in self._handles.items() for record in handle.calls
         ]
-        merged.sort(key=lambda pair: pair[1].recorded_at, reverse=True)
+        merged.sort(key=lambda pair: pair[1].seq, reverse=True)
         return merged[:limit]
 
     def _build_native_tool(self, server_name: str, tool: McpTool) -> NativeTool:
