@@ -119,18 +119,32 @@ def cmd_edit(args: argparse.Namespace) -> int:
 
 
 def cmd_remove(args: argparse.Namespace) -> int:
+    # Bug report: "when I delete source, is its data removed? Warning states
+    # that 'its index file is left on disk' which is ambiguous and not
+    # clear when and how will disk be cleaned up." --delete-index makes
+    # cleanup an explicit, opt-in action instead of leaving the file behind
+    # forever with no path to remove it.
     settings = load_settings()
     if _get_kb(settings, args.name) is None:
         print(f"Unknown knowledge base {args.name!r}.")
         return 1
     if not args.yes:
-        answer = input(f"Remove knowledge base {args.name!r} (config only — the index file is left on disk)? [y/N] ").strip().lower()
+        suffix = (
+            "and delete its index file from disk"
+            if args.delete_index
+            else "config only — pass --delete-index to also remove its index file"
+        )
+        answer = input(f"Remove knowledge base {args.name!r} ({suffix})? [y/N] ").strip().lower()
         if answer not in ("y", "yes"):
             print("Aborted.")
             return 1
     del settings.knowledge.knowledge_bases[args.name]
     save_knowledge_config(settings.knowledge)
-    print(f"Removed knowledge base {args.name!r} from configuration.")
+    if args.delete_index:
+        knowledge_db_path(args.name).unlink(missing_ok=True)
+        print(f"Removed knowledge base {args.name!r} from configuration and deleted its index file.")
+    else:
+        print(f"Removed knowledge base {args.name!r} from configuration (index file left on disk).")
     return 0
 
 
@@ -285,9 +299,14 @@ def _build_parser() -> argparse.ArgumentParser:
     edit.add_argument("name")
     _add_kb_field_args(edit, defaults=False)
 
-    remove = sub.add_parser("remove", help="Remove a knowledge base from configuration (leaves its index file on disk)")
+    remove = sub.add_parser(
+        "remove", help="Remove a knowledge base from configuration (add --delete-index to also remove its index file)"
+    )
     remove.add_argument("name")
     remove.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+    remove.add_argument(
+        "--delete-index", action="store_true", help="Also delete the knowledge base's SQLite index file from disk"
+    )
 
     build = sub.add_parser("build", help="Full rebuild: re-chunk and re-embed every discovered file")
     build.add_argument("name")

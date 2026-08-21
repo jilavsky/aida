@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
 from aida.artifacts.store import ArtifactStore
@@ -108,6 +109,26 @@ def cmd_delete(args: argparse.Namespace) -> int:
             )
             for path in result.skipped_external_files:
                 print(f"  {path}")
+        return 0
+    finally:
+        store.close()
+
+
+def cmd_rename(args: argparse.Namespace) -> int:
+    """Bug report: "Can we have the chat list in the history column have
+    some kind of names? ... these date/times are not very convenient to
+    use." ``set_title`` already exists (``ConversationRecorder`` calls it
+    once, for auto-titling from the first message) — this is the missing
+    "rename it again" entry point."""
+    store = ConversationStore()
+    try:
+        try:
+            conv_id = resolve_conversation_id(store, args.id)
+        except (UnknownConversationIdError, AmbiguousConversationIdError) as exc:
+            print(str(exc))
+            return 1
+        store.set_title(conv_id, args.title, timestamp=datetime.now(UTC).isoformat())
+        print(f"Renamed conversation {conv_id[:8]} to {args.title!r}.")
         return 0
     finally:
         store.close()
@@ -234,6 +255,10 @@ def _build_parser() -> argparse.ArgumentParser:
     delete.add_argument("id", help="Conversation id, or an unambiguous prefix")
     delete.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
 
+    rename = sub.add_parser("rename", help="Rename a conversation's title")
+    rename.add_argument("id", help="Conversation id, or an unambiguous prefix")
+    rename.add_argument("title", help="New title")
+
     export = sub.add_parser("export", help="Re-export a conversation's Markdown transcript on demand")
     export.add_argument("id", help="Conversation id, or an unambiguous prefix")
 
@@ -248,4 +273,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_resume(args)
     if args.subcommand == "delete":
         return cmd_delete(args)
+    if args.subcommand == "rename":
+        return cmd_rename(args)
     return cmd_export(args)

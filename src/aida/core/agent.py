@@ -13,6 +13,8 @@ same way: append a user ``Message``, iterate ``AgentLoop.run()``.
 
 from __future__ import annotations
 
+import dataclasses
+import time
 from collections.abc import AsyncIterator
 
 from aida.artifacts.base import Artifact, FileArtifact, ImageArtifact
@@ -26,6 +28,7 @@ from aida.core.events import (
     TextFinished,
     ToolCallFinished,
     ToolCallStarted,
+    UsageInfo,
 )
 from aida.core.tools import NativeTool
 from aida.providers.base import CompletionSettings, LLMProvider, Message, ToolCall, ToolSchema
@@ -121,7 +124,14 @@ class AgentLoop:
             pending_tool_calls: list[ToolCall] = []
             terminated_by_error = False
 
+            round_trip_started = time.monotonic()
             async for event in self.provider.complete(messages, self._tool_schemas(), self.settings):
+                # Wallclock duration of this provider round-trip, stamped
+                # here (not by the provider itself) so it's available
+                # uniformly regardless of whether a given provider's own
+                # API reports timing — see UsageInfo's docstring.
+                if isinstance(event, UsageInfo) and event.duration_seconds is None:
+                    event = dataclasses.replace(event, duration_seconds=time.monotonic() - round_trip_started)
                 yield event
                 if isinstance(event, TextFinished):
                     assistant_text = event.text

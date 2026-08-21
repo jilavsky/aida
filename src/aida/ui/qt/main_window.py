@@ -23,12 +23,14 @@ from pathlib import Path
 from aida.config.logging_setup import configure_logging, get_logger
 from aida.config.paths import ensure_records_dir, skills_dir
 from aida.config.settings import Settings, save_app_config
+from aida.core.cost import estimate_cost_usd
 from aida.mcp.groups import resolve_group
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
 from aida.persistence.store import ArtifactRecord, ConversationStore
 from aida.ui.qt._qt import (
     QAction,
     QApplication,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -95,6 +97,16 @@ class MainWindow(QMainWindow):
         self.profile_selector = ProfileSelector(self)
         toolbar.addWidget(self.profile_selector)
 
+        # Bug report: "How do I create a new chat within same Workspace?
+        # ... something which will not contain the history from prior
+        # chat." Previously the only way to reset history was switching
+        # workspaces (or profiles, which explicitly keep history) —
+        # _on_new_chat_requested reuses the same _restart_session machinery
+        # pinned to the workspace/profile already active.
+        new_chat_action = QAction("New Chat", self)
+        new_chat_action.triggered.connect(self._on_new_chat_requested)
+        toolbar.addAction(new_chat_action)
+
         mcp_action = QAction("MCP Servers…", self)
         mcp_action.triggered.connect(self.open_mcp_management_dialog)
         toolbar.addAction(mcp_action)
@@ -134,6 +146,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(splitter)
 
         self.statusBar().showMessage("Starting session…")
+        # Bug report: "Can we get cost estimate... at this moment it is a
+        # black box." A permanent status-bar label (not a transient
+        # showMessage(), which this session-start message would clobber)
+        # so it stays visible turn over turn — see _update_usage_label.
+        self._usage_label = QLabel("", self)
+        self.statusBar().addPermanentWidget(self._usage_label)
 
     def _wire_ui_signals(self) -> None:
         self.input_box.send_requested.connect(self._on_send_requested)
@@ -141,6 +159,7 @@ class MainWindow(QMainWindow):
         self.sidebar.resume_requested.connect(self._on_resume_requested)
         self.sidebar.delete_requested.connect(self._on_delete_requested)
         self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
+        self.sidebar.rename_requested.connect(self._on_rename_requested)
         self.workspace_selector.workspace_changed.connect(self._on_workspace_changed)
         self.profile_selector.profile_changed.connect(self._on_profile_changed)
         self.folder_display.source_folders_changed.connect(self._on_source_folders_changed)
@@ -154,6 +173,7 @@ class MainWindow(QMainWindow):
         self.bridge.event_received.connect(self.chat_panel.handle_event)
         self.bridge.turn_started.connect(lambda: self.input_box.set_busy(True))
         self.bridge.turn_finished.connect(lambda: self.input_box.set_busy(False))
+        self.bridge.turn_finished.connect(self._update_usage_label)
         self.bridge.turn_failed.connect(self._on_turn_failed)
         self.bridge.confirmation_requested.connect(self._on_confirmation_requested)
         self.bridge.profile_switched.connect(self._on_profile_switched)
@@ -196,6 +216,25 @@ class MainWindow(QMainWindow):
         self._refresh_folder_display()
         self._refresh_conversations_sidebar()
         self._save_last_session_selection()
+        self._update_usage_label()
+
+    def _update_usage_label(self) -> None:
+        """Bug report: "Can we get cost estimate as I got to other tool?
+        Or token use may be better... at this moment it is a black box."
+        Reads ChatSession's own running totals (aida.cli.chat.ChatSession
+        accumulates them from UsageInfo events in send()) rather than
+        needing a dedicated ChatBridge signal — session is already reachable
+        from the Qt thread. A fresh/history-only session with no usage yet
+        just shows zeros rather than being left blank, so the label doesn't
+        look broken."""
+        session = self.bridge.session
+        if session is None:
+            self._usage_label.setText("")
+            return
+        cost = estimate_cost_usd(session.total_input_tokens, session.total_output_tokens)
+        self._usage_label.setText(
+            f"Tokens: {session.total_input_tokens:,} in / {session.total_output_tokens:,} out (~${cost:.3f} est.)"
+        )
 
     def _save_last_session_selection(self) -> None:
         """"App does not seem to open with last set of settings": persists
@@ -409,6 +448,27 @@ class MainWindow(QMainWindow):
             return
         self._restart_session(workspace_name=name or None, profile_name=None, resume_conversation_id=None)
 
+    def _on_new_chat_requested(self) -> None:
+        """Bug report: "How do I create a new chat within same Workspace?
+        Do not see 'New Chat' button, something which will not contain the
+        history from prior chat." Reuses _restart_session exactly as
+        workspace-switching already does — the only difference is pinning
+        workspace/profile to whatever is already active, instead of
+        switching to a different one."""
+        session = self.bridge.session
+        workspace_name = self._current_workspace_config.name if self._current_workspace_config else None
+        profile_name = session.profile_name if session is not None else None
+        answer = QMessageBox.question(
+            self,
+            "New Chat",
+            "Start a new conversation? Current chat history stays saved and reachable from the sidebar.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._restart_session(workspace_name=workspace_name, profile_name=profile_name, resume_conversation_id=None)
+
     def _on_profile_changed(self, name: str) -> None:
         # aida.ui.qt.bridge.ChatBridge.switch_profile already does the
         # actual work (connected directly in _wire_bridge_signals); nothing
@@ -465,6 +525,21 @@ class MainWindow(QMainWindow):
         try:
             records_dir = ensure_records_dir(self.settings.app.records_dir)
             delete_conversation(store, conversation_id, records_dir=records_dir)
+        finally:
+            store.close()
+        self._refresh_conversations_sidebar()
+
+    def _on_rename_requested(self, conversation_id: str, title: str) -> None:
+        """Bug report: "Can we have the chat list in the history column
+        have some kind of names? ... these date/times are not very
+        convenient to use." set_title already exists (ConversationRecorder
+        auto-titles from the first message via it) — this is just the
+        missing "change it again later" entry point."""
+        from datetime import UTC, datetime
+
+        store = ConversationStore()
+        try:
+            store.set_title(conversation_id, title, timestamp=datetime.now(UTC).isoformat())
         finally:
             store.close()
         self._refresh_conversations_sidebar()
@@ -580,6 +655,12 @@ class MainWindow(QMainWindow):
         # effect immediately, same as the font size above, instead of only
         # applying on the next launch.
         configure_logging(self.settings.app.log_level)
+        # Bug report: "Give user control on number of iterations." Patched
+        # directly onto the *running* AgentLoop too — not just saved for the
+        # next session start — same "takes effect immediately" treatment as
+        # font size/log level above.
+        if self.bridge.session is not None:
+            self.bridge.session.loop.max_iterations = self.settings.app.max_agent_iterations
         save_app_config(self.settings.app)
 
     # --- shutdown ----------------------------------------------------------

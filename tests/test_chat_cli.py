@@ -31,6 +31,7 @@ from aida.core.events import (
     TextStarted,
     ToolCallFinished,
     ToolCallStarted,
+    UsageInfo,
 )
 from aida.knowledge.rag import index as kb_index
 from aida.knowledge.rag.chunking import Chunk
@@ -158,6 +159,26 @@ def test_print_event_agent_error(capsys):
     assert "net down" in out
 
 
+def test_print_event_usage_info_with_duration_shows_tokens_per_second(capsys):
+    print_event(UsageInfo(input_tokens=100, output_tokens=50, duration_seconds=2.0))
+    out = capsys.readouterr().out
+    assert "100" in out
+    assert "50" in out
+    assert "25.0 tok/s" in out
+
+
+def test_print_event_usage_info_without_duration_still_shows_tokens(capsys):
+    print_event(UsageInfo(input_tokens=100, output_tokens=50))
+    out = capsys.readouterr().out
+    assert "100" in out
+    assert "50" in out
+
+
+def test_print_event_usage_info_with_no_tokens_prints_nothing(capsys):
+    print_event(UsageInfo())
+    assert capsys.readouterr().out == ""
+
+
 # --- cli_confirm (Phase 6 default ConfirmCallback) --------------------------
 
 
@@ -267,6 +288,61 @@ async def test_chat_session_switch_profile_closes_old_provider(monkeypatch, aida
 
     await session.aclose()
     assert closed == ["a", "b"]  # session end closes whatever is current
+
+
+def test_chat_session_uses_configured_max_iterations(monkeypatch, aida_home: Path, records_home: Path):
+    """Bug report: iteration cap was hardcoded at 10 with no way to raise
+    it. AppConfig.max_agent_iterations must actually reach the AgentLoop."""
+    settings = _settings_with_profile()
+    settings.app.max_agent_iterations = 250
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+
+    session = ChatSession(settings, "mock-profile")
+    assert session.loop.max_iterations == 250
+
+
+@pytest.mark.asyncio
+async def test_chat_session_switch_profile_keeps_configured_max_iterations(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    settings = _settings_with_profile("profile-a")
+    settings.app.max_agent_iterations = 42
+    settings.providers.profiles["profile-b"] = ProviderProfile(
+        name="profile-b", kind="openai_compat", model="model-b"
+    )
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+
+    session = ChatSession(settings, "profile-a")
+    await session.switch_profile("profile-b")
+    assert session.loop.max_iterations == 42
+
+
+@pytest.mark.asyncio
+async def test_chat_session_accumulates_usage_across_turns(monkeypatch, aida_home: Path, records_home: Path):
+    """Bug report: "Can we get cost estimate... token use may be
+    better... at this moment it is a black box." ChatSession.send() must
+    accumulate UsageInfo tokens across the whole session, not just report
+    per-turn."""
+    settings = _settings_with_profile()
+    provider = MockProvider(
+        [
+            MockTurn(text="first", input_tokens=100, output_tokens=20),
+            MockTurn(text="second", input_tokens=50, output_tokens=10),
+        ]
+    )
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+
+    session = ChatSession(settings, "mock-profile")
+    assert session.total_input_tokens == 0
+    assert session.total_output_tokens == 0
+
+    _ = [e async for e in session.send("one")]
+    assert session.total_input_tokens == 100
+    assert session.total_output_tokens == 20
+
+    _ = [e async for e in session.send("two")]
+    assert session.total_input_tokens == 150
+    assert session.total_output_tokens == 30
 
 
 def test_chat_session_unknown_profile_raises(aida_home: Path, records_home: Path):

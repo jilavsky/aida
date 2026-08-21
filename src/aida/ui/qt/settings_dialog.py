@@ -67,6 +67,14 @@ class SettingsDialog(QDialog):
             self._log_level_combo.setCurrentIndex(index)
         form.addRow("Log level:", self._log_level_combo)
 
+        # Bug report: "Give user control on number of iterations, I asked
+        # for some really multi step analysis and it stopped after 10."
+        # Was a hardcoded AgentLoop constant; now a per-install setting.
+        self._max_iterations_spin = QSpinBox(self)
+        self._max_iterations_spin.setRange(1, 2000)
+        self._max_iterations_spin.setValue(app_config.max_agent_iterations)
+        form.addRow("Max tool-call iterations per turn:", self._max_iterations_spin)
+
         layout.addLayout(form)
 
         self._profiles_list = QListWidget(self)
@@ -95,6 +103,9 @@ class SettingsDialog(QDialog):
     def log_level(self) -> str:
         return self._log_level_combo.currentText()
 
+    def max_agent_iterations(self) -> int:
+        return self._max_iterations_spin.value()
+
     def updated_app_config(self) -> AppConfig:
         """A copy of the ``AppConfig`` this dialog was opened with, with
         this dialog's edited fields applied — window geometry and every
@@ -104,6 +115,7 @@ class SettingsDialog(QDialog):
             font_size=self.font_size(),
             records_dir=self.records_dir(),
             log_level=self.log_level(),
+            max_agent_iterations=self.max_agent_iterations(),
         )
 
 

@@ -15,6 +15,7 @@ from aida.cli.conversations import (
     cmd_delete,
     cmd_export,
     cmd_list,
+    cmd_rename,
     resolve_conversation_id,
 )
 from aida.config.settings import ProviderProfile, load_settings
@@ -154,6 +155,35 @@ def test_cmd_delete_unknown_id_reports_error(aida_home: Path, records_home: Path
     assert "does-not-exist" in out
 
 
+# --- cmd_rename ------------------------------------------------------------------
+
+
+def test_cmd_rename_updates_the_title(aida_home: Path, records_home: Path, capsys):
+    """Bug report: "Can we have the chat list in the history column have
+    some kind of names? ... these date/times are not very convenient to
+    use." set_title already existed for auto-titling; this is the missing
+    "rename it again" CLI entry point."""
+    store = _store(aida_home)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.close()
+
+    rc = cmd_rename(_build_parser().parse_args(["rename", conv_id[:8], "USAXS beamtime notes"]))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "USAXS beamtime notes" in out
+
+    store2 = ConversationStore()
+    assert store2.get_conversation(conv_id).title == "USAXS beamtime notes"
+    store2.close()
+
+
+def test_cmd_rename_unknown_id_reports_error(aida_home: Path, records_home: Path, capsys):
+    rc = cmd_rename(_build_parser().parse_args(["rename", "does-not-exist", "New Title"]))
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "does-not-exist" in out
+
+
 # --- cmd_resume (via _resume_async, same pattern as test_start_session.py) ---
 
 
@@ -224,3 +254,9 @@ def test_parser_resume_accepts_workspace_and_mcp_flags():
 def test_parser_delete_yes_flag_defaults_false():
     args = _build_parser().parse_args(["delete", "abcd1234"])
     assert args.yes is False
+
+
+def test_parser_rename_accepts_id_and_title():
+    args = _build_parser().parse_args(["rename", "abcd1234", "USAXS notes"])
+    assert args.id == "abcd1234"
+    assert args.title == "USAXS notes"

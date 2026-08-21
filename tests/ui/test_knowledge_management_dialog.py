@@ -19,6 +19,7 @@ from aida.config.settings import (
     WorkspacesConfig,
     load_settings,
 )
+from aida.knowledge.rag import index as kb_index
 from aida.providers.mock import MockProvider, MockTurn
 from aida.providers.mock_embeddings import MockEmbeddings
 from aida.ui.qt._qt import QMessageBox
@@ -130,13 +131,16 @@ def test_edit_knowledge_base_via_dialog_action(qapp, aida_home: Path):
     assert load_knowledge_config(aida_home).knowledge_bases["usaxs-docs"].source_folders == ["/new"]
 
 
-def test_remove_knowledge_base_with_confirmation(qapp, aida_home: Path, monkeypatch):
+def test_remove_knowledge_base_yes_deletes_config_and_index_file(qapp, aida_home: Path, monkeypatch):
+    from aida.config.paths import knowledge_db_path
     from aida.config.settings import load_knowledge_config
 
     settings = _settings_with_embedding_profile()
     settings.knowledge = KnowledgeConfig(
         knowledge_bases={"usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")}
     )
+    index_path = knowledge_db_path("usaxs-docs")
+    kb_index.connect(index_path).close()
     dialog = KnowledgeManagementDialog(settings, None)
     dialog._kb_list.setCurrentRow(0)
 
@@ -145,9 +149,31 @@ def test_remove_knowledge_base_with_confirmation(qapp, aida_home: Path, monkeypa
 
     assert dialog._kb_list.count() == 0
     assert "usaxs-docs" not in load_knowledge_config(aida_home).knowledge_bases
+    assert not index_path.exists()
 
 
-def test_remove_knowledge_base_declined_keeps_it(qapp, aida_home: Path, monkeypatch):
+def test_remove_knowledge_base_no_removes_config_but_keeps_index_file(qapp, aida_home: Path, monkeypatch):
+    from aida.config.paths import knowledge_db_path
+    from aida.config.settings import load_knowledge_config
+
+    settings = _settings_with_embedding_profile()
+    settings.knowledge = KnowledgeConfig(
+        knowledge_bases={"usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")}
+    )
+    index_path = knowledge_db_path("usaxs-docs")
+    kb_index.connect(index_path).close()
+    dialog = KnowledgeManagementDialog(settings, None)
+    dialog._kb_list.setCurrentRow(0)
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    dialog._on_remove()
+
+    assert dialog._kb_list.count() == 0
+    assert "usaxs-docs" not in load_knowledge_config(aida_home).knowledge_bases
+    assert index_path.exists()
+
+
+def test_remove_knowledge_base_cancelled_keeps_it(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_embedding_profile()
     settings.knowledge = KnowledgeConfig(
         knowledge_bases={"usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")}
@@ -155,7 +181,7 @@ def test_remove_knowledge_base_declined_keeps_it(qapp, aida_home: Path, monkeypa
     dialog = KnowledgeManagementDialog(settings, None)
     dialog._kb_list.setCurrentRow(0)
 
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Cancel)
     dialog._on_remove()
 
     assert dialog._kb_list.count() == 1

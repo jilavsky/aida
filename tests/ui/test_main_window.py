@@ -336,6 +336,32 @@ def test_settings_dialog_font_size_applies_without_restart(
         window.close()
 
 
+def test_settings_dialog_max_iterations_applies_to_the_running_session(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "Give user control on number of iterations, I asked for
+    some really multi step analysis and it stopped after 10." Patched onto
+    the *running* AgentLoop immediately, not just saved for next launch."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert window.bridge.session.loop.max_iterations == 10  # default, unchanged so far
+
+        def _fake_exec(self):
+            self._max_iterations_spin.setValue(500)
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr("aida.ui.qt.settings_dialog.SettingsDialog.exec", _fake_exec)
+        window.open_settings_dialog()
+
+        assert window.settings.app.max_agent_iterations == 500
+        assert window.bridge.session.loop.max_iterations == 500
+    finally:
+        window.close()
+
+
 def test_window_state_persisted_on_close(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
     settings = _settings_with_profile()
     window = _make_window(
@@ -392,6 +418,116 @@ def test_workspace_switch_declined_keeps_current_session(
         window._on_workspace_changed("plain-chat")
         qapp.processEvents()
         assert window.bridge.session.recorder.conversation_id == conv_id  # unchanged
+    finally:
+        window.close()
+
+
+def test_new_chat_confirmed_starts_a_fresh_conversation_same_workspace_and_profile(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "How do I create a new chat within same Workspace? Do
+    not see 'New Chat' button, something which will not contain the
+    history from prior chat.\""""
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={"plain-chat": WorkspaceConfig(name="plain-chat", profile="mock-profile", mcp_group="none")}
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="plain-chat"
+    )
+    try:
+        first_conv_id = window.bridge.session.recorder.conversation_id
+        window.input_box.set_text("hello")
+        window.input_box._send_button.click()
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+        )
+        window._on_new_chat_requested()
+        assert pump_until(
+            qapp,
+            lambda: window.bridge.session is not None
+            and window.bridge.session.recorder.conversation_id != first_conv_id,
+        )
+        assert window.bridge.session.recorder.workspace_name == "plain-chat"
+        assert window.chat_panel.widget_count == 0  # reset, not carried over
+
+        store = ConversationStore()
+        try:
+            assert store.get_conversation(first_conv_id) is not None  # old conversation still there
+        finally:
+            store.close()
+    finally:
+        window.close()
+
+
+def test_new_chat_declined_keeps_current_session(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        conv_id = window.bridge.session.recorder.conversation_id
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.No
+        )
+        window._on_new_chat_requested()
+        qapp.processEvents()
+        assert window.bridge.session.recorder.conversation_id == conv_id  # unchanged
+    finally:
+        window.close()
+
+
+def test_rename_conversation_updates_title_in_db_and_sidebar(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "Can we have the chat list in the history column have
+    some kind of names? ... these date/times are not very convenient to
+    use.\""""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        conv_id = window.bridge.session.recorder.conversation_id
+        window.input_box.set_text("hello")
+        window.input_box._send_button.click()
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+        window._refresh_conversations_sidebar()
+
+        window._on_rename_requested(conv_id, "USAXS beamtime notes")
+
+        store = ConversationStore()
+        try:
+            assert store.get_conversation(conv_id).title == "USAXS beamtime notes"
+        finally:
+            store.close()
+        assert "USAXS beamtime notes" in window.sidebar._titles_by_row
+    finally:
+        window.close()
+
+
+def test_usage_label_updates_after_a_turn_reports_usage(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "Can we get cost estimate as I got to other tool? Or
+    token use may be better... at this moment it is a black box.\""""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hi", input_tokens=100, output_tokens=50)],
+        profile_name="mock-profile",
+    )
+    try:
+        assert window._usage_label.text() == "Tokens: 0 in / 0 out (~$0.000 est.)"
+        window.input_box.set_text("hello")
+        window.input_box._send_button.click()
+        assert pump_until(qapp, lambda: "100" in window._usage_label.text())
+        assert "50" in window._usage_label.text()
     finally:
         window.close()
 

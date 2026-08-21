@@ -133,11 +133,20 @@ class MessageFinished:
 
 @dataclass(frozen=True)
 class UsageInfo:
-    """Token accounting for one provider turn, when the provider reports it."""
+    """Token accounting for one provider turn, when the provider reports it.
+
+    ``duration_seconds`` (bug report: "may be tok/sec if available and
+    wallclock time") is filled in by ``aida.core.agent.AgentLoop`` itself
+    — the wallclock span of the ``provider.complete()`` round-trip this
+    usage belongs to — rather than by any individual provider, so it's
+    available uniformly regardless of whether a given provider's API
+    reports timing at all.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int | None = None
+    duration_seconds: float | None = None
 
     to_dict = _base_dict
 

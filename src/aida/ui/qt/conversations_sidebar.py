@@ -20,6 +20,7 @@ from aida.ui.qt._qt import (
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -76,10 +77,16 @@ class ConversationsSidebar(QWidget):
     resume_requested = Signal(str)  # conversation_id
     delete_requested = Signal(str)  # conversation_id, already confirmed
     cleanup_requested = Signal(int)  # cutoff in days, already confirmed
+    # Bug report: "Can we have the chat list in the history column have
+    # some kind of names? ... these date/times are not very convenient to
+    # use." set_title already exists on ConversationStore (used once, by
+    # auto-titling) — this is the missing "rename it again" entry point.
+    rename_requested = Signal(str, str)  # conversation_id, new_title
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ids_by_row: list[str] = []
+        self._titles_by_row: list[str] = []
 
         layout = QVBoxLayout(self)
         self._list = QListWidget(self)
@@ -96,6 +103,10 @@ class ConversationsSidebar(QWidget):
         self._delete_button.clicked.connect(self._on_delete_clicked)
         buttons.addWidget(self._delete_button)
 
+        self._rename_button = QPushButton("Rename…", self)
+        self._rename_button.clicked.connect(self._on_rename_clicked)
+        buttons.addWidget(self._rename_button)
+
         self._cleanup_button = QPushButton("Clean Up…", self)
         self._cleanup_button.clicked.connect(self._on_cleanup_clicked)
         buttons.addWidget(self._cleanup_button)
@@ -104,10 +115,12 @@ class ConversationsSidebar(QWidget):
     def set_conversations(self, summaries: Iterable[ConversationSummary]) -> None:
         self._list.clear()
         self._ids_by_row = []
+        self._titles_by_row = []
         for summary in summaries:
             item = QListWidgetItem(_row_label(summary))
             self._list.addItem(item)
             self._ids_by_row.append(summary.id)
+            self._titles_by_row.append(summary.title or "")
 
     @property
     def count(self) -> int:
@@ -145,6 +158,17 @@ class ConversationsSidebar(QWidget):
         )
         if answer == QMessageBox.StandardButton.Yes:
             self.delete_requested.emit(conv_id)
+
+    def _on_rename_clicked(self) -> None:
+        row = self._list.currentRow()
+        conv_id = self.selected_conversation_id()
+        if not conv_id:
+            return
+        current_title = self._titles_by_row[row] if 0 <= row < len(self._titles_by_row) else ""
+        new_title, ok = QInputDialog.getText(self, "Rename Conversation", "Title:", text=current_title)
+        new_title = new_title.strip()
+        if ok and new_title:
+            self.rename_requested.emit(conv_id, new_title)
 
     def _on_cleanup_clicked(self) -> None:
         days = CleanupDialog.get_cutoff_days(self)

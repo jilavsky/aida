@@ -25,6 +25,7 @@ from aida.config.settings import (
 )
 from aida.core.agent import AgentLoop
 from aida.core.context import build_system_message, build_workspace_context_block, load_skill_texts
+from aida.core.cost import estimate_cost_usd
 from aida.core.events import (
     AgentError,
     AgentEvent,
@@ -115,7 +116,19 @@ def print_event(event: AgentEvent) -> None:
     elif isinstance(event, MessageFinished):
         pass  # no separate line; TextFinished already closed the reply
     elif isinstance(event, UsageInfo):
-        pass  # available for a future --verbose flag; not printed by default
+        # Bug report: "Can we get cost estimate... token use may be better
+        # ... it is a black box." Printed unconditionally now (was
+        # previously swallowed, "for a future --verbose flag") — a provider
+        # that doesn't report usage just never emits this event at all, so
+        # there's nothing spurious to gate behind a flag.
+        if event.output_tokens and event.duration_seconds:
+            rate = event.output_tokens / event.duration_seconds
+            print(
+                f"[usage] {event.input_tokens} in / {event.output_tokens} out tokens, "
+                f"{event.duration_seconds:.1f}s ({rate:.1f} tok/s)"
+            )
+        elif event.input_tokens or event.output_tokens:
+            print(f"[usage] {event.input_tokens} in / {event.output_tokens} out tokens")
     elif isinstance(event, AgentError):
         detail = f" ({event.detail})" if event.detail else ""
         print(f"\n[error:{event.layer}] {event.message}{detail}")
@@ -190,7 +203,9 @@ class ChatSession:
         self.profile = resolve_profile(settings, profile_name)
         self.provider = build_provider(self.profile)
         self.completion_settings = CompletionSettings(model=self.profile.model)
-        self.loop = AgentLoop(self.provider, self.completion_settings, self.tools)
+        self.loop = AgentLoop(
+            self.provider, self.completion_settings, self.tools, max_iterations=settings.app.max_agent_iterations
+        )
         self.recorder = recorder
         # Phase 8 (RAG): resolved once at session-start (aida.cli.chat.
         # start_session), queried fresh every turn in send() — retrieval is
@@ -199,6 +214,13 @@ class ChatSession:
         # user message exists). Empty for a workspace with no
         # knowledge_bases configured — zero retrieval calls, zero cost.
         self.active_knowledge_bases = active_knowledge_bases or []
+        # Bug report: "Can we get cost estimate... token use may be
+        # better... at this moment it is a black box." Cumulative across
+        # the whole session (including across /profile switches, which
+        # deliberately don't reset it — the model may change but the
+        # user's own running total shouldn't). See aida.core.cost.
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
 
         skill_texts = load_skill_texts(skills_dir(), skill_names or [])
         system_message = build_system_message(system_prompt, skill_texts, extra_texts=extra_context_texts)
@@ -212,7 +234,9 @@ class ChatSession:
         self.profile_name = name
         self.provider = build_provider(self.profile)
         self.completion_settings = CompletionSettings(model=self.profile.model)
-        self.loop = AgentLoop(self.provider, self.completion_settings, self.tools)
+        self.loop = AgentLoop(
+            self.provider, self.completion_settings, self.tools, max_iterations=self.settings.app.max_agent_iterations
+        )
         # self.messages is intentionally left untouched: history carries over.
         await old_provider.aclose()
 
@@ -289,6 +313,9 @@ class ChatSession:
         try:
             async for event in self.loop.run(self.messages):
                 yield event
+                if isinstance(event, UsageInfo):
+                    self.total_input_tokens += event.input_tokens
+                    self.total_output_tokens += event.output_tokens
                 # Persist each finalized message the instant it lands in
                 # self.messages (agent.py appends assistant/tool messages
                 # in-place as the turn progresses) — this is the "crash-safe
@@ -400,6 +427,14 @@ async def _repl_loop(session: ChatSession) -> None:
         except KeyboardInterrupt:
             session.cancel()
             print("\n[cancelled]")
+            continue
+
+        if session.total_input_tokens or session.total_output_tokens:
+            cost = estimate_cost_usd(session.total_input_tokens, session.total_output_tokens)
+            print(
+                f"[session total] {session.total_input_tokens} in / {session.total_output_tokens} out "
+                f"tokens, ~${cost:.4f} est."
+            )
 
 
 def _ensure_workspace_folders(workspace: WorkspaceConfig) -> None:

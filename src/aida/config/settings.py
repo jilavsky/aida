@@ -66,6 +66,14 @@ class AppConfig:
     # workspace was active, or no session has ever started yet).
     last_workspace_name: str | None = None
     last_profile_name: str | None = None
+    # Bug report: a long multi-step analysis (many files, each needing
+    # several tool calls) hit AgentLoop's iteration cap mid-task with no
+    # way to raise it short of editing code. Mirrors
+    # aida.core.agent.DEFAULT_MAX_ITERATIONS's value as this field's
+    # default, but is a plain literal here rather than an import — settings
+    # must not import core (core.agent already imports
+    # aida.config.logging_setup, so the reverse would cycle).
+    max_agent_iterations: int = 10
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -90,6 +98,7 @@ class AppConfig:
             "font_size": self.font_size,
             "last_workspace_name": self.last_workspace_name,
             "last_profile_name": self.last_profile_name,
+            "max_agent_iterations": self.max_agent_iterations,
         }
 
 

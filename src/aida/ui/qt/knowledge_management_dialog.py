@@ -283,20 +283,30 @@ class KnowledgeManagementDialog(QDialog):
         self._refresh_kb_list()
 
     def _on_remove(self) -> None:
+        # Bug report: "when I delete source, is its data removed? Warning
+        # states that 'its index file is left on disk' which is ambiguous
+        # and not clear when and how will disk be cleaned up." Three-way
+        # choice makes cleanup an explicit, opt-in action instead of a
+        # permanent, unexplained leftover file.
         name = self._selected_name()
         if not name:
             return
         answer = QMessageBox.question(
             self,
             "Remove Knowledge Base",
-            f"Remove knowledge base {name!r} from configuration? Its index file is left on disk.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            f"Remove knowledge base {name!r}?\n\n"
+            "Yes — remove it and delete its index file from disk.\n"
+            "No — remove it from configuration but keep the index file "
+            f"({knowledge_db_path(name)}) in case you re-add it later.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        if answer == QMessageBox.StandardButton.Cancel:
             return
         del self._settings.knowledge.knowledge_bases[name]
         save_knowledge_config(self._settings.knowledge)
+        if answer == QMessageBox.StandardButton.Yes:
+            knowledge_db_path(name).unlink(missing_ok=True)
         self._refresh_kb_list()
 
     # --- build/update --------------------------------------------------------

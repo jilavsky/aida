@@ -141,6 +141,24 @@ async def test_iteration_cap_reached():
 
 
 @pytest.mark.asyncio
+async def test_usage_info_gets_a_real_duration_stamped_by_the_loop():
+    """Bug report: "Add time stamps to each message, may be tok/sec if
+    available and wallclock time." A provider's UsageInfo carries token
+    counts only — AgentLoop._run_turns is the one place that measures the
+    wallclock span of a provider round-trip, so tok/sec is available
+    regardless of whether a given provider's own API reports timing."""
+    provider = MockProvider([MockTurn(text="hi", input_tokens=10, output_tokens=5)])
+    loop = AgentLoop(provider, _settings())
+    messages = [Message(role="user", content="hi")]
+
+    events = [e async for e in loop.run(messages)]
+
+    usage = next(e for e in events if type(e).__name__ == "UsageInfo")
+    assert usage.duration_seconds is not None
+    assert usage.duration_seconds >= 0.0
+
+
+@pytest.mark.asyncio
 async def test_provider_error_propagates_and_stops_loop():
     provider = MockProvider([MockTurn(error="connection refused")])
     loop = AgentLoop(provider, _settings())

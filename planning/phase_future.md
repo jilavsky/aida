@@ -51,6 +51,15 @@ here instead of growing phase scope.
       PySide6 app.
 - [ ] Extra GUI niceties: per-display font/scaling profiles, additional dockable
       widgets.
+- [ ] **GUI workspace editor**, including a knowledge-base picker. Creating/
+      editing a workspace (and which knowledge bases it uses) is CLI-only
+      today (`aida workspace add/edit --knowledge-bases a,b`) — real-use
+      feedback after the v0.0.1 pre-alpha release asked for this in the GUI.
+      Per-workspace KB scoping itself already works correctly
+      (`aida.cli.chat.start_session` only resolves the workspace's own
+      `knowledge_bases` list); this is purely a missing editor UI, sized as
+      the biggest item in that feedback round (a new dialog, comparable in
+      scope to `McpManagementDialog`/`KnowledgeManagementDialog`).
 
 ## Knowledge
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 from aida.persistence.db import CURRENT_SCHEMA_VERSION, connect
@@ -63,6 +64,35 @@ def test_row_factory_allows_dict_like_access(tmp_path: Path):
     assert row["id"] == "c1"
     assert isinstance(row, sqlite3.Row)
     conn.close()
+
+
+def test_concurrent_first_connect_from_two_threads_does_not_raise_database_is_locked(tmp_path: Path):
+    """Real-use bug: the GUI opens the first-ever connection to a fresh DB
+    file from two threads at once (MainWindow.__init__ starts a session on
+    the background loop thread while its own Qt-thread constructor opens a
+    ConversationStore for the sidebar) — both see PRAGMA user_version == 0
+    and race to run the migration. Windows CI hit this as a real
+    sqlite3.OperationalError: database is locked. connect()'s in-process
+    _migrate_lock (aida/persistence/db.py) must serialize the race away."""
+    path = tmp_path / "aida.db"
+    errors: list[Exception] = []
+    barrier = threading.Barrier(2)
+
+    def _connect_and_close() -> None:
+        barrier.wait(timeout=5.0)
+        try:
+            conn = connect(path)
+            conn.close()
+        except Exception as exc:  # noqa: BLE001 - captured to fail the test explicitly, not to swallow it
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_connect_and_close) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10.0)
+
+    assert not errors, f"concurrent first connect() raised: {errors}"
 
 
 def test_foreign_keys_enforced(tmp_path: Path):

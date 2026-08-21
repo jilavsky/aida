@@ -9,11 +9,12 @@ from aida.ui.qt.settings_dialog import SettingsDialog
 
 
 def test_dialog_seeds_fields_from_app_config(qapp):
-    cfg = AppConfig(font_size=14, records_dir="/data/records", log_level="DEBUG")
+    cfg = AppConfig(font_size=14, records_dir="/data/records", log_level="DEBUG", max_agent_iterations=100)
     dialog = SettingsDialog(cfg)
     assert dialog.font_size() == 14
     assert dialog.records_dir() == "/data/records"
     assert dialog.log_level() == "DEBUG"
+    assert dialog.max_agent_iterations() == 100
 
 
 def test_editing_fields_and_reading_back(qapp):
@@ -22,10 +23,12 @@ def test_editing_fields_and_reading_back(qapp):
     dialog._font_size_spin.setValue(20)
     dialog._records_dir_edit.setText("/new/records")
     dialog._log_level_combo.setCurrentText("ERROR")
+    dialog._max_iterations_spin.setValue(500)
 
     assert dialog.font_size() == 20
     assert dialog.records_dir() == "/new/records"
     assert dialog.log_level() == "ERROR"
+    assert dialog.max_agent_iterations() == 500
 
 
 def test_blank_records_dir_returns_none(qapp):
@@ -47,6 +50,18 @@ def test_updated_app_config_preserves_unedited_fields(qapp):
     assert updated.default_safety_mode == "relaxed"
     # original untouched
     assert cfg.font_size != 18
+
+
+def test_updated_app_config_includes_edited_max_agent_iterations(qapp):
+    """Bug report: "Give user control on number of iterations, I asked for
+    some really multi step analysis and it stopped after 10.\""""
+    cfg = AppConfig(max_agent_iterations=10)
+    dialog = SettingsDialog(cfg)
+    dialog._max_iterations_spin.setValue(500)
+
+    updated = dialog.updated_app_config()
+    assert updated.max_agent_iterations == 500
+    assert cfg.max_agent_iterations == 10  # original untouched
 
 
 def test_browse_button_sets_records_dir(qapp, monkeypatch, tmp_path):

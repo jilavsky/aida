@@ -99,6 +99,62 @@ def test_delete_with_no_selection_is_a_noop(qapp, monkeypatch):
     assert called == []
 
 
+def test_rename_confirmed_emits_rename_requested_with_new_title(qapp, monkeypatch):
+    """Bug report: "Can we have the chat list in the history column have
+    some kind of names? ... these date/times are not very convenient to
+    use.\""""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", title="old title")])
+    sidebar.select_row(0)
+    monkeypatch.setattr(
+        "aida.ui.qt.conversations_sidebar.QInputDialog.getText",
+        staticmethod(lambda *a, **kw: ("USAXS beamtime notes", True)),
+    )
+    renamed = []
+    sidebar.rename_requested.connect(lambda conv_id, title: renamed.append((conv_id, title)))
+    sidebar._on_rename_clicked()
+    assert renamed == [("id1", "USAXS beamtime notes")]
+
+
+def test_rename_cancelled_does_not_emit(qapp, monkeypatch):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", title="old title")])
+    sidebar.select_row(0)
+    monkeypatch.setattr(
+        "aida.ui.qt.conversations_sidebar.QInputDialog.getText",
+        staticmethod(lambda *a, **kw: ("new title", False)),
+    )
+    renamed = []
+    sidebar.rename_requested.connect(lambda conv_id, title: renamed.append((conv_id, title)))
+    sidebar._on_rename_clicked()
+    assert renamed == []
+
+
+def test_rename_with_blank_title_does_not_emit(qapp, monkeypatch):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", title="old title")])
+    sidebar.select_row(0)
+    monkeypatch.setattr(
+        "aida.ui.qt.conversations_sidebar.QInputDialog.getText",
+        staticmethod(lambda *a, **kw: ("   ", True)),
+    )
+    renamed = []
+    sidebar.rename_requested.connect(lambda conv_id, title: renamed.append((conv_id, title)))
+    sidebar._on_rename_clicked()
+    assert renamed == []
+
+
+def test_rename_with_no_selection_is_a_noop(qapp, monkeypatch):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([])
+    called = []
+    monkeypatch.setattr(
+        "aida.ui.qt.conversations_sidebar.QInputDialog.getText", staticmethod(lambda *a, **kw: called.append(True))
+    )
+    sidebar._on_rename_clicked()
+    assert called == []
+
+
 def test_cleanup_dialog_days_default_and_getter(qapp):
     dialog = CleanupDialog(default_days=45)
     assert dialog.days() == 45

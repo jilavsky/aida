@@ -127,6 +127,37 @@ def test_remove_without_yes_prompts_and_respects_no(aida_home: Path, monkeypatch
     assert "usaxs-docs" in load_knowledge_config(aida_home).knowledge_bases
 
 
+def test_remove_without_delete_index_leaves_the_index_file_on_disk(aida_home: Path):
+    """Bug report: "when I delete source, is its data removed? ... not
+    clear when and how will disk be cleaned up." Default behavior (no
+    --delete-index) is unchanged: config only."""
+    main(["add", "usaxs-docs", "--source-folders", "/a"])
+    index_path = knowledge_db_path("usaxs-docs")
+    kb_index.connect(index_path).close()
+
+    rc = main(["remove", "usaxs-docs", "--yes"])
+    assert rc == 0
+    assert "usaxs-docs" not in load_knowledge_config(aida_home).knowledge_bases
+    assert index_path.exists()
+
+
+def test_remove_with_delete_index_also_removes_the_index_file(aida_home: Path):
+    main(["add", "usaxs-docs", "--source-folders", "/a"])
+    index_path = knowledge_db_path("usaxs-docs")
+    kb_index.connect(index_path).close()
+
+    rc = main(["remove", "usaxs-docs", "--yes", "--delete-index"])
+    assert rc == 0
+    assert "usaxs-docs" not in load_knowledge_config(aida_home).knowledge_bases
+    assert not index_path.exists()
+
+
+def test_remove_with_delete_index_on_a_never_built_kb_does_not_raise(aida_home: Path):
+    main(["add", "usaxs-docs", "--source-folders", "/a"])
+    rc = main(["remove", "usaxs-docs", "--yes", "--delete-index"])
+    assert rc == 0
+
+
 # --- build / update / query --------------------------------------------------
 
 

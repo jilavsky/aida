@@ -23,11 +23,25 @@ store already writes binaries under ``~/.aida/artifacts/``):
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 from aida.config.paths import db_path
 
 CURRENT_SCHEMA_VERSION = 1
+
+# The Phase 5 GUI opens the first-ever connection to a fresh DB file from
+# two threads at once (MainWindow.__init__ starts a session on the
+# background loop thread, then immediately opens its own ConversationStore
+# for the sidebar on the Qt thread) — both can see `PRAGMA user_version`
+# as 0 and race to run the migration's CREATE TABLE statements. The
+# migrations are idempotent (IF NOT EXISTS) so the race is harmless
+# *content*-wise, but was still observed to raise "database is locked" on
+# Windows CI (busy_timeout alone wasn't a reliable enough guard against two
+# threads in the same process serializing through SQLite's file lock).
+# A plain in-process lock removes the race outright: only one thread ever
+# runs `_migrate` at a time, regardless of platform lock timing.
+_migrate_lock = threading.Lock()
 
 _MIGRATIONS: dict[int, str] = {
     # "IF NOT EXISTS" everywhere, deliberately: two connections can race to
@@ -92,7 +106,8 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     # that finds the file momentarily locked waits and retries instead of
     # raising "database is locked" immediately.
     conn.execute("PRAGMA busy_timeout = 5000")
-    _migrate(conn)
+    with _migrate_lock:
+        _migrate(conn)
     return conn
 
 

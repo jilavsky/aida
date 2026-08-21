@@ -18,6 +18,7 @@ from aida.core.events import (
     TextStarted,
     ToolCallFinished,
     ToolCallStarted,
+    UsageInfo,
 )
 from aida.providers.base import Message
 from aida.ui.qt._qt import QGuiApplication
@@ -36,6 +37,55 @@ def test_add_user_message_appends_bubble(qapp):
     assert isinstance(bubble, MessageBubble)
     assert bubble.role == "user"
     assert "hello there" in bubble.rendered_plain_text
+
+
+def test_add_user_message_shows_a_timestamp(qapp):
+    """Bug report: "Add time stamps to each message, may be tok/sec if
+    available and wallclock time.\""""
+    panel = ChatPanel()
+    bubble = panel.add_user_message("hello there")
+    assert bubble.meta_text != ""
+
+
+def test_streamed_assistant_bubble_shows_a_timestamp(qapp):
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextDelta(message_id="m1", text="hello"))
+    panel.handle_event(TextFinished(message_id="m1", text="hello"))
+    bubble = panel.widget_at(0)
+    assert bubble.meta_text != ""
+
+
+def test_resumed_history_bubble_has_no_timestamp(qapp):
+    """Deliberate scoping limit: per-message timestamps aren't persisted
+    yet (Message, the provider-facing wire type, doesn't carry one) — a
+    resumed bubble shows a blank meta label rather than a misleading
+    "now"."""
+    panel = ChatPanel()
+    panel.load_history([Message(role="user", content="hi")])
+    bubble = panel.widget_at(0)
+    assert bubble.meta_text == ""
+
+
+def test_usage_info_appends_tokens_per_second_to_the_last_assistant_bubble(qapp):
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextDelta(message_id="m1", text="hello"))
+    panel.handle_event(TextFinished(message_id="m1", text="hello"))
+    panel.handle_event(MessageFinished(message_id="m1", stop_reason="stop"))
+    panel.handle_event(UsageInfo(input_tokens=100, output_tokens=50, duration_seconds=2.0))
+
+    bubble = panel.widget_at(0)
+    assert "50 tok" in bubble.meta_text
+    assert "25.0 tok/s" in bubble.meta_text
+
+
+def test_usage_info_with_no_bubble_does_not_raise(qapp):
+    """A tool-call-only round has no visible bubble to attach to — must be
+    a no-op, not a crash."""
+    panel = ChatPanel()
+    panel.handle_event(UsageInfo(input_tokens=10, output_tokens=5, duration_seconds=1.0))
+    assert panel.widget_count == 0
 
 
 def test_message_bubble_copy_button_copies_raw_text_to_clipboard(qapp):

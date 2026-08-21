@@ -14,6 +14,7 @@ be driven directly in tests without a real bridge/session.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 
 from aida.providers.base import Message
 from aida.ui.qt._qt import (
@@ -31,6 +32,10 @@ from aida.ui.qt._qt import (
 from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
 from aida.ui.qt.retrieval_widget import RetrievalRow
 from aida.ui.qt.tool_call_widget import ToolCallRow
+
+
+def _now_str() -> str:
+    return datetime.now().strftime("%H:%M:%S")
 
 
 class _AutoHeightTextBrowser(QTextBrowser):
@@ -84,7 +89,7 @@ class MessageBubble(QFrame):
     dynamic ``palette(...)`` roles rather than a hardcoded color so it
     still looks right in both light and dark system themes."""
 
-    def __init__(self, role: str, parent: QWidget | None = None) -> None:
+    def __init__(self, role: str, parent: QWidget | None = None, *, timestamp: str | None = None) -> None:
         super().__init__(parent)
         self.role = role
         self._raw_text = ""
@@ -95,6 +100,18 @@ class MessageBubble(QFrame):
         role_label = QLabel(role.capitalize(), self)
         role_label.setStyleSheet("font-weight: bold; color: gray; font-size: 10px;")
         header.addWidget(role_label)
+        # Bug report: "Add time stamps to each message, may be tok/sec if
+        # available and wallclock time." Live messages (add_user_message,
+        # streamed assistant replies) pass a wall-clock HH:MM:SS at
+        # creation; resumed history (load_history) passes nothing, since no
+        # per-message timestamp is persisted yet (Message, the
+        # provider-facing wire type, deliberately doesn't carry a GUI
+        # display concern) — a blank label there rather than a misleading
+        # "now". append_meta adds the tok/sec + duration suffix once a
+        # UsageInfo event lands for this bubble (see ChatPanel.handle_event).
+        self._meta_label = QLabel(timestamp or "", self)
+        self._meta_label.setStyleSheet("color: gray; font-size: 10px;")
+        header.addWidget(self._meta_label)
         header.addStretch(1)
         # "code blocks monospaced with copy button" (PLAN.md), plus "is
         # there a way to add that nice 'copy content' button" (bug
@@ -139,9 +156,22 @@ class MessageBubble(QFrame):
         self._raw_text += text
         self._view.setMarkdown(self._raw_text)
 
+    def append_meta(self, text: str) -> None:
+        """Adds a " · "-separated suffix to the header's timestamp label —
+        used to attach the tok/sec + duration line once a UsageInfo event
+        lands for this bubble."""
+        current = self._meta_label.text()
+        self._meta_label.setText(f"{current} · {text}" if current else text)
+
     @property
     def text(self) -> str:
         return self._raw_text
+
+    @property
+    def meta_text(self) -> str:
+        """The header's timestamp (+ tok/sec suffix, once appended) —
+        mainly for tests."""
+        return self._meta_label.text()
 
     @property
     def rendered_plain_text(self) -> str:
@@ -188,6 +218,11 @@ class ChatPanel(QWidget):
         outer.addWidget(self._scroll_area)
 
         self._current_assistant_bubble: MessageBubble | None = None
+        # Kept alive past TextFinished resetting _current_assistant_bubble
+        # to None — a UsageInfo event for this round-trip arrives right
+        # after TextFinished, and still needs a bubble to attach its
+        # tok/sec + duration line to (see handle_event's UsageInfo branch).
+        self._last_assistant_bubble: MessageBubble | None = None
         self._tool_rows: dict[str, ToolCallRow] = {}
 
     # --- internal helpers --------------------------------------------------
@@ -212,7 +247,7 @@ class ChatPanel(QWidget):
     # --- public API ----------------------------------------------------------
 
     def add_user_message(self, text: str) -> MessageBubble:
-        bubble = MessageBubble("user", self._content)
+        bubble = MessageBubble("user", self._content, timestamp=_now_str())
         bubble.set_text(text)
         self._append_widget(bubble)
         return bubble
@@ -248,20 +283,22 @@ class ChatPanel(QWidget):
             self._current_assistant_bubble = None
         elif name == "TextDelta":
             if self._current_assistant_bubble is None:
-                self._current_assistant_bubble = MessageBubble("assistant", self._content)
+                self._current_assistant_bubble = MessageBubble("assistant", self._content, timestamp=_now_str())
                 self._append_widget(self._current_assistant_bubble)
             self._current_assistant_bubble.append_delta(event.text)
             self._scroll_to_bottom()
         elif name == "TextFinished":
             if self._current_assistant_bubble is not None:
                 self._current_assistant_bubble.set_text(event.text)
+                self._last_assistant_bubble = self._current_assistant_bubble
             elif event.text:
                 # No TextDelta arrived (a non-streaming provider path) but
                 # there's real final text — still show it, just not an
                 # empty bubble for a text-less tool-call turn.
-                bubble = MessageBubble("assistant", self._content)
+                bubble = MessageBubble("assistant", self._content, timestamp=_now_str())
                 bubble.set_text(event.text)
                 self._append_widget(bubble)
+                self._last_assistant_bubble = bubble
             self._current_assistant_bubble = None
         elif name == "ToolCallStarted":
             row = ToolCallRow(
@@ -290,7 +327,17 @@ class ChatPanel(QWidget):
         elif name == "MessageFinished":
             pass  # no widget of its own — TextFinished/tool rows already reflect it
         elif name == "UsageInfo":
-            pass  # not shown by default in v1 (matches the CLI); a future settings toggle could surface it
+            # Bug report: "Add time stamps to each message, may be tok/sec
+            # if available and wallclock time." Attaches to the bubble that
+            # just finished (TextFinished, right before this, already reset
+            # _current_assistant_bubble to None — see _last_assistant_bubble's
+            # docstring). A tool-call-only round has no bubble to attach to;
+            # its tokens still count toward MainWindow's running-total label.
+            if self._last_assistant_bubble is not None and event.output_tokens and event.duration_seconds:
+                rate = event.output_tokens / event.duration_seconds
+                self._last_assistant_bubble.append_meta(
+                    f"{event.output_tokens} tok · {event.duration_seconds:.1f}s · {rate:.1f} tok/s"
+                )
         elif name == "AgentError":
             banner = ErrorBanner(layer=event.layer, message=event.message, detail=event.detail, parent=self._content)
             self._append_widget(banner)
@@ -319,6 +366,7 @@ class ChatPanel(QWidget):
             if widget is not None:
                 widget.deleteLater()
         self._current_assistant_bubble = None
+        self._last_assistant_bubble = None
         self._tool_rows.clear()
 
 
