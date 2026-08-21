@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aida.knowledge.rag.chunking import chunk_markdown, chunk_plain_text
+from aida.knowledge.rag.chunking import chunk_markdown, chunk_plain_text, normalize_chunk_params
 
 
 def test_plain_text_short_enough_is_one_chunk():
@@ -78,3 +78,39 @@ def test_markdown_handles_headings_up_to_level_six():
     text = "###### Deep Heading\n\nDeep body text."
     chunks = chunk_markdown(text, chunk_size=1000)
     assert chunks[0].heading == "Deep Heading"
+
+
+# --- overlap >= chunk_size used to spin forever ----------------------------
+#
+# Review finding: the hard-split loop advanced by (chunk_size - overlap)
+# characters, so an overlap at or above the chunk size never advanced and
+# appended a piece on every pass until memory ran out. Reachable straight
+# from the Knowledge Bases dialog (chunk size spins down to 100, overlap up
+# to 100,000, independently) and from `aida kb add --chunk-size 100`; ingest
+# runs on the GUI's shared AsyncLoopThread, so it took the chat session with
+# it. These tests are the ones that would hang the suite on the old code —
+# pytest's 30s global timeout is the backstop.
+
+
+def test_overlap_equal_to_chunk_size_terminates():
+    chunks = chunk_plain_text("word " * 400, chunk_size=100, overlap=100)
+    assert 0 < len(chunks) < 10_000
+
+
+def test_overlap_larger_than_chunk_size_terminates():
+    chunks = chunk_plain_text("word " * 400, chunk_size=100, overlap=100_000)
+    assert 0 < len(chunks) < 10_000
+
+
+def test_markdown_with_a_degenerate_overlap_terminates():
+    text = "# Heading\n\n" + ("sentence. " * 400)
+    chunks = chunk_markdown(text, chunk_size=120, overlap=500)
+    assert 0 < len(chunks) < 10_000
+
+
+def test_normalize_chunk_params_clamps_to_a_terminating_pair():
+    assert normalize_chunk_params(100, 100) == (100, 99)
+    assert normalize_chunk_params(100, 100_000) == (100, 99)
+    assert normalize_chunk_params(0, 0) == (1, 0)
+    assert normalize_chunk_params(1000, -5) == (1000, 0)
+    assert normalize_chunk_params(1000, 150) == (1000, 150)  # a sane pair is untouched

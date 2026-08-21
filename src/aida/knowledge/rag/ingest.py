@@ -42,6 +42,16 @@ INGESTIBLE_SUFFIXES = {".md", ".markdown", ".txt", ".rst", ".py", ".pdf", ".docx
 _INGEST_MAX_CHARS = 2_000_000
 _INGEST_MAX_PDF_PAGES = 2000
 
+#: How many chunk texts go into a single ``embeddings.create`` request.
+#:
+#: Every chunk of a file used to go in *one* call: a 200-page PDF at
+#: chunk_size 1000 is roughly a thousand inputs in a single request — past
+#: Ollama's practical batch limit and close to OpenAI's, so the request
+#: failed and, because ingest treats a failing file as skipped, the entire
+#: document was silently dropped from the index. 64 is a conservative batch
+#: size every embeddings backend AIDA talks to handles comfortably.
+EMBED_BATCH_SIZE = 64
+
 
 @dataclass
 class IngestResult:
@@ -181,6 +191,19 @@ def _chunk_file(path: Path, text: str, *, chunk_size: int, overlap: int) -> list
     return chunk_plain_text(text, chunk_size=chunk_size, overlap=overlap)
 
 
+async def _embed_in_batches(
+    embeddings_provider: EmbeddingsProvider, texts: list[str], *, batch_size: int = EMBED_BATCH_SIZE
+) -> list[list[float]]:
+    """Embed ``texts`` in fixed-size batches, preserving order — see
+    ``EMBED_BATCH_SIZE``. A failure in any batch propagates, so the caller's
+    per-file error handling still records the whole file as skipped rather
+    than storing a half-embedded document."""
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), batch_size):
+        vectors.extend(await embeddings_provider.embed(texts[start : start + batch_size]))
+    return vectors
+
+
 async def _ingest_file(
     conn: sqlite3.Connection, path: Path, *, kb: KnowledgeBaseConfig, embeddings_provider: EmbeddingsProvider
 ) -> int:
@@ -193,7 +216,7 @@ async def _ingest_file(
     if not chunks:
         kb_index.delete_source(conn, str(path))
         return 0
-    embeddings = await embeddings_provider.embed([chunk.text for chunk in chunks])
+    embeddings = await _embed_in_batches(embeddings_provider, [chunk.text for chunk in chunks])
     kb_index.replace_file_chunks(
         conn,
         source_path=str(path),
@@ -214,9 +237,23 @@ async def _run_ingest(
 
     for path in _discover_files(kb.source_folders):
         key = str(path)
-        seen_paths.add(key)
         already_indexed = key in indexed_mtimes
-        if not force and already_indexed and indexed_mtimes[key] == path.stat().st_mtime:
+        # This stat() sat outside the try below, so a file deleted (or a
+        # network share unmounted) between discovery and this check raised
+        # straight out of _run_ingest and aborted the whole pass — the one
+        # thing every other failure here is careful not to do. It's also
+        # what decides whether the file still exists at all, so it happens
+        # before seen_paths records it: a file that has genuinely vanished
+        # should be pruned from the index below, not kept alive by having
+        # been discovered a moment earlier.
+        try:
+            mtime = path.stat().st_mtime
+        except OSError as exc:
+            result.skipped_files.append(f"{key}: {exc}")
+            continue
+
+        seen_paths.add(key)
+        if not force and already_indexed and indexed_mtimes[key] == mtime:
             continue  # unchanged since the last build/update — skip re-embedding it
 
         try:
@@ -260,4 +297,11 @@ async def update(
     return await _run_ingest(conn, kb, embeddings_provider, force=False)
 
 
-__all__ = ["INGESTIBLE_SUFFIXES", "IngestResult", "normalize_source_folder", "rebuild", "update"]
+__all__ = [
+    "EMBED_BATCH_SIZE",
+    "INGESTIBLE_SUFFIXES",
+    "IngestResult",
+    "normalize_source_folder",
+    "rebuild",
+    "update",
+]

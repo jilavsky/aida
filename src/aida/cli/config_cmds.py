@@ -18,6 +18,8 @@ PLAN.md's hard rule says must never happen.
 from __future__ import annotations
 
 import argparse
+import getpass
+from pathlib import Path
 
 from aida.config.paths import app_dir, ensure_records_dir
 
@@ -35,7 +37,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "set", help="Store a secret for a provider profile (matches providers.yaml's secret_ref)"
     )
     set_parser.add_argument("profile", help="Provider profile name — providers.yaml's secret_ref value")
-    set_parser.add_argument("value", help="The secret itself (API key, token, username, ...)")
+    set_parser.add_argument(
+        "value",
+        nargs="?",
+        default=None,
+        help=(
+            "The secret itself (API key, token, username, ...). Omit it to be prompted without "
+            "echo — passing it here puts the secret in your shell history and in `ps` output."
+        ),
+    )
 
     get_parser = secret_sub.add_parser(
         "get", help="Report whether a secret is set for a profile (never prints the value itself)"
@@ -52,7 +62,19 @@ def _secret_main(args: argparse.Namespace) -> int:
     from aida.config.secrets import delete_secret, get_secret, set_secret
 
     if args.secret_action == "set":
-        set_secret(args.profile, args.value)
+        # Taking the secret as an argv value means it lands in shell
+        # history and is visible to anyone running `ps` for as long as the
+        # command runs — on a shared beamline machine, both matter. The
+        # argument stays supported (scripts and the existing docs use it),
+        # but omitting it now prompts without echo instead of being an
+        # error, and that is the form worth recommending.
+        value = args.value
+        if value is None:
+            value = getpass.getpass(f"Secret for profile {args.profile!r} (not echoed): ")
+        if not value:
+            print("No secret entered — nothing stored.")
+            return 1
+        set_secret(args.profile, value)
         print(f"Stored a secret for profile {args.profile!r} in the OS keychain.")
         print(f"Now set providers.yaml's matching profile's secret_ref to {args.profile!r} (a reference name, not the secret itself).")
         return 0
@@ -75,12 +97,32 @@ def _secret_main(args: argparse.Namespace) -> int:
     return 1
 
 
+def _effective_records_dir() -> Path:
+    """The records dir the app will actually use, honoring ``config.yaml``'s
+    ``records_dir`` override.
+
+    Bare ``aida config`` used to print — and, via ``ensure_records_dir()``,
+    *create* — the default ``~/Documents/Aida`` regardless of what the
+    user's config said, so it reported a directory their session never
+    touches and left an empty one behind. ``aida doctor`` was explicitly
+    fixed for this (its own ``_effective_records_dir``); this command was
+    missed. A config that fails to load at all falls back to the default,
+    since printing where things live must not be the thing that crashes."""
+    try:
+        from aida.config.settings import load_settings
+
+        configured = load_settings().app.records_dir
+    except Exception:  # noqa: BLE001 - a broken config must not break `aida config`
+        configured = None
+    return ensure_records_dir(Path(configured) if configured else None)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(argv) if argv is not None else []
 
     if not argv:
         print(f"AIDA config directory: {app_dir()}")
-        print(f"AIDA records directory: {ensure_records_dir()}")
+        print(f"AIDA records directory: {_effective_records_dir()}")
         return 0
 
     parser = _build_parser()

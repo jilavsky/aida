@@ -3,14 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from aida.core.context import (
+    MISSING_TOOL_RESULT,
     build_coding_context_block,
     build_system_message,
     build_workspace_context_block,
     estimate_tokens,
     load_skill_texts,
+    repair_tool_call_pairing,
+    split_into_turns,
     trim_history,
 )
-from aida.providers.base import Message
+from aida.providers.base import Message, ToolCall
 
 
 def test_estimate_tokens_roughly_four_chars_per_token():
@@ -181,3 +184,119 @@ def test_trim_history_noop_when_under_budget():
     trimmed, was_trimmed = trim_history(messages, max_tokens=10_000)
     assert was_trimmed is False
     assert trimmed == messages
+
+
+# --- tool-call pairing repair + turn-safe trimming -------------------------
+#
+# Review finding: nothing ever called trim_history, so context grew without
+# bound until a provider rejected a request for length mid-analysis — and
+# wiring it in as it was written would have introduced the *other* finding's
+# failure mode, since dropping the oldest messages one at a time can cut
+# between an assistant message and the tool results answering its calls.
+
+
+def _assistant_with_calls(*call_ids: str) -> Message:
+    return Message(
+        role="assistant",
+        content="",
+        tool_calls=[ToolCall(id=cid, name="track", arguments={}) for cid in call_ids],
+    )
+
+
+def test_split_into_turns_keeps_tool_results_with_their_call():
+    messages = [
+        Message(role="system", content="sys"),
+        Message(role="user", content="q1"),
+        _assistant_with_calls("c1"),
+        Message(role="tool", content="r1", tool_call_id="c1", name="track"),
+        Message(role="assistant", content="a1"),
+        Message(role="user", content="q2"),
+        Message(role="assistant", content="a2"),
+    ]
+
+    turns = split_into_turns(messages)
+
+    assert [len(t) for t in turns] == [4, 2]
+    assert [m.content for m in turns[0]] == ["q1", "", "r1", "a1"]
+
+
+def test_trim_history_never_orphans_a_tool_result():
+    system = Message(role="system", content="sys")
+    messages = [system]
+    for i in range(12):
+        messages.extend(
+            [
+                Message(role="user", content=f"question {i} " + "x" * 400),
+                _assistant_with_calls(f"c{i}"),
+                Message(role="tool", content="result " + "y" * 400, tool_call_id=f"c{i}", name="track"),
+                Message(role="assistant", content="answer " + "z" * 400),
+            ]
+        )
+
+    trimmed, was_trimmed = trim_history(messages, max_tokens=600, min_recent_turns=2)
+
+    assert was_trimmed is True
+    announced = {tc.id for m in trimmed if m.role == "assistant" for tc in m.tool_calls}
+    answered = {m.tool_call_id for m in trimmed if m.role == "tool"}
+    assert announced == answered
+    # Whole turns, so a kept turn always starts at its user message.
+    assert trimmed[1].role == "user"
+
+
+def test_trim_history_keeps_at_least_min_recent_turns():
+    system = Message(role="system", content="sys")
+    turns = [Message(role="user", content="x" * 4000) for _ in range(10)]
+    trimmed, was_trimmed = trim_history([system, *turns], max_tokens=1, min_recent_turns=3)
+    assert was_trimmed is True
+    assert len(trimmed) == 1 + 3
+
+
+def test_repair_backfills_a_missing_tool_result():
+    messages = [
+        Message(role="user", content="hi"),
+        _assistant_with_calls("c1", "c2"),
+        Message(role="tool", content="done", tool_call_id="c1", name="track"),
+    ]
+
+    repaired = repair_tool_call_pairing(messages)
+
+    assert [m.role for m in repaired] == ["user", "assistant", "tool", "tool"]
+    assert [m.tool_call_id for m in repaired if m.role == "tool"] == ["c1", "c2"]
+    assert repaired[-1].content == MISSING_TOOL_RESULT
+    assert messages[-1].tool_call_id == "c1"  # input untouched
+
+
+def test_repair_drops_a_tool_result_answering_no_call():
+    messages = [
+        Message(role="user", content="hi"),
+        Message(role="tool", content="stray", tool_call_id="ghost", name="track"),
+        Message(role="assistant", content="hello"),
+    ]
+
+    repaired = repair_tool_call_pairing(messages)
+
+    assert [m.role for m in repaired] == ["user", "assistant"]
+
+
+def test_repair_reorders_results_to_match_the_announced_calls():
+    messages = [
+        _assistant_with_calls("c1", "c2"),
+        Message(role="tool", content="second", tool_call_id="c2", name="track"),
+        Message(role="tool", content="first", tool_call_id="c1", name="track"),
+    ]
+
+    repaired = repair_tool_call_pairing(messages)
+
+    assert [m.tool_call_id for m in repaired if m.role == "tool"] == ["c1", "c2"]
+
+
+def test_repair_leaves_a_healthy_history_alone():
+    messages = [
+        Message(role="system", content="sys"),
+        Message(role="user", content="hi"),
+        _assistant_with_calls("c1"),
+        Message(role="tool", content="done", tool_call_id="c1", name="track"),
+        Message(role="assistant", content="all set"),
+    ]
+
+    assert repair_tool_call_pairing(messages) == messages

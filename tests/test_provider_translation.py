@@ -374,3 +374,49 @@ def test_completion_settings_defaults():
     assert settings.temperature == 0.7
     assert settings.max_tokens is None
     assert settings.extra == {}
+
+
+# --- empty assistant content is not sendable -------------------------------
+#
+# Review finding: an assistant message with content="" and no tool calls
+# went on the wire as an empty content block, which Anthropic rejects on the
+# next turn ("all messages must have non-empty content"). Such a message is
+# a real possibility — a provider round that produced only tool calls which
+# were then cancelled, or a model that returned nothing.
+
+
+def test_to_anthropic_params_drops_an_empty_assistant_message():
+    from aida.providers.anthropic_ import to_anthropic_params
+
+    messages = [
+        Message(role="user", content="hi"),
+        Message(role="assistant", content=""),
+        Message(role="user", content="still there?"),
+    ]
+
+    _system, out = to_anthropic_params(messages)
+
+    assert out == [
+        {"role": "user", "content": "hi"},
+        {"role": "user", "content": "still there?"},
+    ]
+
+
+def test_to_anthropic_params_keeps_an_empty_assistant_message_that_has_tool_calls():
+    """Empty *text* with tool calls is the normal shape of a tool-only turn
+    and must still be sent — the tool_use blocks are the content."""
+    from aida.providers.anthropic_ import to_anthropic_params
+
+    messages = [
+        Message(
+            role="assistant",
+            content="",
+            tool_calls=[ToolCall(id="c1", name="get_time", arguments={})],
+        ),
+        Message(role="tool", content="42", tool_call_id="c1", name="get_time"),
+    ]
+
+    _system, out = to_anthropic_params(messages)
+
+    assert out[0]["role"] == "assistant"
+    assert [block["type"] for block in out[0]["content"]] == ["tool_use"]

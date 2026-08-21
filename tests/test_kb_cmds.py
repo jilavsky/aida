@@ -309,3 +309,39 @@ def test_build_warns_about_a_missing_source_folder(monkeypatch, aida_home: Path,
 def test_bare_kb_requires_a_subcommand():
     with pytest.raises(SystemExit):
         main([])
+
+
+# --- chunk_size/chunk_overlap validation ---------------------------------
+#
+# Review finding: `aida kb add --chunk-size 100` had no validation at all,
+# and an overlap >= chunk size makes chunking loop forever (see
+# test_chunking.py). The clamp in normalize_chunk_params is the backstop;
+# the CLI says no up front rather than silently rewriting what was typed.
+
+
+def test_add_rejects_overlap_at_or_above_chunk_size(aida_home: Path, capsys):
+    exit_code = main(["add", "docs", "--chunk-size", "100", "--chunk-overlap", "100"])
+    assert exit_code == 1
+    assert "must be smaller than" in capsys.readouterr().out
+    assert "docs" not in load_knowledge_config().knowledge_bases
+
+
+def test_add_rejects_a_chunk_size_below_one(aida_home: Path, capsys):
+    assert main(["add", "docs", "--chunk-size", "0"]) == 1
+    assert "at least 1" in capsys.readouterr().out
+
+
+def test_add_accepts_a_valid_pair(aida_home: Path):
+    assert main(["add", "docs", "--chunk-size", "500", "--chunk-overlap", "100"]) == 0
+    kb = load_knowledge_config().knowledge_bases["docs"]
+    assert (kb.chunk_size, kb.chunk_overlap) == (500, 100)
+
+
+def test_edit_validates_against_the_resulting_pair_not_just_the_flags(aida_home: Path, capsys):
+    """Lowering only --chunk-size can land below the overlap already stored
+    in knowledge.yaml, so the check has to see both values."""
+    assert main(["add", "docs", "--chunk-size", "1000", "--chunk-overlap", "800"]) == 0
+
+    assert main(["edit", "docs", "--chunk-size", "500"]) == 1
+    assert "must be smaller than" in capsys.readouterr().out
+    assert load_knowledge_config().knowledge_bases["docs"].chunk_size == 1000

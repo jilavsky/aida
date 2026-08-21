@@ -35,6 +35,13 @@ from aida.providers.base import CompletionSettings, LLMProvider, Message, ToolCa
 
 DEFAULT_MAX_ITERATIONS = 10
 
+#: What a tool call that never ran gets recorded as. Both providers reject a
+#: history where an assistant ``tool_use``/``tool_calls`` entry has no
+#: matching result message, so a cancelled turn must still answer every call
+#: it announced — see ``_run_turns``' cancel branch and
+#: ``aida.core.context.repair_tool_call_pairing``.
+CANCELLED_TOOL_RESULT = "(cancelled — this tool call was never executed)"
+
 logger = get_logger("agent")
 
 
@@ -154,8 +161,34 @@ class AgentLoop:
             if not pending_tool_calls:
                 return  # final answer — this turn is done
 
-            for tc in pending_tool_calls:
+            for position, tc in enumerate(pending_tool_calls):
                 if self._cancelled:
+                    # The assistant message appended above announces *every*
+                    # call in pending_tool_calls. Returning here without
+                    # answering the ones that never ran leaves orphaned
+                    # tool_use blocks in `messages`, which both providers
+                    # reject on the *next* request ("each tool_use must have
+                    # a corresponding tool_result") — so pressing Stop
+                    # mid-tool-call used to wedge the conversation
+                    # permanently, resumed sessions included, since those
+                    # messages are persisted as they land. Answering them
+                    # with a synthetic result keeps the history valid and
+                    # tells the model plainly what happened.
+                    for cancelled_call in pending_tool_calls[position:]:
+                        yield ToolCallFinished(
+                            call_id=cancelled_call.id,
+                            tool_name=cancelled_call.name,
+                            result=CANCELLED_TOOL_RESULT,
+                            is_error=True,
+                        )
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=CANCELLED_TOOL_RESULT,
+                                tool_call_id=cancelled_call.id,
+                                name=cancelled_call.name,
+                            )
+                        )
                     yield AgentError(layer="core", message="cancelled")
                     return
 
@@ -218,4 +251,4 @@ class AgentLoop:
             # loop continues: provider gets called again with tool results appended
 
 
-__all__ = ["DEFAULT_MAX_ITERATIONS", "AgentLoop"]
+__all__ = ["CANCELLED_TOOL_RESULT", "DEFAULT_MAX_ITERATIONS", "AgentLoop"]

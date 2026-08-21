@@ -21,6 +21,28 @@ BACKUP_COUNT = 5
 
 _configured = False
 
+DEFAULT_LEVEL = "INFO"
+
+
+def _resolve_level(level: str) -> int:
+    """Map a configured level name to a logging level, falling back to
+    ``INFO`` for anything unrecognized.
+
+    ``root.setLevel(level.upper())`` raised ``ValueError`` on a typo'd
+    ``log_level:`` in config.yaml — which happens during startup, before
+    any handler exists, so the app simply refused to launch with a
+    traceback and no hint that one line of YAML was the cause. That
+    contradicts this project's "old configs must always load" rule
+    (``aida.config.settings``'s docstring); a bad *value* deserves the same
+    treatment as a stale one — warn, use the default, keep going."""
+    resolved = logging.getLevelName(str(level).upper())
+    if isinstance(resolved, int):
+        return resolved
+    logging.getLogger("aida.config").warning(
+        "unknown log_level %r in config.yaml — falling back to %s", level, DEFAULT_LEVEL
+    )
+    return logging.getLevelName(DEFAULT_LEVEL)
+
 
 def configure_logging(level: str = "INFO", *, log_dir: Path | None = None) -> Path:
     """Configure the ``aida`` logger tree once per process.
@@ -32,7 +54,7 @@ def configure_logging(level: str = "INFO", *, log_dir: Path | None = None) -> Pa
     global _configured
 
     root = logging.getLogger("aida")
-    root.setLevel(level.upper())
+    root.setLevel(_resolve_level(level))
 
     target_dir = log_dir or logs_dir()
     log_path = target_dir / LOG_FILENAME

@@ -40,7 +40,11 @@ aida kb add usaxs-notes \
   `providers.yaml`.
 - `--chunk-size` (default `1000`) — max characters per chunk.
 - `--chunk-overlap` (default `150`) — characters of trailing context carried
-  into the next chunk.
+  into the next chunk. It must be **smaller than** `--chunk-size`: chunking
+  advances by `chunk_size - chunk_overlap` characters at a time, so an equal
+  or larger overlap would never make progress. `add`/`edit` refuse such a
+  pair, and the GUI's overlap field is capped at the chunk size it's next
+  to.
 
 Other CLI subcommands:
 

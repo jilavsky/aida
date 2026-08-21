@@ -27,6 +27,7 @@ from aida.ui.qt._qt import (
     QScrollArea,
     Qt,
     QTextBrowser,
+    QTimer,
     QVBoxLayout,
     QWidget,
     Signal,
@@ -41,6 +42,20 @@ def _now_str() -> str:
 
 
 _CODE_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+
+#: How often a streaming reply is re-rendered, at most.
+#:
+#: Every ``TextDelta`` used to call ``setMarkdown`` on the *whole*
+#: accumulated text, which re-parses the entire document, re-runs the
+#: code-fence regex over all of it, and fires ``documentSizeChanged`` ->
+#: ``_recalculate_height``. That is O(n²) over a reply: a 4000-token answer
+#: re-parsed the full document thousands of times, and the visible symptom
+#: is the GUI getting progressively less responsive the longer the model
+#: talks. Coalescing deltas onto one timer keeps the render cost
+#: proportional to elapsed time rather than to token count, while still
+#: looking live. ``set_text`` (``TextFinished``) always renders immediately,
+#: so the finished message is never left waiting on a timer.
+_STREAM_RENDER_INTERVAL_MS = 100
 
 
 class _AutoHeightTextBrowser(QTextBrowser):
@@ -160,6 +175,13 @@ class MessageBubble(QFrame):
         self._view.setOpenExternalLinks(True)
         layout.addWidget(self._view)
 
+        # Coalesces streamed deltas into at most one render per
+        # _STREAM_RENDER_INTERVAL_MS — see that constant.
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(_STREAM_RENDER_INTERVAL_MS)
+        self._render_timer.timeout.connect(self._render_now)
+
         if role == "user":
             self.setStyleSheet(
                 "MessageBubble { background-color: palette(alternate-base); border-radius: 8px; }"
@@ -185,12 +207,21 @@ class MessageBubble(QFrame):
         self._open_in_editor_button.setVisible(self.first_code_block() is not None)
 
     def set_text(self, text: str) -> None:
+        """Set the message's full text and render it right away — the
+        end-of-stream path, and the one resumed history/user messages use."""
         self._raw_text = text
-        self._view.setMarkdown(text)
-        self._update_open_in_editor_visibility()
+        self._render_now()
 
     def append_delta(self, text: str) -> None:
+        """Append one streamed delta. The text is recorded immediately (so
+        ``text``/``copy_to_clipboard`` are always current); the *render* is
+        coalesced onto ``_render_timer`` — see ``_STREAM_RENDER_INTERVAL_MS``."""
         self._raw_text += text
+        if not self._render_timer.isActive():
+            self._render_timer.start()
+
+    def _render_now(self) -> None:
+        self._render_timer.stop()
         self._view.setMarkdown(self._raw_text)
         self._update_open_in_editor_visibility()
 

@@ -105,3 +105,73 @@ def test_secret_value_with_spaces_survives_as_a_single_argv_token(monkeypatch):
     _use_memory_backend(monkeypatch)
     main(["secret", "set", "argo-claude", "a value with spaces"])
     assert secrets.get_secret("argo-claude") == "a value with spaces"
+
+
+# --- bare `aida config` must honor config.yaml's records_dir --------------
+#
+# Review finding: it printed — and, via ensure_records_dir(), *created* —
+# the default ~/Documents/Aida regardless of the user's config, reporting a
+# directory their sessions never touch and leaving an empty one behind.
+# `aida doctor` was explicitly fixed for this (_effective_records_dir);
+# this command was missed.
+
+
+def test_bare_config_reports_the_configured_records_dir(aida_home, records_home, tmp_path, capsys):
+    from aida.config.settings import AppConfig, save_app_config
+
+    configured = tmp_path / "beamline-records"
+    save_app_config(AppConfig(records_dir=str(configured)))
+
+    assert main([]) == 0
+
+    out = capsys.readouterr().out
+    assert str(configured) in out
+    assert configured.is_dir()
+    assert not (records_home / "Documents" / "Aida").exists()
+
+
+def test_bare_config_still_works_when_the_config_is_unreadable(
+    aida_home, records_home, monkeypatch, capsys
+):
+    """Printing where things live must not be the thing that crashes."""
+    import aida.config.settings as settings_module
+
+    def _boom():
+        raise ValueError("config.yaml is not valid YAML")
+
+    monkeypatch.setattr(settings_module, "load_settings", _boom)
+
+    assert main([]) == 0
+    assert "AIDA records directory:" in capsys.readouterr().out
+
+
+# --- `aida config secret set` must not require the secret on argv ---------
+#
+# Review finding: taking the secret as an argv value puts it in shell
+# history and makes it visible in `ps` — on a shared beamline machine, both
+# matter.
+
+
+def test_secret_set_prompts_without_echo_when_the_value_is_omitted(monkeypatch, capsys):
+    _use_memory_backend(monkeypatch)
+    prompts: list[str] = []
+
+    def _fake_getpass(prompt: str = "") -> str:
+        prompts.append(prompt)
+        return "typed-secret"
+
+    monkeypatch.setattr("getpass.getpass", _fake_getpass)
+
+    assert main(["secret", "set", "argo-claude"]) == 0
+    assert prompts  # really prompted rather than erroring on the missing arg
+    assert secrets.get_secret("argo-claude") == "typed-secret"
+    assert "typed-secret" not in capsys.readouterr().out
+
+
+def test_secret_set_stores_nothing_when_the_prompt_is_left_empty(monkeypatch, capsys):
+    _use_memory_backend(monkeypatch)
+    monkeypatch.setattr("getpass.getpass", lambda prompt="": "")
+
+    assert main(["secret", "set", "argo-claude"]) == 1
+    assert secrets.get_secret("argo-claude") is None
+    assert "nothing stored" in capsys.readouterr().out.lower()

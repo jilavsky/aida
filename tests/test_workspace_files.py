@@ -379,3 +379,103 @@ async def test_run_blocking_returns_normally_within_timeout():
 
     result = await _run_blocking(lambda *, value: value * 2, value=21, timeout=5.0)
     assert result == 42
+
+
+# --- copy/move must not silently clobber ----------------------------------
+#
+# Review finding: write_file carefully refuses to replace an existing file
+# without overwrite=true, but copy_file/move_file right beside it went
+# straight through shutil and overwrote without asking — and unlike
+# delete_file there is no _trash copy to recover from. An agent told to
+# "copy the reduced data over" could destroy a file in the target folder
+# with nothing to undo it.
+
+
+@pytest.mark.asyncio
+async def test_copy_file_refuses_to_overwrite_by_default(tmp_path: Path):
+    src = tmp_path / "src.txt"
+    src.write_text("new")
+    dst = tmp_path / "dst.txt"
+    dst.write_text("precious")
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(tools, "copy_file", source=str(src), destination=str(dst))
+
+    assert result.is_error
+    assert "overwrite=true" in result.content
+    assert dst.read_text() == "precious"
+
+
+@pytest.mark.asyncio
+async def test_copy_file_overwrites_when_asked(tmp_path: Path):
+    src = tmp_path / "src.txt"
+    src.write_text("new")
+    dst = tmp_path / "dst.txt"
+    dst.write_text("old")
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(tools, "copy_file", source=str(src), destination=str(dst), overwrite=True)
+
+    assert not result.is_error
+    assert dst.read_text() == "new"
+
+
+@pytest.mark.asyncio
+async def test_move_file_refuses_to_overwrite_by_default(tmp_path: Path):
+    src = tmp_path / "src.txt"
+    src.write_text("new")
+    dst = tmp_path / "dst.txt"
+    dst.write_text("precious")
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(tools, "move_file", source=str(src), destination=str(dst))
+
+    assert result.is_error
+    assert dst.read_text() == "precious"
+    assert src.exists()  # the source is left alone too
+
+
+@pytest.mark.asyncio
+async def test_move_file_overwrites_when_asked(tmp_path: Path):
+    src = tmp_path / "src.txt"
+    src.write_text("new")
+    dst = tmp_path / "dst.txt"
+    dst.write_text("old")
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(tools, "move_file", source=str(src), destination=str(dst), overwrite=True)
+
+    assert not result.is_error
+    assert dst.read_text() == "new"
+    assert not src.exists()
+
+
+@pytest.mark.asyncio
+async def test_copy_into_a_directory_checks_the_file_that_would_be_written(tmp_path: Path):
+    """shutil places a copy *inside* a directory destination, so the
+    existence check has to resolve that path rather than test the folder."""
+    src = tmp_path / "src.txt"
+    src.write_text("new")
+    target_dir = tmp_path / "out"
+    target_dir.mkdir()
+    (target_dir / "src.txt").write_text("precious")
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(tools, "copy_file", source=str(src), destination=str(target_dir))
+
+    assert result.is_error
+    assert (target_dir / "src.txt").read_text() == "precious"
+
+
+@pytest.mark.asyncio
+async def test_copy_into_a_directory_still_works_when_nothing_collides(tmp_path: Path):
+    src = tmp_path / "src.txt"
+    src.write_text("new")
+    target_dir = tmp_path / "out"
+    target_dir.mkdir()
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(tools, "copy_file", source=str(src), destination=str(target_dir))
+
+    assert not result.is_error
+    assert (target_dir / "src.txt").read_text() == "new"

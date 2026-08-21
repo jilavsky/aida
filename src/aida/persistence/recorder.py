@@ -18,6 +18,7 @@ documents the trade-off rather than hiding it.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,6 +29,19 @@ from aida.persistence.store import ConversationStore
 from aida.providers.base import Message
 
 _TITLE_MAX_CHARS = 60
+
+#: Minimum wall-clock gap between two Markdown transcript rewrites.
+#: ``export_transcript`` is not cheap and does not grow gently: it reloads
+#: every message *and* every artifact for the conversation, re-copies each
+#: image into the sidecar folder (a full ``filecmp.cmp(shallow=False)`` byte
+#: comparison per image), and rewrites the whole ``.md`` from scratch. Doing
+#: that once per recorded message made a long session quadratic — 200
+#: messages with 40 plots is ~8000 whole-file comparisons — for a file
+#: nobody reads until the session is over. The DB write itself is still
+#: immediate and per-message, so the crash-safety property this module's
+#: docstring describes is unchanged; only the derived Markdown view lags,
+#: by at most this interval plus one flush.
+DEFAULT_TRANSCRIPT_MIN_INTERVAL_SECONDS = 5.0
 
 
 def _now_iso() -> str:
@@ -60,10 +74,18 @@ class ConversationRecorder:
         profile_name: str | None = None,
         sidecar_dirname: str = "figures",
         resume: bool = False,
+        transcript_min_interval_seconds: float = DEFAULT_TRANSCRIPT_MIN_INTERVAL_SECONDS,
     ) -> None:
         self.store = store
         self.artifact_store = artifact_store
         self.records_dir = records_dir
+        self.transcript_min_interval_seconds = transcript_min_interval_seconds
+        #: Set whenever a message lands but the transcript wasn't rewritten
+        #: for it; cleared by every actual export. ``flush_transcript``
+        #: exists so a caller can settle this at a natural boundary (end of
+        #: turn, session close) rather than waiting out the interval.
+        self._transcript_dirty = False
+        self._last_transcript_export: float | None = None
 
         if resume:
             if conversation_id is None:
@@ -94,15 +116,34 @@ class ConversationRecorder:
     def record_message(self, message: Message) -> int:
         """Persist one finalized message immediately, set an auto-derived
         title on the first user message if none exists yet, and refresh the
-        Markdown transcript. Returns the message's sequence number."""
+        Markdown transcript. Returns the message's sequence number.
+
+        The DB write is immediate (that's the crash-safety property this
+        module's docstring describes); the *transcript* rewrite is rate
+        limited to ``transcript_min_interval_seconds`` — see that constant.
+        ``flush_transcript()`` settles any deferred write."""
         timestamp = _now_iso()
         if self.title is None and message.role == "user" and message.content:
             self.title = _derive_title(message.content)
             self.store.set_title(self.conversation_id, self.title, timestamp=timestamp)
 
         seq = self.store.append_message(self.conversation_id, message, timestamp=timestamp)
-        self.export_transcript()
+        self._transcript_dirty = True
+        elapsed_enough = (
+            self._last_transcript_export is None
+            or time.monotonic() - self._last_transcript_export >= self.transcript_min_interval_seconds
+        )
+        if elapsed_enough:
+            self.export_transcript()
         return seq
+
+    def flush_transcript(self) -> Path | None:
+        """Write out any transcript update ``record_message`` deferred.
+        Called at each turn's end and on session close; a no-op when
+        nothing has changed since the last export."""
+        if not self._transcript_dirty:
+            return self._record_path
+        return self.export_transcript()
 
     def record_artifact(self, artifact: Artifact, *, call_id: str | None) -> None:
         """Persist a real ``Artifact`` object's metadata."""
@@ -147,6 +188,8 @@ class ConversationRecorder:
             sidecar_dirname=self.sidecar_dirname,
         )
         self.store.set_record_path(self.conversation_id, str(self._record_path), timestamp=_now_iso())
+        self._transcript_dirty = False
+        self._last_transcript_export = time.monotonic()
         return self._record_path
 
     def load_history(self) -> list[Message]:
@@ -155,4 +198,8 @@ class ConversationRecorder:
         return self.store.load_messages(self.conversation_id)
 
 
-__all__ = ["ConversationNotFoundError", "ConversationRecorder"]
+__all__ = [
+    "DEFAULT_TRANSCRIPT_MIN_INTERVAL_SECONDS",
+    "ConversationNotFoundError",
+    "ConversationRecorder",
+]

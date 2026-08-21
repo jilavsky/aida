@@ -23,6 +23,31 @@ from dataclasses import dataclass
 DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_CHUNK_OVERLAP = 150
 
+#: Smallest chunk size that can produce forward progress at all.
+MIN_CHUNK_SIZE = 1
+
+
+def normalize_chunk_params(chunk_size: int, overlap: int) -> tuple[int, int]:
+    """Clamp a (``chunk_size``, ``overlap``) pair to values that can
+    actually terminate.
+
+    The hard-split loop in ``_split_by_size`` advances by
+    ``chunk_size - overlap`` characters per iteration, so an ``overlap`` at
+    or above ``chunk_size`` makes it advance by zero or *backwards*: it
+    loops forever, appending a piece every pass, until the process runs out
+    of memory. That was reachable straight from the Knowledge Bases dialog
+    (chunk size spins down to 100 while overlap spins up to 100,000, wholly
+    independently) and from ``aida kb add --chunk-size 100``, neither of
+    which validated the pair — and because ingest runs on the GUI's shared
+    ``AsyncLoopThread``, it took the whole chat session down with it. The
+    editors validate up front now; this clamp is the backstop that makes
+    the function safe for *any* caller, including a config file hand-edited
+    to a bad pair.
+    """
+    chunk_size = max(MIN_CHUNK_SIZE, int(chunk_size))
+    overlap = max(0, min(int(overlap), chunk_size - 1))
+    return chunk_size, overlap
+
 _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 
 
@@ -41,7 +66,11 @@ def _split_by_size(text: str, *, chunk_size: int, overlap: int) -> list[str]:
     into the next. A single paragraph longer than ``chunk_size`` on its own
     (a huge unbroken block of PDF-extracted text, for instance) still gets
     a hard split in a second pass — paragraph boundaries are preferred, not
-    guaranteed."""
+    guaranteed.
+
+    ``chunk_size``/``overlap`` are clamped to a terminating pair first — see
+    ``normalize_chunk_params``."""
+    chunk_size, overlap = normalize_chunk_params(chunk_size, overlap)
     text = text.strip()
     if not text:
         return []

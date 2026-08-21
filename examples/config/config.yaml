@@ -9,7 +9,22 @@ config_version: 1
 records_dir: null
 
 # Python logging level for both the console and ~/.aida/logs/aida.log.
+# An unrecognized value falls back to INFO with a warning rather than
+# stopping the app from launching.
 log_level: INFO
+
+# Soft budget for how much conversation history is sent to the provider on
+# each turn, in estimated tokens (~4 characters each). Once a conversation
+# exceeds it, the oldest whole turns are dropped from what gets sent — the
+# stored conversation and its Markdown transcript still keep everything, so
+# resume and export are unaffected. Set to 0 to disable trimming (the
+# conversation then grows until the provider rejects it for length).
+max_context_tokens: 120000
+
+# Maximum provider round-trips (tool-call iterations) in a single turn.
+# Raise it for long multi-step analyses; /max-iterations N changes it for
+# one CLI session without editing this file.
+max_agent_iterations: 10
 
 # Default safety mode for new workspaces that don't specify their own:
 #   relaxed -> no per-action confirmation inside a workspace's allowed folders

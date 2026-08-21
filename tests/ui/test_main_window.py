@@ -524,7 +524,13 @@ def test_clicking_open_in_editor_in_chat_opens_the_code_editor_dialog(
 
         window.input_box.set_text("give me code")
         window.input_box._send_button.click()
-        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+        # Wait for the turn to *finish*, not merely for the assistant bubble
+        # to exist: the bubble is created on the first TextDelta, so
+        # widget_count alone is satisfied while the code fence is still
+        # half-streamed and first_code_block() still returns None.
+        assert pump_until(
+            qapp, lambda: window.chat_panel.widget_count >= 2 and not window.input_box.is_busy
+        )
 
         bubble = window.chat_panel.widget_at(1)
         bubble._open_in_editor_button.click()

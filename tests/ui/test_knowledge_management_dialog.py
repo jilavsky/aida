@@ -396,3 +396,32 @@ def test_full_workflow_rebuild_then_chat_turn_shows_retrieval_row(
         )
     finally:
         window.close()
+
+
+# --- chunk overlap can no longer exceed chunk size ------------------------
+#
+# Review finding: the two spin boxes were ranged independently (size down to
+# 100, overlap up to 100,000), so a chunk_overlap >= chunk_size was two
+# clicks away — and chunking then loops forever, on the shared
+# AsyncLoopThread, taking the chat session with it (see test_chunking.py).
+
+
+def test_overlap_cannot_be_set_at_or_above_the_chunk_size(qapp):
+    dialog = KnowledgeBaseFormDialog(embedding_profile_names=["mock"])
+    dialog._chunk_size_spin.setValue(100)
+
+    assert dialog._chunk_overlap_spin.maximum() == 99
+
+    dialog._chunk_overlap_spin.setValue(100_000)
+    assert dialog._chunk_overlap_spin.value() < dialog._chunk_size_spin.value()
+
+
+def test_lowering_the_chunk_size_pulls_the_overlap_down_with_it(qapp):
+    dialog = KnowledgeBaseFormDialog(embedding_profile_names=["mock"])
+    dialog._chunk_size_spin.setValue(2000)
+    dialog._chunk_overlap_spin.setValue(1500)
+
+    dialog._chunk_size_spin.setValue(500)
+
+    assert dialog._chunk_overlap_spin.value() <= 499
+    assert dialog.result_config().chunk_overlap < dialog.result_config().chunk_size

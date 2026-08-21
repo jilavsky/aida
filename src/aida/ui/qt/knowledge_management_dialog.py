@@ -97,9 +97,19 @@ class KnowledgeBaseFormDialog(QDialog):
         self._chunk_size_spin.setValue(kb.chunk_size if kb else 1000)
         form.addRow("Chunk size:", self._chunk_size_spin)
 
+        # Overlap must stay strictly below chunk size: chunking advances by
+        # (chunk_size - overlap) characters per piece, so an equal-or-larger
+        # overlap never advances and spins forever, eating memory — and
+        # since ingest runs on the shared AsyncLoopThread, it takes the chat
+        # session down with it. These two spin boxes were independently
+        # ranged before (size down to 100, overlap up to 100,000), so that
+        # state was two clicks away. Capping overlap against the current
+        # chunk size makes it unreachable from this dialog rather than
+        # merely warned about on OK.
         self._chunk_overlap_spin = QSpinBox(self)
-        self._chunk_overlap_spin.setRange(0, 100_000)
+        self._chunk_overlap_spin.setRange(0, self._chunk_size_spin.value() - 1)
         self._chunk_overlap_spin.setValue(kb.chunk_overlap if kb else 150)
+        self._chunk_size_spin.valueChanged.connect(self._on_chunk_size_changed)
         form.addRow("Chunk overlap:", self._chunk_overlap_spin)
 
         layout.addLayout(form)
@@ -108,6 +118,12 @@ class KnowledgeBaseFormDialog(QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _on_chunk_size_changed(self, value: int) -> None:
+        """Keep the overlap cap in step with the chunk size — see where the
+        two spin boxes are built for why the relationship is enforced
+        rather than validated."""
+        self._chunk_overlap_spin.setMaximum(max(0, value - 1))
 
     def _on_accept(self) -> None:
         if not self._name_edit.text().strip():

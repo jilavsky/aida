@@ -12,7 +12,13 @@ import pytest
 
 from aida.config.settings import KnowledgeBaseConfig
 from aida.knowledge.rag import index as kb_index
-from aida.knowledge.rag.ingest import INGESTIBLE_SUFFIXES, normalize_source_folder, rebuild, update
+from aida.knowledge.rag.ingest import (
+    EMBED_BATCH_SIZE,
+    INGESTIBLE_SUFFIXES,
+    normalize_source_folder,
+    rebuild,
+    update,
+)
 from aida.providers.mock_embeddings import MockEmbeddings
 
 
@@ -320,3 +326,101 @@ async def test_rebuild_reports_a_folder_it_cannot_actually_list(tmp_path: Path):
         conn.close()
     finally:
         os.chmod(unreadable, 0o755)  # so tmp_path cleanup can actually remove it
+
+
+# --- embedding batching ----------------------------------------------------
+#
+# Review finding: every chunk of a file went into one embeddings.create
+# call. A 200-page PDF at chunk_size 1000 is ~1000 inputs in a single
+# request — over Ollama's practical limit and near OpenAI's — so the request
+# failed and, since ingest records a failing file as skipped, the whole
+# document was silently dropped from the index.
+
+
+class _BatchRecordingEmbeddings(MockEmbeddings):
+    """MockEmbeddings that remembers the size of each request it received."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.batch_sizes: list[int] = []
+
+    async def embed(self, texts):
+        self.batch_sizes.append(len(texts))
+        return await super().embed(texts)
+
+
+@pytest.mark.asyncio
+async def test_a_large_file_is_embedded_in_bounded_batches(tmp_path: Path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    # ~300 chunks at chunk_size 100.
+    (corpus / "big.txt").write_text("\n\n".join(f"paragraph {i} " + "x" * 90 for i in range(300)))
+
+    embedder = _BatchRecordingEmbeddings()
+    conn = kb_index.connect(tmp_path / "kb.db")
+    result = await rebuild(conn, _kb(corpus, chunk_size=100, chunk_overlap=10), embedder)
+    conn.close()
+
+    assert result.skipped_files == []
+    assert result.chunk_count > EMBED_BATCH_SIZE
+    assert len(embedder.batch_sizes) > 1  # actually split, not one giant call
+    assert max(embedder.batch_sizes) <= EMBED_BATCH_SIZE
+    assert sum(embedder.batch_sizes) == result.chunk_count  # every chunk embedded exactly once
+
+
+@pytest.mark.asyncio
+async def test_batching_preserves_chunk_order(tmp_path: Path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "big.txt").write_text("\n\n".join(f"paragraph {i} " + "y" * 90 for i in range(150)))
+
+    conn = kb_index.connect(tmp_path / "kb.db")
+    await rebuild(conn, _kb(corpus, chunk_size=100, chunk_overlap=10), MockEmbeddings())
+    rows = conn.execute(
+        "SELECT chunk_index FROM chunks WHERE source_path = ? ORDER BY rowid",
+        [str(corpus / "big.txt")],
+    ).fetchall()
+    conn.close()
+
+    assert [row[0] for row in rows] == sorted(row[0] for row in rows)
+
+
+# --- a file that disappears mid-pass --------------------------------------
+#
+# Review finding: this path.stat() sat outside the try, so a file deleted
+# between discovery and the mtime check raised straight out of _run_ingest
+# and aborted the entire pass, rather than skipping the one file.
+
+
+@pytest.mark.asyncio
+async def test_a_file_deleted_between_discovery_and_stat_skips_only_that_file(
+    tmp_path: Path, monkeypatch
+):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "a.txt").write_text("Content A.")
+    doomed = corpus / "gone.txt"
+    doomed.write_text("Content B.")
+    (corpus / "c.txt").write_text("Content C.")
+
+    # Let discovery see the file (that pass stats it once, via is_file()),
+    # then make it vanish — the exact window the bug lived in.
+    real_stat = Path.stat
+    seen: dict[str, int] = {}
+
+    def _stat(self, *args, **kwargs):
+        if self == doomed:
+            seen[str(self)] = seen.get(str(self), 0) + 1
+            if seen[str(self)] > 1:
+                raise FileNotFoundError(2, "No such file or directory", str(doomed))
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", _stat)
+
+    conn = kb_index.connect(tmp_path / "kb.db")
+    result = await rebuild(conn, _kb(corpus), MockEmbeddings())
+    conn.close()
+
+    assert sorted(Path(p).name for p in result.added_files) == ["a.txt", "c.txt"]
+    assert len(result.skipped_files) == 1
+    assert "gone.txt" in result.skipped_files[0]

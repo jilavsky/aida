@@ -15,6 +15,7 @@ its own test-body task.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -24,6 +25,7 @@ import pytest
 
 from aida.artifacts.base import ImageArtifact, JsonArtifact, TextArtifact
 from aida.config.settings import McpServerConfig
+from aida.mcp.manager import McpManager
 from aida.mcp.results import convert_result
 from aida.mcp.server import McpServerError, McpServerHandle
 
@@ -253,3 +255,67 @@ async def test_start_failure_raises_mcp_server_error():
     with pytest.raises(McpServerError):
         await h.start()
     assert not h.is_running
+
+
+# --- a server that starts but never answers initialize ---------------------
+#
+# Review finding: ClientSession was constructed with no read_timeout_seconds
+# and start() did a bare `await ready.wait()`, so a subprocess that launched
+# and then went quiet (bad env, hung import, anything reading stdin) blocked
+# start() -> start_all() -> the whole session forever. stop() hung too: the
+# serving task never reached its stop-event wait, so setting that event did
+# nothing and `await self._serve_task` never returned. There was no recovery
+# path at all — the CLI never reached its prompt, the GUI sat on
+# "Starting session…".
+
+
+def _quiet_server_config(name: str = "quiet-mcp") -> McpServerConfig:
+    """A process that starts fine and then blocks on stdin forever, never
+    replying to the MCP initialize handshake."""
+    return McpServerConfig(
+        name=name, command=sys.executable, args=["-c", "import sys; sys.stdin.read()"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_times_out_on_a_server_that_never_answers_initialize():
+    handle = McpServerHandle(_quiet_server_config(), startup_timeout_seconds=1.0, stop_timeout_seconds=2.0)
+    try:
+        with pytest.raises(McpServerError) as excinfo:
+            await handle.start()
+    finally:
+        await handle.stop()
+
+    assert "did not finish starting" in str(excinfo.value)
+    assert handle.is_running is False
+
+
+@pytest.mark.asyncio
+async def test_stop_returns_after_a_startup_timeout():
+    """stop() must stay callable — and *return* — after a wedged start, since
+    that is exactly the path McpManager/ChatBridge take on the way out."""
+    handle = McpServerHandle(_quiet_server_config(), startup_timeout_seconds=1.0, stop_timeout_seconds=2.0)
+    with pytest.raises(McpServerError):
+        await handle.start()
+
+    await asyncio.wait_for(handle.stop(), timeout=10.0)
+
+
+@pytest.mark.asyncio
+async def test_a_wedged_server_does_not_block_the_others_from_starting():
+    """Failure isolation, the whole point: one silent server contributes no
+    tools and is recorded in start_errors; the healthy one still comes up."""
+    manager = McpManager(
+        [_quiet_server_config(), _mock_config(name="mock-mcp")], startup_timeout_seconds=1.0
+    )
+    try:
+        tools = await manager.start_all()
+        running = list(manager.running_server_names)
+        start_errors = dict(manager.start_errors)
+    finally:
+        await manager.aclose()  # clears the handle list, so snapshot above
+
+    assert "quiet-mcp" in start_errors
+    assert "did not finish starting" in start_errors["quiet-mcp"]
+    assert running == ["mock-mcp"]
+    assert any(name.startswith("mock-mcp") for name in tools)

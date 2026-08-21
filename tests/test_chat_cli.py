@@ -37,6 +37,7 @@ from aida.core.events import (
 from aida.knowledge.rag import index as kb_index
 from aida.knowledge.rag.chunking import Chunk
 from aida.knowledge.rag.retrieval import ActiveKnowledgeBase
+from aida.providers.base import Message
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
 from aida.providers.mock_embeddings import MockEmbeddings
 from aida.workspace.safety import ConfirmationRequest
@@ -521,3 +522,112 @@ async def test_send_with_no_active_knowledge_bases_performs_no_retrieval(
     events = [e async for e in session.send("hello")]
 
     assert not any(isinstance(e, RetrievalPerformed) for e in events)
+
+
+# --- context management (review findings 1 and 8) -------------------------
+#
+# trim_history existed but nothing ever called it, so self.messages grew for
+# the whole session until the provider rejected a request for length,
+# mid-analysis; and resumed history could arrive already broken (a crash
+# mid-turn persists the assistant message announcing tool calls before their
+# results exist), which every later turn's request is then rejected for.
+
+
+@pytest.mark.asyncio
+async def test_send_trims_the_history_to_the_configured_budget(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    settings = _settings_with_profile()
+    settings.app.max_context_tokens = 200  # ~800 characters
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+
+    session = ChatSession(settings, "mock-profile")
+    for i in range(40):
+        session.messages.append(Message(role="user", content=f"old question {i} " + "x" * 400))
+        session.messages.append(Message(role="assistant", content="old answer " + "y" * 400))
+    before = len(session.messages)
+
+    async for _event in session.send("the new question"):
+        pass
+
+    assert len(session.messages) < before
+    assert session.messages[-2].content == "the new question"
+    await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_send_does_not_trim_when_the_budget_is_disabled(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    settings = _settings_with_profile()
+    settings.app.max_context_tokens = 0
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+
+    session = ChatSession(settings, "mock-profile")
+    for i in range(40):
+        session.messages.append(Message(role="user", content=f"old question {i} " + "x" * 400))
+    before = len(session.messages)
+
+    async for _event in session.send("the new question"):
+        pass
+
+    assert len(session.messages) == before + 2  # the new user message + the reply
+    await session.aclose()
+
+
+def test_chat_session_repairs_broken_resumed_history(monkeypatch, aida_home: Path, records_home: Path):
+    """A conversation killed mid-turn leaves an announced tool call with no
+    result — a history the provider rejects outright on the next turn."""
+    from aida.providers.base import ToolCall
+
+    settings = _settings_with_profile()
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    broken = [
+        Message(role="user", content="plot everything"),
+        Message(
+            role="assistant",
+            content="",
+            tool_calls=[ToolCall(id="c1", name="plot", arguments={}), ToolCall(id="c2", name="plot", arguments={})],
+        ),
+        Message(role="tool", content="plotted", tool_call_id="c1", name="plot"),
+    ]
+
+    session = ChatSession(settings, "mock-profile", initial_messages=broken)
+
+    announced = {tc.id for m in session.messages if m.role == "assistant" for tc in m.tool_calls}
+    answered = {m.tool_call_id for m in session.messages if m.role == "tool"}
+    assert announced == answered == {"c1", "c2"}
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_context_message_is_removed_by_identity_not_equality(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """send()'s finally removed the retrieval message with list.remove(),
+    which matches by ``==`` — and ``Message`` is a plain dataclass, so an
+    earlier message with identical field values is the one that gets
+    deleted instead, silently losing real history. Persistence already
+    excluded the context message by *identity*; removal now does too."""
+    settings = _settings_with_profile()
+    provider = MockProvider([MockTurn(text="answer")])
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+
+    kb = await _seeded_active_kb(tmp_path)
+    session = ChatSession(settings, "mock-profile", active_knowledge_bases=[kb])
+
+    # A real earlier message that happens to equal the context message this
+    # turn will generate (the user pasted it back in, say).
+    from aida.cli.chat import _format_retrieved_context
+
+    passages = await session._retrieve_context("How does Unified Fit work?")
+    look_alike = Message(role="user", content=_format_retrieved_context(passages))
+    session.messages.append(look_alike)
+
+    async for _event in session.send("How does Unified Fit work?"):
+        pass
+
+    assert any(m is look_alike for m in session.messages), "an equal-but-distinct message was removed"
+    assert sum(1 for m in session.messages if m.content == look_alike.content) == 1
+
+    await kb.embeddings_provider.aclose()
+    kb.connection.close()

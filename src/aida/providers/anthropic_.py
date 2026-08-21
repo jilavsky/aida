@@ -105,8 +105,16 @@ def to_anthropic_params(messages: list[Message]) -> tuple[str | None, list[dict[
                     "content": m.content or "(no output)",
                 }
             )
-        else:
+        elif m.content:
             out.append({"role": m.role, "content": m.content})
+        # else: a message with no content and no tool calls is dropped.
+        # The API rejects an empty content block outright ("all messages
+        # must have non-empty content"), and an assistant turn *can*
+        # legitimately end up empty — a provider round that produced only
+        # tool calls which were then cancelled, or a model that returned
+        # nothing at all. Sending it poisons every later turn in the
+        # conversation; dropping it loses nothing, since there was no
+        # content to convey.
 
     flush_tool_results()
     system = "\n\n---\n\n".join(system_parts) if system_parts else None
@@ -259,6 +267,20 @@ class AnthropicProvider(LLMProvider):
             )
         except AnthropicError as exc:
             yield AgentError(layer=self.layer_name, message="unexpected provider error", detail=str(exc))
+        except Exception as exc:  # noqa: BLE001 - see LLMProvider.complete's contract
+            # LLMProvider.complete promises callers "yields a single
+            # AgentError ... rather than raising" — AgentLoop relies on
+            # that, treating an AgentError as the turn's terminator. Only
+            # AnthropicError subclasses were caught here, so anything else
+            # the SDK or the network stack raised (a TypeError from a
+            # malformed kwargs override, an httpx-level error not wrapped
+            # by the SDK, a JSON decode failure mid-stream) escaped the
+            # async generator and broke that contract at the call site.
+            # OpenAICompatProvider already ends with the same blanket
+            # catch; this makes the two behave alike.
+            yield AgentError(
+                layer=self.layer_name, message="unexpected error", detail=f"{type(exc).__name__}: {exc}"
+            )
 
     async def ping(self) -> bool:
         try:

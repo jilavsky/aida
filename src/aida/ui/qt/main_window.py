@@ -177,11 +177,21 @@ class MainWindow(QMainWindow):
         self.folder_display.save_to_workspace_requested.connect(self._on_save_folders_to_workspace)
 
     def _wire_bridge_signals(self) -> None:
+        # Every connection here must have *this window* as the receiver, so
+        # that _unwire_bridge_signals' single `bridge.disconnect(self)` can
+        # actually undo all of them. Two shapes used to slip through: a
+        # connection whose receiver is a child widget
+        # (`event_received -> self.chat_panel.handle_event` — receiver is
+        # the chat panel, not the window) and a bare lambda (no receiver at
+        # all). Both survived "retiring" a bridge, so a superseded session's
+        # remaining events rendered into the *new* chat panel and flipped
+        # the new input box's busy state. Plain bound methods on self keep
+        # the receiver correct by construction.
         self.bridge.session_ready.connect(self._on_session_ready)
         self.bridge.startup_failed.connect(self._on_startup_failed)
-        self.bridge.event_received.connect(self.chat_panel.handle_event)
-        self.bridge.turn_started.connect(lambda: self.input_box.set_busy(True))
-        self.bridge.turn_finished.connect(lambda: self.input_box.set_busy(False))
+        self.bridge.event_received.connect(self._on_event_received)
+        self.bridge.turn_started.connect(self._on_turn_started)
+        self.bridge.turn_finished.connect(self._on_turn_finished)
         self.bridge.turn_finished.connect(self._update_usage_label)
         self.bridge.turn_failed.connect(self._on_turn_failed)
         self.bridge.confirmation_requested.connect(self._on_confirmation_requested)
@@ -189,10 +199,27 @@ class MainWindow(QMainWindow):
         self.input_box.cancel_requested.connect(self.bridge.cancel)
         self.profile_selector.profile_changed.connect(self.bridge.switch_profile)
 
+    def _on_event_received(self, event: object) -> None:
+        """Forward one ``AgentEvent`` to the chat panel.
+
+        Deliberately a method on the window rather than
+        ``bridge.event_received.connect(self.chat_panel.handle_event)``:
+        that connection's receiver is the *chat panel*, so
+        ``bridge.disconnect(self)`` never dropped it and a retired bridge
+        kept painting into the live panel. See ``_wire_bridge_signals``."""
+        self.chat_panel.handle_event(event)
+
+    def _on_turn_started(self) -> None:
+        self.input_box.set_busy(True)
+
+    def _on_turn_finished(self) -> None:
+        self.input_box.set_busy(False)
+
     def _unwire_bridge_signals(self, bridge: ChatBridge) -> None:
         """Undo ``_wire_bridge_signals`` for a bridge being retired, in both
         directions: ``bridge.disconnect(self)`` drops the bridge's own
-        signals into this window, and the two explicit calls drop the
+        signals into this window — which now covers every one of them, see
+        ``_wire_bridge_signals`` — and the two explicit calls drop the
         widget-to-bridge connections, where the *bridge* is the receiver and
         so isn't covered by that first call."""
         bridge.disconnect(self)
@@ -503,7 +530,11 @@ class MainWindow(QMainWindow):
         self, *, workspace_name: str | None, profile_name: str | None, resume_conversation_id: str | None
     ) -> None:
         old_bridge = self.bridge
-        old_bridge.shutdown()  # waits for an in-flight start, then closes it
+        # Waits for an in-flight start *and* cancels/awaits an in-flight
+        # turn before closing — see ChatBridge.shutdown. Without the latter,
+        # hitting "New Chat" while a tool call was running left the old
+        # turn streaming into the freshly-created panel.
+        old_bridge.shutdown()
         # Retire the old bridge completely before the new one exists: its
         # signals are still connected to these same handlers, and every
         # handler resolves state through `self.bridge`. A superseded bridge

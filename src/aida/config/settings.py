@@ -13,6 +13,7 @@ No secret value is ever read from or written to these files — see
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,64 @@ import yaml
 from aida.config.paths import config_dir
 
 CURRENT_CONFIG_VERSION = 1
+
+_logger = logging.getLogger("aida.config")
+
+
+def _coerce(kind: str, value: Any) -> Any:
+    """Coerce one config value to the type its field is declared with.
+
+    ``from_dict`` filtered *unknown* keys from day one but never checked the
+    *types* of known ones, so a hand-edited ``config.yaml`` with
+    ``max_agent_iterations: "20"`` (a string, because it was quoted) loaded
+    happily and only blew up much later, deep inside the agent loop at
+    comparison time, with an error naming neither the file nor the field.
+    Raises ``ValueError``/``TypeError`` for a value that can't be coerced;
+    the caller falls back to the field's default and warns, because "old
+    configs must always load" (this module's docstring) applies just as much
+    to a *wrong* config as to an out-of-date one.
+    """
+    optional = kind.endswith("?")
+    base = kind.removesuffix("?")
+    if value is None:
+        if optional:
+            return None
+        raise ValueError("null is not allowed for this field")
+    if base == "int":
+        if isinstance(value, bool):  # bool is an int subclass; almost never intended here
+            raise ValueError("expected a number, got a boolean")
+        return int(value)
+    if base == "bool":
+        return bool(value)
+    if base == "list[str]":
+        if isinstance(value, str) or not isinstance(value, (list, tuple)):
+            raise ValueError("expected a list")
+        return [str(item) for item in value]
+    if base == "str":
+        if isinstance(value, (dict, list, tuple)):
+            raise ValueError("expected a string")
+        return str(value)
+    raise ValueError(f"unsupported field kind {kind!r}")
+
+
+def _coerced_fields(
+    data: dict[str, Any], field_kinds: dict[str, str], *, source: str
+) -> dict[str, Any]:
+    """Filter ``data`` down to known keys and coerce each to its declared
+    type, dropping (with a warning) anything that can't be coerced so the
+    dataclass default applies instead."""
+    coerced: dict[str, Any] = {}
+    for key, value in (data or {}).items():
+        kind = field_kinds.get(key)
+        if kind is None:
+            continue  # unknown key: forward-compatible by design, silently ignored
+        try:
+            coerced[key] = _coerce(kind, value)
+        except (TypeError, ValueError) as exc:
+            _logger.warning(
+                "%s: ignoring %s=%r — %s; using the default instead", source, key, value, exc
+            )
+    return coerced
 
 
 # --------------------------------------------------------------------------
@@ -74,6 +133,14 @@ class AppConfig:
     # must not import core (core.agent already imports
     # aida.config.logging_setup, so the reverse would cycle).
     max_agent_iterations: int = 10
+    # Soft budget for how much conversation history is sent to the provider
+    # (estimated tokens — aida.core.context.estimate_tokens, ~4 chars each).
+    # Nothing used to manage context size at all: self.messages grew for the
+    # whole session until the provider rejected the request for length,
+    # mid-analysis, with no way back. aida.cli.chat.ChatSession.send now
+    # trims whole turns down to this budget before each turn (see
+    # aida.core.context.trim_history). 0 disables trimming entirely.
+    max_context_tokens: int = 120_000
     # Phase 9: a short, user-editable list of safe shell/python invocations
     # (PLAN.md §5) — union'd with each workspace's own command_allowlist by
     # SafetyGuard.for_workspace, same "global + per-workspace, additive"
@@ -83,12 +150,20 @@ class AppConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
-        known = {f for f in cls.__dataclass_fields__}
-        filtered = {k: v for k, v in (data or {}).items() if k in known}
-        if "allowed_folders" in filtered:
-            filtered["allowed_folders"] = list(filtered["allowed_folders"] or [])
-        if "command_allowlist" in filtered:
-            filtered["command_allowlist"] = list(filtered["command_allowlist"] or [])
+        filtered = _coerced_fields(data, _APP_FIELD_KINDS, source="config.yaml")
+        # Values that parse as the right *type* but are nonsensical as
+        # *settings* — an iteration cap of 0 means no turn can ever call a
+        # tool, a negative context budget means nothing can be sent at all.
+        if filtered.get("max_agent_iterations", 1) < 1:
+            _logger.warning(
+                "config.yaml: max_agent_iterations=%r must be at least 1; using the default instead",
+                filtered.pop("max_agent_iterations"),
+            )
+        if filtered.get("max_context_tokens", 0) < 0:
+            _logger.warning(
+                "config.yaml: max_context_tokens=%r must not be negative; using the default instead",
+                filtered.pop("max_context_tokens"),
+            )
         return cls(**filtered)
 
     def to_dict(self) -> dict[str, Any]:
@@ -107,8 +182,34 @@ class AppConfig:
             "last_workspace_name": self.last_workspace_name,
             "last_profile_name": self.last_profile_name,
             "max_agent_iterations": self.max_agent_iterations,
+            "max_context_tokens": self.max_context_tokens,
             "command_allowlist": self.command_allowlist,
         }
+
+
+#: Declared type of every ``AppConfig`` field, for ``from_dict``'s coercion
+#: pass — a ``?`` suffix means the field also accepts ``None``. A field
+#: missing from this map would silently stop being loadable from
+#: ``config.yaml``, so ``tests/test_settings.py`` asserts the two stay in
+#: sync.
+_APP_FIELD_KINDS: dict[str, str] = {
+    "config_version": "int",
+    "records_dir": "str?",
+    "log_level": "str",
+    "default_safety_mode": "str",
+    "allowed_folders": "list[str]",
+    "theme": "str",
+    "window_width": "int?",
+    "window_height": "int?",
+    "window_x": "int?",
+    "window_y": "int?",
+    "font_size": "int",
+    "last_workspace_name": "str?",
+    "last_profile_name": "str?",
+    "max_agent_iterations": "int",
+    "max_context_tokens": "int",
+    "command_allowlist": "list[str]",
+}
 
 
 # --------------------------------------------------------------------------

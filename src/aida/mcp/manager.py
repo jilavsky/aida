@@ -76,12 +76,14 @@ class McpManager:
         *,
         artifact_store: ArtifactStore | None = None,
         call_timeout_seconds: float | None = None,
+        startup_timeout_seconds: float | None = None,
         confirm_callback: ConfirmCallback = deny_all,
     ) -> None:
         self._configs = {s.name: s for s in servers}
         self._handles: dict[str, McpServerHandle] = {}
         self._store = artifact_store or ArtifactStore()
         self._call_timeout_seconds = call_timeout_seconds
+        self._startup_timeout_seconds = startup_timeout_seconds
         self._confirm_callback = confirm_callback
         self.start_errors: dict[str, str] = {}
 
@@ -149,6 +151,8 @@ class McpManager:
         kwargs: dict[str, Any] = {}
         if self._call_timeout_seconds is not None:
             kwargs["call_timeout_seconds"] = self._call_timeout_seconds
+        if self._startup_timeout_seconds is not None:
+            kwargs["startup_timeout_seconds"] = self._startup_timeout_seconds
         return kwargs
 
     def _tools_for(

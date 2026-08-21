@@ -166,6 +166,35 @@ def _search_text_sync(
     return rows
 
 
+def _resolve_destination(source: Path, destination: Path) -> Path:
+    """The path a copy/move will actually write to.
+
+    ``shutil.copy2``/``shutil.move`` accept a *directory* as the
+    destination and place the file inside it under its own name — so
+    "destination" as the model passes it isn't necessarily the file that
+    ends up on disk, and an existence check against the raw argument would
+    ask the wrong question."""
+    return destination / source.name if destination.is_dir() else destination
+
+
+def _refuse_existing_destination(target: Path, *, overwrite: bool) -> ToolResult | None:
+    """``ToolResult`` refusing to clobber ``target``, or ``None`` if the
+    write may proceed.
+
+    ``write_file`` has always refused to replace an existing file without
+    an explicit ``overwrite=true``, but ``copy_file``/``move_file`` sitting
+    right beside it went straight through ``shutil`` and overwrote without
+    asking — and unlike ``delete_file`` there was no ``_trash`` copy to
+    recover from, so an agent told to "copy the reduced data over" could
+    destroy a file in the target folder with nothing to undo it. Same flag,
+    same default, same wording as ``write_file`` now."""
+    if not target.exists() or overwrite:
+        return None
+    return ToolResult(
+        content=f"{target} already exists — pass overwrite=true to replace it.", is_error=True
+    )
+
+
 def default_file_tools(
     guard: SafetyGuard,
     *,
@@ -262,17 +291,22 @@ def default_file_tools(
     async def copy_file(arguments: dict[str, Any]) -> ToolResult:
         source = await guard.authorize_read(arguments["source"])
         destination = await guard.authorize_write(arguments["destination"])
+        overwrite = bool(arguments.get("overwrite", False))
         if not source.is_file():
             return ToolResult(content=f"Not a file: {source}", is_error=True)
+        target = _resolve_destination(source, destination)
+        refusal = _refuse_existing_destination(target, overwrite=overwrite)
+        if refusal is not None:
+            return refusal
 
         def _copy() -> None:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
 
         await _run_blocking(_copy)
-        mime_type = mimetypes.guess_type(str(destination))[0]
-        artifact = FileArtifact(path=str(destination), mime_type=mime_type)
-        return ToolResult(content=f"Copied {source} -> {destination}", artifacts=[artifact])
+        mime_type = mimetypes.guess_type(str(target))[0]
+        artifact = FileArtifact(path=str(target), mime_type=mime_type)
+        return ToolResult(content=f"Copied {source} -> {target}", artifacts=[artifact])
 
     @_tool
     async def move_file(arguments: dict[str, Any]) -> ToolResult:
@@ -281,17 +315,31 @@ def default_file_tools(
         # authorize_read — same confirmation gating a delete would get.
         source = await guard.authorize_delete(arguments["source"])
         destination = await guard.authorize_write(arguments["destination"])
+        overwrite = bool(arguments.get("overwrite", False))
         if not source.exists():
             return ToolResult(content=f"Not found: {source}", is_error=True)
+        target = _resolve_destination(source, destination)
+        refusal = _refuse_existing_destination(target, overwrite=overwrite)
+        if refusal is not None:
+            return refusal
 
         def _move() -> None:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source), str(destination))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                # shutil.move onto an existing *directory* target moves the
+                # source inside it instead of replacing it; the target here
+                # is already fully resolved, so remove first to make
+                # overwrite mean overwrite in every case.
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            shutil.move(str(source), str(target))
 
         await _run_blocking(_move)
-        mime_type = mimetypes.guess_type(str(destination))[0]
-        artifact = FileArtifact(path=str(destination), mime_type=mime_type)
-        return ToolResult(content=f"Moved {source} -> {destination}", artifacts=[artifact])
+        mime_type = mimetypes.guess_type(str(target))[0]
+        artifact = FileArtifact(path=str(target), mime_type=mime_type)
+        return ToolResult(content=f"Moved {source} -> {target}", artifacts=[artifact])
 
     @_tool
     async def delete_file(arguments: dict[str, Any]) -> ToolResult:
@@ -420,12 +468,19 @@ def default_file_tools(
         NativeTool(
             schema=ToolSchema(
                 name="copy_file",
-                description="Copy a file to a new location.",
+                description=(
+                    "Copy a file to a new location. Fails if the destination already exists "
+                    "unless overwrite=true."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
                         "source": {"type": "string"},
                         "destination": {"type": "string"},
+                        "overwrite": {
+                            "type": "boolean",
+                            "description": "Replace an existing destination file. Default false.",
+                        },
                     },
                     "required": ["source", "destination"],
                 },
@@ -435,12 +490,19 @@ def default_file_tools(
         NativeTool(
             schema=ToolSchema(
                 name="move_file",
-                description="Move (rename) a file to a new location.",
+                description=(
+                    "Move (rename) a file to a new location. Fails if the destination already "
+                    "exists unless overwrite=true."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
                         "source": {"type": "string"},
                         "destination": {"type": "string"},
+                        "overwrite": {
+                            "type": "boolean",
+                            "description": "Replace an existing destination file. Default false.",
+                        },
                     },
                     "required": ["source", "destination"],
                 },

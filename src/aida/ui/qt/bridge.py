@@ -170,6 +170,14 @@ class ChatBridge(QObject):
         # the rest of the process's life — and emitted `session_ready` into
         # a window that had already moved on to a different bridge.
         self._start_future: concurrent.futures.Future | None = None
+        # The in-flight turn, for the same reason `_start_future` exists:
+        # shutdown() has to be able to *finish* with it rather than walk
+        # away. A bridge retired mid-turn (the user hits "New Chat" while an
+        # MCP plot is running) used to keep streaming — its remaining events
+        # rendered into the new session's chat panel and flipped the new
+        # input box's busy state — and its ChatSession was closed out from
+        # under a turn that was still using it.
+        self._turn_future: concurrent.futures.Future | None = None
         # Phase 9 code editor: the live subprocess of whatever script is
         # currently running via run_script, so cancel_script_run has
         # something to kill. None whenever nothing is running.
@@ -236,19 +244,38 @@ class ChatBridge(QObject):
         """Start a new turn. No-op if the session hasn't finished starting
         yet — callers (the input box) should be disabled until
         ``session_ready``."""
-        if self.session is None:
+        if self.session is None or self._closing:
             return
-        asyncio.run_coroutine_threadsafe(self._drain(user_text), self._loop_thread.loop)
+        self._turn_future = asyncio.run_coroutine_threadsafe(
+            self._drain(user_text), self._loop_thread.loop
+        )
 
     async def _drain(self, user_text: str) -> None:
-        self.turn_started.emit()
+        """Stream one turn's events out as signals.
+
+        Every emit is gated on ``self._closing``: once this bridge is being
+        retired its signals must go quiet, because the window has already
+        moved on to a different bridge and a stale event would render into
+        the *new* session's panel. The generator is still drained to
+        completion rather than abandoned mid-iteration — ``ChatSession.send``
+        has cleanup in a ``finally`` (dropping the ephemeral retrieval
+        message, flushing the transcript) and ``AgentLoop`` answers any
+        cancelled tool calls on its way out, so cutting the loop short here
+        would skip both. ``shutdown`` sets the cancel flag first, so this
+        ends promptly."""
+        if not self._closing:
+            self.turn_started.emit()
         try:
             async for event in self.session.send(user_text):
-                self.event_received.emit(event)
+                if not self._closing:
+                    self.event_received.emit(event)
         except Exception as exc:  # noqa: BLE001 - must never crash the loop thread
-            self.turn_failed.emit(str(exc))
+            if not self._closing:
+                self.turn_failed.emit(str(exc))
         finally:
-            self.turn_finished.emit()
+            self._turn_future = None
+            if not self._closing:
+                self.turn_finished.emit()
 
     def cancel(self) -> None:
         """Request cancellation of the in-flight turn. ``ChatSession.cancel``
@@ -473,6 +500,21 @@ class ChatBridge(QObject):
             with contextlib.suppress(Exception):
                 await asyncio.wrap_future(self._start_future)
             self._start_future = None
+        # Snapshot before awaiting: _drain clears the attribute in its own
+        # `finally`, which can land between the check and the await.
+        turn_future, self._turn_future = self._turn_future, None
+        if turn_future is not None:
+            # Same reasoning as the start above, one step further: a turn
+            # still running when this bridge is retired must be *finished
+            # with*, not walked away from — otherwise session.aclose()
+            # below closes the provider and recorder out from under it.
+            # cancel() is the session's own cooperative flag (checked
+            # between tool calls), so the turn unwinds through its normal
+            # cleanup path rather than being killed mid-await.
+            if self.session is not None:
+                self.session.cancel()
+            with contextlib.suppress(Exception):
+                await asyncio.wrap_future(turn_future)
         if self._closed:
             return  # idempotent: repeated shutdown() calls must not double-close
         self._closed = True

@@ -79,10 +79,35 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _validate_chunk_params(chunk_size: int, chunk_overlap: int) -> str | None:
+    """Reject a chunk_size/chunk_overlap pair that can't terminate, naming
+    the fix. Chunking advances by (chunk_size - chunk_overlap) characters
+    per piece, so an overlap at or above the chunk size loops forever;
+    ``aida.knowledge.rag.chunking.normalize_chunk_params`` clamps it as a
+    backstop, but silently rewriting what someone typed on the command line
+    is worse than telling them it's wrong. Returns an error message, or
+    ``None`` if the pair is fine."""
+    if chunk_size < 1:
+        return f"--chunk-size must be at least 1 (got {chunk_size})."
+    if chunk_overlap < 0:
+        return f"--chunk-overlap must not be negative (got {chunk_overlap})."
+    if chunk_overlap >= chunk_size:
+        return (
+            f"--chunk-overlap ({chunk_overlap}) must be smaller than --chunk-size "
+            f"({chunk_size}) — chunking would never advance."
+        )
+    return None
+
+
 def cmd_add(args: argparse.Namespace) -> int:
     settings = load_settings()
     if _get_kb(settings, args.name) is not None:
         print(f"Knowledge base {args.name!r} already exists — use `aida kb edit` to change it.")
+        return 1
+
+    error = _validate_chunk_params(args.chunk_size, args.chunk_overlap)
+    if error:
+        print(error)
         return 1
 
     kb = KnowledgeBaseConfig(
@@ -105,12 +130,22 @@ def cmd_edit(args: argparse.Namespace) -> int:
         print(f"Unknown knowledge base {args.name!r} — use `aida kb add` to create it.")
         return 1
 
+    chunk_size = args.chunk_size if args.chunk_size is not None else existing.chunk_size
+    chunk_overlap = args.chunk_overlap if args.chunk_overlap is not None else existing.chunk_overlap
+    # Validated against the *resulting* pair, not just the flags given:
+    # lowering only --chunk-size can just as easily land below the overlap
+    # already stored in knowledge.yaml.
+    error = _validate_chunk_params(chunk_size, chunk_overlap)
+    if error:
+        print(error)
+        return 1
+
     updated = KnowledgeBaseConfig(
         name=args.name,
         source_folders=_split_folders_csv(args.source_folders) if args.source_folders is not None else existing.source_folders,
         embedding_profile=args.embedding_profile if args.embedding_profile is not None else existing.embedding_profile,
-        chunk_size=args.chunk_size if args.chunk_size is not None else existing.chunk_size,
-        chunk_overlap=args.chunk_overlap if args.chunk_overlap is not None else existing.chunk_overlap,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
     )
     settings.knowledge.knowledge_bases[args.name] = updated
     save_knowledge_config(settings.knowledge)

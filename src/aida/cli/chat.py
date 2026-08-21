@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import signal
+from collections.abc import Iterator
 from pathlib import Path
 
 from aida.artifacts.store import ArtifactStore
@@ -31,6 +33,8 @@ from aida.core.context import (
     build_system_message,
     build_workspace_context_block,
     load_skill_texts,
+    repair_tool_call_pairing,
+    trim_history,
 )
 from aida.core.cost import estimate_cost_usd
 from aida.core.events import (
@@ -232,7 +236,13 @@ class ChatSession:
 
         skill_texts = load_skill_texts(skills_dir(), skill_names or [])
         system_message = build_system_message(system_prompt, skill_texts, extra_texts=extra_context_texts)
-        history = list(initial_messages) if initial_messages else []
+        # Resumed history can arrive already broken: a session killed
+        # (crash, force-quit) after an assistant message with tool calls was
+        # persisted but before its results were leaves orphaned tool_use
+        # blocks, which every later turn's request is then rejected for.
+        # Repaired once here, on the way in — see
+        # aida.core.context.repair_tool_call_pairing.
+        history = repair_tool_call_pairing(list(initial_messages)) if initial_messages else []
         self.messages: list[Message] = ([system_message] if system_message.content else []) + history
 
     async def switch_profile(self, name: str) -> None:
@@ -250,6 +260,29 @@ class ChatSession:
 
     def cancel(self) -> None:
         self.loop.cancel()
+
+    def _trim_context(self) -> None:
+        """Drop the oldest whole turns from the in-memory history once it
+        exceeds ``AppConfig.max_context_tokens``.
+
+        Nothing managed context size before this: ``self.messages`` grew for
+        the whole session until the provider rejected a request for length,
+        mid-analysis, with no way back short of starting over. Mutates
+        ``self.messages`` in place rather than rebinding it, because
+        ``AgentLoop.run`` appends to that same list object."""
+        budget = self.settings.app.max_context_tokens
+        if not budget:
+            return  # 0 disables trimming
+        trimmed, was_trimmed = trim_history(self.messages, budget)
+        if not was_trimmed:
+            return
+        logger.info(
+            "trimmed conversation history to fit ~%d tokens: %d message(s) -> %d",
+            budget,
+            len(self.messages),
+            len(trimmed),
+        )
+        self.messages[:] = trimmed
 
     async def _retrieve_context(self, user_text: str) -> dict[str, list[RetrievedPassage]]:
         """Query every active knowledge base for this turn's question.
@@ -300,6 +333,12 @@ class ChatSession:
         self.messages.append(user_message)
         if self.recorder is not None:
             self.recorder.record_message(user_message)
+        # Keep the *sent* history under budget (the recorded history in the
+        # DB is never trimmed — resume/export still show everything). Done
+        # here, before `persisted` is captured, because trimming shifts
+        # every index in self.messages. Whole turns only, so a tool result
+        # is never separated from the call it answers — see trim_history.
+        self._trim_context()
         persisted = len(self.messages)
 
         context_message: Message | None = None
@@ -364,8 +403,23 @@ class ChatSession:
             # Ephemeral: never persisted (guarded above by identity), and
             # never allowed to accumulate into next turn's context either —
             # each turn embeds a fresh query and gets fresh passages.
-            if context_message is not None and context_message in self.messages:
-                self.messages.remove(context_message)
+            # Removed *by identity*, matching how persistence excludes it:
+            # list.remove() matches by ==, and Message is a plain dataclass,
+            # so an ordinary user message that happened to have identical
+            # field values would be the one deleted instead.
+            if context_message is not None:
+                for position in range(len(self.messages) - 1, -1, -1):
+                    if self.messages[position] is context_message:
+                        del self.messages[position]
+                        break
+            # One transcript write per turn instead of one per message —
+            # see ConversationRecorder.record_message. Suppressed because a
+            # failed *export* must not be what breaks a turn: the messages
+            # themselves are already durable in the DB, and the next flush
+            # (or session close) writes the file again from scratch anyway.
+            if self.recorder is not None:
+                with contextlib.suppress(Exception):
+                    self.recorder.flush_transcript()
 
     async def aclose(self) -> None:
         """Release the current provider's connections, every active
@@ -381,6 +435,10 @@ class ChatSession:
             with contextlib.suppress(Exception):
                 kb.connection.close()
         if self.recorder is not None:
+            # Settle any transcript write deferred by the recorder's rate
+            # limit before the DB connection it reads from goes away.
+            with contextlib.suppress(Exception):
+                self.recorder.flush_transcript()
             self.recorder.store.close()
 
 
@@ -402,6 +460,47 @@ async def _run_repl(session: ChatSession) -> None:
         # Always close the (possibly swapped) provider's HTTP client before
         # asyncio.run() tears down the event loop — see ChatSession.aclose.
         await session.aclose()
+
+
+@contextlib.contextmanager
+def _cancel_turn_on_sigint(session: ChatSession) -> Iterator[None]:
+    """Make Ctrl-C during a streaming reply cancel *the turn* instead of the
+    process, for as long as this context is active.
+
+    Python's default SIGINT handler raises ``KeyboardInterrupt`` wherever
+    the interpreter happens to be executing — with the main thread parked
+    inside ``loop.run_forever()``, that is ``asyncio.run`` itself, not the
+    coroutine below it. So the ``except KeyboardInterrupt`` wrapped around
+    ``async for ... session.send(...)`` never actually fired: Ctrl-C
+    mid-reply killed the process rather than cancelling the turn, even
+    though ``AgentLoop.cancel``'s whole design assumes a caller reaches it.
+    An event-loop signal handler runs as a normal loop callback instead, so
+    it can just set the cancel flag and let the turn unwind through its own
+    cleanup (which now includes answering any tool calls it had already
+    announced — see ``aida.core.agent``).
+
+    Installed only around the streaming section and removed again at the
+    prompt, deliberately: ``input()`` blocks the loop, so a loop-level
+    handler would sit queued instead of interrupting it, and Ctrl-C at the
+    ``>`` prompt (which works today, raising inside ``input()``) has to keep
+    working. Platforms without ``add_signal_handler`` (Windows' proactor
+    loop) fall back to the previous behavior rather than failing to start."""
+    loop = asyncio.get_running_loop()
+
+    def _request_cancel() -> None:
+        print("\n[cancelling — finishing the step in flight...]", flush=True)
+        session.cancel()
+
+    try:
+        loop.add_signal_handler(signal.SIGINT, _request_cancel)
+    except (NotImplementedError, RuntimeError, ValueError, AttributeError):
+        yield
+        return
+    try:
+        yield
+    finally:
+        with contextlib.suppress(Exception):
+            loop.remove_signal_handler(signal.SIGINT)
 
 
 async def _repl_loop(session: ChatSession) -> None:
@@ -451,9 +550,12 @@ async def _repl_loop(session: ChatSession) -> None:
             continue
 
         try:
-            async for event in session.send(line):
-                print_event(event)
+            with _cancel_turn_on_sigint(session):
+                async for event in session.send(line):
+                    print_event(event)
         except KeyboardInterrupt:
+            # Retained as a backstop for the platforms/paths where the
+            # loop-level handler above isn't available — see its docstring.
             session.cancel()
             print("\n[cancelled]")
             continue

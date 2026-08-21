@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from aida.artifacts.base import FileArtifact, ImageArtifact, TextArtifact
-from aida.core.agent import AgentLoop
+from aida.core.agent import CANCELLED_TOOL_RESULT, AgentLoop
 from aida.core.events import (
     AgentError,
     FileArtifactCreated,
@@ -405,3 +405,129 @@ async def test_unknown_tool_call_logs_a_warning(caplog):
 
     messages_logged = [r.message for r in caplog.records if r.name == "aida.agent"]
     assert any("unknown tool" in m.lower() for m in messages_logged)
+
+
+# --- cancellation must leave a *valid* history -----------------------------
+#
+# Review finding: pressing Stop mid-tool-call permanently broke the
+# conversation. The assistant message announcing every tool call is appended
+# before the per-call loop runs, so bailing out on _cancelled left the
+# un-executed calls with no matching tool result — a history Anthropic
+# rejects with a 400 ("each tool_use must have a corresponding tool_result")
+# and OpenAI likewise. Because those messages are also persisted as they
+# land, the same wedge survived into a resumed session, and any crash or
+# force-quit mid-turn produced it with no Stop involved.
+
+
+def _announced_call_ids(messages: list[Message]) -> list[str]:
+    return [tc.id for m in messages if m.role == "assistant" for tc in m.tool_calls]
+
+
+def _answered_call_ids(messages: list[Message]) -> list[str]:
+    return [m.tool_call_id for m in messages if m.role == "tool"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_tool_call_answers_every_announced_call():
+    async def _slow_tool(_args):
+        return ToolResult(content="ok")
+
+    tool = NativeTool(
+        schema=ToolSchema(name="track", description="", parameters={"type": "object"}),
+        func=_slow_tool,
+    )
+    provider = MockProvider(
+        [
+            MockTurn(
+                tool_calls=[
+                    MockToolCall(name="track", id="call_1"),
+                    MockToolCall(name="track", id="call_2"),
+                    MockToolCall(name="track", id="call_3"),
+                ]
+            )
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"track": tool})
+    messages = [Message(role="user", content="hi")]
+
+    cancelled_once = False
+    async for event in loop.run(messages):
+        if isinstance(event, ToolCallFinished) and not cancelled_once:
+            loop.cancel()
+            cancelled_once = True
+
+    assert _announced_call_ids(messages) == ["call_1", "call_2", "call_3"]
+    assert _answered_call_ids(messages) == ["call_1", "call_2", "call_3"]
+    cancelled = [m for m in messages if m.content == CANCELLED_TOOL_RESULT]
+    assert [m.tool_call_id for m in cancelled] == ["call_2", "call_3"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_tool_call_emits_a_result_event_for_each_cancelled_call():
+    """The GUI's tool rows are driven by ToolCallFinished; without one, a
+    cancelled call's row would spin forever."""
+
+    async def _tool(_args):
+        return ToolResult(content="ok")
+
+    tool = NativeTool(
+        schema=ToolSchema(name="track", description="", parameters={"type": "object"}),
+        func=_tool,
+    )
+    provider = MockProvider(
+        [MockTurn(tool_calls=[MockToolCall(name="track", id="c1"), MockToolCall(name="track", id="c2")])]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"track": tool})
+    messages = [Message(role="user", content="hi")]
+
+    events = []
+    async for event in loop.run(messages):
+        events.append(event)
+        if isinstance(event, ToolCallStarted):
+            loop.cancel()
+
+    finished = [e for e in events if isinstance(e, ToolCallFinished)]
+    assert [e.call_id for e in finished] == ["c1", "c2"]
+    assert all(e.is_error for e in finished)
+
+
+@pytest.mark.asyncio
+async def test_history_after_cancelled_turn_still_translates_for_anthropic():
+    """The real failure mode was on the *next* request, at translation
+    time — assert the repaired history survives it."""
+    from aida.providers.anthropic_ import to_anthropic_params
+
+    async def _tool(_args):
+        return ToolResult(content="ok")
+
+    tool = NativeTool(
+        schema=ToolSchema(name="track", description="", parameters={"type": "object"}),
+        func=_tool,
+    )
+    provider = MockProvider(
+        [MockTurn(tool_calls=[MockToolCall(name="track", id="c1"), MockToolCall(name="track", id="c2")])]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"track": tool})
+    messages = [Message(role="user", content="hi")]
+    async for event in loop.run(messages):
+        if isinstance(event, ToolCallStarted):
+            loop.cancel()  # mid-turn: c1 runs, c2 never does
+
+    assert any(m.role == "assistant" and m.tool_calls for m in messages)
+    _system, wire = to_anthropic_params(messages)
+    tool_use_ids = {
+        block["id"]
+        for message in wire
+        if isinstance(message["content"], list)
+        for block in message["content"]
+        if block.get("type") == "tool_use"
+    }
+    tool_result_ids = {
+        block["tool_use_id"]
+        for message in wire
+        if isinstance(message["content"], list)
+        for block in message["content"]
+        if block.get("type") == "tool_result"
+    }
+    assert tool_use_ids  # the cancelled turn really did announce calls
+    assert tool_use_ids == tool_result_ids

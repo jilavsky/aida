@@ -27,6 +27,7 @@ from aida.ui.qt.chat_panel import ChatPanel, ErrorBanner, MessageBubble
 from aida.ui.qt.retrieval_widget import RetrievalRow
 from aida.ui.qt.tool_call_widget import ToolCallRow
 from tests.mock_mcp_server import TINY_PNG_BYTES
+from tests.ui._qt_test_utils import pump_until
 
 
 def test_add_user_message_appends_bubble(qapp):
@@ -371,3 +372,62 @@ def test_clear_removes_all_widgets_and_resets_state(qapp):
     # panel is still usable after clear()
     panel.add_user_message("again")
     assert panel.widget_count == 1
+
+
+# --- streaming a long reply must not re-render per token -------------------
+#
+# Review finding: every TextDelta called setMarkdown() on the whole
+# accumulated text, re-parsing the entire document, re-running the
+# code-fence regex over all of it, and triggering documentSizeChanged ->
+# _recalculate_height. That's O(n²) over a reply — a 4000-token answer
+# re-parsed the full document thousands of times, and the GUI got
+# progressively less responsive the longer the model talked.
+
+
+def test_streaming_deltas_are_coalesced_into_few_renders(qapp):
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextDelta(message_id="m1", text="start "))
+    bubble = panel.widget_at(0)
+
+    renders = []
+    real_set_markdown = bubble._view.setMarkdown
+    bubble._view.setMarkdown = lambda text: (renders.append(text), real_set_markdown(text))[1]
+
+    for i in range(200):
+        panel.handle_event(TextDelta(message_id="m1", text=f"token{i} "))
+
+    assert len(renders) <= 2, f"{len(renders)} renders for 200 deltas — deltas are not being coalesced"
+
+
+def test_the_raw_text_is_always_current_even_before_a_render(qapp):
+    """Coalescing the *render* must not delay the text itself — Copy and
+    the persisted history read from it."""
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextDelta(message_id="m1", text="hel"))
+    panel.handle_event(TextDelta(message_id="m1", text="lo"))
+
+    assert panel.widget_at(0).text == "hello"
+
+
+def test_text_finished_renders_immediately(qapp):
+    """The end of a stream must never be left waiting on a timer."""
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextDelta(message_id="m1", text="par"))
+    panel.handle_event(TextDelta(message_id="m1", text="tial"))
+    panel.handle_event(TextFinished(message_id="m1", text="partial answer"))
+
+    assert "partial answer" in panel.widget_at(0).rendered_plain_text
+
+
+def test_a_pending_render_still_lands_when_the_timer_fires(qapp):
+    """A stream that stalls mid-reply (a slow provider) must still show what
+    arrived so far, without waiting for TextFinished."""
+    panel = ChatPanel()
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextDelta(message_id="m1", text="streamed so far"))
+    bubble = panel.widget_at(0)
+
+    assert pump_until(qapp, lambda: "streamed so far" in bubble.rendered_plain_text)

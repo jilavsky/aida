@@ -49,6 +49,12 @@ default for new workspaces is `confirm`, and `~/.aida/config.yaml`'s
   still go to `_trash` (recoverable) but overwrites are not undo-able — so
   make sure the folders you've relaxed are backed up.
 
+Independently of the mode, `write_file`, `copy_file`, and `move_file` all
+refuse to replace a file that already exists unless the call passes
+`overwrite=true`. That refusal is about *clobbering*, not permissions: it
+applies in `relaxed` mode too, because an overwritten file has no `_trash`
+copy to recover from.
+
 ## What *always* asks, regardless of mode
 
 This is the part that matters most, because it's independent of whether the

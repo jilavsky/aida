@@ -221,41 +221,139 @@ def build_system_message(
     return Message(role="system", content="\n\n---\n\n".join(parts))
 
 
+#: What a tool call with no recorded result is backfilled with by
+#: ``repair_tool_call_pairing``. Distinct from
+#: ``aida.core.agent.CANCELLED_TOOL_RESULT`` on purpose: that one is written
+#: at the moment a call is cancelled and knows *why*; this one is a repair
+#: applied to history that arrived already broken (a crash or force-quit
+#: mid-turn, an older conversation recorded before the cancel path answered
+#: its own calls).
+MISSING_TOOL_RESULT = "(no result recorded — the session ended before this tool call finished)"
+
+
+def split_into_turns(messages: list[Message]) -> list[list[Message]]:
+    """Group non-system messages into whole turns.
+
+    A turn starts at a ``role="user"`` message and runs up to (not
+    including) the next one, so an assistant message and every ``role=
+    "tool"`` result it triggered stay together. Any messages before the
+    first user message (a resumed history that starts mid-turn, say) form
+    one leading group of their own rather than being dropped.
+    """
+    turns: list[list[Message]] = []
+    for message in messages:
+        if message.role == "system":
+            continue
+        if message.role == "user" or not turns:
+            turns.append([message])
+        else:
+            turns[-1].append(message)
+    return turns
+
+
+def repair_tool_call_pairing(
+    messages: list[Message], *, placeholder: str = MISSING_TOOL_RESULT
+) -> list[Message]:
+    """Return ``messages`` with assistant tool calls and tool results
+    guaranteed to line up, so a provider can't reject the whole history.
+
+    Both providers require a strict pairing: every ``tool_call`` on an
+    assistant message must be answered by a ``role="tool"`` message, and
+    every tool message must answer a call that was actually announced.
+    History can violate that without anything being wrong *now* — a session
+    killed (crash, force-quit, Stop pressed by an older build) after the
+    assistant message was persisted but before its tool results were, or a
+    trim that cut between the two. One such gap wedges the conversation
+    permanently: every later turn fails, not just the interrupted one.
+
+    Repairs, in order of appearance: a missing tool result is backfilled
+    with ``placeholder``; results are emitted in the order their calls were
+    announced; a tool message answering no announced call is dropped.
+    The input list is not modified.
+    """
+    repaired: list[Message] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        if message.role == "tool":
+            index += 1  # orphan: no assistant tool call announced it
+            continue
+
+        repaired.append(message)
+        if not (message.role == "assistant" and message.tool_calls):
+            index += 1
+            continue
+
+        call_ids = [tc.id for tc in message.tool_calls]
+        answers: dict[str, Message] = {}
+        scan = index + 1
+        while scan < len(messages) and messages[scan].role == "tool":
+            answer = messages[scan]
+            if answer.tool_call_id in call_ids and answer.tool_call_id not in answers:
+                answers[answer.tool_call_id] = answer
+            scan += 1
+
+        for call in message.tool_calls:
+            repaired.append(
+                answers.get(call.id)
+                or Message(
+                    role="tool", content=placeholder, tool_call_id=call.id, name=call.name
+                )
+            )
+        index = scan
+    return repaired
+
+
 def trim_history(
     messages: list[Message], max_tokens: int, *, min_recent_turns: int = 4
 ) -> tuple[list[Message], bool]:
-    """Drop oldest non-system messages until under ``max_tokens`` (estimated).
+    """Drop oldest whole turns until under ``max_tokens`` (estimated).
 
     Always keeps every ``role="system"`` message and at least
-    ``min_recent_turns`` of the most recent non-system messages, even if that
-    means staying over budget — trimming should never make the very next
-    turn unanswerable. Returns ``(trimmed_messages, was_trimmed)``.
+    ``min_recent_turns`` of the most recent turns, even if that means
+    staying over budget — trimming should never make the very next turn
+    unanswerable. Returns ``(trimmed_messages, was_trimmed)``.
+
+    Whole *turns* (a user message plus the assistant/tool messages it
+    produced — see ``split_into_turns``), never individual messages: cutting
+    between an assistant message and the tool results answering its calls
+    produces exactly the orphaned-``tool_use`` history both providers reject
+    outright, so a message-at-a-time trim would break the conversation it
+    was meant to keep alive.
     """
     system_messages = [m for m in messages if m.role == "system"]
-    other_messages = [m for m in messages if m.role != "system"]
+    turns = split_into_turns(messages)
 
     def total_tokens(msgs: list[Message]) -> int:
         return sum(estimate_tokens(m.content) for m in msgs)
 
-    was_trimmed = False
-    while (
-        total_tokens(system_messages) + total_tokens(other_messages) > max_tokens
-        and len(other_messages) > min_recent_turns
-    ):
-        other_messages.pop(0)
-        was_trimmed = True
+    system_tokens = total_tokens(system_messages)
+    turn_tokens = [total_tokens(turn) for turn in turns]
 
-    return system_messages + other_messages, was_trimmed
+    dropped = 0
+    while (
+        system_tokens + sum(turn_tokens[dropped:]) > max_tokens
+        and len(turns) - dropped > min_recent_turns
+    ):
+        dropped += 1
+
+    if not dropped:
+        return list(messages), False
+    kept = [m for turn in turns[dropped:] for m in turn]
+    return system_messages + kept, True
 
 
 __all__ = [
+    "MISSING_TOOL_RESULT",
     "SkillInfo",
     "build_system_message",
     "build_workspace_context_block",
     "estimate_tokens",
     "list_skills",
     "load_skill_texts",
+    "repair_tool_call_pairing",
     "skill_exists",
     "skill_path",
+    "split_into_turns",
     "trim_history",
 ]

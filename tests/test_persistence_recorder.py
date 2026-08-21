@@ -133,3 +133,64 @@ def test_resume_requires_conversation_id(tmp_path: Path):
     artifact_store = ArtifactStore(base_dir=tmp_path / "artifacts")
     with pytest.raises(ValueError, match="resume=True requires"):
         ConversationRecorder(store, artifact_store, tmp_path / "records", resume=True)
+
+
+# --- transcript rewrites are rate limited ----------------------------------
+#
+# Review finding: record_message called export_transcript() every single
+# time, and that reloads all messages *and* all artifacts, re-copies every
+# image into the sidecar folder (a full filecmp.cmp(shallow=False) byte
+# comparison each), and rewrites the whole .md. A session with 40 plots and
+# 200 messages meant ~8000 whole-file comparisons for a file nobody reads
+# until the session ends.
+
+
+def _recorder(tmp_path: Path, **kwargs) -> ConversationRecorder:
+    store = ConversationStore(tmp_path / "aida.db")
+    artifact_store = ArtifactStore(base_dir=tmp_path / "artifacts")
+    return ConversationRecorder(store, artifact_store, tmp_path / "records", **kwargs)
+
+
+def test_rapid_messages_do_not_each_rewrite_the_transcript(tmp_path: Path):
+    rec = _recorder(tmp_path, transcript_min_interval_seconds=60.0)
+    exports = []
+    original = rec.export_transcript
+    rec.export_transcript = lambda: (exports.append(1), original())[1]  # type: ignore[method-assign]
+
+    for i in range(20):
+        rec.record_message(Message(role="user", content=f"message {i}"))
+
+    assert len(exports) == 1  # the first one only; the rest are deferred
+
+
+def test_flush_transcript_settles_the_deferred_write(tmp_path: Path):
+    rec = _recorder(tmp_path, transcript_min_interval_seconds=60.0)
+    rec.record_message(Message(role="user", content="first"))
+    rec.record_message(Message(role="assistant", content="deferred answer"))
+
+    assert "deferred answer" not in rec._record_path.read_text(encoding="utf-8")
+    rec.flush_transcript()
+    assert "deferred answer" in rec._record_path.read_text(encoding="utf-8")
+
+
+def test_flush_transcript_is_a_noop_when_nothing_changed(tmp_path: Path):
+    rec = _recorder(tmp_path, transcript_min_interval_seconds=60.0)
+    rec.record_message(Message(role="user", content="only message"))
+    rec.flush_transcript()
+
+    exports = []
+    original = rec.export_transcript
+    rec.export_transcript = lambda: (exports.append(1), original())[1]  # type: ignore[method-assign]
+    rec.flush_transcript()
+
+    assert exports == []
+
+
+def test_the_db_write_is_still_immediate(tmp_path: Path):
+    """The crash-safety property this module documents is unchanged — only
+    the derived Markdown view lags."""
+    rec = _recorder(tmp_path, transcript_min_interval_seconds=60.0)
+    for i in range(5):
+        rec.record_message(Message(role="user", content=f"m{i}"))
+
+    assert [m.content for m in rec.load_history()] == ["m0", "m1", "m2", "m3", "m4"]

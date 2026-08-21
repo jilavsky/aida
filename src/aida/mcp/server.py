@@ -11,11 +11,11 @@ clear layer-naming message; agent loop continues") lives in
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import itertools
 import tempfile
 import time
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -25,6 +25,26 @@ from mcp.types import CallToolResult, Tool
 from aida.config.settings import McpServerConfig
 
 DEFAULT_CALL_TIMEOUT_SECONDS = 60.0
+
+#: How long ``start()`` waits for a server to launch, answer the MCP
+#: ``initialize`` handshake, and list its tools.
+#:
+#: A subprocess that starts successfully and then simply goes quiet — a bad
+#: env var, a hung import, anything that reads stdin — used to block
+#: ``start()`` forever: ``ClientSession`` was constructed with no
+#: ``read_timeout_seconds``, so ``session.initialize()`` had no deadline of
+#: its own, and ``start()`` did a bare ``await ready.wait()``. Nothing
+#: recovered from that: ``start_all()`` never returned, so the CLI never
+#: reached its prompt and the GUI sat on "Starting session…" indefinitely —
+#: and ``stop()`` hung too, because ``_serve`` never reached its stop-event
+#: wait, so setting that event did nothing. Every wait in this class is
+#: bounded now.
+DEFAULT_STARTUP_TIMEOUT_SECONDS = 30.0
+
+#: How long ``stop()`` waits for the serving task to unwind before
+#: cancelling it, and how long it then waits for that cancellation.
+DEFAULT_STOP_TIMEOUT_SECONDS = 10.0
+
 _STDERR_TAIL_LINES = 200
 
 #: Per-process, strictly increasing — see ToolCallRecord.seq's docstring
@@ -203,9 +223,13 @@ class McpServerHandle:
         config: McpServerConfig,
         *,
         call_timeout_seconds: float = DEFAULT_CALL_TIMEOUT_SECONDS,
+        startup_timeout_seconds: float = DEFAULT_STARTUP_TIMEOUT_SECONDS,
+        stop_timeout_seconds: float = DEFAULT_STOP_TIMEOUT_SECONDS,
     ) -> None:
         self.config = config
         self.call_timeout_seconds = call_timeout_seconds
+        self.startup_timeout_seconds = startup_timeout_seconds
+        self.stop_timeout_seconds = stop_timeout_seconds
         self.stderr: StderrCapture | None = None
         self.calls: list[ToolCallRecord] = []
         #: The server's own ``instructions`` string from the MCP
@@ -236,8 +260,9 @@ class McpServerHandle:
         """Launch the subprocess, initialize the session, and discover
         tools. Idempotent — calling ``start()`` on an already-running handle
         just returns the known tool list. Raises ``McpServerError`` on any
-        failure (bad command, crash before handshake, ...); the caller
-        isolates this to one server."""
+        failure (bad command, crash before handshake, a server that never
+        answers ``initialize`` within ``startup_timeout_seconds``); the
+        caller isolates this to one server."""
         if self._session is not None:
             return list(self._tools.values())
 
@@ -245,7 +270,19 @@ class McpServerHandle:
         self._start_error = None
         ready = asyncio.Event()
         self._serve_task = asyncio.create_task(self._serve(ready))
-        await ready.wait()
+        try:
+            await asyncio.wait_for(ready.wait(), timeout=self.startup_timeout_seconds)
+        except TimeoutError as exc:
+            # Read the stderr tail *before* tearing the serving task down —
+            # its `finally` closes the capture file.
+            tail = "\n".join(self.stderr.tail()) if self.stderr is not None else ""
+            detail = f" — stderr: {tail}" if tail else ""
+            await self._abandon_serve_task()
+            raise McpServerError(
+                f"mcp server {self.config.name!r} did not finish starting within "
+                f"{self.startup_timeout_seconds}s (no reply to the MCP initialize "
+                f"handshake){detail}"
+            ) from exc
 
         if self._start_error is not None:
             error, self._start_error = self._start_error, None
@@ -259,13 +296,28 @@ class McpServerHandle:
         why. Sets ``ready`` exactly once, whether startup succeeded or
         failed, so ``start()`` never hangs waiting for it."""
         stderr = StderrCapture()
+        # Published before the handshake, not after it, so a start() that
+        # times out waiting for `ready` can still report whatever the
+        # subprocess printed on its way to going quiet.
+        self.stderr = stderr
         try:
             params = StdioServerParameters(
                 command=self.config.command, args=self.config.args, env=self.config.env or None
             )
             async with (
                 stdio_client(params, errlog=stderr) as (read_stream, write_stream),
-                ClientSession(read_stream, write_stream) as session,
+                # Backstop deadline on *every* request this session makes,
+                # initialize/list_tools below included: without it, a server
+                # that accepts a request and never replies leaves the await
+                # pending forever. The explicit asyncio.wait_for()s in
+                # start()/call_tool() are the primary, tighter bounds (and
+                # give the clearer error messages); this one is deliberately
+                # a little looser so those win the race in the normal case.
+                ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(seconds=self.call_timeout_seconds + 5),
+                ) as session,
             ):
                 init_result = await session.initialize()
                 tools_result = await session.list_tools()
@@ -273,7 +325,6 @@ class McpServerHandle:
                 self._session = session
                 self._tools = {t.name: t for t in tools_result.tools}
                 self.instructions = init_result.instructions
-                self.stderr = stderr
                 ready.set()
 
                 assert self._stop_event is not None
@@ -293,15 +344,42 @@ class McpServerHandle:
             self.stderr = None
 
     async def stop(self) -> None:
-        """Signal the serving task to tear down and wait for it. Safe to
-        call even if the handle was never started, or already stopped."""
+        """Signal the serving task to tear down and wait for it, bounded by
+        ``stop_timeout_seconds``. Safe to call even if the handle was never
+        started, or already stopped.
+
+        The wait has to be bounded because the stop event only ever reaches
+        a server that got far enough to wait on it: a handle wedged
+        mid-handshake never does, so setting the event achieves nothing and
+        the old unbounded ``await self._serve_task`` hung here too. A task
+        that ignores both the event and the cancellation that follows is
+        abandoned — a leaked subprocess is a much smaller problem than an
+        application that cannot shut down."""
         if self._stop_event is not None:
             self._stop_event.set()
-        if self._serve_task is not None:
-            with contextlib.suppress(Exception):  # teardown errors are diagnostics, not this call's problem
-                await self._serve_task
-            self._serve_task = None
+        task, self._serve_task = self._serve_task, None
         self._stop_event = None
+        if task is None:
+            return
+        done, _pending = await asyncio.wait({task}, timeout=self.stop_timeout_seconds)
+        if not done:
+            await self._abandon_serve_task(task)
+
+    async def _abandon_serve_task(self, task: asyncio.Task[None] | None = None) -> None:
+        """Cancel the serving task and give it a bounded chance to unwind.
+
+        ``asyncio.wait`` rather than ``await task`` on purpose: it neither
+        re-raises the task's ``CancelledError`` into this caller nor lets a
+        teardown error escape (both are diagnostics, not this call's
+        problem), and it returns at the timeout instead of hanging if the
+        task refuses to unwind at all."""
+        if task is None:
+            task, self._serve_task = self._serve_task, None
+        self._stop_event = None
+        if task is None:
+            return
+        task.cancel()
+        await asyncio.wait({task}, timeout=self.stop_timeout_seconds)
 
     async def restart(self) -> list[Tool]:
         """Stop (if running) and start again — recovery path after a
@@ -381,4 +459,12 @@ class McpServerHandle:
         )
 
 
-__all__ = ["DEFAULT_CALL_TIMEOUT_SECONDS", "McpServerError", "McpServerHandle", "StderrCapture", "ToolCallRecord"]
+__all__ = [
+    "DEFAULT_CALL_TIMEOUT_SECONDS",
+    "DEFAULT_STARTUP_TIMEOUT_SECONDS",
+    "DEFAULT_STOP_TIMEOUT_SECONDS",
+    "McpServerError",
+    "McpServerHandle",
+    "StderrCapture",
+    "ToolCallRecord",
+]

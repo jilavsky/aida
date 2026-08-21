@@ -18,7 +18,7 @@ import asyncio
 from pathlib import Path
 
 from aida.config.settings import ProviderProfile, Settings, load_settings
-from aida.providers.mock import MockProvider, MockTurn
+from aida.providers.mock import MockProvider, MockToolCall, MockTurn
 from aida.ui.qt._qt import QMessageBox
 from aida.ui.qt.bridge import ChatBridge
 from aida.ui.qt.main_window import MainWindow
@@ -147,3 +147,124 @@ def test_shutdown_is_idempotent(qapp, loop_thread, aida_home: Path, records_home
     bridge.shutdown(timeout=10.0)
     bridge.shutdown(timeout=10.0)  # must not raise
     assert bridge._closed is True
+
+
+# --- retiring a bridge must actually disconnect it -------------------------
+#
+# Review finding: MainWindow._unwire_bridge_signals relied on
+# bridge.disconnect(self), which only drops connections whose *receiver* is
+# the window. Two connections weren't: `event_received ->
+# self.chat_panel.handle_event` (receiver is the chat panel) and the two
+# turn_started/turn_finished lambdas (no receiver at all). Both survived the
+# disconnect, so a superseded session's remaining events rendered into the
+# new chat panel and flipped the new input box's busy state.
+
+
+def test_a_retired_bridge_cannot_render_into_the_new_chat_panel(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    from aida.core.events import TextDelta, TextFinished
+
+    window = _ready_window(qapp, loop_thread, monkeypatch, profile_name="mock-profile")
+    try:
+        old_bridge = window.bridge
+        window._restart_session(workspace_name=None, profile_name="mock-profile", resume_conversation_id=None)
+        assert pump_until(qapp, lambda: window.statusBar().currentMessage().startswith("Ready"))
+        assert window.chat_panel.widget_count == 0
+
+        old_bridge.event_received.emit(TextDelta(message_id="stale", text="ghost text"))
+        old_bridge.event_received.emit(TextFinished(message_id="stale", text="ghost text"))
+        qapp.processEvents()
+
+        assert window.chat_panel.widget_count == 0, "a retired bridge painted into the live chat panel"
+    finally:
+        window.bridge.shutdown()
+        window.close()
+        qapp.processEvents()
+
+
+def test_a_retired_bridge_cannot_flip_the_new_input_boxs_busy_state(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    window = _ready_window(qapp, loop_thread, monkeypatch, profile_name="mock-profile")
+    try:
+        old_bridge = window.bridge
+        window._restart_session(workspace_name=None, profile_name="mock-profile", resume_conversation_id=None)
+        assert pump_until(qapp, lambda: window.statusBar().currentMessage().startswith("Ready"))
+
+        old_bridge.turn_started.emit()
+        qapp.processEvents()
+        assert window.input_box.is_busy is False
+
+        window.input_box.set_busy(True)
+        old_bridge.turn_finished.emit()
+        qapp.processEvents()
+        assert window.input_box.is_busy is True, "a retired bridge cleared the live input box's busy state"
+    finally:
+        window.input_box.set_busy(False)
+        window.bridge.shutdown()
+        window.close()
+        qapp.processEvents()
+
+
+def test_shutdown_cancels_and_waits_for_an_in_flight_turn(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Review finding: shutdown() waited for an in-flight *start* but not an
+    in-flight *turn*, so "New Chat" during a running tool call closed the
+    session out from under the turn still using it, and the turn's remaining
+    events landed in the new panel."""
+    import aida.cli.chat as chat_module
+    from aida.core.tools import NativeTool, ToolResult
+    from aida.providers.base import ToolSchema
+
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def _blocking_tool(_args):
+        started.set()
+        await release.wait()
+        return ToolResult(content="finally done")
+
+    real_start = chat_module.start_session
+
+    async def _start_with_slow_tool(settings, **kwargs):
+        session, mcp_manager = await real_start(settings, **kwargs)
+        session.tools["slow"] = NativeTool(
+            schema=ToolSchema(name="slow", description="", parameters={"type": "object"}),
+            func=_blocking_tool,
+        )
+        return session, mcp_manager
+
+    monkeypatch.setattr(
+        "aida.cli.chat.build_provider",
+        lambda profile: MockProvider(
+            [
+                MockTurn(tool_calls=[MockToolCall(name="slow", id="c1"), MockToolCall(name="slow", id="c2")]),
+                MockTurn(text="done"),
+            ]
+        ),
+    )
+    monkeypatch.setattr("aida.ui.qt.bridge.start_session", _start_with_slow_tool)
+
+    bridge = ChatBridge(loop_thread)
+    bridge.start(_settings_with_profile(), profile_name="mock-profile")
+    assert pump_until(qapp, lambda: bridge.session is not None)
+
+    events: list[object] = []
+    bridge.event_received.connect(events.append)
+    bridge.send("run the slow tool")
+    assert pump_until(qapp, started.is_set)
+
+    events_before = len(events)
+    loop_thread.loop.call_soon_threadsafe(release.set)
+    bridge.shutdown(timeout=10.0)
+
+    assert bridge._turn_future is None, "shutdown() returned with a turn still in flight"
+    qapp.processEvents()
+    assert len(events) == events_before, "a closing bridge kept emitting events"
+    # The turn unwound through its normal cancel path, so every announced
+    # tool call still has a matching result (see aida.core.agent).
+    announced = {tc.id for m in bridge.session.messages if m.role == "assistant" for tc in m.tool_calls}
+    answered = {m.tool_call_id for m in bridge.session.messages if m.role == "tool"}
+    assert announced == answered

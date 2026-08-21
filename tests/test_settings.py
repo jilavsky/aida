@@ -461,3 +461,58 @@ def test_app_config_command_allowlist_defaults_to_empty(aida_home: Path):
 
     loaded = load_app_config(aida_home)
     assert loaded.command_allowlist == []
+
+
+# --- from_dict type coercion ----------------------------------------------
+#
+# Review finding: AppConfig.from_dict filtered unknown keys but never
+# validated types, so `max_agent_iterations: "20"` from a hand-edited YAML
+# loaded fine and only failed much later, at comparison time inside the
+# agent loop, with an error naming neither the file nor the field.
+
+
+def test_app_config_coerces_a_quoted_number():
+    config = AppConfig.from_dict({"max_agent_iterations": "20", "font_size": "13"})
+    assert config.max_agent_iterations == 20
+    assert config.font_size == 13
+
+
+def test_app_config_falls_back_to_the_default_for_an_uncoercible_value():
+    """"Old configs must always load" applies to a *wrong* config too: warn
+    and use the default rather than refusing to start."""
+    config = AppConfig.from_dict({"max_agent_iterations": "lots", "log_level": "DEBUG"})
+    assert config.max_agent_iterations == AppConfig().max_agent_iterations
+    assert config.log_level == "DEBUG"  # the rest of the file still applies
+
+
+def test_app_config_rejects_nonsensical_but_well_typed_values():
+    assert AppConfig.from_dict({"max_agent_iterations": 0}).max_agent_iterations >= 1
+    assert AppConfig.from_dict({"max_context_tokens": -5}).max_context_tokens >= 0
+
+
+def test_app_config_rejects_a_scalar_where_a_list_belongs():
+    config = AppConfig.from_dict({"allowed_folders": "/tmp/one"})
+    assert config.allowed_folders == []
+
+
+def test_app_config_accepts_null_only_for_optional_fields():
+    assert AppConfig.from_dict({"records_dir": None}).records_dir is None
+    assert AppConfig.from_dict({"log_level": None}).log_level == AppConfig().log_level
+
+
+def test_app_config_still_ignores_unknown_keys():
+    config = AppConfig.from_dict({"some_future_field": 1, "theme": "dark"})
+    assert config.theme == "dark"
+
+
+def test_every_app_config_field_is_loadable_from_disk():
+    """A field missing from the coercion map would silently stop being
+    readable from config.yaml — keep the two in step."""
+    from aida.config.settings import _APP_FIELD_KINDS
+
+    assert set(_APP_FIELD_KINDS) == set(AppConfig.__dataclass_fields__)
+
+
+def test_app_config_round_trips_max_context_tokens(tmp_path: Path, aida_home: Path):
+    save_app_config(AppConfig(max_context_tokens=4321))
+    assert load_app_config().max_context_tokens == 4321
