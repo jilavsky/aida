@@ -23,6 +23,11 @@ conda activate aida
 aida doctor
 ```
 
+## Documentation
+
+Task-oriented setup and configuration guides — providers, workspaces, the
+safety model, MCP servers, scripting, RAG — live in [`docs/`](docs/README.md).
+
 ## Status
 
 Following the phased plan in [`PLAN.md`](PLAN.md); per-phase checklists live

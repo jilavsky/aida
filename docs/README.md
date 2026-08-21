@@ -1,0 +1,25 @@
+# AIDA documentation
+
+> **Status: pre-alpha.** Config formats and CLI commands may change without
+> notice until Phase 5. See [`PLAN.md`](../PLAN.md) for the full roadmap.
+
+Task-oriented setup and configuration guides, one file per subsystem. Each
+covers both the CLI and GUI way to configure that subsystem — most things
+in AIDA can be done either way. For the design rationale behind a
+subsystem (why it works this way), see [`PLAN.md`](../PLAN.md); for fully
+commented example config files, see [`examples/config/`](../examples/config/).
+
+| File | What you'll set up there |
+|---|---|
+| [`installation.md`](installation.md) | Install AIDA, run `aida doctor`, understand the `~/.aida/` layout |
+| [`providers-and-secrets.md`](providers-and-secrets.md) | LLM/embedding provider profiles (Ollama, OpenAI, Claude, ANL Argo), API keys in the OS keychain |
+| [`workspaces.md`](workspaces.md) | Named workspaces: source/target folders, which profile/MCP servers/skills a workspace uses |
+| [`safety-and-permissions.md`](safety-and-permissions.md) | What AIDA is allowed to read/write/run without asking, and what always asks |
+| [`mcp-servers.md`](mcp-servers.md) | Adding MCP servers (pyIrena, bait_mcp, web search, ...), groups, per-tool permissions |
+| [`coding-and-scripting.md`](coding-and-scripting.md) | Letting the agent run Python/shell commands, code templates, the Code Editor |
+| [`knowledge-bases.md`](knowledge-bases.md) | RAG: indexing your own documents so the agent can search them |
+| [`gui-overview.md`](gui-overview.md) | A spatial tour of the desktop app — what's where |
+
+New to AIDA? Start with `installation.md`, then `providers-and-secrets.md`,
+then `workspaces.md` — that's enough to have a working chat session. The
+rest are opt-in features you can add as you need them.
