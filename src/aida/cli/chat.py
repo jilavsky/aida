@@ -26,7 +26,12 @@ from aida.config.settings import (
     load_settings,
 )
 from aida.core.agent import AgentLoop
-from aida.core.context import build_system_message, build_workspace_context_block, load_skill_texts
+from aida.core.context import (
+    build_coding_context_block,
+    build_system_message,
+    build_workspace_context_block,
+    load_skill_texts,
+)
 from aida.core.cost import estimate_cost_usd
 from aida.core.events import (
     AgentError,
@@ -622,6 +627,18 @@ async def start_session(
         templates_context = templates_context_text(load_templates(Path(workspace.templates_dir)))
         if templates_context:
             extra_context_texts.append(templates_context)
+
+    # Bug report: the model resorted to an ad hoc `python3 -c "..."` shell
+    # probe (via run_command, needing confirmation since it was never
+    # allowlisted) just to discover which interpreter/packages it had —
+    # telling it directly avoids the probe in the first place.
+    coding_context = build_coding_context_block(
+        python_interpreter=workspace.python_interpreter if workspace else None,
+        command_allowlist=settings.app.command_allowlist + (workspace.command_allowlist if workspace else []),
+        scripting_enabled=bool(workspace and workspace.scripting_enabled),
+    )
+    if coding_context:
+        extra_context_texts.append(coding_context)
 
     # Phase 8 (RAG): resolve each of the workspace's knowledge_bases names
     # into a ready-to-query ActiveKnowledgeBase (open index connection +

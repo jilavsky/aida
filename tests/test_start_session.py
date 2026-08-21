@@ -193,6 +193,48 @@ async def test_start_session_tells_the_model_its_source_and_target_folders(
 
 
 @pytest.mark.asyncio
+async def test_start_session_tells_the_model_its_python_interpreter(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """Bug report: the model resorted to a raw `python3 -c "..."` shell
+    probe (via run_command, needing confirmation) just to discover which
+    interpreter/packages it had — the system message must name the
+    configured interpreter directly instead."""
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    ws = _workspace(python_interpreter="/opt/miniconda3/envs/aievaluator/bin/python", command_allowlist=["git status"])
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        content = session.messages[0].content
+        assert "/opt/miniconda3/envs/aievaluator/bin/python" in content
+        assert "git status" in content
+        assert "run_python_script" in content
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_no_coding_context_when_scripting_disabled(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.cli.chat.McpManager", _FakeMcpManager)
+
+    ws = _workspace(scripting_enabled=False)
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        content = session.messages[0].content
+        assert "# Python execution" not in content
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
 async def test_start_session_folds_mcp_server_instructions_into_system_message(
     monkeypatch, aida_home: Path, records_home: Path
 ):

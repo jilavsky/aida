@@ -155,6 +155,49 @@ def build_workspace_context_block(
     return "\n".join(lines)
 
 
+def build_coding_context_block(
+    *, python_interpreter: str | None, command_allowlist: list[str], scripting_enabled: bool
+) -> str | None:
+    """Tells the model which interpreter ``run_python_script`` actually
+    uses and which shell commands ``run_command`` doesn't need confirmation
+    for (Phase 9).
+
+    Bug report: with nothing telling it otherwise, the model resorted to a
+    raw ``python3 -c "..."`` probe through ``run_command`` just to discover
+    which interpreter/packages were available — an ad hoc command that was
+    never on the allowlist, so it needed confirmation for something
+    ``run_python_script`` (not allowlist-gated at all) would have answered
+    directly. Same "generate fresh per session, not a static skill" reasoning
+    as ``build_workspace_context_block`` — the interpreter path and
+    allowlist are per-workspace, user-configured data.
+
+    Returns ``None`` when scripting is disabled for this workspace —
+    ``run_python_script``/``run_command`` aren't even registered then, so
+    there's nothing useful to say.
+    """
+    if not scripting_enabled:
+        return None
+
+    lines = ["# Python execution"]
+    lines.append("")
+    lines.append(
+        f"run_python_script runs scripts with: {python_interpreter or 'the interpreter AIDA itself is running under'}. "
+        "Prefer it (write a small script, even a one-liner saved to a temp path) over run_command for anything "
+        "Python-related, including checking what's importable — it isn't gated by the command allowlist below, "
+        "only by the workspace's normal folder-safety rules."
+    )
+    lines.append("")
+    if command_allowlist:
+        lines.append("run_command only runs these without asking for confirmation first:")
+        lines.extend(f"- {pattern}" for pattern in command_allowlist)
+    else:
+        lines.append(
+            "run_command has no allowlisted commands configured for this workspace — every run_command "
+            "call asks for confirmation first."
+        )
+    return "\n".join(lines)
+
+
 def build_system_message(
     system_prompt: str | None, skill_texts: list[str], *, extra_texts: list[str] | None = None
 ) -> Message:

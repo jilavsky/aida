@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from aida.core.context import (
+    build_coding_context_block,
     build_system_message,
     build_workspace_context_block,
     estimate_tokens,
@@ -86,6 +87,51 @@ def test_workspace_context_block_mentions_global_allowed_folders_even_with_no_wo
     )
     assert block is not None
     assert "/shared/reference" in block
+
+
+# --- build_coding_context_block (regression: the model resorted to a raw
+# `python3 -c "..."` probe via run_command, needing confirmation, just to
+# discover its interpreter/packages) ----------------------------------------
+
+
+def test_coding_context_block_none_when_scripting_disabled():
+    assert (
+        build_coding_context_block(python_interpreter=None, command_allowlist=[], scripting_enabled=False) is None
+    )
+
+
+def test_coding_context_block_mentions_configured_interpreter():
+    block = build_coding_context_block(
+        python_interpreter="/opt/miniconda3/envs/aievaluator/bin/python",
+        command_allowlist=[],
+        scripting_enabled=True,
+    )
+    assert block is not None
+    assert "/opt/miniconda3/envs/aievaluator/bin/python" in block
+
+
+def test_coding_context_block_mentions_default_interpreter_when_unset():
+    block = build_coding_context_block(python_interpreter=None, command_allowlist=[], scripting_enabled=True)
+    assert "AIDA itself is running under" in block
+
+
+def test_coding_context_block_lists_allowlisted_commands():
+    block = build_coding_context_block(
+        python_interpreter=None, command_allowlist=["git status", "git log *"], scripting_enabled=True
+    )
+    assert "git status" in block
+    assert "git log *" in block
+
+
+def test_coding_context_block_notes_empty_allowlist():
+    block = build_coding_context_block(python_interpreter=None, command_allowlist=[], scripting_enabled=True)
+    assert "no allowlisted commands" in block.lower()
+
+
+def test_coding_context_block_recommends_run_python_script_over_run_command():
+    block = build_coding_context_block(python_interpreter=None, command_allowlist=[], scripting_enabled=True)
+    assert "run_python_script" in block
+    assert "run_command" in block
 
 
 def test_load_skill_texts_flat_file(tmp_path: Path):

@@ -222,6 +222,17 @@ class MainWindow(QMainWindow):
         self._refresh_mcp_panel()
         self._refresh_folder_display()
         self._refresh_conversations_sidebar()
+        # Bug report: "I restored prior session and have selected local AI
+        # ... I suspect it must be using cloud (Argo)." Root cause:
+        # _refresh_profile_selector() was previously only ever called once,
+        # synchronously in __init__ *before* bridge.start()'s async session
+        # construction had even resolved a profile — self.bridge.session
+        # was still None at that point, so the dropdown fell back to
+        # whichever profile sorts first alphabetically and was never
+        # corrected once the real session became ready. The dropdown could
+        # therefore show a profile that was never actually in use, for
+        # every session (not just resumed ones).
+        self._refresh_profile_selector()
         self._save_last_session_selection()
         self._update_usage_label()
 
@@ -525,7 +536,21 @@ class MainWindow(QMainWindow):
             store.close()
 
     def _on_resume_requested(self, conversation_id: str) -> None:
-        self._restart_session(workspace_name=None, profile_name=None, resume_conversation_id=conversation_id)
+        # Bug report: "I restored prior session and have selected local AI
+        # ... I suspect it must be using cloud (Argo) because no local AI
+        # server started." Resuming with profile_name=None used to fall
+        # all the way through to start_session's own fallback (the
+        # conversation's *originally recorded* profile,
+        # chat.py's effective_profile_name) — silently overriding whatever
+        # the user currently has picked in the toolbar dropdown, with
+        # nothing but the dropdown's own (easy to miss) redraw to notice
+        # by. Reading the dropdown here makes Resume respect it, the same
+        # way workspace-switching/New Chat already treat their own
+        # selectors as authoritative for what they do.
+        current_profile = self.profile_selector.current_profile()
+        self._restart_session(
+            workspace_name=None, profile_name=current_profile or None, resume_conversation_id=conversation_id
+        )
 
     def _on_delete_requested(self, conversation_id: str) -> None:
         store = ConversationStore()

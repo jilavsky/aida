@@ -89,6 +89,29 @@ def test_session_starts_and_completes_a_turn(qapp, loop_thread, aida_home: Path,
         window.close()
 
 
+def test_profile_selector_shows_the_actual_active_profile_once_ready(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "I restored prior session and have selected local AI ...
+    I suspect it must be using cloud (Argo)." _refresh_profile_selector()
+    used to run exactly once, synchronously in __init__, *before*
+    bridge.start()'s async session construction had resolved a profile —
+    self.bridge.session was still None then, so the dropdown fell back to
+    whichever profile sorts first alphabetically and was never corrected
+    once the real session became ready. Configuring the started profile to
+    sort *after* another one alphabetically would have shown the bug even
+    for a brand-new (non-resumed) session."""
+    settings = _settings_with_profile("z-profile")
+    settings.providers.profiles["a-profile"] = ProviderProfile(name="a-profile", kind="openai_compat", model="m")
+
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="z-profile")
+    try:
+        assert window.bridge.session.profile_name == "z-profile"
+        assert window.profile_selector.current_profile() == "z-profile"
+    finally:
+        window.close()
+
+
 def test_flagship_demo_tool_call_produces_inline_image(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
@@ -155,6 +178,42 @@ def test_resume_conversation_loads_prior_history(qapp, loop_thread, aida_home: P
         assert "first reply" in texts
     finally:
         resumed.close()
+
+
+def test_resume_uses_the_currently_selected_profile_not_the_conversations_original_one(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "I restored prior session and have selected local AI ...
+    I suspect it must be using cloud (Argo) because no local AI server
+    started." Resuming used to always fall back to the conversation's
+    originally-recorded profile (start_session's own effective_profile_name
+    fallback), silently ignoring whatever the toolbar dropdown currently
+    shows."""
+    settings = _settings_with_profile("profile-a")
+    settings.providers.profiles["profile-b"] = ProviderProfile(name="profile-b", kind="openai_compat", model="model-b")
+
+    first = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="first reply")], profile_name="profile-a"
+    )
+    conv_id = first.bridge.session.recorder.conversation_id
+    first.input_box.set_text("remember this")
+    first.input_box._send_button.click()
+    assert pump_until(qapp, lambda: first.chat_panel.widget_count >= 2)
+    first.close()
+
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="second reply")], profile_name="profile-b"
+    )
+    try:
+        assert window.profile_selector.current_profile() == "profile-b"
+
+        window._on_resume_requested(conv_id)
+        assert pump_until(
+            qapp, lambda: window.bridge.session is not None and window.bridge.session.recorder.conversation_id == conv_id
+        )
+        assert window.bridge.session.profile_name == "profile-b"
+    finally:
+        window.close()
 
 
 def test_resume_conversation_redisplays_prior_image_artifact(
