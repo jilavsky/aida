@@ -172,6 +172,8 @@ class MainWindow(QMainWindow):
         self.folder_display.source_folders_changed.connect(self._on_source_folders_changed)
         self.folder_display.target_folder_changed.connect(self._on_target_folder_changed)
         self.folder_display.sidecar_folder_name_changed.connect(self._on_sidecar_folder_name_changed)
+        self.folder_display.command_allowlist_changed.connect(self._on_command_allowlist_changed)
+        self.folder_display.python_interpreter_changed.connect(self._on_python_interpreter_changed)
         self.folder_display.save_to_workspace_requested.connect(self._on_save_folders_to_workspace)
 
     def _wire_bridge_signals(self) -> None:
@@ -631,8 +633,13 @@ class MainWindow(QMainWindow):
                 target_folder=self._current_workspace_config.target_folder,
                 sidecar_folder_name=self._current_workspace_config.sidecar_folder_name,
             )
+            self.folder_display.set_commands(
+                patterns=self._current_workspace_config.command_allowlist,
+                interpreter=self._current_workspace_config.python_interpreter,
+            )
         else:
             self.folder_display.set_folders(source_folders=[], target_folder=None, sidecar_folder_name="figures")
+            self.folder_display.set_commands(patterns=[], interpreter=None)
 
     def _on_source_folders_changed(self, folders: list[str]) -> None:
         if self._current_workspace_config is not None:
@@ -645,6 +652,14 @@ class MainWindow(QMainWindow):
     def _on_sidecar_folder_name_changed(self, name: str) -> None:
         if self._current_workspace_config is not None:
             self._current_workspace_config.sidecar_folder_name = name
+
+    def _on_command_allowlist_changed(self, patterns: list[str]) -> None:
+        if self._current_workspace_config is not None:
+            self._current_workspace_config.command_allowlist = list(patterns)
+
+    def _on_python_interpreter_changed(self, interpreter: str) -> None:
+        if self._current_workspace_config is not None:
+            self._current_workspace_config.python_interpreter = interpreter or None
 
     def _on_save_folders_to_workspace(self) -> None:
         if self._current_workspace_config is None:

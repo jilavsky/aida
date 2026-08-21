@@ -478,6 +478,43 @@ async def test_start_session_global_allowed_folders_apply_without_workspace(
         await session.aclose()
 
 
+@pytest.mark.asyncio
+async def test_start_session_always_allows_writes_under_aida_artifacts_dir(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """Bug report: writing under ~/.aida/artifacts (AIDA's own generated-
+    output folder, distinct from the rest of ~/.aida which holds config/
+    secrets refs/the DB) triggered a confirmation prompt like any other
+    outside-allowed-folders path, even though nothing user-configured
+    should need to name it explicitly. It's always allowed now, with no
+    workspace and no configured allowed_folders at all — but the mode still
+    has to be relaxed for that to mean "no prompt" (same as any other
+    allowed-folders case; see test_start_session_global_allowed_folders_apply_without_workspace)."""
+    from aida.config.paths import artifacts_dir
+
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    settings = _settings()
+    settings.app.default_safety_mode = "relaxed"
+
+    confirm_calls = []
+
+    async def _never_called(request):
+        confirm_calls.append(request)
+        return False
+
+    session, _mcp_manager = await start_session(
+        settings, profile_name="mock-profile", confirm_callback=_never_called
+    )
+    try:
+        target = artifacts_dir() / "note.txt"
+        result = await session.tools["write_file"].func({"path": str(target), "content": "hello"})
+        assert not result.is_error
+        assert target.read_text(encoding="utf-8") == "hello"
+        assert confirm_calls == []
+    finally:
+        await session.aclose()
+
+
 def test_build_parser_accepts_workspace_flag():
     args = _build_parser().parse_args(["--workspace", "use-ws"])
     assert args.workspace == "use-ws"

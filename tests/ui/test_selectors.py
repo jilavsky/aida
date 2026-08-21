@@ -222,6 +222,135 @@ def test_folder_display_editing_sidecar_name_no_change_does_not_emit(qapp):
     assert changed == []
 
 
+# --- Phase 9 follow-up: command allowlist + Python interpreter editable
+# from the GUI (previously CLI-only via `aida workspace edit`) -------------
+
+
+def test_folder_display_commands_default_empty(qapp):
+    display = FolderDisplay()
+    assert display.command_allowlist == []
+    assert display.python_interpreter is None
+    assert "(none)" in display._command_label.text()
+
+
+def test_folder_display_set_commands_updates_rows_and_interpreter(qapp):
+    display = FolderDisplay()
+    display.set_commands(patterns=["git status", "git log *"], interpreter="/opt/env/bin/python")
+
+    assert display.command_allowlist == ["git status", "git log *"]
+    assert display.python_interpreter == "/opt/env/bin/python"
+    assert display._interpreter_edit.text() == "/opt/env/bin/python"
+    assert display._command_label.isHidden()
+
+    row_patterns = [
+        display._command_rows_layout.itemAt(i).widget().path for i in range(display._command_rows_layout.count())
+    ]
+    assert row_patterns == ["git status", "git log *"]
+
+
+def test_folder_display_add_command_emits_signal(qapp):
+    display = FolderDisplay()
+    changed = []
+    display.command_allowlist_changed.connect(changed.append)
+
+    display._command_edit.setText("git status")
+    display._on_add_command()
+
+    assert display.command_allowlist == ["git status"]
+    assert changed == [["git status"]]
+    assert display._command_edit.text() == ""  # cleared after adding
+
+
+def test_folder_display_add_command_blank_is_a_noop(qapp):
+    display = FolderDisplay()
+    changed = []
+    display.command_allowlist_changed.connect(changed.append)
+
+    display._command_edit.setText("   ")
+    display._on_add_command()
+
+    assert display.command_allowlist == []
+    assert changed == []
+
+
+def test_folder_display_add_command_duplicate_is_a_noop(qapp):
+    display = FolderDisplay()
+    display.set_commands(patterns=["git status"], interpreter=None)
+    changed = []
+    display.command_allowlist_changed.connect(changed.append)
+
+    display._command_edit.setText("git status")
+    display._on_add_command()
+
+    assert display.command_allowlist == ["git status"]
+    assert changed == []
+
+
+def test_folder_display_remove_command_button_removes_it(qapp):
+    display = FolderDisplay()
+    display.set_commands(patterns=["git status", "git log *"], interpreter=None)
+    changed = []
+    display.command_allowlist_changed.connect(changed.append)
+
+    row = display._command_rows_layout.itemAt(0).widget()
+    assert row.path == "git status"
+    row.remove_requested.emit("git status")
+
+    assert display.command_allowlist == ["git log *"]
+    assert changed == [["git log *"]]
+
+
+def test_folder_display_editing_interpreter_emits_signal(qapp):
+    display = FolderDisplay()
+    changed = []
+    display.python_interpreter_changed.connect(changed.append)
+
+    display._interpreter_edit.setText("/usr/bin/python3")
+    display._on_interpreter_edited()
+
+    assert display.python_interpreter == "/usr/bin/python3"
+    assert changed == ["/usr/bin/python3"]
+
+
+def test_folder_display_clearing_interpreter_is_allowed(qapp):
+    display = FolderDisplay()
+    display.set_commands(patterns=[], interpreter="/usr/bin/python3")
+    changed = []
+    display.python_interpreter_changed.connect(changed.append)
+
+    display._interpreter_edit.setText("")
+    display._on_interpreter_edited()
+
+    assert display.python_interpreter is None  # blank means "use the default"
+    assert changed == [""]
+
+
+def test_folder_display_browse_interpreter_via_dialog(qapp, monkeypatch):
+    display = FolderDisplay()
+    monkeypatch.setattr(
+        "aida.ui.qt.selectors.QFileDialog.getOpenFileName", lambda *a, **kw: ("/opt/env/bin/python", "")
+    )
+    changed = []
+    display.python_interpreter_changed.connect(changed.append)
+
+    display._on_browse_interpreter()
+
+    assert display.python_interpreter == "/opt/env/bin/python"
+    assert changed == ["/opt/env/bin/python"]
+
+
+def test_folder_display_browse_interpreter_dialog_cancelled_does_nothing(qapp, monkeypatch):
+    display = FolderDisplay()
+    monkeypatch.setattr("aida.ui.qt.selectors.QFileDialog.getOpenFileName", lambda *a, **kw: ("", ""))
+    changed = []
+    display.python_interpreter_changed.connect(changed.append)
+
+    display._on_browse_interpreter()
+
+    assert display.python_interpreter is None
+    assert changed == []
+
+
 def test_mcp_quick_panel_shows_group_and_checkboxes(qapp):
     panel = McpQuickPanel()
     panel.set_servers(["pyirena", "bait"], enabled=["pyirena"], group_name="pyirena-analysis")

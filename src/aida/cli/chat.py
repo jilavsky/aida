@@ -17,7 +17,7 @@ from aida.artifacts.store import ArtifactStore
 from aida.coding.templates import load_templates, templates_context_text
 from aida.coding.tools import default_coding_tools
 from aida.config.logging_setup import get_logger
-from aida.config.paths import ensure_records_dir, knowledge_db_path, skills_dir
+from aida.config.paths import artifacts_dir, ensure_records_dir, knowledge_db_path, skills_dir
 from aida.config.settings import (
     McpConfig,
     McpServerConfig,
@@ -594,7 +594,12 @@ async def start_session(
     guard = SafetyGuard.for_workspace(
         source_folders=workspace.source_folders if workspace else [],
         target_folder=workspace.target_folder if workspace else None,
-        global_allowed_folders=settings.app.allowed_folders,
+        # Bug report: writing into ~/.aida/artifacts (AIDA's own generated-
+        # output folder) always asked for confirmation, since nothing put it
+        # in any allowed-folders list. Always-allow just that subfolder, not
+        # the rest of ~/.aida (config.yaml, secrets refs, and the DB live
+        # there too and stay gated).
+        global_allowed_folders=[*settings.app.allowed_folders, str(artifacts_dir())],
         mode=effective_safety_mode,
         confirm_callback=confirm_callback,
         # Phase 9: union'd the same way allowed folders already are — a

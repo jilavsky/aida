@@ -143,11 +143,22 @@ class FolderDisplay(QGroupBox):
     copied, relative to the target folder — see
     ``aida.documents.writers.md_obsidian``) as a plain editable text field,
     following the same "visible + editable, saved only on request" pattern
-    as the folder pickers above it."""
+    as the folder pickers above it.
+
+    Phase 9 follow-up: the command allowlist and Python interpreter
+    (``WorkspaceConfig.command_allowlist``/``.python_interpreter``) were
+    CLI-only (``aida workspace edit --command-allowlist ...``) — user
+    feedback was that they wanted to manage what ``run_command`` may run
+    without confirmation from the same place they already manage folders,
+    rather than dropping to a terminal. Reuses ``_RemovableFolderRow``
+    as-is for allow-pattern rows (it only ever knew about a plain string +
+    Remove button, never anything folder-specific)."""
 
     source_folders_changed = Signal(list)
     target_folder_changed = Signal(str)
     sidecar_folder_name_changed = Signal(str)
+    command_allowlist_changed = Signal(list)
+    python_interpreter_changed = Signal(str)
     save_to_workspace_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -155,6 +166,8 @@ class FolderDisplay(QGroupBox):
         self._source_folders: list[str] = []
         self._target_folder: str | None = None
         self._sidecar_folder_name: str = "figures"
+        self._command_patterns: list[str] = []
+        self._python_interpreter: str = ""
 
         layout = QVBoxLayout(self)
 
@@ -182,6 +195,31 @@ class FolderDisplay(QGroupBox):
         self._sidecar_edit.editingFinished.connect(self._on_sidecar_edited)
         sidecar_row.addWidget(self._sidecar_edit)
         layout.addLayout(sidecar_row)
+
+        layout.addWidget(QLabel("Allowed commands (run_command needs no confirmation for these):", self))
+        self._command_label = QLabel("(none)", self)  # shown only when the list is empty
+        layout.addWidget(self._command_label)
+        self._command_rows_layout = QVBoxLayout()
+        layout.addLayout(self._command_rows_layout)
+        add_command_row = QHBoxLayout()
+        self._command_edit = QLineEdit(self)
+        self._command_edit.setPlaceholderText("e.g. git status  or  git log *")
+        add_command_row.addWidget(self._command_edit, stretch=1)
+        add_command_button = QPushButton("Add Command", self)
+        add_command_button.clicked.connect(self._on_add_command)
+        add_command_row.addWidget(add_command_button)
+        layout.addLayout(add_command_row)
+
+        interpreter_row = QHBoxLayout()
+        interpreter_row.addWidget(QLabel("Python interpreter:", self))
+        self._interpreter_edit = QLineEdit(self)
+        self._interpreter_edit.setPlaceholderText("(default: the interpreter AIDA itself runs under)")
+        self._interpreter_edit.editingFinished.connect(self._on_interpreter_edited)
+        interpreter_row.addWidget(self._interpreter_edit, stretch=1)
+        browse_interpreter_button = QPushButton("Browse…", self)
+        browse_interpreter_button.clicked.connect(self._on_browse_interpreter)
+        interpreter_row.addWidget(browse_interpreter_button)
+        layout.addLayout(interpreter_row)
 
         self._save_button = QPushButton("Save to Workspace", self)
         self._save_button.clicked.connect(self.save_to_workspace_requested.emit)
@@ -211,6 +249,24 @@ class FolderDisplay(QGroupBox):
             row.remove_requested.connect(self._on_remove_source_folder)
             self._source_rows_layout.addWidget(row)
 
+    def set_commands(self, *, patterns: list[str], interpreter: str | None) -> None:
+        self._command_patterns = list(patterns)
+        self._python_interpreter = interpreter or ""
+        self._interpreter_edit.setText(self._python_interpreter)
+        self._refresh_command_rows()
+
+    def _refresh_command_rows(self) -> None:
+        while self._command_rows_layout.count():
+            item = self._command_rows_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._command_label.setVisible(not self._command_patterns)
+        for pattern in self._command_patterns:
+            row = _RemovableFolderRow(pattern, self)
+            row.remove_requested.connect(self._on_remove_command)
+            self._command_rows_layout.addWidget(row)
+
     @property
     def source_folders(self) -> list[str]:
         return list(self._source_folders)
@@ -222,6 +278,14 @@ class FolderDisplay(QGroupBox):
     @property
     def sidecar_folder_name(self) -> str:
         return self._sidecar_folder_name
+
+    @property
+    def command_allowlist(self) -> list[str]:
+        return list(self._command_patterns)
+
+    @property
+    def python_interpreter(self) -> str | None:
+        return self._python_interpreter or None
 
     def _on_add_source_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Add Source Folder")
@@ -255,6 +319,37 @@ class FolderDisplay(QGroupBox):
             return
         self._sidecar_folder_name = name
         self.sidecar_folder_name_changed.emit(name)
+
+    def _on_add_command(self) -> None:
+        pattern = self._command_edit.text().strip()
+        if not pattern or pattern in self._command_patterns:
+            return
+        self._command_patterns.append(pattern)
+        self._command_edit.clear()
+        self._refresh_command_rows()
+        self.command_allowlist_changed.emit(self._command_patterns)
+
+    def _on_remove_command(self, pattern: str) -> None:
+        if pattern not in self._command_patterns:
+            return
+        self._command_patterns.remove(pattern)
+        self._refresh_command_rows()
+        self.command_allowlist_changed.emit(self._command_patterns)
+
+    def _on_browse_interpreter(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(self, "Python Interpreter", self._interpreter_edit.text())
+        if not path:
+            return
+        self._interpreter_edit.setText(path)
+        self._python_interpreter = path
+        self.python_interpreter_changed.emit(path)
+
+    def _on_interpreter_edited(self) -> None:
+        text = self._interpreter_edit.text().strip()
+        if text == self._python_interpreter:
+            return
+        self._python_interpreter = text
+        self.python_interpreter_changed.emit(text)
 
 
 class McpQuickPanel(QGroupBox):

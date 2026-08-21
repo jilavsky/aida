@@ -343,6 +343,50 @@ def test_folder_display_shows_and_saves_sidecar_folder_name(
         window.close()
 
 
+def test_folder_display_shows_and_saves_command_allowlist_and_interpreter(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: the command allowlist and Python interpreter
+    (WorkspaceConfig.command_allowlist/.python_interpreter) were CLI-only —
+    ``aida workspace edit --command-allowlist ...`` — with no GUI way to
+    manage what run_command may run without confirmation. Verifies the same
+    show-on-start + edit + "Save to Workspace" round trip as the folder
+    fields already get."""
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "use-pyirena": WorkspaceConfig(
+                name="use-pyirena",
+                profile="mock-profile",
+                mcp_group="none",
+                command_allowlist=["git status"],
+                python_interpreter="/opt/env/bin/python",
+            )
+        }
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+    )
+    try:
+        assert window.folder_display.command_allowlist == ["git status"]
+        assert window.folder_display.python_interpreter == "/opt/env/bin/python"
+
+        window.folder_display.command_allowlist_changed.emit(["git status", "git log *"])
+        window.folder_display.python_interpreter_changed.emit("/usr/bin/python3")
+        window.folder_display.save_to_workspace_requested.emit()
+
+        saved = get_workspace(window.settings, "use-pyirena")
+        assert saved.command_allowlist == ["git status", "git log *"]
+        assert saved.python_interpreter == "/usr/bin/python3"
+
+        reloaded_settings = load_settings()
+        reloaded = get_workspace(reloaded_settings, "use-pyirena")
+        assert reloaded.command_allowlist == ["git status", "git log *"]
+        assert reloaded.python_interpreter == "/usr/bin/python3"
+    finally:
+        window.close()
+
+
 def test_delete_conversation_removes_from_sidebar_and_db(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
