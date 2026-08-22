@@ -5,6 +5,7 @@ test_workspace_files.py."""
 
 from __future__ import annotations
 
+import socketserver
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -41,9 +42,30 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class _Server(ThreadingHTTPServer):
+    """``ThreadingHTTPServer`` that binds without a reverse-DNS lookup.
+
+    ``HTTPServer.server_bind`` calls ``socket.getfqdn(host)`` for the sole
+    purpose of filling in ``self.server_name``, which only the CGI handlers
+    read and this test never touches. On GitHub's macOS runners there is no
+    resolver willing to answer the PTR query for 127.0.0.1, so that call
+    blocked past pytest-timeout's 30s limit and errored this module at
+    fixture setup ("Failed: Timeout (>30.0s)" inside ``socket.getfqdn``)
+    while every other test in the suite passed. Bind through ``TCPServer``
+    and set the two attributes directly — identical to the stdlib
+    implementation minus the name resolution.
+    """
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
+
 @pytest.fixture
 def http_server() -> Iterator[str]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    server = _Server(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
