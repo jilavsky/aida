@@ -242,7 +242,7 @@ def test_form_normalizes_a_file_uri_source_folder(qapp, aida_home: Path):
 
 
 def _make_bridge(qapp, loop_thread, settings, monkeypatch) -> ChatBridge:
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
     bridge = ChatBridge(loop_thread)
     bridge.start(settings, profile_name="mock-profile")
     assert pump_until(qapp, lambda: bridge.session is not None, timeout=10.0)
@@ -384,8 +384,8 @@ def test_full_workflow_rebuild_then_chat_turn_shows_retrieval_row(
     a real temp corpus, rebuild, confirm chunk count updates; then send a
     chat turn through a workspace with that KB attached and confirm a
     RetrievalPerformed row appears in the chat transcript."""
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="here you go")]))
-    monkeypatch.setattr("aida.cli.chat.build_embeddings_provider", lambda profile: MockEmbeddings())
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="here you go")]))
+    monkeypatch.setattr("aida.core.session.build_embeddings_provider", lambda profile: MockEmbeddings())
     monkeypatch.setattr("aida.ui.qt.bridge.build_embeddings_provider", lambda profile: MockEmbeddings())
     corpus = _make_corpus(tmp_path)
 

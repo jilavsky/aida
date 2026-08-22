@@ -23,6 +23,7 @@ from aida.config.settings import (
     WorkspacesConfig,
     load_settings,
 )
+from aida.core.events import ContextTrimmed
 from aida.persistence.store import ConversationStore
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
 from aida.ui.qt._qt import QApplication, QDesktopServices, QDialog, QMessageBox, Qt
@@ -42,7 +43,7 @@ def _settings_with_profile(name: str = "mock-profile") -> Settings:
 
 
 def _make_window(qapp, loop_thread, settings, monkeypatch, script, **start_kwargs):
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider(script))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider(script))
     window = MainWindow(settings, loop_thread, start_kwargs=start_kwargs)
     # Deliberately NOT `window.bridge.session is not None`: ChatBridge._start
     # (aida/ui/qt/bridge.py) sets `self.session` on the background loop
@@ -421,9 +422,9 @@ def test_mcp_quick_panel_manage_button_opens_management_dialog(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     """Bug report: the quick panel's checkboxes silently did nothing when
-    ticked. They're now read-only status only; the real interaction point
-    is the "MCP Servers…" button, which must actually open the management
-    dialog (previously nothing connected McpQuickPanel to it at all)."""
+    ticked (now fixed for real — see the tests below); its "MCP Servers…"
+    button must also actually open the full management dialog (previously
+    nothing connected McpQuickPanel to it at all)."""
     settings = _settings_with_profile()
     window = _make_window(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
@@ -439,6 +440,108 @@ def test_mcp_quick_panel_manage_button_opens_management_dialog(
         window.mcp_panel.manage_requested.emit()
 
         assert "dialog" in opened
+    finally:
+        window.close()
+
+
+def test_mcp_panel_start_requested_calls_bridge_start_mcp_server(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        calls = []
+        monkeypatch.setattr(window.bridge, "start_mcp_server", lambda name: calls.append(name))
+        window.mcp_panel.server_start_requested.emit("mock-mcp")
+        assert calls == ["mock-mcp"]
+    finally:
+        window.close()
+
+
+def test_mcp_panel_stop_requested_calls_bridge_stop_mcp_server(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        calls = []
+        monkeypatch.setattr(window.bridge, "stop_mcp_server", lambda name: calls.append(name))
+        window.mcp_panel.server_stop_requested.emit("mock-mcp")
+        assert calls == ["mock-mcp"]
+    finally:
+        window.close()
+
+
+def test_mcp_server_status_changed_refreshes_the_quick_panel(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        refreshed = []
+        monkeypatch.setattr(window, "_refresh_mcp_panel", lambda: refreshed.append(True))
+        window.bridge.mcp_server_status_changed.emit("mock-mcp")
+        assert refreshed == [True]
+    finally:
+        window.close()
+
+
+def test_mcp_server_action_failed_warns_and_refreshes_the_quick_panel(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A start/stop that fails must not leave the checkbox showing a state
+    that isn't real — refreshing re-reads McpManager.running_server_names,
+    which snaps a just-ticked-but-failed checkbox back to unchecked."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        warned = []
+        monkeypatch.setattr(QMessageBox, "warning", lambda *a, **kw: warned.append(a[2:]))
+        refreshed = []
+        monkeypatch.setattr(window, "_refresh_mcp_panel", lambda: refreshed.append(True))
+        window.bridge.mcp_server_action_failed.emit("mock-mcp", "boom")
+        assert warned and "mock-mcp" in warned[0][0] and "boom" in warned[0][0]
+        assert refreshed == [True]
+    finally:
+        window.close()
+
+
+def test_checking_a_box_in_the_quick_panel_really_starts_the_server(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """The other half of "can those checkboxes start/stop the mcp" — a
+    real mock-mcp subprocess started and stopped purely by ticking the
+    checkbox, verified via the actual McpManager.running_server_names (not
+    just that a signal fired) — same real-subprocess testing approach as
+    the flagship-demo test above."""
+    settings = _settings_with_profile()
+    settings.mcp = McpConfig(
+        servers={"mock-mcp": McpServerConfig(name="mock-mcp", command=sys.executable, args=[str(MOCK_SERVER_PATH)])}
+    )
+    # No active workspace/mcp_group, so nothing auto-starts — the checkbox
+    # is the only thing that can start this server.
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window._refresh_mcp_panel()
+        assert "mock-mcp" not in window.mcp_panel.enabled_servers()
+
+        window.mcp_panel._checkboxes["mock-mcp"].setChecked(True)
+        assert pump_until(
+            qapp,
+            lambda: window.bridge.mcp_manager is not None
+            and "mock-mcp" in window.bridge.mcp_manager.running_server_names,
+            timeout=10.0,
+        )
+        assert pump_until(qapp, lambda: "mock-mcp" in window.mcp_panel.enabled_servers())
+
+        window.mcp_panel._checkboxes["mock-mcp"].setChecked(False)
+        assert pump_until(
+            qapp,
+            lambda: window.bridge.mcp_manager is not None
+            and "mock-mcp" not in window.bridge.mcp_manager.running_server_names,
+            timeout=10.0,
+        )
+        assert pump_until(qapp, lambda: "mock-mcp" not in window.mcp_panel.enabled_servers())
     finally:
         window.close()
 
@@ -891,7 +994,13 @@ def test_open_config_folder_opens_the_config_dir(qapp, loop_thread, aida_home: P
         opened = []
         monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
         window._on_open_config_folder()
-        assert opened == [str(config_dir())]
+        # Compared via Path rather than a raw string: on Windows, Qt's
+        # QUrl round-trip through fromLocalFile()/toLocalFile() has been
+        # observed to come back with forward slashes rather than the
+        # native backslash separator (real CI failure) — Path() treats
+        # both as equivalent, which is all this test actually cares about.
+        assert len(opened) == 1
+        assert Path(opened[0]) == config_dir()
     finally:
         window.close()
 
@@ -905,7 +1014,10 @@ def test_open_records_folder_opens_the_records_dir(qapp, loop_thread, aida_home:
         opened = []
         monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
         window._on_open_records_folder()
-        assert opened == [str(default_records_dir())]
+        # See test_open_config_folder_opens_the_config_dir's comment on why
+        # this compares via Path rather than a raw string.
+        assert len(opened) == 1
+        assert Path(opened[0]) == default_records_dir()
     finally:
         window.close()
 
@@ -1164,6 +1276,23 @@ def test_folder_drop_with_no_active_workspace_shows_status_message(
     try:
         window.input_box.folder_dropped.emit(str(tmp_path))
         assert "workspace" in window.statusBar().currentMessage().lower()
+    finally:
+        window.close()
+
+
+def test_context_trimmed_event_shows_in_the_status_bar(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """B7: trimming used to be invisible in the GUI (a log line only) —
+    ContextTrimmed now surfaces in the same low-key status-bar channel
+    already used for "Ready — profile" / "Saved folders to workspace X"."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window._on_event_received(ContextTrimmed(dropped_turns=5, estimated_tokens=1234))
+        message = window.statusBar().currentMessage()
+        assert "5" in message
+        assert "1234" in message
     finally:
         window.close()
 

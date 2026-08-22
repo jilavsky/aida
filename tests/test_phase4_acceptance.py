@@ -76,7 +76,7 @@ async def test_kill_mid_turn_then_resume_continues_sensibly_with_image_artifact(
             MockTurn(text=IN_FLIGHT_TEXT),
         ]
     )
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider_before_kill)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider_before_kill)
 
     session, mcp_manager = await start_session(settings, profile_name="mock-profile", mcp_names=["mock-mcp"])
     conv_id = session.recorder.conversation_id
@@ -114,7 +114,7 @@ async def test_kill_mid_turn_then_resume_continues_sensibly_with_image_artifact(
 
     # --- resume: a brand new process would do exactly this ---------------
     provider_after_resume = MockProvider([MockTurn(text="continuing after resume")])
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider_after_resume)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider_after_resume)
 
     resumed_session, resumed_mcp = await start_session(settings, resume_conversation_id=conv_id)
     try:
@@ -182,7 +182,7 @@ async def test_two_workspaces_load_different_provider_mcp_skills_environments(
     from aida.config import paths as paths_module
 
     monkeypatch.setattr(paths_module, "skills_dir", lambda: skills_dir)
-    monkeypatch.setattr("aida.cli.chat.skills_dir", lambda: skills_dir)
+    monkeypatch.setattr("aida.core.session.skills_dir", lambda: skills_dir)
     monkeypatch.setattr("aida.workspace.workspaces.skills_dir", lambda: skills_dir)
 
     settings = _settings_with_mock_mcp()
@@ -202,7 +202,7 @@ async def test_two_workspaces_load_different_provider_mcp_skills_environments(
         }
     )
 
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
 
     session_a, mcp_a = await start_session(settings, workspace_name="use-pyirena")
     session_b, mcp_b = await start_session(settings, workspace_name="plain-chat")

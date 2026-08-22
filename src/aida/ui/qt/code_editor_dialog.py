@@ -30,6 +30,7 @@ class CodeEditorDialog(QDialog):
         initial_text: str = "",
         saved_scripts_dir: str | None = None,
         python_interpreter: str | None = None,
+        script_timeout_seconds: float = DEFAULT_RUN_TIMEOUT_SECONDS,
         bridge=None,
         parent: QWidget | None = None,
     ) -> None:
@@ -38,6 +39,12 @@ class CodeEditorDialog(QDialog):
         self.resize(760, 560)
         self._saved_scripts_dir = saved_scripts_dir
         self._python_interpreter = python_interpreter
+        # B5: previously hardcoded to DEFAULT_RUN_TIMEOUT_SECONDS regardless
+        # of what the active workspace configured — the "Run" button ignored
+        # the same script_timeout_seconds a run_python_script tool call now
+        # respects. Defaults to DEFAULT_RUN_TIMEOUT_SECONDS when no
+        # workspace is active (matching the config field's own default).
+        self._script_timeout_seconds = script_timeout_seconds
         self._bridge = bridge
         self._current_path: Path | None = None
 
@@ -147,7 +154,7 @@ class CodeEditorDialog(QDialog):
             [],
             interpreter=self._python_interpreter,
             cwd=str(self._current_path.parent),
-            timeout=DEFAULT_RUN_TIMEOUT_SECONDS,
+            timeout=self._script_timeout_seconds,
         )
 
     def _on_kill(self) -> None:

@@ -148,6 +148,82 @@ async def test_run_python_script_timeout_is_flagged_as_error(tmp_path: Path, mon
     assert "TIMED OUT" in result.content
 
 
+# --- B5: configurable script/command timeout --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_python_script_defaults_to_workspace_timeout(tmp_path: Path, monkeypatch):
+    """No ``timeout`` argument given -> falls back to
+    workspace.script_timeout_seconds, not the runner's own hardcoded
+    default."""
+    import aida.coding.tools as tools_module
+
+    captured: dict = {}
+
+    async def _fake_run(*_a, **kwargs):
+        from aida.coding.runner import RunResult
+
+        captured.update(kwargs)
+        return RunResult(stdout="", stderr="", returncode=0, timed_out=False, duration_seconds=0.1)
+
+    monkeypatch.setattr(tools_module, "_run_python_script", _fake_run)
+    script = tmp_path / "hello.py"
+    script.write_text("print('hi')", encoding="utf-8")
+    workspace = _workspace(tmp_path, script_timeout_seconds=120.0)
+    tools = default_coding_tools(_guard(tmp_path), workspace=workspace)
+
+    await _call(tools, "run_python_script", path=str(script))
+    assert captured["timeout"] == 120.0
+
+
+@pytest.mark.asyncio
+async def test_run_python_script_requested_timeout_is_capped_by_workspace(tmp_path: Path, monkeypatch):
+    """A model-requested ``timeout`` larger than the workspace's configured
+    ceiling is clamped down to it, never allowed to raise it."""
+    import aida.coding.tools as tools_module
+
+    captured: dict = {}
+
+    async def _fake_run(*_a, **kwargs):
+        from aida.coding.runner import RunResult
+
+        captured.update(kwargs)
+        return RunResult(stdout="", stderr="", returncode=0, timed_out=False, duration_seconds=0.1)
+
+    monkeypatch.setattr(tools_module, "_run_python_script", _fake_run)
+    script = tmp_path / "hello.py"
+    script.write_text("print('hi')", encoding="utf-8")
+    workspace = _workspace(tmp_path, script_timeout_seconds=30.0)
+    tools = default_coding_tools(_guard(tmp_path), workspace=workspace)
+
+    await _call(tools, "run_python_script", path=str(script), timeout=9999)
+    assert captured["timeout"] == 30.0
+
+
+@pytest.mark.asyncio
+async def test_run_python_script_requested_timeout_below_ceiling_is_honored(tmp_path: Path, monkeypatch):
+    """A smaller-than-ceiling request (a script that should fail fast) is
+    respected rather than always snapping to the workspace maximum."""
+    import aida.coding.tools as tools_module
+
+    captured: dict = {}
+
+    async def _fake_run(*_a, **kwargs):
+        from aida.coding.runner import RunResult
+
+        captured.update(kwargs)
+        return RunResult(stdout="", stderr="", returncode=0, timed_out=False, duration_seconds=0.1)
+
+    monkeypatch.setattr(tools_module, "_run_python_script", _fake_run)
+    script = tmp_path / "hello.py"
+    script.write_text("print('hi')", encoding="utf-8")
+    workspace = _workspace(tmp_path, script_timeout_seconds=120.0)
+    tools = default_coding_tools(_guard(tmp_path), workspace=workspace)
+
+    await _call(tools, "run_python_script", path=str(script), timeout=5)
+    assert captured["timeout"] == 5.0
+
+
 # --- run_command --------------------------------------------------------------
 
 
@@ -203,6 +279,27 @@ async def test_run_command_no_cwd_and_no_workspace_folder_is_an_error(tmp_path: 
     result = await _call(tools, "run_command", command="ls")
     assert result.is_error
     assert "No cwd given" in result.content
+
+
+@pytest.mark.asyncio
+async def test_run_command_requested_timeout_is_capped_by_workspace(tmp_path: Path, monkeypatch):
+    import aida.coding.tools as tools_module
+
+    captured: dict = {}
+
+    async def _fake_run(*_a, **kwargs):
+        from aida.coding.runner import RunResult
+
+        captured.update(kwargs)
+        return RunResult(stdout="", stderr="", returncode=0, timed_out=False, duration_seconds=0.1)
+
+    monkeypatch.setattr(tools_module, "run_subprocess", _fake_run)
+    guard = _guard(tmp_path, mode="relaxed", allowlist=[f"{sys.executable} -c *"])
+    workspace = _workspace(tmp_path, script_timeout_seconds=10.0)
+    tools = default_coding_tools(guard, workspace=workspace)
+
+    await _call(tools, "run_command", command=f"{sys.executable} -c \"print('hi')\"", timeout=999)
+    assert captured["timeout"] == 10.0
 
 
 @pytest.mark.asyncio

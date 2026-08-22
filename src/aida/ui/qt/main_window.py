@@ -21,11 +21,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from aida import __version__ as AIDA_VERSION
+from aida.coding.runner import DEFAULT_RUN_TIMEOUT_SECONDS
 from aida.config.logging_setup import configure_logging, get_logger
 from aida.config.paths import config_dir, ensure_records_dir, skills_dir
 from aida.config.settings import Settings, save_app_config
 from aida.core.cost import estimate_cost_usd
-from aida.mcp.groups import resolve_group
+from aida.core.events import ContextTrimmed
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
 from aida.persistence.store import ArtifactRecord, ConversationStore
 from aida.providers.base import ImageRef
@@ -238,6 +239,8 @@ class MainWindow(QMainWindow):
         self.folder_display.python_interpreter_changed.connect(self._on_python_interpreter_changed)
         self.folder_display.save_to_workspace_requested.connect(self._on_save_folders_to_workspace)
         self.mcp_panel.manage_requested.connect(self.open_mcp_management_dialog)
+        self.mcp_panel.server_start_requested.connect(self._on_mcp_server_start_requested)
+        self.mcp_panel.server_stop_requested.connect(self._on_mcp_server_stop_requested)
 
     def _wire_bridge_signals(self) -> None:
         # Every connection here must have *this window* as the receiver, so
@@ -260,6 +263,8 @@ class MainWindow(QMainWindow):
         self.bridge.confirmation_requested.connect(self._on_confirmation_requested)
         self.bridge.profile_switched.connect(self._on_profile_switched)
         self.bridge.profile_switch_failed.connect(self._on_profile_switch_failed)
+        self.bridge.mcp_server_status_changed.connect(self._on_mcp_server_status_changed)
+        self.bridge.mcp_server_action_failed.connect(self._on_mcp_server_action_failed)
         self.input_box.cancel_requested.connect(self.bridge.cancel)
         self.profile_selector.profile_changed.connect(self.bridge.switch_profile)
 
@@ -271,6 +276,18 @@ class MainWindow(QMainWindow):
         that connection's receiver is the *chat panel*, so
         ``bridge.disconnect(self)`` never dropped it and a retired bridge
         kept painting into the live panel. See ``_wire_bridge_signals``."""
+        if isinstance(event, ContextTrimmed):
+            # B7: trimming used to be invisible in the GUI entirely (a log
+            # line only) — the status bar is the same low-key channel
+            # already used for "Ready — profile" / "Saved folders to
+            # workspace X", so this doesn't interrupt the chat transcript
+            # the way an inline notice would.
+            turn_word = "turn" if event.dropped_turns == 1 else "turns"
+            self.statusBar().showMessage(
+                f"Context trimmed: dropped {event.dropped_turns} old {turn_word} "
+                f"(~{event.estimated_tokens} tokens now)",
+                8000,
+            )
         self.chat_panel.handle_event(event)
 
     def _on_turn_started(self) -> None:
@@ -782,17 +799,56 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_mcp_panel(self) -> None:
+        """``enabled`` (McpQuickPanel's checked-state input) is now which
+        servers are *actually running* (``McpManager.running_server_names``)
+        — the checkboxes became live start/stop controls, so their checked
+        state has to mean "running", not "would this workspace's mcp_group
+        start it" (the old, config-only meaning). ``group_name`` is still
+        shown as a label purely for context: it's what the active
+        workspace would auto-start on its own next session, independent of
+        whatever the user has manually toggled on top of that this
+        session."""
         session = self.bridge.session
         workspace_name = session.recorder.workspace_name if session and session.recorder else None
         group_name = None
-        enabled: list[str] = []
         if workspace_name:
             workspace = get_workspace(self.settings, workspace_name)
             if workspace is not None:
                 group_name = workspace.mcp_group
-                enabled = [s.name for s in resolve_group(self.settings.mcp, workspace.mcp_group)]
         all_server_names = sorted(self.settings.mcp.servers)
-        self.mcp_panel.set_servers(all_server_names, enabled=enabled, group_name=group_name)
+        manager = self.bridge.mcp_manager
+        running = list(manager.running_server_names) if manager is not None else []
+        self.mcp_panel.set_servers(all_server_names, enabled=running, group_name=group_name)
+
+    def _on_mcp_server_start_requested(self, name: str) -> None:
+        # The quick panel lists every server in settings.mcp.servers, but
+        # bridge.mcp_manager only actually knows about the ones the
+        # session's active workspace/mcp_group started at launch (or None
+        # at all, if none did — see ChatBridge._ensure_mcp_manager). Ticking
+        # a box for a server outside that set used to fail with "not
+        # configured" even though it's a perfectly real, configured server —
+        # register it with the manager first (a no-op if it's already
+        # known) so "Start" from the quick panel works for any configured
+        # server, not just ones the session happened to start with.
+        config = self.settings.mcp.servers.get(name)
+        if config is not None:
+            self.bridge.register_mcp_server(config)
+        self.bridge.start_mcp_server(name)
+
+    def _on_mcp_server_stop_requested(self, name: str) -> None:
+        self.bridge.stop_mcp_server(name)
+
+    def _on_mcp_server_status_changed(self, _name: str) -> None:
+        self._refresh_mcp_panel()
+
+    def _on_mcp_server_action_failed(self, name: str, message: str) -> None:
+        """A start/stop/restart from the quick panel (or the full
+        McpManagementDialog, still running the same ChatBridge) failed —
+        refreshing re-reads the real running state, so a checkbox the user
+        just ticked snaps back to unchecked instead of lying about a
+        server that never actually started."""
+        QMessageBox.warning(self, "MCP Server", f"{name}: {message}")
+        self._refresh_mcp_panel()
 
     def _refresh_folder_display(self) -> None:
         """Loads the active workspace's actual source/target folders into
@@ -898,6 +954,7 @@ class MainWindow(QMainWindow):
             initial_text=initial_text,
             saved_scripts_dir=workspace.resolved_saved_scripts_dir() if workspace else None,
             python_interpreter=workspace.python_interpreter if workspace else None,
+            script_timeout_seconds=workspace.script_timeout_seconds if workspace else DEFAULT_RUN_TIMEOUT_SECONDS,
             bridge=self.bridge,
             parent=self,
         )

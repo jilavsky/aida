@@ -12,6 +12,7 @@ is the piece that actually plugs the MCP layer into ``aida.core.agent``.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -130,21 +131,39 @@ class McpManager:
         """Launch every enabled server and return namespaced ``NativeTool``s
         ready to merge into an ``AgentLoop``'s tool set.
 
-        Failure isolation applies at startup too: a server that fails to
-        launch is recorded in ``start_errors`` and simply contributes no
-        tools, rather than aborting the whole chat session over one bad MCP
-        server config.
+        Launched concurrently (B4: sequential startup meant N servers paid
+        N times the slowest one's handshake latency — a real cost with
+        several process-spawning MCP servers configured, e.g. a workspace
+        pulling in three or four analysis servers at once). Failure
+        isolation applies exactly as before: each server's ``start()`` is
+        awaited inside its own try/except (now inside a per-server
+        coroutine gathered with the rest), so one bad config still just
+        lands in ``start_errors`` and contributes no tools rather than
+        aborting the whole session. Results are merged back in
+        ``self._configs``' original order — same as the old sequential
+        loop — so a tool-name collision between two servers still resolves
+        the same way regardless of which one's handshake actually finished
+        first.
         """
-        tools: dict[str, NativeTool] = {}
-        for name, config in self._configs.items():
+
+        async def _start_one(name: str, config: McpServerConfig) -> tuple[McpServerHandle, dict[str, NativeTool]] | None:
             handle = McpServerHandle(config, **self._handle_kwargs())
             try:
                 mcp_tools = await handle.start()
             except McpServerError as exc:
                 self.start_errors[name] = str(exc)
+                return None
+            return handle, self._tools_for(name, config, mcp_tools)
+
+        results = await asyncio.gather(*(_start_one(name, config) for name, config in self._configs.items()))
+
+        tools: dict[str, NativeTool] = {}
+        for name, result in zip(self._configs.keys(), results, strict=True):
+            if result is None:
                 continue
+            handle, server_tools = result
             self._handles[name] = handle
-            tools.update(self._tools_for(name, config, mcp_tools))
+            tools.update(server_tools)
         return tools
 
     def _handle_kwargs(self) -> dict[str, Any]:

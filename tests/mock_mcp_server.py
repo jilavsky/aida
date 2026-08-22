@@ -62,6 +62,16 @@ def get_multi_part() -> list[TextContent | ImageContent]:
 
 
 @mcp.tool()
+def echo_env(name: str) -> str:
+    """Return the value of one environment variable this process was
+    launched with (or "" if unset) — B6: lets a test verify a
+    "keyring:NAME" env value in McpServerConfig.env was actually resolved
+    to a real secret *before* this subprocess was spawned, not just that
+    McpServerHandle.start() didn't raise."""
+    return os.environ.get(name, "")
+
+
+@mcp.tool()
 def always_fails() -> str:
     """Always raises, to exercise the tool-level error path."""
     raise RuntimeError("intentional failure for testing")

@@ -188,6 +188,28 @@ class RetrievalPerformed:
 
 
 @dataclass(frozen=True)
+class ContextTrimmed:
+    """Emitted by ``aida.cli.chat.ChatSession.send()`` (B7) when
+    ``_trim_context`` actually dropped history to fit
+    ``AppConfig.max_context_tokens`` — before this, trimming happened
+    silently (a log line only), so a user watching a long session slowly
+    lose earlier turns had no visibility into it at all, and no way to
+    tell "context got tight" from "the model just forgot".
+
+    ``dropped_turns`` is how many whole turns (see
+    ``aida.core.context.trim_history``) were cut this time.
+    ``estimated_tokens`` is the *post*-trim estimate — what the sent
+    history now costs, per ``aida.core.context.estimate_tokens`` (now
+    tool-call-argument-aware) — so a frontend can show "trimmed to ~N
+    tokens" rather than just "trimmed"."""
+
+    dropped_turns: int
+    estimated_tokens: int
+
+    to_dict = _base_dict
+
+
+@dataclass(frozen=True)
 class AgentError:
     """A terminal error for the current ``complete()``/``run()`` call.
 
@@ -215,12 +237,14 @@ AgentEvent = (
     | MessageFinished
     | UsageInfo
     | RetrievalPerformed
+    | ContextTrimmed
     | AgentError
 )
 
 __all__ = [
     "AgentError",
     "AgentEvent",
+    "ContextTrimmed",
     "FileArtifactCreated",
     "ImageArtifactCreated",
     "MessageFinished",

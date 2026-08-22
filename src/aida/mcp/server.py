@@ -22,9 +22,46 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import CallToolResult, Tool
 
+from aida.config.secrets import get_secret
 from aida.config.settings import McpServerConfig
 
 DEFAULT_CALL_TIMEOUT_SECONDS = 60.0
+
+#: B6: the one remaining hole in "secrets never touch YAML/JSON" — a real
+#: MCP server config (e.g. one exported from Claude Desktop, or hand-
+#: written for a private instrument API) routinely needs an API key/token
+#: in its `env` block, and until now that meant a plaintext value sitting
+#: right in `mcp.json`. Either prefix on an `env` value defers it to
+#: aida.config.secrets instead — "keyring:" reads more naturally
+#: standalone, "secret:" mirrors provider profiles' own `secret_ref`
+#: terminology, so both are accepted.
+_SECRET_ENV_PREFIXES = ("keyring:", "secret:")
+
+
+def resolve_env_secrets(env: dict[str, str]) -> dict[str, str]:
+    """Resolve any ``keyring:NAME``/``secret:NAME`` values in an MCP
+    server's ``env`` block into real values via
+    ``aida.config.secrets.get_secret`` — plain values pass through
+    unchanged. Raises ``McpServerError`` (not e.g. KeyError) for a
+    reference with nothing stored under that name, so a missing secret
+    fails the same way any other bad server config does: isolated to that
+    one server, with a clear message, rather than launching a subprocess
+    that's missing a credential it needs and failing confusingly later."""
+    resolved: dict[str, str] = {}
+    for key, value in env.items():
+        prefix = next((p for p in _SECRET_ENV_PREFIXES if value.startswith(p)), None)
+        if prefix is None:
+            resolved[key] = value
+            continue
+        secret_name = value[len(prefix) :]
+        secret_value = get_secret(secret_name) if secret_name else None
+        if secret_value is None:
+            raise McpServerError(
+                f"env var {key!r} references secret {secret_name!r} ({value!r}), but nothing is "
+                f"stored under that name in the OS keychain (or AIDA_SECRET_{secret_name.upper()})"
+            )
+        resolved[key] = secret_value
+    return resolved
 
 #: How long ``start()`` waits for a server to launch, answer the MCP
 #: ``initialize`` handshake, and list its tools.
@@ -244,6 +281,7 @@ class McpServerHandle:
         self.instructions: str | None = None
         self._session: ClientSession | None = None
         self._tools: dict[str, Tool] = {}
+        self._resolved_env: dict[str, str] = {}
         self._serve_task: asyncio.Task[None] | None = None
         self._stop_event: asyncio.Event | None = None
         self._start_error: McpServerError | None = None
@@ -265,6 +303,12 @@ class McpServerHandle:
         caller isolates this to one server."""
         if self._session is not None:
             return list(self._tools.values())
+
+        # B6: resolved here, synchronously, before the subprocess is even
+        # spawned — a missing/misspelled secret reference fails immediately
+        # with a clear message rather than launching a process that's
+        # quietly missing a credential it needs.
+        self._resolved_env = resolve_env_secrets(self.config.env)
 
         self._stop_event = asyncio.Event()
         self._start_error = None
@@ -302,7 +346,7 @@ class McpServerHandle:
         self.stderr = stderr
         try:
             params = StdioServerParameters(
-                command=self.config.command, args=self.config.args, env=self.config.env or None
+                command=self.config.command, args=self.config.args, env=self._resolved_env or None
             )
             async with (
                 stdio_client(params, errlog=stderr) as (read_stream, write_stream),

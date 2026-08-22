@@ -1,5 +1,5 @@
 """Event-stream -> Qt bridge (PLAN.md Phase 5): drives a
-``aida.cli.chat.ChatSession`` (an async API) from Qt's synchronous,
+``aida.core.session.ChatSession`` (an async API) from Qt's synchronous,
 single-threaded GUI event loop, re-emitting every
 ``aida.core.events.AgentEvent`` as a Qt signal.
 
@@ -13,10 +13,14 @@ receiver object that lives on the Qt thread is automatically delivered via
 a queued connection — no manual locking needed, and no widget code ever
 touches asyncio directly.
 
-Nothing in ``aida.core``/``aida.cli`` knows this module exists — it only
-imports ``aida.cli.chat``'s public API (``start_session``, the error
-classes) and ``aida.core.events``, both already Qt-free. That is what keeps
-the "core remains importable and testable without Qt" rule intact.
+Nothing in ``aida.core`` knows this module exists — it only imports
+``aida.core.session``'s public API (``start_session``, the error classes)
+and ``aida.core.events``, both already Qt-free. That is what keeps the
+"core remains importable and testable without Qt" rule intact. (B8: this
+used to import from ``aida.cli.chat`` — the one place the intended layering
+read backwards, ``ui`` reaching into ``cli`` — until the session engine
+moved to ``aida.core.session``; ``aida.cli.chat`` re-exports the same names
+so nothing else needed to change.)
 """
 
 from __future__ import annotations
@@ -27,13 +31,6 @@ import contextlib
 import threading
 from typing import Any
 
-from aida.cli.chat import (
-    ChatSession,
-    UnknownMcpServerError,
-    UnknownProfileError,
-    UnknownWorkspaceError,
-    start_session,
-)
 from aida.coding.runner import run_python_script
 from aida.config.paths import knowledge_db_path
 from aida.config.settings import (
@@ -44,6 +41,13 @@ from aida.config.settings import (
     Settings,
 )
 from aida.core.confirmation import ConfirmationRequest
+from aida.core.session import (
+    ChatSession,
+    UnknownMcpServerError,
+    UnknownProfileError,
+    UnknownWorkspaceError,
+    start_session,
+)
 from aida.knowledge.rag import index as kb_index
 from aida.knowledge.rag.ingest import IngestResult
 from aida.knowledge.rag.ingest import rebuild as ingest_rebuild

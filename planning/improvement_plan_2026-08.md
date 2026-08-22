@@ -224,20 +224,39 @@ is cumbersome" experience.
       actually reaching the real `messages.create` kwargs); CLI cache-note
       display covered in `test_chat_cli.py`.
 
-- [ ] **(B4) Parallel MCP server startup.** `McpManager.start_all` launches
+- [x] **(B4) Parallel MCP server startup.** `McpManager.start_all` launches
       servers sequentially; with 2–3 servers at up to 30 s startup timeout each,
       worst-case session start is additive. `asyncio.gather` over handles keeps
       the same failure isolation (each start already catches `McpServerError`)
       and makes the common case as fast as the slowest server.
 
-- [ ] **(B5) Configurable script/command timeout.** `run_python_script`/
+      **Done (2026-08-22):** `start_all` now launches every configured server
+      concurrently via `asyncio.gather` on a per-server coroutine that catches
+      `McpServerError` and returns `None`, merged back in original config
+      order so tool-name-collision resolution stays deterministic regardless
+      of which server actually finishes first. Test: new
+      `test_start_all_launches_servers_concurrently` in `test_mcp_manager.py`.
+
+- [x] **(B5) Configurable script/command timeout.** `run_python_script`/
       `run_command` are pinned to `DEFAULT_RUN_TIMEOUT_SECONDS = 30` — a real
       reduction/analysis script will blow through that. Add
       `WorkspaceConfig.script_timeout_seconds` (default 30) and an optional
       `timeout` argument in the two tool schemas (capped by the workspace
       value), so the model can ask for more when the task warrants it.
 
-- [ ] **(B6) Secrets in `mcp.json` env blocks.** MCP server `env` values (e.g. a
+      **Done (2026-08-22):** `WorkspaceConfig.script_timeout_seconds` (default
+      30.0) added; `run_python_script`/`run_command` gained an optional
+      `timeout` tool argument, resolved by a new `_effective_timeout` helper
+      that caps a model-requested value at the workspace ceiling (falling
+      back to the workspace default for a missing/invalid/non-positive
+      request). The GUI's Code Editor "Run" button (previously hardcoded to
+      the 30 s default) now uses the workspace's configured timeout too, and
+      the Workspace management dialog gained a spin box to set it. Tests:
+      `test_coding_tools.py`, `test_settings.py`,
+      `tests/ui/test_workspace_management_dialog.py`,
+      `tests/ui/test_code_editor_dialog.py`.
+
+- [x] **(B6) Secrets in `mcp.json` env blocks.** MCP server `env` values (e.g. a
       Tavily/Brave API key for the search server) are stored in plaintext
       `mcp.json` — the one remaining hole in the "secrets never touch
       YAML/JSON" rule. Support a `keyring:NAME` (or `secret:NAME`) value syntax
@@ -245,7 +264,19 @@ is cumbersome" experience.
       `aida.config.secrets`, and let the GUI's env editor offer "store value in
       keychain" instead of masking-only.
 
-- [ ] **(B7) Context-budget visibility.** Trimming works but is invisible
+      **Done (2026-08-22):** `McpServerHandle.start()` now resolves any
+      `keyring:NAME`/`secret:NAME` env value into `self._resolved_env` via a
+      new `resolve_env_secrets` function (using the existing
+      `aida.config.secrets.get_secret`) before spawning the subprocess, so a
+      missing/misspelled secret reference fails fast and is isolated
+      per-server the same way every other `start()` failure already is. The
+      MCP management dialog's server form gained a "Store Value in
+      Keychain…" button that writes through `set_secret` and rewrites the env
+      text to reference it, independent of the existing "hide values"
+      masking toggle. Tests: `test_mcp_server.py` (7 new cases),
+      `tests/ui/test_mcp_management_dialog.py` (2 new cases).
+
+- [x] **(B7) Context-budget visibility.** Trimming works but is invisible
       (logged only), and `estimate_tokens` ignores `tool_calls` arguments, so
       the estimate skews low in tool-heavy sessions. Two small steps: count
       tool-call argument JSON in `estimate_tokens`, and emit a
@@ -253,7 +284,17 @@ is cumbersome" experience.
       prints and the GUI shows in the status bar. This continues the
       "no black boxes" thread from the cost work.
 
-- [ ] **(B8) Move `ChatSession`/`start_session` out of `aida.cli`.** The Qt
+      **Done (2026-08-22):** new `estimate_message_tokens` wraps
+      `estimate_tokens` plus the JSON size of each tool call's
+      `{name, arguments}`, used by `trim_history`'s internal budget
+      calculation instead of undercounting tool-heavy messages. A new
+      `ContextTrimmed(dropped_turns, estimated_tokens)` event (added to the
+      `AgentEvent` union) is yielded by `ChatSession.send()` whenever
+      `_trim_context` actually drops turns; the CLI's `print_event` prints a
+      `[context] trimmed ...` line, and the GUI's `MainWindow` shows the same
+      information in the status bar for 8 seconds.
+
+- [x] **(B8) Move `ChatSession`/`start_session` out of `aida.cli`.** The Qt
       bridge importing `aida.cli.chat` is the one place the layering reads
       wrong (`ui → cli`). Mechanically extract the session engine
       (`ChatSession`, `start_session`, the error types) into
@@ -262,6 +303,23 @@ is cumbersome" experience.
       `aida.cli.chat` so nothing external breaks. Not urgent, but it makes the
       contract test honest and helps every future frontend (Phase 10's
       `aida run` will want the same engine, too).
+
+      **Done (2026-08-22):** the session engine (`ChatSession`,
+      `start_session`, `cli_confirm`, `resolve_mcp_servers`,
+      `resolve_profile`, and the three `Unknown*Error` types, plus their
+      private helpers) moved to a new `aida.core.session` module.
+      `aida.ui.qt.bridge` now imports directly from there instead of from
+      `aida.cli.chat`; `aida.cli.chat` re-exports every one of those names so
+      `aida.cli.conversations` and every existing test keep working
+      unchanged, and keeps only genuinely CLI-frontend code (`print_event`,
+      the REPL loop, Ctrl-C handling, `argparse` wiring, `main`). The ~90
+      `monkeypatch.setattr("aida.cli.chat.NAME", ...)` string patches across
+      10 test files that targeted names now defined in `aida.core.session`
+      (`build_provider`, `McpManager`, `build_embeddings_provider`,
+      `skills_dir`) were updated to the new module path — Python resolves a
+      moved function's internal name lookups against its *new* enclosing
+      module's globals, so the old string patches would otherwise have
+      silently stopped intercepting anything.
 
 Deliberately *not* recommended right now: swapping the RAG store for a vector
 DB, adopting an agent framework, or a web frontend — the plan's original

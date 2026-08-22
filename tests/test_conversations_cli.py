@@ -199,7 +199,7 @@ async def test_resume_async_continues_conversation_with_stored_profile(
     store.append_message(conv_id, Message(role="user", content="earlier turn"), timestamp=T0)
     store.close()
 
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
     monkeypatch.setattr("builtins.input", lambda _prompt="": "/exit")  # end the REPL immediately
 
     rc = await _resume_async(

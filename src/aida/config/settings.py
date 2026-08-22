@@ -477,6 +477,15 @@ class WorkspaceConfig:
     #: name since a saved-scripts location may reasonably live outside
     #: target_folder too.
     saved_scripts_dir: str | None = None
+    #: B5: run_python_script/run_command were pinned to
+    #: aida.coding.runner.DEFAULT_RUN_TIMEOUT_SECONDS (30s, mirrored here as
+    #: the literal default — aida.config is a leaf module and does not
+    #: import from aida.coding) with no way to raise it, a real problem for
+    #: a workspace whose scripts legitimately run long (e.g. a
+    #: multi-minute reduction/fit). Per-workspace rather than global: one
+    #: workspace's long-running jobs shouldn't force every other workspace
+    #: to wait as long for a runaway/hung script to be killed.
+    script_timeout_seconds: float = 30.0
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> WorkspaceConfig:
@@ -497,6 +506,7 @@ class WorkspaceConfig:
             scripting_enabled=data.get("scripting_enabled", True),
             templates_dir=data.get("templates_dir"),
             saved_scripts_dir=data.get("saved_scripts_dir"),
+            script_timeout_seconds=data.get("script_timeout_seconds", 30.0),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -515,6 +525,7 @@ class WorkspaceConfig:
             "scripting_enabled": self.scripting_enabled,
             "templates_dir": self.templates_dir,
             "saved_scripts_dir": self.saved_scripts_dir,
+            "script_timeout_seconds": self.script_timeout_seconds,
         }
 
     def resolved_saved_scripts_dir(self) -> str | None:

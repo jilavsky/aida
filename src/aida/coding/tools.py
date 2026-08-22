@@ -46,6 +46,25 @@ def _default_cwd(workspace: WorkspaceConfig) -> str | None:
     return None
 
 
+def _effective_timeout(arguments: dict[str, Any], workspace: WorkspaceConfig) -> float:
+    """B5: the model may pass a per-call ``timeout`` (a long-running
+    reduction script asking for more than the default 30s), but it's
+    capped at ``workspace.script_timeout_seconds`` — a per-workspace
+    ceiling the user configured, not something a tool call gets to raise
+    unbounded. A missing/non-positive request just falls back to the
+    workspace's own default."""
+    requested = arguments.get("timeout")
+    if requested is None:
+        return workspace.script_timeout_seconds
+    try:
+        requested = float(requested)
+    except (TypeError, ValueError):
+        return workspace.script_timeout_seconds
+    if requested <= 0:
+        return workspace.script_timeout_seconds
+    return min(requested, workspace.script_timeout_seconds)
+
+
 def default_coding_tools(guard: SafetyGuard, *, workspace: WorkspaceConfig | None) -> dict[str, NativeTool]:
     """Empty for ``workspace=None`` (no folders configured, nothing to run
     in) or ``workspace.scripting_enabled=False`` — same "lazy, only if
@@ -61,7 +80,10 @@ def default_coding_tools(guard: SafetyGuard, *, workspace: WorkspaceConfig | Non
         if not candidate.is_file():
             return ToolResult(content=f"Not a file: {candidate}", is_error=True)
         await guard.authorize_run_script(candidate)
-        result = await _run_python_script(candidate, args, interpreter=workspace.python_interpreter, cwd=candidate.parent)
+        timeout = _effective_timeout(arguments, workspace)
+        result = await _run_python_script(
+            candidate, args, interpreter=workspace.python_interpreter, cwd=candidate.parent, timeout=timeout
+        )
         return ToolResult(content=_format_run_result(result), is_error=result.timed_out or result.returncode != 0)
 
     @_tool
@@ -78,7 +100,8 @@ def default_coding_tools(guard: SafetyGuard, *, workspace: WorkspaceConfig | Non
             argv = split_command(command)
         except ValueError as exc:
             return ToolResult(content=f"Could not parse command {command!r}: {exc}", is_error=True)
-        result = await run_subprocess(argv, cwd=cwd)
+        timeout = _effective_timeout(arguments, workspace)
+        result = await run_subprocess(argv, cwd=cwd, timeout=timeout)
         return ToolResult(content=_format_run_result(result), is_error=result.timed_out or result.returncode != 0)
 
     tools = [
@@ -94,6 +117,14 @@ def default_coding_tools(guard: SafetyGuard, *, workspace: WorkspaceConfig | Non
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "Command-line arguments to pass to the script.",
+                        },
+                        "timeout": {
+                            "type": "number",
+                            "description": (
+                                "Seconds to allow before killing the script, for scripts that "
+                                "legitimately run long. Capped by the workspace's configured "
+                                "script_timeout_seconds; omit to use that default."
+                            ),
                         },
                     },
                     "required": ["path"],
@@ -115,6 +146,14 @@ def default_coding_tools(guard: SafetyGuard, *, workspace: WorkspaceConfig | Non
                         "cwd": {
                             "type": "string",
                             "description": "Working directory (defaults to the workspace's target/source folder).",
+                        },
+                        "timeout": {
+                            "type": "number",
+                            "description": (
+                                "Seconds to allow before killing the command, for commands that "
+                                "legitimately run long. Capped by the workspace's configured "
+                                "script_timeout_seconds; omit to use that default."
+                            ),
                         },
                     },
                     "required": ["command"],

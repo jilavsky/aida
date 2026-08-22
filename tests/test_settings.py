@@ -505,6 +505,20 @@ def test_workspace_coding_fields_default(aida_home: Path):
     assert loaded.scripting_enabled is True
     assert loaded.templates_dir is None
     assert loaded.saved_scripts_dir is None
+    assert loaded.script_timeout_seconds == 30.0
+
+
+def test_workspace_script_timeout_seconds_roundtrip(aida_home: Path):
+    """B5: WorkspaceConfig.script_timeout_seconds — the per-workspace
+    ceiling run_python_script/run_command are capped by."""
+    from aida.config.settings import WorkspaceConfig
+
+    cfg = WorkspacesConfig(
+        workspaces={"long-runs": WorkspaceConfig(name="long-runs", script_timeout_seconds=300.0)}
+    )
+    save_workspaces_config(cfg, aida_home)
+    loaded = load_workspaces_config(aida_home).workspaces["long-runs"]
+    assert loaded.script_timeout_seconds == 300.0
 
 
 def test_workspace_templates_and_saved_scripts_dir_roundtrip(aida_home: Path):

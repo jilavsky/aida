@@ -24,7 +24,7 @@ def _settings_with_profile(name: str = "mock-profile") -> object:
 
 
 def test_start_success_fires_session_ready(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
     settings = _settings_with_profile()
 
     bridge = ChatBridge(loop_thread)
@@ -57,7 +57,7 @@ def test_start_unknown_profile_fires_startup_failed(qapp, loop_thread, aida_home
 def test_send_emits_events_in_order_and_turn_finished(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hello there")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hello there")]))
     settings = _settings_with_profile()
 
     bridge = ChatBridge(loop_thread)
@@ -109,7 +109,7 @@ def test_switch_profile_success(qapp, loop_thread, aida_home: Path, records_home
     settings.providers.profiles["a"] = ProviderProfile(name="a", kind="openai_compat", model="model-a")
     settings.providers.profiles["b"] = ProviderProfile(name="b", kind="openai_compat", model="model-b")
     providers = {"a": MockProvider([MockTurn(text="from a")]), "b": MockProvider([MockTurn(text="from b")])}
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: providers[profile.name])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: providers[profile.name])
 
     bridge = ChatBridge(loop_thread)
     ready = []
@@ -128,7 +128,7 @@ def test_switch_profile_success(qapp, loop_thread, aida_home: Path, records_home
 
 
 def test_switch_profile_unknown_fires_failure_signal(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
     settings = _settings_with_profile()
 
     bridge = ChatBridge(loop_thread)
@@ -154,7 +154,7 @@ def test_shutdown_closes_provider(qapp, loop_thread, aida_home: Path, records_ho
         async def aclose(self):
             closed.append(True)
 
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: _TrackingProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: _TrackingProvider([MockTurn(text="hi")]))
     settings = _settings_with_profile()
 
     bridge = ChatBridge(loop_thread)
@@ -179,7 +179,7 @@ def test_cancel_forwards_to_the_session(qapp, loop_thread, aida_home: Path, reco
     ``aida.core.agent.AgentLoop`` and are covered by its own tests from
     earlier phases; what's specific to Phase 5 is that the GUI's wiring
     actually reaches it, which is what this pins down."""
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
     settings = _settings_with_profile()
 
     bridge = ChatBridge(loop_thread)
@@ -250,7 +250,7 @@ def test_start_defaults_confirm_callback_to_bridge_confirm(
     deny_all-less default) or hanging."""
     target = tmp_path / "note.txt"
     monkeypatch.setattr(
-        "aida.cli.chat.build_provider",
+        "aida.core.session.build_provider",
         lambda profile: MockProvider(
             [
                 MockTurn(

@@ -24,10 +24,12 @@ from pathlib import Path
 import pytest
 
 from aida.artifacts.base import ImageArtifact, JsonArtifact, TextArtifact
+from aida.config import secrets
 from aida.config.settings import McpServerConfig
 from aida.mcp.manager import McpManager
 from aida.mcp.results import convert_result
-from aida.mcp.server import McpServerError, McpServerHandle
+from aida.mcp.server import McpServerError, McpServerHandle, resolve_env_secrets
+from tests.test_secrets import _use_memory_backend
 
 MOCK_SERVER_PATH = Path(__file__).parent / "mock_mcp_server.py"
 
@@ -36,6 +38,7 @@ ALL_TOOL_NAMES = {
     "get_image",
     "get_json_data",
     "get_multi_part",
+    "echo_env",
     "always_fails",
     "hang_forever",
     "crash_process",
@@ -255,6 +258,87 @@ async def test_start_failure_raises_mcp_server_error():
     with pytest.raises(McpServerError):
         await h.start()
     assert not h.is_running
+
+
+# --- B6: secrets in mcp.json env blocks -------------------------------------
+
+
+def test_resolve_env_secrets_passes_plain_values_through():
+    assert resolve_env_secrets({"FOO": "bar"}) == {"FOO": "bar"}
+
+
+def test_resolve_env_secrets_resolves_keyring_prefix(monkeypatch):
+    _use_memory_backend(monkeypatch)
+    secrets.set_secret("my-token", "sk-real-value")
+    resolved = resolve_env_secrets({"API_TOKEN": "keyring:my-token"})
+    assert resolved == {"API_TOKEN": "sk-real-value"}
+
+
+def test_resolve_env_secrets_resolves_secret_prefix(monkeypatch):
+    """"secret:" is accepted too — mirrors provider profiles' own
+    secret_ref terminology, rather than only the "keyring:" spelling."""
+    _use_memory_backend(monkeypatch)
+    secrets.set_secret("my-token", "sk-real-value")
+    resolved = resolve_env_secrets({"API_TOKEN": "secret:my-token"})
+    assert resolved == {"API_TOKEN": "sk-real-value"}
+
+
+def test_resolve_env_secrets_mixes_plain_and_referenced_values(monkeypatch):
+    _use_memory_backend(monkeypatch)
+    secrets.set_secret("my-token", "sk-real-value")
+    resolved = resolve_env_secrets({"PLAIN": "unchanged", "API_TOKEN": "keyring:my-token"})
+    assert resolved == {"PLAIN": "unchanged", "API_TOKEN": "sk-real-value"}
+
+
+def test_resolve_env_secrets_missing_secret_raises(monkeypatch):
+    _use_memory_backend(monkeypatch)
+    with pytest.raises(McpServerError, match="no-such-secret"):
+        resolve_env_secrets({"API_TOKEN": "keyring:no-such-secret"})
+
+
+@pytest.mark.asyncio
+async def test_start_raises_for_missing_secret_without_spawning(monkeypatch):
+    """A missing/misspelled secret reference fails start() synchronously,
+    same as any other bad server config — isolated to just that one
+    server by the caller (McpManager.start_all/start_server already wrap
+    handle.start() in try/except McpServerError)."""
+    _use_memory_backend(monkeypatch)
+    config = McpServerConfig(
+        name="mock-mcp",
+        command=sys.executable,
+        args=[str(MOCK_SERVER_PATH)],
+        env={"API_TOKEN": "keyring:never-stored"},
+    )
+    h = McpServerHandle(config)
+    with pytest.raises(McpServerError, match="never-stored"):
+        await h.start()
+    assert not h.is_running
+
+
+@pytest.mark.asyncio
+async def test_start_resolves_keyring_env_value_and_child_sees_the_real_value(monkeypatch):
+    """End-to-end: a "keyring:NAME" env value is resolved to the real
+    secret *before* the subprocess is spawned, and that subprocess (via
+    the mock server's echo_env tool) actually receives the real value —
+    not the "keyring:NAME" reference string itself."""
+    _use_memory_backend(monkeypatch)
+    secrets.set_secret("my-mock-token", "sk-actual-secret-value")
+    config = McpServerConfig(
+        name="mock-mcp",
+        command=sys.executable,
+        args=[str(MOCK_SERVER_PATH)],
+        env={"MOCK_API_TOKEN": "keyring:my-mock-token"},
+    )
+    h = McpServerHandle(config)
+    try:
+        await h.start()
+        result = await h.call_tool("echo_env", {"name": "MOCK_API_TOKEN"})
+    finally:
+        await h.stop()
+    artifacts = convert_result(result)
+    text_artifacts = [a for a in artifacts if isinstance(a, TextArtifact)]
+    assert len(text_artifacts) == 1
+    assert text_artifacts[0].text == "sk-actual-secret-value"
 
 
 # --- a server that starts but never answers initialize ---------------------

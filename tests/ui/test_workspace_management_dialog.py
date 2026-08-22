@@ -42,6 +42,7 @@ def test_workspace_form_seeds_fields_when_editing(qapp, aida_home: Path):
         scripting_enabled=False,
         python_interpreter="/usr/bin/python3",
         command_allowlist=["git status"],
+        script_timeout_seconds=180.0,
     )
     dialog = WorkspaceFormDialog(settings=settings, skills_dir=aida_home / "skills", workspace=workspace)
 
@@ -55,6 +56,7 @@ def test_workspace_form_seeds_fields_when_editing(qapp, aida_home: Path):
     assert not dialog._scripting_checkbox.isChecked()
     assert dialog._interpreter_edit.text() == "/usr/bin/python3"
     assert dialog._command_allowlist_edit.toPlainText() == "git status"
+    assert dialog._script_timeout_spin.value() == 180
 
 
 def test_workspace_form_defaults_when_adding(qapp, aida_home: Path):
@@ -64,6 +66,23 @@ def test_workspace_form_defaults_when_adding(qapp, aida_home: Path):
     assert dialog._mcp_group_combo.currentText() == "none"
     assert dialog._safety_combo.currentText() == "confirm"
     assert dialog._scripting_checkbox.isChecked()
+    assert dialog._script_timeout_spin.value() == 30
+
+
+def test_workspace_form_script_timeout_round_trips_into_result_config(qapp, aida_home: Path):
+    """B5: the GUI's Script/command timeout field is the last thing this
+    dialog reconstructs into a WorkspaceConfig — before this, the field
+    didn't exist at all, so an edited timeout would have silently been
+    lost (result_config() rebuilds a fresh WorkspaceConfig from just the
+    form widgets, same footgun that already applies to templates_dir/
+    saved_scripts_dir, which this dialog still doesn't expose)."""
+    settings = _settings_with_a_profile(aida_home)
+    dialog = WorkspaceFormDialog(settings=settings, skills_dir=aida_home / "skills")
+    dialog._name_edit.setText("ws")
+    dialog._script_timeout_spin.setValue(600)
+
+    config = dialog.result_config()
+    assert config.script_timeout_seconds == 600.0
 
 
 def test_workspace_form_result_config_reflects_edited_fields(qapp, aida_home: Path):

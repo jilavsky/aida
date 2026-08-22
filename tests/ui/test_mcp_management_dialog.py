@@ -11,6 +11,7 @@ import json
 import sys
 from pathlib import Path
 
+from aida.config import secrets as secrets_module
 from aida.config.settings import (
     McpConfig,
     McpServerConfig,
@@ -118,6 +119,51 @@ def test_edit_server_via_dialog_action(qapp, aida_home: Path):
     assert load_mcp_config(aida_home).servers["pyirena"].command == "/new"
 
 
+# --- B6: "Store Value in Keychain" -------------------------------------
+
+
+def test_store_value_in_keychain_replaces_env_line_with_keyring_ref(qapp, aida_home: Path, monkeypatch):
+    """The env editor's new button: pick which KEY, name a secret, confirm
+    its value -> the real value goes into the OS keychain and the env text
+    is rewritten to reference it, leaving other env lines untouched."""
+    from tests.test_secrets import _use_memory_backend
+
+    _use_memory_backend(monkeypatch)
+    settings = load_settings()
+    form = ServerFormDialog(mcp_config=settings.mcp, skills_dir=aida_home / "skills")
+    form._name_edit.setText("pyirena")
+    form._env_edit.setPlainText("API_TOKEN=sk-plaintext-value\nOTHER=unchanged")
+
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QInputDialog.getItem", lambda *a, **k: ("API_TOKEN", True)
+    )
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QInputDialog.getText",
+        lambda parent, title, label, *rest, **kw: (
+            ("pyirena-token", True) if title == "Secret Name" else ("sk-plaintext-value", True)
+        ),
+    )
+    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.QMessageBox.information", lambda *a, **k: None)
+
+    form._on_store_secret_in_keychain()
+
+    assert secrets_module.get_secret("pyirena-token") == "sk-plaintext-value"
+    config = form.result_config()
+    assert config.env["API_TOKEN"] == "keyring:pyirena-token"
+    assert config.env["OTHER"] == "unchanged"
+
+
+def test_store_value_in_keychain_with_no_env_vars_is_a_safe_noop(qapp, aida_home: Path, monkeypatch):
+    settings = load_settings()
+    form = ServerFormDialog(mcp_config=settings.mcp, skills_dir=aida_home / "skills")
+    informed = []
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.information", lambda *a, **k: informed.append(True)
+    )
+    form._on_store_secret_in_keychain()  # must not raise
+    assert informed == [True]
+
+
 def test_remove_server_with_confirmation(qapp, aida_home: Path, monkeypatch):
     from aida.config.settings import load_mcp_config
 
@@ -213,7 +259,7 @@ def test_groups_dialog_delete(qapp, aida_home: Path, monkeypatch):
 
 
 def _make_bridge(qapp, loop_thread, settings, monkeypatch, script) -> ChatBridge:
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider(script))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider(script))
     bridge = ChatBridge(loop_thread)
     bridge.start(settings, profile_name="mock-profile")
     assert pump_until(qapp, lambda: bridge.session is not None or bridge.mcp_manager is not None or True, timeout=10.0)
@@ -301,7 +347,7 @@ def test_confirm_flagged_tool_triggers_the_modal_even_in_relaxed_workspace(
     )
 
     monkeypatch.setattr(
-        "aida.cli.chat.build_provider",
+        "aida.core.session.build_provider",
         lambda profile: MockProvider(
             [MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp__echo_text", id="c1")]), MockTurn(text="done")]
         ),

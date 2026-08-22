@@ -174,7 +174,11 @@ class FolderDisplay(QGroupBox):
     save_to_workspace_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__("Folders", parent)
+        # Renamed from "Folders" — this group box covers everything a
+        # session is allowed to touch for the active workspace (source/
+        # target folders, the command allowlist, the Python interpreter),
+        # not just folders; "Workspace permissions" says that plainly.
+        super().__init__("Workspace permissions", parent)
         self._source_folders: list[str] = []
         self._target_folder: str | None = None
         self._sidecar_folder_name: str = "figures"
@@ -365,28 +369,33 @@ class FolderDisplay(QGroupBox):
 
 
 class McpQuickPanel(QGroupBox):
-    """Shows the current workspace's enabled MCP group and a checkbox per
-    server currently known to ``mcp.json`` — full server management
-    (add/edit/remove servers, live enable/disable) is Phase 7's
-    ``McpManagementDialog``.
+    """Shows a checkbox per server currently known to ``mcp.json`` and lets
+    the user start/stop each one directly — full server management
+    (add/edit/remove servers, tool inspection, logs) is still Phase 7's
+    ``McpManagementDialog``, reachable via the "MCP Servers…" button below
+    the checkboxes.
 
     v1 shipped these checkboxes as if ticking one would change which
-    servers start — but which servers are enabled is decided entirely by
-    the workspace's ``mcp_group`` (resolved via
-    ``aida.mcp.groups.resolve_group``); there is no per-workspace explicit
-    server list for a checkbox to write to, and nothing ever connected
-    ``enabled_servers_changed`` to anything. Ticking a box silently did
-    nothing — "AIDA ignored my setting". Rather than invent a new config
-    concept to make the checkboxes real, they're now a read-only status
-    display (disabled, but still showing which servers the active group
-    resolves to) plus a "MCP Servers…" button that opens the real
-    management dialog — "a misleading control is worse than no control".
-    ``enabled_servers()``/``enabled_servers_changed`` are kept for tests and
-    any future caller that wants to inspect the resolved set, but the boxes
-    themselves no longer accept user input.
+    servers start, but nothing was wired up — a real bug, fixed by
+    disabling them (2026-08-22 note above the fix in
+    planning/improvement_plan_2026-08.md §1: "a misleading control is worse
+    than no control"). This is the follow-up the user actually wanted
+    instead of the read-only compromise: ticking/unticking now really
+    starts/stops that server (``server_start_requested``/
+    ``server_stop_requested`` — ``aida.ui.qt.main_window`` is the one place
+    that turns those into real ``ChatBridge.start_mcp_server``/
+    ``stop_mcp_server`` calls, same live-control pattern
+    ``McpManagementDialog`` already used). Checked state is not
+    self-maintained: it always reflects whatever ``set_servers`` was last
+    told is actually running, so a failed start (bad command, server
+    crashed) or a stop from the full management dialog shows up here
+    correctly on the next refresh rather than the checkbox silently lying
+    about what's really running.
     """
 
     enabled_servers_changed = Signal(list)
+    server_start_requested = Signal(str)  # server name — user checked the box
+    server_stop_requested = Signal(str)  # server name — user unchecked the box
     manage_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -400,6 +409,16 @@ class McpQuickPanel(QGroupBox):
         self._layout.addWidget(self._manage_button)
 
     def set_servers(self, server_names: list[str], *, enabled: list[str], group_name: str | None) -> None:
+        """``enabled`` is which servers are *actually running right now*
+        (``aida.mcp.manager.McpManager.running_server_names``), not merely
+        which ones the workspace's ``mcp_group`` would resolve to — the
+        checkbox is a live control now, so its checked state has to mean
+        "running", not "would start". Rebuilding the checkboxes here (own
+        signals blocked) rather than just calling ``setChecked`` on
+        existing ones is deliberately the same "clear and rebuild" pattern
+        as before, so a changed server list (workspace switch, a server
+        added/removed via the management dialog) is always handled
+        correctly too."""
         self._group_label.setText(f"Group: {group_name or '(none)'}")
         for checkbox in self._checkboxes.values():
             checkbox.deleteLater()
@@ -408,21 +427,21 @@ class McpQuickPanel(QGroupBox):
         enabled_set = set(enabled)
         for name in server_names:
             checkbox = QCheckBox(name, self)
+            checkbox.blockSignals(True)
             checkbox.setChecked(name in enabled_set)
-            # Read-only status, not a live control — see the class
-            # docstring. Left connected to _on_toggle so a programmatic
-            # setChecked() (tests, or a future caller) still reflects into
-            # enabled_servers()/enabled_servers_changed; a user simply can't
-            # click it since it's disabled.
-            checkbox.setEnabled(False)
-            checkbox.stateChanged.connect(self._on_toggle)
+            checkbox.blockSignals(False)
+            checkbox.toggled.connect(lambda checked, name=name: self._on_toggle(name, checked))
             self._layout.insertWidget(self._layout.count() - 1, checkbox)
             self._checkboxes[name] = checkbox
 
     def enabled_servers(self) -> list[str]:
         return [name for name, box in self._checkboxes.items() if box.isChecked()]
 
-    def _on_toggle(self, _state: int) -> None:
+    def _on_toggle(self, name: str, checked: bool) -> None:
+        if checked:
+            self.server_start_requested.emit(name)
+        else:
+            self.server_stop_requested.emit(name)
         self.enabled_servers_changed.emit(self.enabled_servers())
 
 

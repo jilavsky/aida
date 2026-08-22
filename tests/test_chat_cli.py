@@ -26,6 +26,7 @@ from aida.config.settings import (
 )
 from aida.core.events import (
     AgentError,
+    ContextTrimmed,
     FileArtifactCreated,
     ImageArtifactCreated,
     RetrievalPerformed,
@@ -168,6 +169,20 @@ def test_print_event_file_artifact(capsys):
     assert "/tmp/x.md" in capsys.readouterr().out
 
 
+def test_print_event_context_trimmed(capsys):
+    print_event(ContextTrimmed(dropped_turns=3, estimated_tokens=512))
+    out = capsys.readouterr().out
+    assert "3" in out
+    assert "512" in out
+    assert "context" in out.lower()
+
+
+def test_print_event_context_trimmed_singular_turn_wording(capsys):
+    print_event(ContextTrimmed(dropped_turns=1, estimated_tokens=100))
+    out = capsys.readouterr().out
+    assert "1 old turn " in out  # not "1 old turns"
+
+
 def test_print_event_agent_error(capsys):
     print_event(AgentError(layer="provider", message="boom", detail="net down"))
     out = capsys.readouterr().out
@@ -222,7 +237,7 @@ def test_print_event_usage_info_with_duration_shows_cache_note_too(capsys):
 
 
 def test_completion_settings_for_profile_falls_back_to_defaults_when_unset(aida_home: Path, records_home: Path):
-    from aida.cli.chat import _completion_settings_for_profile
+    from aida.core.session import _completion_settings_for_profile
 
     settings = _settings_with_profile()
     profile = settings.providers.profiles["mock-profile"]
@@ -236,7 +251,7 @@ def test_completion_settings_for_profile_falls_back_to_defaults_when_unset(aida_
 
 
 def test_completion_settings_for_profile_uses_profile_overrides(aida_home: Path, records_home: Path):
-    from aida.cli.chat import _completion_settings_for_profile
+    from aida.core.session import _completion_settings_for_profile
 
     settings = _settings_with_profile(temperature=0.2, max_tokens=512, supports_vision=True)
     profile = settings.providers.profiles["mock-profile"]
@@ -286,7 +301,7 @@ async def test_cli_confirm_shows_the_request_detail(monkeypatch):
 async def test_chat_session_send_streams_and_updates_history(monkeypatch, aida_home: Path, records_home: Path):
     settings = _settings_with_profile()
     provider = MockProvider([MockTurn(text="hi there")])
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
 
     session = ChatSession(settings, "mock-profile")
     events = [e async for e in session.send("hello")]
@@ -310,7 +325,7 @@ async def test_chat_session_send_attaches_images_to_the_user_message(
 
     settings = _settings_with_profile()
     provider = MockProvider([MockTurn(text="looks like a plot")])
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
 
     session = ChatSession(settings, "mock-profile")
     refs = [ImageRef(path="/tmp/plot.png", mime_type="image/png")]
@@ -327,7 +342,7 @@ async def test_chat_session_send_with_no_images_defaults_to_empty_list(
 ):
     settings = _settings_with_profile()
     provider = MockProvider([MockTurn(text="hi there")])
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
 
     session = ChatSession(settings, "mock-profile")
     _ = [e async for e in session.send("hello")]
@@ -346,7 +361,7 @@ async def test_chat_session_profile_switch_preserves_history(monkeypatch, aida_h
     provider_a = MockProvider([MockTurn(text="from a")])
     provider_b = MockProvider([MockTurn(text="from b")])
     providers = {"profile-a": provider_a, "profile-b": provider_b}
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: providers[profile.name])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: providers[profile.name])
 
     session = ChatSession(settings, "profile-a")
     _ = [e async for e in session.send("first")]
@@ -388,7 +403,7 @@ async def test_chat_session_switch_profile_closes_old_provider(monkeypatch, aida
     provider_a = _TrackingProvider("a", [MockTurn(text="from a")])
     provider_b = _TrackingProvider("b", [MockTurn(text="from b")])
     providers = {"profile-a": provider_a, "profile-b": provider_b}
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: providers[profile.name])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: providers[profile.name])
 
     session = ChatSession(settings, "profile-a")
     await session.switch_profile("profile-b")
@@ -403,7 +418,7 @@ def test_chat_session_uses_configured_max_iterations(monkeypatch, aida_home: Pat
     it. AppConfig.max_agent_iterations must actually reach the AgentLoop."""
     settings = _settings_with_profile()
     settings.app.max_agent_iterations = 250
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
 
     session = ChatSession(settings, "mock-profile")
     assert session.loop.max_iterations == 250
@@ -418,7 +433,7 @@ async def test_chat_session_switch_profile_keeps_configured_max_iterations(
     settings.providers.profiles["profile-b"] = ProviderProfile(
         name="profile-b", kind="openai_compat", model="model-b"
     )
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
 
     session = ChatSession(settings, "profile-a")
     await session.switch_profile("profile-b")
@@ -438,7 +453,7 @@ async def test_chat_session_accumulates_usage_across_turns(monkeypatch, aida_hom
             MockTurn(text="second", input_tokens=50, output_tokens=10),
         ]
     )
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
 
     session = ChatSession(settings, "mock-profile")
     assert session.total_input_tokens == 0
@@ -463,7 +478,7 @@ async def test_repl_max_iterations_command_raises_the_cap_mid_session(
     dialog at all. /max-iterations must take effect on session.loop
     immediately, without restarting."""
     settings = _settings_with_profile()
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
     session = ChatSession(settings, "mock-profile")
     assert session.loop.max_iterations == 10
 
@@ -479,7 +494,7 @@ async def test_repl_max_iterations_command_rejects_non_numeric_input(
     monkeypatch, aida_home: Path, records_home: Path, capsys
 ):
     settings = _settings_with_profile()
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
     session = ChatSession(settings, "mock-profile")
 
     lines = iter(["/max-iterations nope", "/exit"])
@@ -504,10 +519,10 @@ async def test_chat_session_loads_skills_into_system_message(monkeypatch, aida_h
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "saxs-basics.md").write_text("SAXS is small-angle X-ray scattering.", encoding="utf-8")
     monkeypatch.setattr(paths_module, "skills_dir", lambda: skills_dir)
-    monkeypatch.setattr("aida.cli.chat.skills_dir", lambda: skills_dir)
+    monkeypatch.setattr("aida.core.session.skills_dir", lambda: skills_dir)
 
     settings = _settings_with_profile()
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
 
     session = ChatSession(settings, "mock-profile", skill_names=["saxs-basics"])
     assert session.messages
@@ -523,7 +538,7 @@ async def test_chat_session_tool_round_trip_with_default_tools(monkeypatch, aida
             MockTurn(text="the time is now"),
         ]
     )
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
     settings = _settings_with_profile()
 
     session = ChatSession(settings, "mock-profile")
@@ -564,7 +579,7 @@ async def test_send_records_image_artifact_with_the_tool_messages_future_seq(
     provider = MockProvider(
         [MockTurn(tool_calls=[MockToolCall(name="get_plot", id="call_1")]), MockTurn(text="here it is")]
     )
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
     settings = _settings_with_profile()
     recorder = _recorder(tmp_path)
     session = ChatSession(settings, "mock-profile", tools={"get_plot": tool}, recorder=recorder)
@@ -593,7 +608,7 @@ async def test_send_records_file_artifact_with_the_tool_messages_future_seq(
     provider = MockProvider(
         [MockTurn(tool_calls=[MockToolCall(name="get_report", id="call_1")]), MockTurn(text="here it is")]
     )
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
     settings = _settings_with_profile()
     recorder = _recorder(tmp_path)
     session = ChatSession(settings, "mock-profile", tools={"get_report": tool}, recorder=recorder)
@@ -634,7 +649,7 @@ async def test_send_injects_retrieved_context_for_a_configured_kb(
 ):
     settings = _settings_with_profile()
     provider = MockProvider([MockTurn(text="here is the answer")])
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
 
     kb = await _seeded_active_kb(tmp_path)
     session = ChatSession(settings, "mock-profile", active_knowledge_bases=[kb])
@@ -660,7 +675,7 @@ async def test_send_never_persists_the_ephemeral_context_message_and_it_does_not
 ):
     settings = _settings_with_profile()
     provider = MockProvider([MockTurn(text="answer 1"), MockTurn(text="answer 2")])
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
 
     kb = await _seeded_active_kb(tmp_path)
     session = ChatSession(settings, "mock-profile", active_knowledge_bases=[kb])
@@ -686,7 +701,7 @@ async def test_send_with_no_active_knowledge_bases_performs_no_retrieval(
 ):
     settings = _settings_with_profile()
     provider = MockProvider([MockTurn(text="hi there")])
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
 
     session = ChatSession(settings, "mock-profile")  # no active_knowledge_bases at all
     events = [e async for e in session.send("hello")]
@@ -709,7 +724,7 @@ async def test_send_trims_the_history_to_the_configured_budget(
 ):
     settings = _settings_with_profile()
     settings.app.max_context_tokens = 200  # ~800 characters
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
 
     session = ChatSession(settings, "mock-profile")
     for i in range(40):
@@ -731,7 +746,7 @@ async def test_send_does_not_trim_when_the_budget_is_disabled(
 ):
     settings = _settings_with_profile()
     settings.app.max_context_tokens = 0
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
 
     session = ChatSession(settings, "mock-profile")
     for i in range(40):
@@ -745,13 +760,70 @@ async def test_send_does_not_trim_when_the_budget_is_disabled(
     await session.aclose()
 
 
+@pytest.mark.asyncio
+async def test_send_yields_context_trimmed_event_when_it_actually_trims(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """B7: trimming used to be a log line only — send() now yields a
+    ContextTrimmed event the frontend can show, with a real dropped_turns
+    count and a post-trim token estimate."""
+    settings = _settings_with_profile()
+    settings.app.max_context_tokens = 200  # ~800 characters
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+
+    session = ChatSession(settings, "mock-profile")
+    for i in range(40):
+        session.messages.append(Message(role="user", content=f"old question {i} " + "x" * 400))
+        session.messages.append(Message(role="assistant", content="old answer " + "y" * 400))
+
+    events = [e async for e in session.send("the new question")]
+    trim_events = [e for e in events if isinstance(e, ContextTrimmed)]
+    assert len(trim_events) == 1
+    assert trim_events[0].dropped_turns > 0
+    assert trim_events[0].estimated_tokens > 0
+    await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_send_yields_no_context_trimmed_event_when_nothing_was_dropped(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    settings = _settings_with_profile()  # default max_context_tokens is generous
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+
+    session = ChatSession(settings, "mock-profile")
+    events = [e async for e in session.send("hello")]
+    assert not any(isinstance(e, ContextTrimmed) for e in events)
+    await session.aclose()
+
+
+def test_estimate_message_tokens_counts_tool_call_arguments():
+    """B7: estimate_tokens(message.content) alone ignored tool_calls
+    entirely — a tool-heavy message (empty/short content, a big arguments
+    payload) used to cost almost nothing in the trim budget."""
+    from aida.core.context import estimate_message_tokens, estimate_tokens
+    from aida.providers.base import ToolCall
+
+    plain = Message(role="assistant", content="short reply")
+    tool_heavy = Message(
+        role="assistant",
+        content="",
+        tool_calls=[ToolCall(id="c1", name="plot", arguments={"path": "x" * 2000})],
+    )
+    assert estimate_message_tokens(plain) == estimate_tokens("short reply")
+    # A message with a large tool-call payload and empty content must cost
+    # meaningfully more than one with only that empty content — before B7
+    # it cost exactly estimate_tokens(""), regardless of arguments size.
+    assert estimate_message_tokens(tool_heavy) > estimate_tokens("") + 400
+
+
 def test_chat_session_repairs_broken_resumed_history(monkeypatch, aida_home: Path, records_home: Path):
     """A conversation killed mid-turn leaves an announced tool call with no
     result — a history the provider rejects outright on the next turn."""
     from aida.providers.base import ToolCall
 
     settings = _settings_with_profile()
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
     broken = [
         Message(role="user", content="plot everything"),
         Message(
@@ -780,14 +852,14 @@ async def test_ephemeral_context_message_is_removed_by_identity_not_equality(
     excluded the context message by *identity*; removal now does too."""
     settings = _settings_with_profile()
     provider = MockProvider([MockTurn(text="answer")])
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
 
     kb = await _seeded_active_kb(tmp_path)
     session = ChatSession(settings, "mock-profile", active_knowledge_bases=[kb])
 
     # A real earlier message that happens to equal the context message this
     # turn will generate (the user pasted it back in, say).
-    from aida.cli.chat import _format_retrieved_context
+    from aida.core.session import _format_retrieved_context
 
     passages = await session._retrieve_context("How does Unified Fit work?")
     look_alike = Message(role="user", content=_format_retrieved_context(passages))

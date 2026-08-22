@@ -398,16 +398,60 @@ def test_mcp_quick_panel_reset_servers_clears_old_checkboxes(qapp):
     assert list(panel._checkboxes.keys()) == ["other"]
 
 
-def test_mcp_quick_panel_checkboxes_are_read_only(qapp):
-    """Bug report: ticking a checkbox in the quick panel silently did
-    nothing — enabled_servers_changed had zero receivers anywhere. Rather
-    than wire it to a config concept that doesn't exist (a per-workspace
-    explicit server list independent of mcp_group), the checkboxes are now
-    disabled so the user can't be misled into thinking a click does
-    something; "MCP Servers…" is the real entry point."""
+def test_mcp_quick_panel_checkboxes_are_now_live_controls(qapp):
+    """Follow-up to the "ticking a checkbox silently did nothing" bug
+    report: v1's fix disabled the checkboxes outright (read-only status,
+    "MCP Servers…" as the only real entry point). The actual ask was for
+    the checkboxes to work, not just stop lying — they're enabled again."""
     panel = McpQuickPanel()
     panel.set_servers(["pyirena", "bait"], enabled=["pyirena"], group_name="analysis")
-    assert all(not box.isEnabled() for box in panel._checkboxes.values())
+    assert all(box.isEnabled() for box in panel._checkboxes.values())
+
+
+def test_mcp_quick_panel_checking_a_box_emits_start_requested(qapp):
+    panel = McpQuickPanel()
+    panel.set_servers(["pyirena", "bait"], enabled=["pyirena"], group_name="analysis")
+    started = []
+    panel.server_start_requested.connect(started.append)
+    panel._checkboxes["bait"].setChecked(True)
+    assert started == ["bait"]
+
+
+def test_mcp_quick_panel_unchecking_a_box_emits_stop_requested(qapp):
+    panel = McpQuickPanel()
+    panel.set_servers(["pyirena", "bait"], enabled=["pyirena"], group_name="analysis")
+    stopped = []
+    panel.server_stop_requested.connect(stopped.append)
+    panel._checkboxes["pyirena"].setChecked(False)
+    assert stopped == ["pyirena"]
+
+
+def test_mcp_quick_panel_set_servers_does_not_emit_requests(qapp):
+    """set_servers is a refresh, not a user action — programmatically
+    setting the initial checked state must not fire start/stop requests
+    right back at whatever just supplied that state (that would be an
+    infinite refresh loop through aida.ui.qt.main_window)."""
+    panel = McpQuickPanel()
+    started = []
+    stopped = []
+    panel.server_start_requested.connect(started.append)
+    panel.server_stop_requested.connect(stopped.append)
+    panel.set_servers(["pyirena", "bait"], enabled=["pyirena"], group_name="analysis")
+    assert started == []
+    assert stopped == []
+
+
+def test_mcp_quick_panel_enabled_now_means_actually_running(qapp):
+    """The checked state is McpQuickPanel's whole point now — it must
+    reflect exactly the `enabled` list passed in, regardless of any prior
+    state, since aida.ui.qt.main_window feeds it real running-server
+    state (McpManager.running_server_names), not the workspace's resolved
+    mcp_group."""
+    panel = McpQuickPanel()
+    panel.set_servers(["pyirena", "bait"], enabled=["pyirena", "bait"], group_name="analysis")
+    assert set(panel.enabled_servers()) == {"pyirena", "bait"}
+    panel.set_servers(["pyirena", "bait"], enabled=[], group_name="analysis")
+    assert panel.enabled_servers() == []
 
 
 def test_mcp_quick_panel_manage_button_emits_manage_requested(qapp):

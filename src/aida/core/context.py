@@ -8,6 +8,7 @@ nothing here talks to an index.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +24,24 @@ def estimate_tokens(text: str) -> int:
     """Cheap token estimate for context-size management. Not exact — good
     enough to decide "are we getting close to the limit"."""
     return max(1, len(text) // _CHARS_PER_TOKEN_ESTIMATE)
+
+
+def estimate_message_tokens(message: Message) -> int:
+    """``estimate_tokens`` for one whole ``Message`` — B7: the plain
+    ``estimate_tokens(message.content)`` ``trim_history`` used to budget on
+    ignored ``tool_calls`` entirely, so a tool-heavy session (a big
+    ``arguments`` payload on every assistant turn, ``content`` often
+    empty/short) skewed the estimate low — the trim budget looked like it
+    had headroom it didn't actually have. Adds the JSON size of every tool
+    call's ``name``+``arguments`` on top of the content estimate; a message
+    with no tool calls costs exactly what ``estimate_tokens(message.content)``
+    already did, so this is purely additive, never a regression for plain
+    text turns."""
+    total = estimate_tokens(message.content)
+    for call in message.tool_calls:
+        payload = json.dumps({"name": call.name, "arguments": call.arguments}, default=str)
+        total += estimate_tokens(payload)
+    return total
 
 
 def skill_path(skills_dir: Path, name: str) -> Path | None:
@@ -325,7 +344,7 @@ def trim_history(
     turns = split_into_turns(messages)
 
     def total_tokens(msgs: list[Message]) -> int:
-        return sum(estimate_tokens(m.content) for m in msgs)
+        return sum(estimate_message_tokens(m) for m in msgs)
 
     system_tokens = total_tokens(system_messages)
     turn_tokens = [total_tokens(turn) for turn in turns]
@@ -348,6 +367,7 @@ __all__ = [
     "SkillInfo",
     "build_system_message",
     "build_workspace_context_block",
+    "estimate_message_tokens",
     "estimate_tokens",
     "list_skills",
     "load_skill_texts",

@@ -13,6 +13,18 @@ from aida.ui.qt.code_editor_dialog import CodeEditorDialog
 from tests.ui._qt_test_utils import pump_until
 
 
+class _NullSignal:
+    """Stand-in for a Qt Signal on a fake bridge that never actually needs
+    to fire one — just enough for CodeEditorDialog's constructor/``done()``
+    to connect()/disconnect() against without a real QObject."""
+
+    def connect(self, _slot) -> None:
+        pass
+
+    def disconnect(self, _slot) -> None:
+        pass
+
+
 def test_dialog_seeds_initial_text(qapp):
     dialog = CodeEditorDialog(initial_text="print('hi')")
     assert dialog.text() == "print('hi')"
@@ -59,6 +71,32 @@ def test_run_with_no_bridge_is_a_safe_noop(qapp, tmp_path: Path):
     dialog = CodeEditorDialog(initial_text="print(1)", saved_scripts_dir=str(tmp_path))
     dialog._on_run()  # must not raise
     assert dialog.output_text() == ""
+
+
+def test_run_uses_the_configured_workspace_timeout_not_the_hardcoded_default(qapp, tmp_path: Path, monkeypatch):
+    """B5: previously always passed DEFAULT_RUN_TIMEOUT_SECONDS (30s) to
+    bridge.run_script regardless of what the active workspace configured —
+    the "Run" button ignored the same script_timeout_seconds a
+    run_python_script tool call now respects."""
+
+    class _FakeBridge:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+            self.script_run_finished = _NullSignal()
+            self.script_run_failed = _NullSignal()
+
+        def run_script(self, path, args, *, interpreter, cwd, timeout):
+            self.calls.append({"path": path, "timeout": timeout})
+
+    bridge = _FakeBridge()
+    dialog = CodeEditorDialog(
+        initial_text="print(1)", saved_scripts_dir=str(tmp_path), bridge=bridge, script_timeout_seconds=180.0
+    )
+    monkeypatch.setattr(
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName", lambda *a, **kw: (str(tmp_path / "s.py"), "")
+    )
+    dialog._on_run()
+    assert bridge.calls[0]["timeout"] == 180.0
 
 
 def test_run_saves_first_then_shows_output(qapp, loop_thread, tmp_path: Path, monkeypatch):

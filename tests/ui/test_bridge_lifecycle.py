@@ -36,7 +36,7 @@ def _ready_window(qapp, loop_thread, monkeypatch, **start_kwargs) -> MainWindow:
     with an undelivered queued signal has it delivered by the *next* test's
     ``processEvents()`` — which is how an unrelated startup failure ended up
     opening a modal dialog inside another test and hanging the run."""
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
     window = MainWindow(_settings_with_profile(), loop_thread, start_kwargs=start_kwargs)
     assert pump_until(
         qapp,
@@ -87,7 +87,7 @@ def test_shutdown_closes_a_session_that_was_still_starting(
         session.aclose = recording_aclose
         return session, mcp_manager
 
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
     monkeypatch.setattr(bridge_module, "start_session", slow_start)
 
     settings = _settings_with_profile()
@@ -141,7 +141,7 @@ def test_a_superseded_bridge_cannot_drive_the_window(
 def test_shutdown_is_idempotent(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
     """``_restart_session`` shuts a bridge down, and ``closeEvent`` may shut
     the same one down again — the second call must not double-close."""
-    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
     bridge = ChatBridge(loop_thread)
     bridge.start(_settings_with_profile(), profile_name="mock-profile")
     bridge.shutdown(timeout=10.0)
@@ -237,7 +237,7 @@ def test_shutdown_cancels_and_waits_for_an_in_flight_turn(
         return session, mcp_manager
 
     monkeypatch.setattr(
-        "aida.cli.chat.build_provider",
+        "aida.core.session.build_provider",
         lambda profile: MockProvider(
             [
                 MockTurn(tool_calls=[MockToolCall(name="slow", id="c1"), MockToolCall(name="slow", id="c2")]),

@@ -70,7 +70,7 @@ async def test_read_two_files_and_write_markdown_report_with_image(
 
     settings = _settings_with_workspace(source_dir, target_dir)
     monkeypatch.setattr(
-        "aida.cli.chat.build_provider",
+        "aida.core.session.build_provider",
         lambda profile: MockProvider(
             [
                 MockTurn(
@@ -173,7 +173,7 @@ async def test_write_outside_target_folder_is_denied_without_confirmation(
 
     settings = _settings_with_workspace(source_dir, target_dir, safety="confirm")
     monkeypatch.setattr(
-        "aida.cli.chat.build_provider",
+        "aida.core.session.build_provider",
         lambda profile: MockProvider(
             [
                 MockTurn(

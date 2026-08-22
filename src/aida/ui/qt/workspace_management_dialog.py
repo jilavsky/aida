@@ -49,6 +49,7 @@ from aida.ui.qt._qt import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     Qt,
     QVBoxLayout,
     QWidget,
@@ -191,6 +192,16 @@ class WorkspaceFormDialog(QDialog):
         self._command_allowlist_edit.setMaximumHeight(80)
         form.addRow("Command allowlist:", self._command_allowlist_edit)
 
+        # B5: previously hardcoded to 30s with no per-workspace override —
+        # a workspace whose scripts legitimately run long (a multi-minute
+        # reduction/fit) had no way to raise it short of hand-editing
+        # workspaces.yaml.
+        self._script_timeout_spin = QSpinBox(self)
+        self._script_timeout_spin.setRange(1, 3600)
+        self._script_timeout_spin.setSuffix(" s")
+        self._script_timeout_spin.setValue(int(workspace.script_timeout_seconds) if workspace else 30)
+        form.addRow("Script/command timeout:", self._script_timeout_spin)
+
         layout.addLayout(form)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
@@ -255,6 +266,7 @@ class WorkspaceFormDialog(QDialog):
             ],
             python_interpreter=self._interpreter_edit.text().strip() or None,
             scripting_enabled=self._scripting_checkbox.isChecked(),
+            script_timeout_seconds=float(self._script_timeout_spin.value()),
         )
 
 
@@ -272,6 +284,7 @@ def _workspace_detail_lines(workspace: WorkspaceConfig, validation: WorkspaceVal
         f"scripting_enabled: {workspace.scripting_enabled}",
         f"python_interpreter: {workspace.python_interpreter or '(default)'}",
         f"command_allowlist: {', '.join(workspace.command_allowlist) or '(none)'}",
+        f"script_timeout_seconds: {workspace.script_timeout_seconds:g}",
         f"system_prompt: {'(set)' if workspace.system_prompt else '(none)'}",
     ]
     if validation.warnings:

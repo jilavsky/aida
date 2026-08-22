@@ -35,6 +35,7 @@ import contextlib
 import json
 from pathlib import Path
 
+from aida.config.secrets import set_secret
 from aida.config.settings import McpConfig, McpServerConfig, Settings, save_mcp_config
 from aida.core.context import list_skills
 from aida.mcp.config_io import merge_mcp_config
@@ -79,6 +80,27 @@ def _parse_kv_lines(text: str) -> dict[str, str]:
         if sep:
             env[key.strip()] = value
     return env
+
+
+def _replace_env_value(text: str, key: str, new_value: str) -> str:
+    """Rewrite just ``key``'s line in a ``KEY=VALUE``-per-line env block,
+    leaving every other line (order, spacing, unrelated values) untouched —
+    used by "Store in Keychain" so swapping one value for a ``keyring:``
+    reference doesn't disturb the rest of what the user typed."""
+    lines = text.splitlines()
+    out = []
+    replaced = False
+    for line in lines:
+        stripped = line.strip()
+        k, sep, _v = stripped.partition("=")
+        if not replaced and sep and k.strip() == key:
+            out.append(f"{key}={new_value}")
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced:
+        out.append(f"{key}={new_value}")
+    return "\n".join(out)
 
 
 def _status_for(name: str, bridge) -> str:
@@ -141,9 +163,21 @@ class ServerFormDialog(QDialog):
         self._env_edit.setPlaceholderText("KEY=VALUE, one per line")
         form.addRow("Env:", self._env_edit)
 
+        env_options_row = QHBoxLayout()
         self._hide_values_checkbox = QCheckBox("Hide values", self)
         self._hide_values_checkbox.toggled.connect(self._on_hide_toggled)
-        form.addRow("", self._hide_values_checkbox)
+        env_options_row.addWidget(self._hide_values_checkbox)
+        # B6: env values previously had no home but plaintext mcp.json — the
+        # one remaining hole in "secrets never touch YAML/JSON" (every other
+        # secret already goes through aida.config.secrets via secret_ref).
+        # This stores the real value in the OS keychain and swaps the env
+        # line for a "keyring:NAME" reference, which McpServerHandle.start()
+        # resolves back to the real value at launch time.
+        store_secret_button = QPushButton("Store Value in Keychain…", self)
+        store_secret_button.clicked.connect(self._on_store_secret_in_keychain)
+        env_options_row.addWidget(store_secret_button)
+        env_options_row.addStretch(1)
+        form.addRow("", env_options_row)
         if self._is_edit and server and server.env:
             self._hide_values_checkbox.setChecked(True)
 
@@ -191,6 +225,43 @@ class ServerFormDialog(QDialog):
         else:
             self._env_edit.setPlainText(self._raw_env_text)
             self._env_edit.setReadOnly(False)
+
+    def _on_store_secret_in_keychain(self) -> None:
+        current_text = self._raw_env_text if self._hide_values_checkbox.isChecked() else self._env_edit.toPlainText()
+        env = _parse_kv_lines(current_text)
+        if not env:
+            QMessageBox.information(self, "No Env Vars", "Add an env var (KEY=VALUE) first.")
+            return
+
+        key, ok = QInputDialog.getItem(self, "Store in Keychain", "Env var:", list(env.keys()), editable=False)
+        if not ok or not key:
+            return
+
+        current_value = env[key]
+        already_ref = current_value.startswith(("keyring:", "secret:"))
+        default_name = f"{self._name_edit.text().strip() or 'mcp'}_{key}".lower()
+        secret_name, ok = QInputDialog.getText(self, "Secret Name", "Store under this name in the OS keychain:", text=default_name)
+        secret_name = secret_name.strip()
+        if not ok or not secret_name:
+            return
+
+        value, ok = QInputDialog.getText(
+            self,
+            "Secret Value",
+            f"Value for {key}:",
+            QLineEdit.EchoMode.Password,
+            "" if already_ref else current_value,
+        )
+        if not ok or not value:
+            return
+
+        set_secret(secret_name, value)
+        self._raw_env_text = _replace_env_value(current_text, key, f"keyring:{secret_name}")
+        if self._hide_values_checkbox.isChecked():
+            self._on_hide_toggled(True)  # refresh the masked view from the new _raw_env_text
+        else:
+            self._env_edit.setPlainText(self._raw_env_text)
+        QMessageBox.information(self, "Stored", f"{key} now references keyring secret {secret_name!r}.")
 
     def _on_add_group(self) -> None:
         name = self._new_group_edit.text().strip()

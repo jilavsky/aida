@@ -121,6 +121,51 @@ async def test_failing_server_is_isolated_not_fatal(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_start_all_launches_servers_concurrently(tmp_path, monkeypatch):
+    """B4: start_all used to await each server's handshake one at a time —
+    N slow-to-start servers paid N times one server's latency. Faked here
+    (rather than N real subprocesses, which would make the timing assertion
+    flaky under CI load) by monkeypatching McpServerHandle with a stand-in
+    whose start() just sleeps; asyncio.gather means the *total* elapsed
+    time should track the single slowest handshake, not the sum of all of
+    them."""
+    import asyncio
+    import time
+
+    from aida.mcp import manager as manager_module
+
+    class _SleepyFakeHandle:
+        def __init__(self, config: McpServerConfig, **kwargs: object) -> None:
+            self._config = config
+            self.instructions: str | None = None
+
+        async def start(self) -> list:
+            await asyncio.sleep(0.2)
+            return []
+
+        def list_tools(self) -> list:
+            return []
+
+        async def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(manager_module, "McpServerHandle", _SleepyFakeHandle)
+
+    configs = [McpServerConfig(name=f"srv-{i}", command="unused") for i in range(5)]
+    manager = McpManager(configs, artifact_store=ArtifactStore(base_dir=tmp_path))
+    try:
+        started = time.monotonic()
+        await manager.start_all()
+        elapsed = time.monotonic() - started
+        # Sequential would be >= 5 * 0.2s = 1.0s; concurrent should land
+        # close to a single 0.2s sleep plus scheduling overhead.
+        assert elapsed < 0.8
+        assert manager.running_server_names == [f"srv-{i}" for i in range(5)]
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
 async def test_calling_tool_after_aclose_reports_not_running(tmp_path):
     manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
     tools = await manager.start_all()
