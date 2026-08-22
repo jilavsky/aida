@@ -27,6 +27,7 @@ from aida.ui.qt._qt import (
     QScrollArea,
     Qt,
     QTextBrowser,
+    QTextCursor,
     QTimer,
     QVBoxLayout,
     QWidget,
@@ -56,6 +57,77 @@ _CODE_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 #: looking live. ``set_text`` (``TextFinished``) always renders immediately,
 #: so the finished message is never left waiting on a timer.
 _STREAM_RENDER_INTERVAL_MS = 100
+
+
+def _unwrap_preformatted_blocks(document: object) -> int:
+    """Let fenced code blocks wrap at the widget width like everything else.
+
+    Qt's Markdown importer marks a ``<pre>`` block's ``QTextBlockFormat``
+    with ``nonBreakableLines``, which overrides every widget-level wrap
+    setting there is — ``setWordWrapMode``, ``setLineWrapMode``,
+    ``document().setDefaultTextOption(...)`` and a
+    ``pre { white-space: pre-wrap }`` default stylesheet all leave it laid
+    out at its natural width (measured: 701px of content in a 400px
+    viewport, unchanged by any of them). With
+    ``_AutoHeightTextBrowser``'s horizontal scrollbar forced off, that
+    overflow is silently *clipped* — the tail of a long code line is
+    unreachable. Clearing the flag per block is the only thing that
+    actually rewraps it; ``toPlainText()`` is unaffected, so Copy and
+    ``first_code_block`` still see the original source.
+
+    Returns the number of blocks changed (mainly for tests)."""
+    cursor = QTextCursor(document)
+    cursor.beginEditBlock()  # one relayout + one undo step for the whole pass
+    block = document.begin()
+    changed = 0
+    while block.isValid():
+        block_format = block.blockFormat()
+        if block_format.nonBreakableLines():
+            block_format.setNonBreakableLines(False)
+            QTextCursor(block).setBlockFormat(block_format)
+            changed += 1
+        block = block.next()
+    cursor.endEditBlock()
+    return changed
+
+
+class _ConversationScrollArea(QScrollArea):
+    """A ``QScrollArea`` whose content widget can never grow wider than the
+    viewport.
+
+    Bug report: "all text is not wrapped to current width of the chat
+    window... there is a horizontal scroll control to let me move left and
+    right." ``setWidgetResizable(True)`` grows the content widget to the
+    viewport but never *shrinks* it below the content's
+    ``minimumSizeHint()``. One over-wide row anywhere in the transcript —
+    a tool-call summary whose longest token can't be broken, an artifact
+    card's unwrapped filename — therefore widens the whole content widget,
+    and since every ``MessageBubble`` is laid out at that inflated width,
+    *every* message then wraps at it instead of at the visible width. The
+    measured effect of a single bad row: content width 2006px in an 898px
+    viewport, so each reply's text wrapped at 1984px and had to be scrolled
+    to.
+
+    Capping the content to the viewport fixes the whole class of problem at
+    once, rather than chasing each widget that forgets ``setWordWrap(True)``
+    — a word-wrapping child re-wraps to fit, and only a genuinely
+    unbreakable child (a wide image) is clipped. Note that turning the
+    horizontal scrollbar off alone does *not* work: it hides the scrollbar
+    but leaves the content 2006px wide, so the text stays unwrapped and is
+    now unreachable as well."""
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().resizeEvent(event)
+        self._clamp_content_width()
+
+    def setWidget(self, widget: QWidget) -> None:  # noqa: N802 - Qt override
+        super().setWidget(widget)
+        self._clamp_content_width()
+
+    def _clamp_content_width(self) -> None:
+        content = self.widget()
+        if content is not None:
+            content.setMaximumWidth(self.viewport().width())
 
 
 class _AutoHeightTextBrowser(QTextBrowser):
@@ -223,6 +295,7 @@ class MessageBubble(QFrame):
     def _render_now(self) -> None:
         self._render_timer.stop()
         self._view.setMarkdown(self._raw_text)
+        _unwrap_preformatted_blocks(self._view.document())
         self._update_open_in_editor_visibility()
 
     def append_meta(self, text: str) -> None:
@@ -283,7 +356,7 @@ class ChatPanel(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
-        self._scroll_area = QScrollArea(self)
+        self._scroll_area = _ConversationScrollArea(self)
         self._scroll_area.setWidgetResizable(True)
         self._content = QWidget()
         self._content_layout = QVBoxLayout(self._content)
