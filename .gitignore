@@ -35,3 +35,6 @@ secrets.env
 htmlcov/
 .coverage
 .playwright-mcp/*
+
+#to delete
+_to_delete/*
