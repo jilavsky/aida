@@ -415,6 +415,61 @@ def test_delete_conversation_removes_from_sidebar_and_db(
         window.close()
 
 
+def test_mcp_quick_panel_manage_button_opens_management_dialog(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: the quick panel's checkboxes silently did nothing when
+    ticked. They're now read-only status only; the real interaction point
+    is the "MCP Servers…" button, which must actually open the management
+    dialog (previously nothing connected McpQuickPanel to it at all)."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        opened = {}
+
+        def _fake_exec(self):
+            opened["dialog"] = self
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.McpManagementDialog.exec", _fake_exec)
+        window.mcp_panel.manage_requested.emit()
+
+        assert "dialog" in opened
+    finally:
+        window.close()
+
+
+def test_failed_profile_switch_warns_and_resets_the_selector(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report class: "I selected local AI but it used Argo" — a failed
+    mid-session profile switch (ChatBridge.profile_switch_failed) used to
+    leave the toolbar dropdown showing a profile that was never actually
+    put into use, with no indication anything failed. It should now show a
+    warning dialog and reset the dropdown back to the profile that's
+    genuinely active."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        warnings = []
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.warning",
+            lambda *args, **kwargs: warnings.append(args) or QMessageBox.StandardButton.Ok,
+        )
+
+        window.profile_selector.profile_changed.emit("does-not-exist")
+        assert pump_until(qapp, lambda: warnings)
+
+        assert window.bridge.session.profile_name == "mock-profile"  # unchanged
+        assert window.profile_selector.current_profile() == "mock-profile"
+    finally:
+        window.close()
+
+
 def test_settings_dialog_font_size_applies_without_restart(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):

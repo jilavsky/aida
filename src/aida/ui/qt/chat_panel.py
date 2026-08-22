@@ -331,13 +331,38 @@ class ErrorBanner(QFrame):
         self.message = message
         self.detail = detail
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("background-color: #ffe5e5;")
+        # Background is a fixed pale pink regardless of theme, so the text
+        # color must be fixed too — leaving it to the palette renders
+        # near-white-on-pink in dark mode. #7a1f1f is a dark red readable on
+        # #ffe5e5 in both light and dark themes; "color" is inherited by the
+        # child QLabel via Qt's stylesheet cascade.
+        self.setStyleSheet("background-color: #ffe5e5; color: #7a1f1f;")
 
         layout = QVBoxLayout(self)
         text = f"[{layer}] {message}"
         if detail:
             text += f" — {detail}"
         label = QLabel(text, self)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+
+
+class TruncationNotice(QFrame):
+    """Shown when ``MessageFinished.stop_reason == "length"`` — the reply
+    was cut off mid-sentence by ``max_tokens`` with no other indication why
+    (bug report: truncated replies are silent). Styled as an unobtrusive
+    warning rather than ``ErrorBanner``'s red, since this isn't a failure —
+    the turn otherwise succeeded."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("background-color: #fff3cd; color: #664d03;")
+        layout = QVBoxLayout(self)
+        label = QLabel(
+            "Reply hit the max-tokens limit and was cut off — raise max_tokens in the profile settings.",
+            self,
+        )
         label.setWordWrap(True)
         layout.addWidget(label)
 
@@ -478,7 +503,8 @@ class ChatPanel(QWidget):
             row = RetrievalRow(passages_by_kb=event.passages_by_kb, parent=self._content)
             self._append_widget(row)
         elif name == "MessageFinished":
-            pass  # no widget of its own — TextFinished/tool rows already reflect it
+            if event.stop_reason == "length":
+                self._append_widget(TruncationNotice(parent=self._content))
         elif name == "UsageInfo":
             # Bug report: "Add time stamps to each message, may be tok/sec
             # if available and wallclock time." Attaches to the bubble that

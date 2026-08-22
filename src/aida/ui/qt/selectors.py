@@ -355,11 +355,27 @@ class FolderDisplay(QGroupBox):
 class McpQuickPanel(QGroupBox):
     """Shows the current workspace's enabled MCP group and a checkbox per
     server currently known to ``mcp.json`` — full server management
-    (add/edit/remove servers, live enable/disable) is Phase 7; this is the
-    "quick panel" v1: which servers *would* be enabled next time a session
-    starts, reflected as ``enabled_servers_changed``."""
+    (add/edit/remove servers, live enable/disable) is Phase 7's
+    ``McpManagementDialog``.
+
+    v1 shipped these checkboxes as if ticking one would change which
+    servers start — but which servers are enabled is decided entirely by
+    the workspace's ``mcp_group`` (resolved via
+    ``aida.mcp.groups.resolve_group``); there is no per-workspace explicit
+    server list for a checkbox to write to, and nothing ever connected
+    ``enabled_servers_changed`` to anything. Ticking a box silently did
+    nothing — "AIDA ignored my setting". Rather than invent a new config
+    concept to make the checkboxes real, they're now a read-only status
+    display (disabled, but still showing which servers the active group
+    resolves to) plus a "MCP Servers…" button that opens the real
+    management dialog — "a misleading control is worse than no control".
+    ``enabled_servers()``/``enabled_servers_changed`` are kept for tests and
+    any future caller that wants to inspect the resolved set, but the boxes
+    themselves no longer accept user input.
+    """
 
     enabled_servers_changed = Signal(list)
+    manage_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("MCP Servers", parent)
@@ -367,6 +383,9 @@ class McpQuickPanel(QGroupBox):
         self._group_label = QLabel("Group: (none)", self)
         self._layout.addWidget(self._group_label)
         self._checkboxes: dict[str, QCheckBox] = {}
+        self._manage_button = QPushButton("MCP Servers…", self)
+        self._manage_button.clicked.connect(self.manage_requested)
+        self._layout.addWidget(self._manage_button)
 
     def set_servers(self, server_names: list[str], *, enabled: list[str], group_name: str | None) -> None:
         self._group_label.setText(f"Group: {group_name or '(none)'}")
@@ -378,8 +397,14 @@ class McpQuickPanel(QGroupBox):
         for name in server_names:
             checkbox = QCheckBox(name, self)
             checkbox.setChecked(name in enabled_set)
+            # Read-only status, not a live control — see the class
+            # docstring. Left connected to _on_toggle so a programmatic
+            # setChecked() (tests, or a future caller) still reflects into
+            # enabled_servers()/enabled_servers_changed; a user simply can't
+            # click it since it's disabled.
+            checkbox.setEnabled(False)
             checkbox.stateChanged.connect(self._on_toggle)
-            self._layout.addWidget(checkbox)
+            self._layout.insertWidget(self._layout.count() - 1, checkbox)
             self._checkboxes[name] = checkbox
 
     def enabled_servers(self) -> list[str]:

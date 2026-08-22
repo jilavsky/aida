@@ -12,8 +12,11 @@ No secret value is ever read from or written to these files — see
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -61,6 +64,43 @@ def _coerce(kind: str, value: Any) -> Any:
             raise ValueError("expected a string")
         return str(value)
     raise ValueError(f"unsupported field kind {kind!r}")
+
+
+def _coerce_str_list(
+    source: str, field_name: str, value: Any, *, default: list[str] | None = None
+) -> list[str]:
+    """Coerce a YAML value that should be a list of strings — the guard for
+    the scalar-vs-list footgun: a hand-edited ``source_folders: /some/path``
+    (scalar instead of list) fed straight to ``list(data.get(...))`` used to
+    silently become a list of single characters (``['/', 's', 'o', …]``),
+    producing a nonsense allowed-roots list with no warning at all. A bare
+    string is almost always "the user meant a one-item list", so it's
+    wrapped in one (with a warning telling them to write ``[...]``) rather
+    than rejected outright; anything else that isn't a list/tuple (a dict,
+    a number, ...) falls back to ``default`` — also warned, same as
+    ``_coerce``'s "old/wrong configs must still load" rule."""
+    default = list(default) if default is not None else []
+    if value is None:
+        return default
+    if isinstance(value, str):
+        _logger.warning(
+            "%s: %s=%r is a single string, not a list — treating it as a one-item list "
+            "(write it as [%r] in the YAML to make this intentional and silence this warning)",
+            source,
+            field_name,
+            value,
+            value,
+        )
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    _logger.warning(
+        "%s: ignoring %s=%r — expected a list of strings; using the default instead",
+        source,
+        field_name,
+        value,
+    )
+    return default
 
 
 def _coerced_fields(
@@ -369,18 +409,19 @@ class WorkspaceConfig:
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> WorkspaceConfig:
+        source = f"workspaces.yaml (workspace {name!r})"
         return cls(
             name=name,
             profile=data.get("profile"),
-            source_folders=list(data.get("source_folders", [])),
+            source_folders=_coerce_str_list(source, "source_folders", data.get("source_folders")),
             target_folder=data.get("target_folder"),
             sidecar_folder_name=data.get("sidecar_folder_name", "figures"),
             mcp_group=data.get("mcp_group", "none"),
-            skills=list(data.get("skills", [])),
+            skills=_coerce_str_list(source, "skills", data.get("skills")),
             system_prompt=data.get("system_prompt"),
             safety=data.get("safety", "confirm"),
-            knowledge_bases=list(data.get("knowledge_bases", [])),
-            command_allowlist=list(data.get("command_allowlist", [])),
+            knowledge_bases=_coerce_str_list(source, "knowledge_bases", data.get("knowledge_bases")),
+            command_allowlist=_coerce_str_list(source, "command_allowlist", data.get("command_allowlist")),
             python_interpreter=data.get("python_interpreter"),
             scripting_enabled=data.get("scripting_enabled", True),
             templates_dir=data.get("templates_dir"),
@@ -491,15 +532,16 @@ class McpServerConfig:
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> McpServerConfig:
         extra = {k: v for k, v in data.items() if k not in _KNOWN_SERVER_KEYS}
+        source = f"mcp.json (server {name!r})"
         return cls(
             name=name,
             command=data.get("command", ""),
-            args=list(data.get("args", [])),
+            args=_coerce_str_list(source, "args", data.get("args")),
             env=dict(data.get("env", {})),
-            groups=list(data.get("groups", [])),
-            skills=list(data.get("skills", [])),
-            disabled_tools=list(data.get("disabled_tools", [])),
-            confirm_tools=list(data.get("confirm_tools", [])),
+            groups=_coerce_str_list(source, "groups", data.get("groups")),
+            skills=_coerce_str_list(source, "skills", data.get("skills")),
+            disabled_tools=_coerce_str_list(source, "disabled_tools", data.get("disabled_tools")),
+            confirm_tools=_coerce_str_list(source, "confirm_tools", data.get("confirm_tools")),
             extra=extra,
         )
 
@@ -572,7 +614,9 @@ class KnowledgeBaseConfig:
     def from_dict(cls, name: str, data: dict[str, Any]) -> KnowledgeBaseConfig:
         return cls(
             name=name,
-            source_folders=list(data.get("source_folders", [])),
+            source_folders=_coerce_str_list(
+                f"knowledge.yaml (knowledge base {name!r})", "source_folders", data.get("source_folders")
+            ),
             embedding_profile=data.get("embedding_profile"),
             chunk_size=data.get("chunk_size", 1000),
             chunk_overlap=data.get("chunk_overlap", 150),
@@ -623,10 +667,33 @@ def _read_yaml(path: Path) -> dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
-def _write_yaml(path: Path, data: dict[str, Any]) -> None:
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` without ever leaving a truncated file on
+    disk. A crash or power loss mid-write to ``path`` directly would corrupt
+    a config file the whole app depends on (config.yaml, providers.yaml,
+    workspaces.yaml, mcp.json); writing to a temp file in the same directory
+    and ``os.replace()``-ing it into place makes the swap atomic — readers
+    either see the old complete file or the new complete file, never a
+    partial one. Same directory matters so the replace is a same-filesystem
+    rename, not a cross-filesystem copy."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        yaml.safe_dump(data, fh, sort_keys=False)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
+
+
+def _write_yaml(path: Path, data: dict[str, Any]) -> None:
+    _atomic_write_text(path, yaml.safe_dump(data, sort_keys=False))
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -637,10 +704,7 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2)
-        fh.write("\n")
+    _atomic_write_text(path, json.dumps(data, indent=2) + "\n")
 
 
 def load_app_config(base_dir: Path | None = None) -> AppConfig:

@@ -107,11 +107,13 @@ def _check_provider_endpoints(settings: Settings | None) -> list[CheckResult]:
 
     profiles = settings.providers.profiles
     if not profiles:
+        providers_yaml = paths.config_dir() / "providers.yaml"
         return [
             CheckResult(
                 "provider_endpoints",
                 True,
-                "no provider profiles configured yet — add one with `aida config profile add`",
+                "no provider profiles configured yet — add one by editing "
+                f"{providers_yaml} (see PLAN.md / README for the profile format)",
             )
         ]
 

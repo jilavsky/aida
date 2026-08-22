@@ -166,6 +166,51 @@ def test_workspaces_config_roundtrip(aida_home: Path):
     assert ws.source_folders == ["/data/USAXS"]
 
 
+def test_workspace_config_wraps_a_hand_edited_scalar_list_field():
+    """A hand-edited ``source_folders: /some/path`` (scalar, not a YAML
+    list) used to be fed straight to ``list(...)``, silently exploding into
+    a list of single characters (['/', 's', 'o', ...]) — a nonsense
+    allowed-roots list with no warning at all. It should instead be treated
+    as a one-item list, same as every other list-typed field guarded this
+    way."""
+    from aida.config.settings import WorkspaceConfig
+
+    ws = WorkspaceConfig.from_dict(
+        "use-pyirena",
+        {
+            "source_folders": "/data/USAXS",
+            "skills": "pyirena-usage",
+            "knowledge_bases": "usaxs-docs",
+            "command_allowlist": "ls",
+        },
+    )
+    assert ws.source_folders == ["/data/USAXS"]
+    assert ws.skills == ["pyirena-usage"]
+    assert ws.knowledge_bases == ["usaxs-docs"]
+    assert ws.command_allowlist == ["ls"]
+
+
+def test_workspace_config_falls_back_to_default_for_a_non_list_non_string_field():
+    from aida.config.settings import WorkspaceConfig
+
+    ws = WorkspaceConfig.from_dict("use-pyirena", {"source_folders": {"not": "a list"}})
+    assert ws.source_folders == []
+
+
+def test_mcp_server_config_wraps_a_hand_edited_scalar_args():
+    from aida.config.settings import McpServerConfig
+
+    server = McpServerConfig.from_dict("pyirena-mcp", {"args": "--flag"})
+    assert server.args == ["--flag"]
+
+
+def test_knowledge_base_config_wraps_a_hand_edited_scalar_source_folders():
+    from aida.config.settings import KnowledgeBaseConfig
+
+    kb = KnowledgeBaseConfig.from_dict("usaxs-docs", {"source_folders": "/data/usaxs-instructions"})
+    assert kb.source_folders == ["/data/usaxs-instructions"]
+
+
 def test_mcp_config_roundtrip(aida_home: Path):
     from aida.config.settings import McpServerConfig
 

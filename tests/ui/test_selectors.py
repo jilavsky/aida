@@ -375,3 +375,23 @@ def test_mcp_quick_panel_reset_servers_clears_old_checkboxes(qapp):
     panel.set_servers(["pyirena"], enabled=["pyirena"], group_name="a")
     panel.set_servers(["other"], enabled=[], group_name="b")
     assert list(panel._checkboxes.keys()) == ["other"]
+
+
+def test_mcp_quick_panel_checkboxes_are_read_only(qapp):
+    """Bug report: ticking a checkbox in the quick panel silently did
+    nothing — enabled_servers_changed had zero receivers anywhere. Rather
+    than wire it to a config concept that doesn't exist (a per-workspace
+    explicit server list independent of mcp_group), the checkboxes are now
+    disabled so the user can't be misled into thinking a click does
+    something; "MCP Servers…" is the real entry point."""
+    panel = McpQuickPanel()
+    panel.set_servers(["pyirena", "bait"], enabled=["pyirena"], group_name="analysis")
+    assert all(not box.isEnabled() for box in panel._checkboxes.values())
+
+
+def test_mcp_quick_panel_manage_button_emits_manage_requested(qapp):
+    panel = McpQuickPanel()
+    requests = []
+    panel.manage_requested.connect(lambda: requests.append(True))
+    panel._manage_button.click()
+    assert requests == [True]

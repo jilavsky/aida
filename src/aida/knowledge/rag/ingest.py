@@ -9,6 +9,7 @@ returns.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sqlite3
@@ -211,7 +212,13 @@ async def _ingest_file(
     Raises on an unreadable file (an ``OSError``, a document-reader-
     specific parse error, ...) — callers record it as skipped rather than
     aborting the pass."""
-    text = _extract_text(path)
+    # _extract_text -> read_document() is synchronous (PDF/DOCX/PPTX
+    # parsing, disk I/O) and this runs on the one shared background loop
+    # that also drives chat turns and MCP calls — a large PDF parse would
+    # otherwise freeze the whole app for its duration. Embedding calls are
+    # already async (embeddings_provider.embed); this is the one remaining
+    # blocking step in the ingest path.
+    text = await asyncio.to_thread(_extract_text, path)
     chunks = _chunk_file(path, text, chunk_size=kb.chunk_size, overlap=kb.chunk_overlap)
     if not chunks:
         kb_index.delete_source(conn, str(path))

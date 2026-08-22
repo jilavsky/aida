@@ -126,7 +126,12 @@ def print_event(event: AgentEvent) -> None:
     elif isinstance(event, FileArtifactCreated):
         print(f"[file artifact] {event.path}")
     elif isinstance(event, MessageFinished):
-        pass  # no separate line; TextFinished already closed the reply
+        # TextFinished already closed the reply visually; the one case
+        # worth a separate line is "length" — the reply was cut off
+        # mid-sentence by max_tokens and, without this, there is no
+        # indication of why (bug report: truncated replies are silent).
+        if event.stop_reason == "length":
+            print("[notice] reply hit the max-tokens limit and was cut off — raise max_tokens in the profile settings")
     elif isinstance(event, UsageInfo):
         # Bug report: "Can we get cost estimate... token use may be better
         # ... it is a black box." Printed unconditionally now (was
@@ -248,13 +253,16 @@ class ChatSession:
     async def switch_profile(self, name: str) -> None:
         new_profile = resolve_profile(self.settings, name)  # validate before tearing anything down
         old_provider = self.provider
+        # Carry over the iteration cap already in effect (e.g. set moments
+        # earlier via /max-iterations) rather than resetting it to
+        # settings.app.max_agent_iterations — a /profile switch shouldn't
+        # silently discard a value the user just set in the same session.
+        max_iterations = self.loop.max_iterations
         self.profile = new_profile
         self.profile_name = name
         self.provider = build_provider(self.profile)
         self.completion_settings = CompletionSettings(model=self.profile.model)
-        self.loop = AgentLoop(
-            self.provider, self.completion_settings, self.tools, max_iterations=self.settings.app.max_agent_iterations
-        )
+        self.loop = AgentLoop(self.provider, self.completion_settings, self.tools, max_iterations=max_iterations)
         # self.messages is intentionally left untouched: history carries over.
         await old_provider.aclose()
 

@@ -175,6 +175,7 @@ class MainWindow(QMainWindow):
         self.folder_display.command_allowlist_changed.connect(self._on_command_allowlist_changed)
         self.folder_display.python_interpreter_changed.connect(self._on_python_interpreter_changed)
         self.folder_display.save_to_workspace_requested.connect(self._on_save_folders_to_workspace)
+        self.mcp_panel.manage_requested.connect(self.open_mcp_management_dialog)
 
     def _wire_bridge_signals(self) -> None:
         # Every connection here must have *this window* as the receiver, so
@@ -196,6 +197,7 @@ class MainWindow(QMainWindow):
         self.bridge.turn_failed.connect(self._on_turn_failed)
         self.bridge.confirmation_requested.connect(self._on_confirmation_requested)
         self.bridge.profile_switched.connect(self._on_profile_switched)
+        self.bridge.profile_switch_failed.connect(self._on_profile_switch_failed)
         self.input_box.cancel_requested.connect(self.bridge.cancel)
         self.profile_selector.profile_changed.connect(self.bridge.switch_profile)
 
@@ -525,6 +527,21 @@ class MainWindow(QMainWindow):
 
     def _on_profile_switched(self, _name: str) -> None:
         self._save_last_session_selection()
+
+    def _on_profile_switch_failed(self, message: str) -> None:
+        """Bug report class: "I selected local AI but it used Argo" — a
+        mid-session ``/profile``-equivalent switch that fails left the
+        toolbar dropdown showing a profile that was never actually put into
+        use, with no indication anything went wrong
+        (``ChatBridge.profile_switch_failed`` was emitted but nothing ever
+        connected to it). Tell the user the switch didn't happen, and reset
+        the dropdown back to the profile that's actually active — the
+        session's provider/loop are untouched by a failed
+        ``ChatSession.switch_profile`` (see its docstring), so
+        ``_refresh_profile_selector`` reading ``bridge.session.profile_name``
+        is exactly the still-active profile."""
+        QMessageBox.warning(self, "Profile Switch Failed", message)
+        self._refresh_profile_selector()
 
     def _restart_session(
         self, *, workspace_name: str | None, profile_name: str | None, resume_conversation_id: str | None
