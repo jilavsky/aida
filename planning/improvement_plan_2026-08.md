@@ -277,7 +277,7 @@ can only be created by hand-editing YAML or via CLI flags. Even AIDA's own
 dialogs point users at files ("Configure an embedding profile in providers.yaml
 first"). Closing this gap is the biggest usability win available.
 
-- [ ] **(U1) Workspace editor dialog** — the top item. A "Workspaces…" dialog
+- [x] **(U1) Workspace editor dialog** — the top item. A "Workspaces…" dialog
       following the exact `McpManagementDialog` pattern (list left; Add/Edit/
       Remove; form dialog): name, profile (dropdown of configured profiles),
       source folders (reuse the row widgets), target folder, sidecar name,
@@ -290,8 +290,22 @@ first"). Closing this gap is the biggest usability win available.
       `validate_workspace` for inline warnings) — this is purely assembly.
       With this in place, a new user can go from empty config to a working
       pyIrena workspace without opening a text editor.
+      **Done (2026-08-22):** new `aida.ui.qt.workspace_management_dialog`
+      module — `WorkspaceFormDialog` (all fields from the plan; folder lists
+      use the KB dialog's one-per-line `QPlainTextEdit` precedent rather than
+      `FolderDisplay`, which is tightly coupled to live session state) and
+      `WorkspaceManagementDialog` (list left, Add/Edit/Remove, details panel
+      showing `validate_workspace` warnings). No `ChatBridge` needed — purely
+      config CRUD, persisted immediately via `save_workspace`/
+      `delete_workspace`. Wired into `MainWindow` behind a new "Workspaces…"
+      toolbar action. Tests: `tests/ui/test_workspace_management_dialog.py`
+      (17 cases: form seeding/defaults/round-trip, skills/KB checkbox
+      round-trip, mcp_group population, blank-name rejection, relaxed-mode
+      warning blocking save on Cancel, add/edit/remove persistence to disk,
+      duplicate-name rejection, validation warnings shown in the details
+      panel).
 
-- [ ] **(U2) Provider & embedding profile editor** — second priority. Extend
+- [x] **(U2) Provider & embedding profile editor** — second priority. Extend
       the Settings dialog (or a dedicated "Providers…" dialog): Add/Edit/Remove
       for both `profiles` and `embedding_profiles` (name, kind, base_url,
       model, capability notes, plus the new sampling/cost fields from B2), a
@@ -300,18 +314,65 @@ first"). Closing this gap is the biggest usability win available.
       `validate_embedding_profile` on the background loop (they're already
       async and never raise). This also fixes the dead-end where the KB dialog
       refuses to proceed until the user hand-edits providers.yaml.
+      **Done (2026-08-22):** new `aida.ui.qt.profiles_dialog` module — a
+      `ProfilesDialog` (QTabWidget, one tab per config object) with
+      `ProviderProfileFormDialog`/`EmbeddingProfileFormDialog` covering every
+      field named above, including the new B2 sampling/cost fields. The
+      secret field is write-only (blank = keep existing, exactly like a
+      "change password" form) and goes straight to `set_secret` — never to
+      `providers.yaml`. "Test" reuses `ChatBridge` exactly like the existing
+      MCP "Test Connection" button: two new signal/method pairs
+      (`validate_provider_profile`/`profile_validated` and
+      `validate_embedding_provider_profile`/`embedding_profile_validated`)
+      mirroring `test_mcp_connection`/`mcp_connection_tested`, so validation
+      runs on the background loop and never blocks the Qt thread. Also fixed
+      the KB dialog's dead end: `_on_add()` with zero embedding profiles now
+      offers to open this dialog directly instead of a bare warning. Wired
+      into `MainWindow` behind a new "Providers…" toolbar action. Tests:
+      `tests/ui/test_profiles_dialog.py` (20 cases) plus 3 new bridge tests
+      in `tests/ui/test_bridge.py` and 2 rewritten KB-dialog tests covering
+      the Yes/No paths of the new offer.
 
-- [ ] **(U3) Settings dialog completeness.** Expose the AppConfig fields that
+- [x] **(U3) Settings dialog completeness.** Expose the AppConfig fields that
       currently require hand-editing: `default_safety_mode`, global
       `allowed_folders`, global `command_allowlist`, `max_context_tokens`.
       Remove or implement `theme` — it is stored and round-tripped but nothing
       ever reads it (dead setting; confusing if a user sets it by hand).
+      **Done (2026-08-22):** `SettingsDialog` gained a safety-mode combo,
+      multi-line folder/command-allowlist editors, and a `max_context_tokens`
+      spin box (0 = "Disabled (no trimming)", matching `AppConfig`'s own
+      documented sentinel). Changing the global default into `relaxed` now
+      surfaces the same `relaxed_mode_warning_if_newly_enabled` warning used
+      for a single workspace's safety field, wired through
+      `MainWindow.open_settings_dialog`. `theme` was removed rather than
+      implemented — real Qt light/dark theming is a much larger change than
+      this item's scope, and `AppConfig`'s existing "ignore unknown YAML
+      keys" coercion means an old `config.yaml` with a stray `theme: dark`
+      line keeps loading fine. Tests: 5 new cases in
+      `tests/ui/test_settings_dialog.py` (seeding, editing/round-trip, the
+      max-tokens-zero sentinel, and a regression guard that `theme` stays
+      gone) plus updated cases in `tests/test_settings.py`.
 
-- [ ] **(U4) First-run experience.** On launch with no profiles configured,
+- [x] **(U4) First-run experience.** On launch with no profiles configured,
       show a small onboarding panel instead of the bare "No profile given"
       failure dialog: run the doctor checks, then offer "Add a provider
       profile…" (U2) → "Create a workspace…" (U1). One afternoon once U1/U2
       exist, and it converts the worst first impression into a guided path.
+      **Done (2026-08-22):** new `aida.ui.qt.onboarding_dialog.OnboardingDialog`
+      — runs `run_checks()` (exception-safe: a `run_checks` crash shows a
+      "could not run environment checks" message instead of taking the
+      dialog down with it), then offers "Add a Provider Profile…" (opens
+      `ProfilesDialog`) and "Create a Workspace…" (opens
+      `WorkspaceManagementDialog`, disabled until at least one profile
+      exists). `MainWindow._on_startup_failed` now checks
+      `self.settings.providers.profiles`: genuinely empty triggers this
+      onboarding panel instead of the old bare critical dialog (any other
+      startup failure with at least one profile configured still gets the
+      plain critical dialog, unchanged). After onboarding closes, if a
+      profile now exists, `_restart_session` is retried automatically.
+      Tests: `tests/ui/test_onboarding_dialog.py` (6 cases) plus 2 new/split
+      cases in `tests/ui/test_main_window.py` covering both branches of
+      `_on_startup_failed`.
 
 - [ ] **(U5) Conversations sidebar polish.** Row labels currently start with a
       raw UTC ISO timestamp (`2026-08-22T14:03:22.123456+00:00 …`). Format as

@@ -155,6 +155,18 @@ class AppConfig:
     state — ``None`` for any ``window_*`` field means "let Qt pick" (first
     run, or a monitor arrangement that no longer fits), so the GUI never
     fails to launch on a stale/foreign geometry.
+
+    U3 (2026-08-22): a ``theme`` field ("system"/"light"/"dark") used to
+    live here — stored and round-tripped, but nothing anywhere ever read it
+    (a dead, GUI-only setting that was actively confusing to hand-edit).
+    Removed rather than wired up: real Qt light/dark theming is a
+    meaningfully larger change (a palette/stylesheet pass across every
+    widget) than this settings-completeness pass warrants, and every
+    consumer already reads the platform's own light/dark mode automatically
+    via Qt's native styling. An old ``config.yaml`` with ``theme: ...`` in
+    it still loads fine — ``_coerced_fields`` silently ignores unknown
+    keys, the same "old configs must always load" rule every other removed/
+    renamed field already relies on.
     """
 
     config_version: int = CURRENT_CONFIG_VERSION
@@ -169,7 +181,6 @@ class AppConfig:
     # Editable via this config file for v1, same as everything else in
     # Settings dialog v1 that doesn't have its own editor yet.
     allowed_folders: list[str] = field(default_factory=list)
-    theme: str = "system"
     window_width: int | None = None
     window_height: int | None = None
     window_x: int | None = None
@@ -232,7 +243,6 @@ class AppConfig:
             "log_level": self.log_level,
             "default_safety_mode": self.default_safety_mode,
             "allowed_folders": self.allowed_folders,
-            "theme": self.theme,
             "window_width": self.window_width,
             "window_height": self.window_height,
             "window_x": self.window_x,
@@ -257,7 +267,6 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "log_level": "str",
     "default_safety_mode": "str",
     "allowed_folders": "list[str]",
-    "theme": "str",
     "window_width": "int?",
     "window_height": "int?",
     "window_x": "int?",

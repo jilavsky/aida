@@ -39,13 +39,12 @@ def test_blank_records_dir_returns_none(qapp):
 
 
 def test_updated_app_config_preserves_unedited_fields(qapp):
-    cfg = AppConfig(theme="dark", window_width=900, default_safety_mode="relaxed")
+    cfg = AppConfig(window_width=900, default_safety_mode="relaxed")
     dialog = SettingsDialog(cfg)
     dialog._font_size_spin.setValue(18)
 
     updated = dialog.updated_app_config()
     assert updated.font_size == 18
-    assert updated.theme == "dark"
     assert updated.window_width == 900
     assert updated.default_safety_mode == "relaxed"
     # original untouched
@@ -96,3 +95,62 @@ def test_profiles_shown_read_only(qapp):
 def test_no_profiles_gives_empty_list(qapp):
     dialog = SettingsDialog(AppConfig())
     assert dialog._profiles_list.count() == 0
+
+
+# --- U3: the remaining AppConfig fields that previously required
+# hand-editing config.yaml ----------------------------------------------
+
+
+def test_u3_fields_seeded_from_app_config(qapp):
+    cfg = AppConfig(
+        default_safety_mode="relaxed",
+        allowed_folders=["/shared/refs"],
+        command_allowlist=["git status"],
+        max_context_tokens=50_000,
+    )
+    dialog = SettingsDialog(cfg)
+    assert dialog.default_safety_mode() == "relaxed"
+    assert dialog.allowed_folders() == ["/shared/refs"]
+    assert dialog.command_allowlist() == ["git status"]
+    assert dialog.max_context_tokens() == 50_000
+
+
+def test_u3_fields_default_from_a_fresh_app_config(qapp):
+    dialog = SettingsDialog(AppConfig())
+    assert dialog.default_safety_mode() == "confirm"
+    assert dialog.allowed_folders() == []
+    assert dialog.command_allowlist() == []
+    assert dialog.max_context_tokens() == 120_000
+
+
+def test_u3_fields_editable_and_reflected_in_updated_app_config(qapp):
+    cfg = AppConfig()
+    dialog = SettingsDialog(cfg)
+    dialog._default_safety_combo.setCurrentText("relaxed")
+    dialog._allowed_folders_edit.setPlainText("/one\n/two")
+    dialog._command_allowlist_edit.setPlainText("git status\ngit log *")
+    dialog._max_context_tokens_spin.setValue(75_000)
+
+    updated = dialog.updated_app_config()
+    assert updated.default_safety_mode == "relaxed"
+    assert updated.allowed_folders == ["/one", "/two"]
+    assert updated.command_allowlist == ["git status", "git log *"]
+    assert updated.max_context_tokens == 75_000
+    # original untouched
+    assert cfg.default_safety_mode == "confirm"
+
+
+def test_max_context_tokens_zero_means_disabled(qapp):
+    """max_context_tokens=0 (AppConfig's own documented "trimming disabled"
+    value) must stay reachable from the spin box, not clamped to 1."""
+    dialog = SettingsDialog(AppConfig())
+    dialog._max_context_tokens_spin.setValue(0)
+    assert dialog.max_context_tokens() == 0
+
+
+def test_theme_field_no_longer_exists_on_app_config(qapp):
+    """U3: theme was a dead, write-only setting — removed rather than
+    exposed in this dialog. Regression guard against it quietly coming
+    back."""
+    assert not hasattr(AppConfig(), "theme")
+    assert not hasattr(SettingsDialog(AppConfig()), "_theme_combo")

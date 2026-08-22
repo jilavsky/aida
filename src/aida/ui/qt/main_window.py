@@ -49,9 +49,13 @@ from aida.ui.qt.icon import app_icon
 from aida.ui.qt.input_box import InputBox
 from aida.ui.qt.knowledge_management_dialog import KnowledgeManagementDialog
 from aida.ui.qt.mcp_management_dialog import McpManagementDialog
+from aida.ui.qt.onboarding_dialog import OnboardingDialog
+from aida.ui.qt.profiles_dialog import ProfilesDialog
 from aida.ui.qt.selectors import FolderDisplay, McpQuickPanel, ProfileSelector, WorkspaceSelector
 from aida.ui.qt.settings_dialog import SettingsDialog
 from aida.ui.qt.window_state import apply_font_size, apply_window_state, capture_window_state
+from aida.ui.qt.workspace_management_dialog import WorkspaceManagementDialog
+from aida.workspace.safety import relaxed_mode_warning_if_newly_enabled
 from aida.workspace.workspaces import (
     WorkspaceConfig,
     get_workspace,
@@ -121,6 +125,18 @@ class MainWindow(QMainWindow):
         knowledge_action = QAction("Knowledge Bases…", self)
         knowledge_action.triggered.connect(self.open_knowledge_management_dialog)
         toolbar.addAction(knowledge_action)
+
+        # U2/U1: provider/embedding profiles and workspaces were previously
+        # only editable by hand-editing providers.yaml/workspaces.yaml — the
+        # two config objects everything else (a session, a workspace, a
+        # knowledge base) ultimately depends on.
+        providers_action = QAction("Providers…", self)
+        providers_action.triggered.connect(self.open_profiles_dialog)
+        toolbar.addAction(providers_action)
+
+        workspaces_action = QAction("Workspaces…", self)
+        workspaces_action.triggered.connect(self.open_workspace_management_dialog)
+        toolbar.addAction(workspaces_action)
 
         settings_action = QAction("Settings…", self)
         settings_action.triggered.connect(self.open_settings_dialog)
@@ -345,7 +361,35 @@ class MainWindow(QMainWindow):
 
     def _on_startup_failed(self, message: str) -> None:
         self.statusBar().showMessage("Startup failed", 5000)
+        # U4: the single most common startup failure — a genuine first run,
+        # nothing configured yet — used to land on a bare "No profile
+        # given" critical dialog with no path forward short of a text
+        # editor. Any *other* startup failure (unknown workspace, a typo'd
+        # --mcp name, a broken resume) still gets the plain critical dialog
+        # — those aren't "you haven't set anything up yet", they're "you
+        # configured something and it's wrong", which the onboarding panel
+        # doesn't help with.
+        if not self.settings.providers.profiles:
+            self._show_onboarding()
+            return
         QMessageBox.critical(self, "Could Not Start Session", message)
+
+    def _show_onboarding(self) -> None:
+        dialog = OnboardingDialog(self.settings, self.bridge, skills_dir(), self)
+        dialog.exec()
+        self._refresh_profile_selector()
+        self._refresh_workspace_selector()
+        if self.settings.providers.profiles:
+            # At least one profile now exists (added during onboarding) —
+            # retry starting a session instead of leaving the user staring
+            # at a window with no active chat and no obvious next step.
+            last_profile = self.settings.app.last_profile_name
+            profile_name = (
+                last_profile if last_profile in self.settings.providers.profiles else sorted(self.settings.providers.profiles)[0]
+            )
+            last_workspace = self.settings.app.last_workspace_name
+            workspace_name = last_workspace if last_workspace in self.settings.workspaces.workspaces else None
+            self._restart_session(workspace_name=workspace_name, profile_name=profile_name, resume_conversation_id=None)
 
     def _on_turn_failed(self, message: str) -> None:
         QMessageBox.warning(self, "Turn Failed", message)
@@ -759,6 +803,25 @@ class MainWindow(QMainWindow):
         dialog = KnowledgeManagementDialog(self.settings, self.bridge, self)
         dialog.exec()
 
+    # --- provider/embedding profiles (U2) -------------------------------------
+
+    def open_profiles_dialog(self) -> None:
+        """Opens with ``self.bridge`` even mid-startup, same reasoning as
+        ``open_mcp_management_dialog`` — "Test" is a no-op until a bridge
+        exists, but Add/Edit/Remove never depended on one."""
+        dialog = ProfilesDialog(self.settings, self.bridge, self)
+        dialog.exec()
+        # A profile may have been added/removed/renamed — every selector
+        # and dependent dialog that lists profile names needs to see it.
+        self._refresh_profile_selector()
+
+    # --- workspaces (U1) ------------------------------------------------------
+
+    def open_workspace_management_dialog(self) -> None:
+        dialog = WorkspaceManagementDialog(self.settings, skills_dir(), self)
+        dialog.exec()
+        self._refresh_workspace_selector()
+
     # --- code editor (Phase 9) -------------------------------------------------
 
     def open_code_editor_dialog(self, *, initial_text: str = "") -> None:
@@ -786,7 +849,16 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self.settings.app, self.settings.providers.profiles, self)
         if not dialog.exec():
             return
+        previous_safety_mode = self.settings.app.default_safety_mode
         self.settings.app = dialog.updated_app_config()
+        # U3: the global default gets the same one-time relaxed-mode
+        # warning a workspace's own safety field already shows on the
+        # CLI/GUI workspace editor (relaxed_mode_warning_if_newly_enabled)
+        # — flipping the *default* every new workspace inherits deserves
+        # the same heads-up as flipping one workspace's own setting.
+        warning = relaxed_mode_warning_if_newly_enabled(previous_safety_mode, self.settings.app.default_safety_mode)
+        if warning:
+            QMessageBox.warning(self, "Relaxed Mode", warning)
         apply_font_size(QApplication.instance(), self.settings.app)  # takes effect immediately, no restart
         # "Change the debug level so I can help with console report" (bug
         # report): configure_logging is safe to call again — it only

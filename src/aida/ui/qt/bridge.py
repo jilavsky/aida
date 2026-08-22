@@ -36,7 +36,13 @@ from aida.cli.chat import (
 )
 from aida.coding.runner import run_python_script
 from aida.config.paths import knowledge_db_path
-from aida.config.settings import EmbeddingProfile, KnowledgeBaseConfig, McpServerConfig, Settings
+from aida.config.settings import (
+    EmbeddingProfile,
+    KnowledgeBaseConfig,
+    McpServerConfig,
+    ProviderProfile,
+    Settings,
+)
 from aida.core.confirmation import ConfirmationRequest
 from aida.knowledge.rag import index as kb_index
 from aida.knowledge.rag.ingest import IngestResult
@@ -46,7 +52,12 @@ from aida.mcp.manager import NAMESPACE_SEPARATOR, McpManager
 from aida.mcp.server import McpServerError
 from aida.persistence.recorder import ConversationNotFoundError
 from aida.providers.base import ImageRef
-from aida.providers.profiles import UnknownProviderKindError, build_embeddings_provider
+from aida.providers.profiles import (
+    UnknownProviderKindError,
+    build_embeddings_provider,
+    validate_embedding_profile,
+    validate_profile,
+)
 from aida.ui.qt._qt import QObject, QThread, Signal
 
 _STARTUP_ERRORS = (UnknownProfileError, UnknownWorkspaceError, UnknownMcpServerError, ConversationNotFoundError)
@@ -148,6 +159,15 @@ class ChatBridge(QObject):
     # on a rebuild of a large corpus.
     kb_ingest_finished = Signal(str, object)  # (kb name, IngestResult)
     kb_ingest_failed = Signal(str, str)  # (kb name, error message)
+    # U2: "Test" button in the provider/embedding profile editor —
+    # validate_profile/validate_embedding_profile are real network pings
+    # (a model list call, or a 1-token completion), so they run on the
+    # background loop the same way MCP's test_mcp_connection does. One
+    # signal per profile kind rather than a shared one: a ProfileValidation
+    # for a chat profile and one for an embedding profile aren't
+    # interchangeable to a dialog that has two separate lists to refresh.
+    profile_validated = Signal(str, object)  # (profile name, ProfileValidation)
+    embedding_profile_validated = Signal(str, object)  # (profile name, ProfileValidation)
     # Phase 9: code editor Run/Kill — same "one finished/failed pair" shape
     # as the KB ingest signals above. Runs on the background loop (a real
     # subprocess) so the Qt thread never blocks while a script runs.
@@ -396,6 +416,29 @@ class ChatBridge(QObject):
     async def _test_mcp_connection(self, config: McpServerConfig) -> None:
         result = await self._ensure_mcp_manager().test_connection(config)
         self.mcp_connection_tested.emit(config.name, result)
+
+    # --- provider/embedding profile validation (U2 management dialog) ------
+
+    def validate_provider_profile(self, profile: ProviderProfile) -> None:
+        """"Test" button for one ``ProviderProfile`` — pings the real
+        endpoint (see ``aida.providers.profiles.validate_profile``'s
+        docstring for what that means per provider kind) on the background
+        loop, never blocking the Qt thread."""
+        asyncio.run_coroutine_threadsafe(self._validate_provider_profile(profile), self._loop_thread.loop)
+
+    async def _validate_provider_profile(self, profile: ProviderProfile) -> None:
+        result = await validate_profile(profile)
+        self.profile_validated.emit(profile.name, result)
+
+    def validate_embedding_provider_profile(self, profile: EmbeddingProfile) -> None:
+        """Same as ``validate_provider_profile``, for an ``EmbeddingProfile``."""
+        asyncio.run_coroutine_threadsafe(
+            self._validate_embedding_provider_profile(profile), self._loop_thread.loop
+        )
+
+    async def _validate_embedding_provider_profile(self, profile: EmbeddingProfile) -> None:
+        result = await validate_embedding_profile(profile)
+        self.embedding_profile_validated.emit(profile.name, result)
 
     # --- knowledge base build/update (Phase 8 management dialog) -----------
 

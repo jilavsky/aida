@@ -130,7 +130,7 @@ class KnowledgeBaseFormDialog(QDialog):
             QMessageBox.warning(self, "Name Required", "A knowledge base needs a name.")
             return
         if not self._profile_combo.currentText():
-            QMessageBox.warning(self, "Embedding Profile Required", "Configure an embedding profile first (providers.yaml).")
+            QMessageBox.warning(self, "Embedding Profile Required", "Configure an embedding profile first (Providers… dialog).")
             return
         self.accept()
 
@@ -269,11 +269,23 @@ class KnowledgeManagementDialog(QDialog):
 
     def _on_add(self) -> None:
         if not self._embedding_profile_names():
-            QMessageBox.warning(
-                self, "No Embedding Profiles",
-                "Configure an embedding profile in providers.yaml (embedding_profiles:) first.",
+            # U2 fixed the actual dead end this used to be ("Configure an
+            # embedding profile in providers.yaml first" — with no GUI path
+            # to do that): offer to open the new Providers… dialog right
+            # here instead of sending the user to a text editor.
+            answer = QMessageBox.question(
+                self,
+                "No Embedding Profiles",
+                "No embedding profiles are configured yet. Open the Providers… dialog to add one now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
             )
-            return
+            if answer == QMessageBox.StandardButton.Yes:
+                from aida.ui.qt.profiles_dialog import ProfilesDialog
+
+                ProfilesDialog(self._settings, self._bridge, self).exec()
+            if not self._embedding_profile_names():
+                return
         dialog = KnowledgeBaseFormDialog(embedding_profile_names=self._embedding_profile_names(), parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return

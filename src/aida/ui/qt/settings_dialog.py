@@ -1,6 +1,8 @@
-"""``SettingsDialog`` (PLAN.md Phase 5): "Settings dialog v1: font size,
-records folder, log level, provider profiles *view* (editing via config
-file is acceptable this phase)".
+"""``SettingsDialog`` (PLAN.md Phase 5; U3, planning/improvement_plan_2026-08.md
+§3): font size, records folder, log level, provider profiles *view*, and
+(U3) the remaining ``AppConfig`` fields that previously required hand-
+editing ``config.yaml``: ``default_safety_mode``, the global
+``allowed_folders``/``command_allowlist`` lists, and ``max_context_tokens``.
 
 Never calls ``exec()`` from anywhere in ``aida.ui.qt`` itself and never
 touches ``aida.config`` I/O directly — it's constructed from an
@@ -24,6 +26,7 @@ from aida.ui.qt._qt import (
     QHBoxLayout,
     QLineEdit,
     QListWidget,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -31,6 +34,7 @@ from aida.ui.qt._qt import (
 )
 
 LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
+SAFETY_MODES = ["confirm", "relaxed"]
 
 
 class SettingsDialog(QDialog):
@@ -75,6 +79,37 @@ class SettingsDialog(QDialog):
         self._max_iterations_spin.setValue(app_config.max_agent_iterations)
         form.addRow("Max tool-call iterations per turn:", self._max_iterations_spin)
 
+        # U3: the remaining AppConfig fields that previously required
+        # hand-editing config.yaml.
+        self._default_safety_combo = QComboBox(self)
+        self._default_safety_combo.addItems(SAFETY_MODES)
+        index = self._default_safety_combo.findText(app_config.default_safety_mode)
+        if index >= 0:
+            self._default_safety_combo.setCurrentIndex(index)
+        form.addRow("Default safety mode:", self._default_safety_combo)
+
+        self._allowed_folders_edit = QPlainTextEdit("\n".join(app_config.allowed_folders), self)
+        self._allowed_folders_edit.setPlaceholderText(
+            "One folder per line — implicitly allowed for every workspace/session,\n"
+            "on top of that workspace's own source/target folders"
+        )
+        self._allowed_folders_edit.setMaximumHeight(80)
+        form.addRow("Global allowed folders:", self._allowed_folders_edit)
+
+        self._command_allowlist_edit = QPlainTextEdit("\n".join(app_config.command_allowlist), self)
+        self._command_allowlist_edit.setPlaceholderText(
+            "One allowed command pattern per line — union'd with each workspace's own"
+        )
+        self._command_allowlist_edit.setMaximumHeight(80)
+        form.addRow("Global command allowlist:", self._command_allowlist_edit)
+
+        self._max_context_tokens_spin = QSpinBox(self)
+        self._max_context_tokens_spin.setRange(0, 2_000_000)
+        self._max_context_tokens_spin.setSingleStep(1000)
+        self._max_context_tokens_spin.setSpecialValueText("Disabled (no trimming)")
+        self._max_context_tokens_spin.setValue(app_config.max_context_tokens)
+        form.addRow("Max context tokens:", self._max_context_tokens_spin)
+
         layout.addLayout(form)
 
         self._profiles_list = QListWidget(self)
@@ -106,6 +141,18 @@ class SettingsDialog(QDialog):
     def max_agent_iterations(self) -> int:
         return self._max_iterations_spin.value()
 
+    def default_safety_mode(self) -> str:
+        return self._default_safety_combo.currentText()
+
+    def allowed_folders(self) -> list[str]:
+        return [line.strip() for line in self._allowed_folders_edit.toPlainText().splitlines() if line.strip()]
+
+    def command_allowlist(self) -> list[str]:
+        return [line.strip() for line in self._command_allowlist_edit.toPlainText().splitlines() if line.strip()]
+
+    def max_context_tokens(self) -> int:
+        return self._max_context_tokens_spin.value()
+
     def updated_app_config(self) -> AppConfig:
         """A copy of the ``AppConfig`` this dialog was opened with, with
         this dialog's edited fields applied — window geometry and every
@@ -116,6 +163,10 @@ class SettingsDialog(QDialog):
             records_dir=self.records_dir(),
             log_level=self.log_level(),
             max_agent_iterations=self.max_agent_iterations(),
+            default_safety_mode=self.default_safety_mode(),
+            allowed_folders=self.allowed_folders(),
+            command_allowlist=self.command_allowlist(),
+            max_context_tokens=self.max_context_tokens(),
         )
 
 

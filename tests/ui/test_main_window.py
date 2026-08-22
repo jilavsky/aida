@@ -520,6 +520,97 @@ def test_settings_dialog_max_iterations_applies_to_the_running_session(
         window.close()
 
 
+def test_settings_dialog_warns_when_global_default_safety_becomes_relaxed(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """U3: flipping the *global default* safety mode gets the same
+    one-time relaxed-mode warning a single workspace's own safety field
+    already shows (relaxed_mode_warning_if_newly_enabled)."""
+    settings = _settings_with_profile()
+    settings.app.default_safety_mode = "confirm"
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+
+        def _fake_exec(self):
+            self._default_safety_combo.setCurrentText("relaxed")
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr("aida.ui.qt.settings_dialog.SettingsDialog.exec", _fake_exec)
+        warned = []
+        monkeypatch.setattr("aida.ui.qt.main_window.QMessageBox.warning", lambda *a, **k: warned.append(True))
+        window.open_settings_dialog()
+
+        assert warned == [True]
+        assert window.settings.app.default_safety_mode == "relaxed"
+    finally:
+        window.close()
+
+
+def test_settings_dialog_does_not_warn_when_default_safety_stays_confirm(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+
+        def _fake_exec(self):
+            return QDialog.DialogCode.Accepted  # no changes made
+
+        monkeypatch.setattr("aida.ui.qt.settings_dialog.SettingsDialog.exec", _fake_exec)
+        warned = []
+        monkeypatch.setattr("aida.ui.qt.main_window.QMessageBox.warning", lambda *a, **k: warned.append(True))
+        window.open_settings_dialog()
+
+        assert warned == []
+    finally:
+        window.close()
+
+
+# --- U1/U2 toolbar dialogs ----------------------------------------------
+
+
+def test_open_profiles_dialog_refreshes_the_profile_selector(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+
+        def _fake_exec(self):
+            self._settings.providers.profiles["new-profile"] = ProviderProfile(
+                name="new-profile", kind="openai_compat", model="m"
+            )
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr("aida.ui.qt.profiles_dialog.ProfilesDialog.exec", _fake_exec)
+        window.open_profiles_dialog()
+
+        assert window.profile_selector._combo.findText("new-profile") >= 0
+    finally:
+        window.close()
+
+
+def test_open_workspace_management_dialog_refreshes_the_workspace_selector(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+
+        def _fake_exec(self):
+            self._settings.workspaces.workspaces["new-ws"] = WorkspaceConfig(name="new-ws")
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr(
+            "aida.ui.qt.workspace_management_dialog.WorkspaceManagementDialog.exec", _fake_exec
+        )
+        window.open_workspace_management_dialog()
+
+        assert window.workspace_selector._combo.findText("new-ws") >= 0
+    finally:
+        window.close()
+
+
 def test_open_code_editor_dialog_uses_workspace_saved_scripts_dir_and_interpreter(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
 ):
@@ -1001,15 +1092,49 @@ def test_write_markdown_report_shows_as_file_artifact_card(
         window.close()
 
 
-def test_startup_failure_shows_error_and_leaves_session_none(
+def test_startup_failure_with_a_configured_profile_shows_critical_dialog(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    settings = load_settings()  # no profiles configured
+    """U4: the onboarding panel only replaces the bare critical dialog when
+    *zero* provider profiles are configured — this is the "something else
+    is wrong" case (a real profile exists; the requested one is just a
+    typo), which must still get the plain critical dialog, not the
+    first-run panel."""
+    settings = _settings_with_profile()  # a real profile exists
     monkeypatch.setattr("aida.ui.qt.main_window.QMessageBox.critical", lambda *a, **kw: None)
     window = MainWindow(settings, loop_thread, start_kwargs={"profile_name": "does-not-exist"})
     try:
         assert pump_until(qapp, lambda: window.statusBar().currentMessage() == "Startup failed")
         assert window.bridge.session is None
+    finally:
+        window.close()
+
+
+def test_startup_failure_with_no_profiles_shows_onboarding_instead(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """U4: a genuine first run (no profiles configured at all) shows the
+    onboarding panel instead of the bare "No profile given" critical
+    dialog."""
+    settings = load_settings()  # no profiles configured
+    opened = []
+
+    class _FakeOnboardingDialog:
+        def __init__(self, *a, **k):
+            opened.append(True)
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr("aida.ui.qt.main_window.OnboardingDialog", _FakeOnboardingDialog)
+    critical_calls = []
+    monkeypatch.setattr("aida.ui.qt.main_window.QMessageBox.critical", lambda *a, **kw: critical_calls.append(True))
+    window = MainWindow(settings, loop_thread, start_kwargs={})
+    try:
+        assert pump_until(qapp, lambda: window.statusBar().currentMessage() == "Startup failed")
+        assert window.bridge.session is None
+        assert opened == [True]
+        assert critical_calls == []  # onboarding replaced the critical dialog, didn't add to it
     finally:
         window.close()
 

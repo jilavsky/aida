@@ -331,3 +331,68 @@ def test_cancel_script_run_kills_a_sleeping_script(qapp, loop_thread, tmp_path: 
 def test_cancel_script_run_with_nothing_running_is_a_safe_noop(qapp, loop_thread):
     bridge = ChatBridge(loop_thread)
     bridge.cancel_script_run()  # must not raise
+
+
+# --- provider/embedding profile validation (U2 "Test" button) ---------------
+
+
+def test_validate_provider_profile_emits_profile_validated(qapp, loop_thread, monkeypatch):
+    from aida.config.settings import ProviderProfile
+    from aida.providers.profiles import ProfileValidation
+
+    async def fake_validate_profile(profile, *, timeout=10.0):
+        return ProfileValidation(name=profile.name, ok=True, detail="reachable (fake)")
+
+    monkeypatch.setattr("aida.ui.qt.bridge.validate_profile", fake_validate_profile)
+
+    bridge = ChatBridge(loop_thread)
+    results = []
+    bridge.profile_validated.connect(lambda name, result: results.append((name, result)))
+
+    bridge.validate_provider_profile(ProviderProfile(name="argo-claude", kind="anthropic", model="claude-x"))
+
+    assert pump_until(qapp, lambda: results)
+    name, result = results[0]
+    assert name == "argo-claude"
+    assert result.ok
+    assert result.detail == "reachable (fake)"
+
+
+def test_validate_provider_profile_surfaces_a_failed_ping(qapp, loop_thread, monkeypatch):
+    from aida.config.settings import ProviderProfile
+    from aida.providers.profiles import ProfileValidation
+
+    async def fake_validate_profile(profile, *, timeout=10.0):
+        return ProfileValidation(name=profile.name, ok=False, detail="not reachable (fake)")
+
+    monkeypatch.setattr("aida.ui.qt.bridge.validate_profile", fake_validate_profile)
+
+    bridge = ChatBridge(loop_thread)
+    results = []
+    bridge.profile_validated.connect(lambda name, result: results.append((name, result)))
+
+    bridge.validate_provider_profile(ProviderProfile(name="local", kind="openai_compat", model="llama"))
+
+    assert pump_until(qapp, lambda: results)
+    assert results[0][1].ok is False
+
+
+def test_validate_embedding_provider_profile_emits_embedding_profile_validated(qapp, loop_thread, monkeypatch):
+    from aida.config.settings import EmbeddingProfile
+    from aida.providers.profiles import ProfileValidation
+
+    async def fake_validate_embedding_profile(profile, *, timeout=10.0):
+        return ProfileValidation(name=profile.name, ok=True, detail="reachable (fake)")
+
+    monkeypatch.setattr("aida.ui.qt.bridge.validate_embedding_profile", fake_validate_embedding_profile)
+
+    bridge = ChatBridge(loop_thread)
+    results = []
+    bridge.embedding_profile_validated.connect(lambda name, result: results.append((name, result)))
+
+    bridge.validate_embedding_provider_profile(EmbeddingProfile(name="local-embed", kind="openai_compat", model="nomic"))
+
+    assert pump_until(qapp, lambda: results)
+    name, result = results[0]
+    assert name == "local-embed"
+    assert result.ok

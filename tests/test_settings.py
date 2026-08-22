@@ -102,7 +102,6 @@ def test_old_config_missing_fields_gets_defaults(aida_home: Path):
 
     loaded = load_app_config(aida_home)
     assert loaded.log_level == "INFO"  # default, not a crash
-    assert loaded.theme == "system"
 
 
 def test_unknown_future_field_ignored(aida_home: Path):
@@ -601,8 +600,13 @@ def test_app_config_accepts_null_only_for_optional_fields():
 
 
 def test_app_config_still_ignores_unknown_keys():
+    """``theme`` (U3) is itself a real example of this: removed as a dead
+    setting, so an old config.yaml with ``theme: dark`` in it must load
+    exactly as if that key had never existed at all — a still-known field
+    (``log_level``) stays at its default, unaffected."""
     config = AppConfig.from_dict({"some_future_field": 1, "theme": "dark"})
-    assert config.theme == "dark"
+    assert config.log_level == AppConfig().log_level
+    assert not hasattr(config, "theme")
 
 
 def test_every_app_config_field_is_loadable_from_disk():

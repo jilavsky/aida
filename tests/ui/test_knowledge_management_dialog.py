@@ -187,15 +187,42 @@ def test_remove_knowledge_base_cancelled_keeps_it(qapp, aida_home: Path, monkeyp
     assert dialog._kb_list.count() == 1
 
 
-def test_add_without_any_embedding_profile_configured_warns(qapp, aida_home: Path, monkeypatch):
+def test_add_without_any_embedding_profile_configured_offers_to_open_providers_dialog(
+    qapp, aida_home: Path, monkeypatch
+):
+    """U2 fixed the actual dead end this used to be — "Configure an
+    embedding profile in providers.yaml first" with no GUI path to do that
+    — by offering to open the new Providers… dialog right here. Declining
+    (answer=No) behaves like the old bare warning: nothing added."""
     settings = load_settings()  # no embedding_profiles configured at all
     dialog = KnowledgeManagementDialog(settings, None)
 
-    warned = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(True))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     dialog._on_add()
 
-    assert warned == [True]
+    assert dialog._kb_list.count() == 0
+
+
+def test_add_without_any_embedding_profile_opens_providers_dialog_on_yes(qapp, aida_home: Path, monkeypatch):
+    settings = load_settings()  # no embedding_profiles configured at all
+    dialog = KnowledgeManagementDialog(settings, None)
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    opened = []
+
+    class _FakeProfilesDialog:
+        def __init__(self, *a, **k):
+            opened.append(True)
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr("aida.ui.qt.profiles_dialog.ProfilesDialog", _FakeProfilesDialog)
+    dialog._on_add()
+
+    assert opened == [True]
+    # Still no embedding profiles were actually added by the fake dialog,
+    # so _on_add bails out the same way it did before — no KB form opened.
     assert dialog._kb_list.count() == 0
 
 
