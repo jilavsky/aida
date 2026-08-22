@@ -4,7 +4,7 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from aida.persistence.db import CURRENT_SCHEMA_VERSION, connect
+from aida.persistence.db import _MIGRATIONS, CURRENT_SCHEMA_VERSION, connect
 
 
 def test_connect_creates_db_file(tmp_path: Path):
@@ -93,6 +93,44 @@ def test_concurrent_first_connect_from_two_threads_does_not_raise_database_is_lo
         t.join(timeout=10.0)
 
     assert not errors, f"concurrent first connect() raised: {errors}"
+
+
+def test_artifacts_table_has_a_seq_column(tmp_path: Path):
+    """U6(b): "add a seq/message anchor to artifact records at write time
+    so resumed images can interleave at their original positions" —
+    schema v2."""
+    conn = connect(tmp_path / "aida.db")
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(artifacts)")}
+    assert "seq" in columns
+    conn.close()
+
+
+def test_migrating_from_v1_adds_artifacts_seq_column_without_data_loss(tmp_path: Path):
+    """Builds a genuine v1-only DB by hand (bypassing connect(), which
+    always migrates straight to CURRENT_SCHEMA_VERSION) so the v1->v2 step
+    itself — not just "works on a brand new DB" — is proven additive: an
+    existing artifact row survives with seq defaulting to NULL."""
+    path = tmp_path / "aida.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(_MIGRATIONS[1])
+    raw.execute("PRAGMA user_version = 1")
+    raw.execute(
+        "INSERT INTO conversations (id, created_at, updated_at) VALUES (?, ?, ?)",
+        ("c1", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+    )
+    raw.execute(
+        "INSERT INTO artifacts (id, conversation_id, kind, created_at) VALUES (?, ?, ?, ?)",
+        ("a1", "c1", "ImageArtifact", "2026-01-01T00:00:00"),
+    )
+    raw.commit()
+    raw.close()
+
+    conn = connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION == 2
+    row = conn.execute("SELECT * FROM artifacts WHERE id = 'a1'").fetchone()
+    assert row["id"] == "a1"  # pre-migration row survived
+    assert row["seq"] is None  # new column, no data for a pre-existing row
+    conn.close()
 
 
 def test_foreign_keys_enforced(tmp_path: Path):

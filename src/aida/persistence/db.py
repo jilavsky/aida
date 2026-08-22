@@ -28,7 +28,7 @@ from pathlib import Path
 
 from aida.config.paths import db_path
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 # The Phase 5 GUI opens the first-ever connection to a fresh DB file from
 # two threads at once (MainWindow.__init__ starts a session on the
@@ -89,6 +89,18 @@ _MIGRATIONS: dict[int, str] = {
 
     CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, seq);
     CREATE INDEX IF NOT EXISTS idx_artifacts_conversation ON artifacts(conversation_id);
+    """,
+    # U6(b): "Better resumed-conversation rendering... add a seq/message
+    # anchor to artifact records at write time so resumed images can
+    # interleave at their original positions." NULL for every row written
+    # before this migration (and for the rare case a caller doesn't know
+    # the owning message's seq yet) — the resume-rendering path falls back
+    # to appending those at the end of the transcript, exactly like v1's
+    # behavior, so old conversations keep working, just without
+    # interleaving for artifacts recorded before the upgrade.
+    2: """
+    ALTER TABLE artifacts ADD COLUMN seq INTEGER;
+    CREATE INDEX IF NOT EXISTS idx_artifacts_conversation_seq ON artifacts(conversation_id, seq);
     """,
 }
 

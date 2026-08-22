@@ -20,7 +20,8 @@ from aida.core.events import (
     ToolCallStarted,
     UsageInfo,
 )
-from aida.providers.base import Message
+from aida.persistence.store import ArtifactRecord
+from aida.providers.base import Message, ToolCall
 from aida.ui.qt._qt import QGuiApplication
 from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
 from aida.ui.qt.chat_panel import ChatPanel, ErrorBanner, MessageBubble
@@ -334,6 +335,124 @@ def test_load_history_renders_one_bubble_per_message_skipping_system(qapp):
     assert panel.widget_count == 2
     assert panel.widget_at(0).role == "user"
     assert panel.widget_at(1).role == "assistant"
+
+
+# --- U6: resumed tool messages render as collapsed rows, and artifacts
+# interleave at their original position ------------------------------------
+
+
+def test_load_history_renders_resumed_tool_message_as_a_collapsed_row(qapp):
+    """Bug report: a resumed analysis session "replays as a wall of raw
+    tool output" — a role="tool" message used to render as a full text
+    bubble. A tool-call-only assistant turn (no text) produces no bubble
+    either, matching the live TextStarted-deferred behavior."""
+    panel = ChatPanel()
+    panel.load_history(
+        [
+            Message(role="user", content="what time is it?"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[ToolCall(id="call_1", name="get_current_time", arguments={"tz": "utc"})],
+            ),
+            Message(role="tool", content="the time is now", tool_call_id="call_1", name="get_current_time"),
+            Message(role="assistant", content="it's noon"),
+        ]
+    )
+    kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
+    assert kinds == ["MessageBubble", "ToolCallRow", "MessageBubble"]
+
+    row = panel.widget_at(1)
+    assert row.tool_name == "get_current_time"
+    assert row.arguments == {"tz": "utc"}
+    assert row.is_error is None
+    assert "the time is now" in row._detail_text.toPlainText()
+    assert panel.widget_at(2).text == "it's noon"
+
+
+def test_load_history_tool_row_with_unmatched_call_id_gets_empty_arguments(qapp):
+    """A tool message whose matching assistant tool_calls entry isn't in
+    this history (e.g. it was trimmed) must not raise — just show no
+    recovered arguments."""
+    panel = ChatPanel()
+    panel.load_history([Message(role="tool", content="ok", tool_call_id="call_missing", name="a_tool")])
+    row = panel.widget_at(0)
+    assert row.arguments == {}
+
+
+def test_load_history_interleaves_artifacts_at_their_recorded_seq(qapp, tmp_path: Path):
+    png_path = tmp_path / "plot.png"
+    png_path.write_bytes(TINY_PNG_BYTES)
+    record = ArtifactRecord(
+        id="a1", conversation_id="c1", call_id="call_1", kind="ImageArtifact",
+        path=str(png_path), mime_type="image/png", created_at="2026-08-22T00:00:00", seq=2,
+    )
+    messages = [
+        Message(role="user", content="plot it"),
+        Message(
+            role="assistant", content="", tool_calls=[ToolCall(id="call_1", name="get_plot", arguments={})]
+        ),
+        Message(role="tool", content="[image]", tool_call_id="call_1", name="get_plot"),
+        Message(role="assistant", content="here it is"),
+    ]
+
+    panel = ChatPanel()
+    panel.load_history(messages, seqs=[0, 1, 2, 3], artifacts_by_seq={2: [record]})
+
+    kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
+    # user bubble, tool row (seq2's artifact right after it), image, final reply
+    assert kinds == ["MessageBubble", "ToolCallRow", "InlineImageWidget", "MessageBubble"]
+
+
+def test_load_history_artifact_with_a_missing_file_is_skipped(qapp, tmp_path: Path):
+    record = ArtifactRecord(
+        id="a1", conversation_id="c1", call_id="call_1", kind="ImageArtifact",
+        path=str(tmp_path / "gone.png"), mime_type="image/png", created_at="2026-08-22T00:00:00", seq=0,
+    )
+    panel = ChatPanel()
+    panel.load_history([Message(role="user", content="hi")], seqs=[0], artifacts_by_seq={0: [record]})
+    assert panel.widget_count == 1  # just the user bubble — the missing-file artifact was skipped
+
+
+def test_load_history_without_seqs_still_works_exactly_as_before(qapp):
+    """seqs/artifacts_by_seq are both optional — a caller that only passes
+    messages (every existing caller, and any test that predates U6) must
+    see unchanged behavior."""
+    panel = ChatPanel()
+    panel.load_history([Message(role="user", content="hi"), Message(role="assistant", content="hello!")])
+    assert panel.widget_count == 2
+
+
+def test_artifact_widget_for_builds_the_right_widget_kind(qapp, tmp_path: Path):
+    image_path = tmp_path / "plot.png"
+    image_path.write_bytes(TINY_PNG_BYTES)
+    file_path = tmp_path / "report.md"
+    file_path.write_text("# report", encoding="utf-8")
+    panel = ChatPanel()
+
+    image_widget = panel.artifact_widget_for(
+        ArtifactRecord(
+            id="a1", conversation_id="c1", call_id=None, kind="ImageArtifact",
+            path=str(image_path), mime_type="image/png", created_at="2026-08-22T00:00:00",
+        )
+    )
+    assert isinstance(image_widget, InlineImageWidget)
+
+    file_widget = panel.artifact_widget_for(
+        ArtifactRecord(
+            id="a2", conversation_id="c1", call_id=None, kind="FileArtifact",
+            path=str(file_path), mime_type="text/markdown", created_at="2026-08-22T00:00:00",
+        )
+    )
+    assert isinstance(file_widget, FileArtifactCard)
+
+    unknown_widget = panel.artifact_widget_for(
+        ArtifactRecord(
+            id="a3", conversation_id="c1", call_id=None, kind="TextArtifact",
+            path=None, mime_type=None, created_at="2026-08-22T00:00:00",
+        )
+    )
+    assert unknown_widget is None
 
 
 def test_retrieval_performed_renders_a_retrieval_row(qapp):

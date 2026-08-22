@@ -145,19 +145,30 @@ class ConversationRecorder:
             return self._record_path
         return self.export_transcript()
 
-    def record_artifact(self, artifact: Artifact, *, call_id: str | None) -> None:
-        """Persist a real ``Artifact`` object's metadata."""
+    def record_artifact(self, artifact: Artifact, *, call_id: str | None, message_seq: int | None = None) -> None:
+        """Persist a real ``Artifact`` object's metadata. ``message_seq``
+        (U6(b)) is the seq of the message this artifact belongs with — see
+        ``next_message_seq``."""
         self.store.append_artifact_from_object(
-            self.conversation_id, artifact, call_id=call_id, timestamp=_now_iso()
+            self.conversation_id, artifact, call_id=call_id, timestamp=_now_iso(), seq=message_seq
         )
 
     def record_artifact_fields(
-        self, *, artifact_id: str, kind: str, path: str | None, mime_type: str | None, call_id: str | None
+        self,
+        *,
+        artifact_id: str,
+        kind: str,
+        path: str | None,
+        mime_type: str | None,
+        call_id: str | None,
+        message_seq: int | None = None,
     ) -> None:
         """Persist artifact metadata from primitive fields — what
         ``aida.cli.chat`` actually has on hand from an
         ``ImageArtifactCreated``/``FileArtifactCreated`` event, which
-        doesn't carry a full ``Artifact`` instance."""
+        doesn't carry a full ``Artifact`` instance. ``message_seq`` (U6(b))
+        is the seq of the message this artifact belongs with — see
+        ``next_message_seq``."""
         self.store.append_artifact(
             self.conversation_id,
             artifact_id=artifact_id,
@@ -166,7 +177,15 @@ class ConversationRecorder:
             mime_type=mime_type,
             call_id=call_id,
             timestamp=_now_iso(),
+            seq=message_seq,
         )
+
+    def next_message_seq(self) -> int:
+        """U6(b): the seq the *next* message appended to this conversation
+        will receive — see ``ConversationStore.next_seq``'s docstring for
+        why a caller needs to know this ahead of the message actually being
+        persisted."""
+        return self.store.next_seq(self.conversation_id)
 
     def export_transcript(self) -> Path:
         """Write (or overwrite) this conversation's Markdown transcript,

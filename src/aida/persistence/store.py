@@ -49,6 +49,13 @@ class ArtifactRecord:
     path: str | None
     mime_type: str | None
     created_at: str
+    #: U6(b): the ``seq`` of the message this artifact belongs with (set at
+    #: write time — see ``ConversationRecorder.record_artifact_fields`` /
+    #: ``next_message_seq``), so a resumed conversation can show it right
+    #: after that message instead of appended at the end of the transcript.
+    #: ``None`` for rows written before this field existed, or for any
+    #: caller that doesn't know the owning message's seq yet.
+    seq: int | None = None
 
 
 def _artifact_kind(artifact: Artifact) -> str:
@@ -176,23 +183,31 @@ class ConversationStore:
         rows = self._conn.execute(
             "SELECT * FROM messages WHERE conversation_id = ? ORDER BY seq ASC", (conversation_id,)
         ).fetchall()
-        messages: list[Message] = []
-        for row in rows:
-            tool_calls = (
-                [ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"]) for tc in json.loads(row["tool_calls_json"])]
-                if row["tool_calls_json"]
-                else []
-            )
-            messages.append(
-                Message(
-                    role=row["role"],
-                    content=row["content"],
-                    tool_calls=tool_calls,
-                    tool_call_id=row["tool_call_id"],
-                    name=row["name"],
-                )
-            )
-        return messages
+        return [self._row_to_message(row) for row in rows]
+
+    def load_messages_with_seq(self, conversation_id: str) -> list[tuple[int, Message]]:
+        """Same as ``load_messages`` but paired with each message's ``seq``
+        — U6(b): the GUI resume path needs it to interleave artifacts at
+        their original position (``artifacts.seq`` matches one of these)."""
+        rows = self._conn.execute(
+            "SELECT * FROM messages WHERE conversation_id = ? ORDER BY seq ASC", (conversation_id,)
+        ).fetchall()
+        return [(row["seq"], self._row_to_message(row)) for row in rows]
+
+    @staticmethod
+    def _row_to_message(row: sqlite3.Row) -> Message:
+        tool_calls = (
+            [ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"]) for tc in json.loads(row["tool_calls_json"])]
+            if row["tool_calls_json"]
+            else []
+        )
+        return Message(
+            role=row["role"],
+            content=row["content"],
+            tool_calls=tool_calls,
+            tool_call_id=row["tool_call_id"],
+            name=row["name"],
+        )
 
     def _next_seq(self, conversation_id: str) -> int:
         row = self._conn.execute(
@@ -200,6 +215,16 @@ class ConversationStore:
             (conversation_id,),
         ).fetchone()
         return row[0]
+
+    def next_seq(self, conversation_id: str) -> int:
+        """Public wrapper for ``_next_seq`` — U6(b): the seq the *next*
+        appended message will receive. An ``ImageArtifactCreated``/
+        ``FileArtifactCreated`` event can arrive before the tool-result
+        message that will carry it is itself persisted (see
+        ``aida.core.agent.AgentLoop.run``), so ``aida.cli.chat.ChatSession``
+        needs to know that message's future seq ahead of time to record the
+        association (``ConversationRecorder.next_message_seq``)."""
+        return self._next_seq(conversation_id)
 
     # --- artifacts ---------------------------------------------------------
 
@@ -213,22 +238,30 @@ class ConversationStore:
         mime_type: str | None,
         call_id: str | None,
         timestamp: str,
+        seq: int | None = None,
     ) -> None:
         """Primitive fields, not an ``Artifact`` object — this is what a
         frontend actually has on hand (e.g. from an
         ``ImageArtifactCreated``/``FileArtifactCreated`` event, which
         carries exactly these fields and not a full ``Artifact`` instance).
         Use ``append_artifact_from_object`` when a real ``Artifact`` is
-        available instead."""
+        available instead. ``seq`` is U6(b)'s interleave anchor — see
+        ``ArtifactRecord.seq``."""
         self._conn.execute(
-            "INSERT INTO artifacts (id, conversation_id, call_id, kind, path, mime_type, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (artifact_id, conversation_id, call_id, kind, path, mime_type, timestamp),
+            "INSERT INTO artifacts (id, conversation_id, call_id, kind, path, mime_type, created_at, seq) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (artifact_id, conversation_id, call_id, kind, path, mime_type, timestamp, seq),
         )
         self._conn.commit()
 
     def append_artifact_from_object(
-        self, conversation_id: str, artifact: Artifact, *, call_id: str | None, timestamp: str
+        self,
+        conversation_id: str,
+        artifact: Artifact,
+        *,
+        call_id: str | None,
+        timestamp: str,
+        seq: int | None = None,
     ) -> None:
         self.append_artifact(
             conversation_id,
@@ -238,6 +271,7 @@ class ConversationStore:
             mime_type=_artifact_mime_type(artifact),
             call_id=call_id,
             timestamp=timestamp,
+            seq=seq,
         )
 
     def load_artifacts(self, conversation_id: str) -> list[ArtifactRecord]:
@@ -254,6 +288,7 @@ class ConversationStore:
                 path=row["path"],
                 mime_type=row["mime_type"],
                 created_at=row["created_at"],
+                seq=row["seq"],
             )
             for row in rows
         ]

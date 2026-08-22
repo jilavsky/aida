@@ -81,6 +81,42 @@ def test_record_artifact_persists(tmp_path: Path):
     assert loaded[0].call_id == "call_1"
 
 
+def test_next_message_seq_reflects_persisted_messages(tmp_path: Path):
+    """U6(b): ChatSession reads this before the tool-result message that
+    will carry an artifact has itself been persisted (see aida.cli.chat's
+    ImageArtifactCreated/FileArtifactCreated handling)."""
+    rec = _recorder(tmp_path)
+    assert rec.next_message_seq() == 0
+    rec.record_message(Message(role="user", content="hi"))
+    assert rec.next_message_seq() == 1
+
+
+def test_record_artifact_fields_stores_message_seq(tmp_path: Path):
+    rec = _recorder(tmp_path)
+    rec.record_artifact_fields(
+        artifact_id="art-1", kind="ImageArtifact", path="/tmp/x.png", mime_type="image/png", call_id="call_1",
+        message_seq=2,
+    )
+    loaded = rec.store.load_artifacts(rec.conversation_id)
+    assert loaded[0].seq == 2
+
+
+def test_record_artifact_stores_message_seq(tmp_path: Path):
+    rec = _recorder(tmp_path)
+    art = rec.artifact_store.save_image(ImageArtifact(data=b"x", mime_type="image/png"))
+    rec.record_artifact(art, call_id="call_1", message_seq=5)
+    loaded = rec.store.load_artifacts(rec.conversation_id)
+    assert loaded[0].seq == 5
+
+
+def test_record_artifact_without_message_seq_defaults_to_none(tmp_path: Path):
+    rec = _recorder(tmp_path)
+    art = rec.artifact_store.save_image(ImageArtifact(data=b"x", mime_type="image/png"))
+    rec.record_artifact(art, call_id="call_1")
+    loaded = rec.store.load_artifacts(rec.conversation_id)
+    assert loaded[0].seq is None
+
+
 def test_resume_loads_existing_conversation(tmp_path: Path):
     db_path = tmp_path / "aida.db"
     artifact_store = ArtifactStore(base_dir=tmp_path / "artifacts")

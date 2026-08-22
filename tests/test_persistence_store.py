@@ -166,6 +166,60 @@ def test_delete_conversation_removes_messages_and_artifacts(tmp_path: Path):
     assert store.load_artifacts(conv_id) == []
 
 
+def test_next_seq_reflects_already_persisted_messages(tmp_path: Path):
+    """U6(b): ConversationStore.next_seq is the public wrapper an artifact
+    event handler uses to learn a not-yet-persisted message's future seq —
+    same value append_message would assign next."""
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    assert store.next_seq(conv_id) == 0
+
+    store.append_message(conv_id, Message(role="user", content="hi"), timestamp=T0)
+    assert store.next_seq(conv_id) == 1
+
+    store.append_message(conv_id, Message(role="assistant", content="hello"), timestamp=T1)
+    assert store.next_seq(conv_id) == 2
+
+
+def test_load_messages_with_seq_pairs_each_message_with_its_seq(tmp_path: Path):
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.append_message(conv_id, Message(role="user", content="hi"), timestamp=T0)
+    store.append_message(conv_id, Message(role="assistant", content="hello"), timestamp=T1)
+
+    rows = store.load_messages_with_seq(conv_id)
+
+    assert [seq for seq, _ in rows] == [0, 1]
+    assert [m.content for _, m in rows] == ["hi", "hello"]
+
+
+def test_append_artifact_seq_round_trips(tmp_path: Path):
+    """U6(b): the seq an artifact is recorded with (the tool-result message
+    it belongs to) survives the round trip so the GUI resume path can
+    interleave it back at that position."""
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    art = ImageArtifact(data=b"pngbytes", mime_type="image/png", path="/tmp/x.png")
+    store.append_artifact_from_object(conv_id, art, call_id="call_1", timestamp=T0, seq=3)
+
+    loaded = store.load_artifacts(conv_id)
+    assert loaded[0].seq == 3
+
+
+def test_append_artifact_seq_defaults_to_none(tmp_path: Path):
+    """A caller that doesn't know the owning message's seq yet (or an old
+    pre-U6(b) row) must not crash and must round-trip as None rather than
+    some sentinel — the GUI resume path treats None as "append at the end",
+    same as v1's behavior."""
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    art = ImageArtifact(data=b"pngbytes", mime_type="image/png", path="/tmp/x.png")
+    store.append_artifact_from_object(conv_id, art, call_id="call_1", timestamp=T0)
+
+    loaded = store.load_artifacts(conv_id)
+    assert loaded[0].seq is None
+
+
 def test_delete_conversation_does_not_touch_other_conversations(tmp_path: Path):
     store = _store(tmp_path)
     conv_a = store.create_conversation(timestamp=T0)

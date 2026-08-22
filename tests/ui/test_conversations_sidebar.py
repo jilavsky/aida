@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from aida.persistence.store import ConversationSummary
 from aida.ui.qt._qt import QDialog, QMessageBox
 from aida.ui.qt.conversations_sidebar import CleanupDialog, ConversationsSidebar
@@ -188,3 +190,69 @@ def test_cleanup_button_cancelled_does_not_emit(qapp, monkeypatch):
     sidebar.cleanup_requested.connect(cleaned.append)
     sidebar._on_cleanup_clicked()
     assert cleaned == []
+
+
+# --- U5: local short date/time + a live title filter ------------------------
+
+
+def test_row_label_shows_local_short_date_time_not_the_raw_iso_string(qapp):
+    """Bug report: "these date/times are not very convenient to use" — the
+    row used to show the raw UTC ISO-8601 updated_at string verbatim."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", title="analysis")])
+    label = sidebar._list.item(0).text()
+    assert "2026-08-19T00:00:00" not in label
+    assert "[use-pyirena]" in label
+    assert "analysis" in label
+    # "Aug 19 HH:MM" shape — exact minute depends on the viewer's local
+    # timezone offset from the stored UTC timestamp, so only the shape is
+    # asserted, not a specific clock time.
+    assert re.search(r"^[A-Z][a-z]{2} \d{2} \d{2}:\d{2}", label)
+
+
+def test_row_label_falls_back_to_the_raw_string_for_unparseable_timestamps(qapp):
+    sidebar = ConversationsSidebar()
+    bad = _summary("id1")
+    bad.updated_at = "not-a-timestamp"
+    sidebar.set_conversations([bad])
+    assert "not-a-timestamp" in sidebar._list.item(0).text()
+
+
+def test_search_filters_by_title_case_insensitively(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", title="USAXS beamtime notes"), _summary("id2", title="other chat")])
+    sidebar._search_edit.setText("usaxs")
+    assert sidebar.count == 1
+    assert sidebar._ids_by_row == ["id1"]
+
+
+def test_search_with_no_matches_shows_an_empty_list(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", title="alpha"), _summary("id2", title="beta")])
+    sidebar._search_edit.setText("no such conversation")
+    assert sidebar.count == 0
+
+
+def test_clearing_search_restores_every_conversation(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", title="alpha"), _summary("id2", title="beta")])
+    sidebar._search_edit.setText("alpha")
+    assert sidebar.count == 1
+    sidebar._search_edit.setText("")
+    assert sidebar.count == 2
+
+
+def test_refreshing_conversations_preserves_an_active_filter(qapp):
+    """set_conversations is called again on every resume/delete/rename/
+    cleanup — it must re-apply whatever the user already typed rather than
+    silently clearing the search box."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", title="alpha"), _summary("id2", title="beta")])
+    sidebar._search_edit.setText("alpha")
+    assert sidebar.count == 1
+
+    # A refresh with a fresh set of summaries (e.g. after a rename) — the
+    # filter text itself is untouched, so it must still apply.
+    sidebar.set_conversations([_summary("id1", title="alpha"), _summary("id2", title="beta"), _summary("id3", title="alpha two")])
+    assert sidebar.count == 2
+    assert sidebar._search_edit.text() == "alpha"

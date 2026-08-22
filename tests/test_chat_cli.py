@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from aida.artifacts.base import FileArtifact, ImageArtifact
+from aida.artifacts.store import ArtifactStore
 from aida.cli.chat import (
     ChatSession,
     UnknownMcpServerError,
@@ -34,10 +36,13 @@ from aida.core.events import (
     ToolCallStarted,
     UsageInfo,
 )
+from aida.core.tools import NativeTool, ToolResult
 from aida.knowledge.rag import index as kb_index
 from aida.knowledge.rag.chunking import Chunk
 from aida.knowledge.rag.retrieval import ActiveKnowledgeBase
-from aida.providers.base import Message
+from aida.persistence.recorder import ConversationRecorder
+from aida.persistence.store import ConversationStore
+from aida.providers.base import Message, ToolSchema
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
 from aida.providers.mock_embeddings import MockEmbeddings
 from aida.workspace.safety import ConfirmationRequest
@@ -527,6 +532,80 @@ async def test_chat_session_tool_round_trip_with_default_tools(monkeypatch, aida
     finished = next(e for e in events if isinstance(e, ToolCallFinished))
     assert finished.tool_name == "get_current_time"
     assert "utc_iso" in finished.result
+
+
+# --- U6(b): artifacts are recorded with the owning message's future seq ----
+
+
+def _recorder(tmp_path: Path) -> ConversationRecorder:
+    store = ConversationStore(tmp_path / "aida.db")
+    artifact_store = ArtifactStore(base_dir=tmp_path / "artifacts")
+    return ConversationRecorder(store, artifact_store, tmp_path / "records")
+
+
+@pytest.mark.asyncio
+async def test_send_records_image_artifact_with_the_tool_messages_future_seq(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """aida.core.agent.AgentLoop.run yields ImageArtifactCreated/
+    FileArtifactCreated *before* appending the tool-result message they
+    belong to (see its own comment) — ChatSession must still tag the
+    recorded artifact with that message's seq so the GUI resume path
+    (aida.ui.qt.chat_panel.load_history) can interleave it back at the
+    right position, not just append it at the end like pre-U6(b)."""
+
+    async def _get_plot(_args):
+        art = ImageArtifact(data=b"pngbytes", mime_type="image/png", path=str(tmp_path / "plot.png"))
+        return ToolResult(content="[image]", artifacts=[art])
+
+    tool = NativeTool(
+        schema=ToolSchema(name="get_plot", description="", parameters={"type": "object"}), func=_get_plot
+    )
+    provider = MockProvider(
+        [MockTurn(tool_calls=[MockToolCall(name="get_plot", id="call_1")]), MockTurn(text="here it is")]
+    )
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    settings = _settings_with_profile()
+    recorder = _recorder(tmp_path)
+    session = ChatSession(settings, "mock-profile", tools={"get_plot": tool}, recorder=recorder)
+
+    [e async for e in session.send("plot it")]
+
+    records = recorder.store.load_artifacts(recorder.conversation_id)
+    assert len(records) == 1
+    tool_message_seq = next(
+        seq for seq, m in recorder.store.load_messages_with_seq(recorder.conversation_id) if m.role == "tool"
+    )
+    assert records[0].seq == tool_message_seq
+
+
+@pytest.mark.asyncio
+async def test_send_records_file_artifact_with_the_tool_messages_future_seq(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    async def _get_report(_args):
+        art = FileArtifact(path=str(tmp_path / "report.md"), mime_type="text/markdown")
+        return ToolResult(content="[file]", artifacts=[art])
+
+    tool = NativeTool(
+        schema=ToolSchema(name="get_report", description="", parameters={"type": "object"}), func=_get_report
+    )
+    provider = MockProvider(
+        [MockTurn(tool_calls=[MockToolCall(name="get_report", id="call_1")]), MockTurn(text="here it is")]
+    )
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+    settings = _settings_with_profile()
+    recorder = _recorder(tmp_path)
+    session = ChatSession(settings, "mock-profile", tools={"get_report": tool}, recorder=recorder)
+
+    [e async for e in session.send("write a report")]
+
+    records = recorder.store.load_artifacts(recorder.conversation_id)
+    assert len(records) == 1
+    tool_message_seq = next(
+        seq for seq, m in recorder.store.load_messages_with_seq(recorder.conversation_id) if m.role == "tool"
+    )
+    assert records[0].seq == tool_message_seq
 
 
 # --- ChatSession.send() retrieval injection (Phase 8 RAG) -------------------

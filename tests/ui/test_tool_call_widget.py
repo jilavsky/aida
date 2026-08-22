@@ -28,6 +28,29 @@ def test_mark_finished_error_updates_summary(qapp):
     assert "✗" in row._summary_label.text()
 
 
+def test_mark_historic_shows_a_neutral_marker_and_no_elapsed_time(qapp):
+    """U6: a resumed tool row rebuilt from a persisted Message — is_error
+    and duration were never recorded, so neither ✓/✗ nor an elapsed
+    seconds figure can be shown."""
+    row = ToolCallRow(call_id="c1", tool_name="get_time", arguments={"tz": "utc"})
+    row.mark_historic(result="the time is now")
+    assert row.is_error is None
+    text = row._summary_label.text()
+    assert "•" in text
+    assert "✓" not in text
+    assert "✗" not in text
+    assert "s)" not in text  # no elapsed-seconds suffix
+    assert "the time is now" in row._detail_text.toPlainText()
+
+
+def test_mark_historic_row_still_expands_to_show_details(qapp):
+    row = ToolCallRow(call_id="c1", tool_name="get_time", arguments={"tz": "utc"})
+    row.mark_historic(result="the time is now")
+    row.toggle_expanded()
+    assert row.is_expanded
+    assert "the time is now" in row._detail_text.toPlainText()
+
+
 def test_toggle_expanded_shows_and_hides_detail(qapp):
     row = ToolCallRow(call_id="c1", tool_name="get_time", arguments={"tz": "utc"})
     row.mark_finished(result="the time is now", is_error=False)

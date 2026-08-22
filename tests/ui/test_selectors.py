@@ -3,6 +3,7 @@ display, MCP quick panel."""
 
 from __future__ import annotations
 
+from aida.ui.qt._qt import Qt
 from aida.ui.qt.selectors import (
     NO_WORKSPACE_LABEL,
     FolderDisplay,
@@ -51,6 +52,26 @@ def test_profile_selector_emits_on_change(qapp):
     selector.profile_changed.connect(changes.append)
     selector._combo.setCurrentText("b")
     assert changes == ["b"]
+
+
+def test_profile_selector_sets_capability_notes_as_tooltip(qapp):
+    """U7 paper cut: "capability_notes is stored but shown nowhere"."""
+    selector = ProfileSelector()
+    selector.set_profiles(
+        ["argo-claude", "local-ollama"],
+        capability_notes={"local-ollama": "small local model — prefer lean MCP groups"},
+    )
+    assert selector._combo.itemData(0, Qt.ItemDataRole.ToolTipRole) is None
+    assert (
+        selector._combo.itemData(1, Qt.ItemDataRole.ToolTipRole)
+        == "small local model — prefer lean MCP groups"
+    )
+
+
+def test_profile_selector_with_no_capability_notes_sets_no_tooltips(qapp):
+    selector = ProfileSelector()
+    selector.set_profiles(["argo-claude"])
+    assert selector._combo.itemData(0, Qt.ItemDataRole.ToolTipRole) is None
 
 
 def test_folder_display_shows_none_by_default(qapp):

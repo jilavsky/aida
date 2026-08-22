@@ -374,13 +374,23 @@ first"). Closing this gap is the biggest usability win available.
       cases in `tests/ui/test_main_window.py` covering both branches of
       `_on_startup_failed`.
 
-- [ ] **(U5) Conversations sidebar polish.** Row labels currently start with a
+- [x] **(U5) Conversations sidebar polish.** Row labels currently start with a
       raw UTC ISO timestamp (`2026-08-22T14:03:22.123456+00:00 …`). Format as
       local short date/time (`Aug 22 09:03`), and add a small filter/search box
       above the list (title substring match is enough) — the list grows fast in
       real use.
+      **Done (2026-08-22):** `ConversationsSidebar` gained `_format_timestamp`
+      (parses the stored UTC ISO string, converts to the viewer's local
+      timezone, formats as e.g. "Aug 22 09:03"; falls back to the raw string
+      on anything unparseable) used in `_row_label`, and a live search
+      `QLineEdit` above the list. Filtering is case-insensitive substring
+      match against title, re-applied via `_apply_filter` every time
+      `set_conversations` is called — so a refresh (resume/delete/rename/
+      cleanup all call it) re-applies whatever the user already typed rather
+      than silently clearing the search box. Tests: 7 new cases in
+      `tests/ui/test_conversations_sidebar.py`.
 
-- [ ] **(U6) Better resumed-conversation rendering.** `load_history` renders
+- [x] **(U6) Better resumed-conversation rendering.** `load_history` renders
       every `role="tool"` message as a full text bubble, so a resumed analysis
       session replays as a wall of raw tool output, and images are appended at
       the very end rather than in place. Two steps: (a) render resumed
@@ -388,8 +398,46 @@ first"). Closing this gap is the biggest usability win available.
       `tool_call_id`, `name` — is already persisted); (b) add a `seq`/message
       anchor to artifact records at write time so resumed images can interleave
       at their original positions. (a) is easy and delivers most of the value.
+      **Done (2026-08-22):** both steps.
+      (a): a resumed `role="tool"` message now renders as the same
+      `ToolCallRow` the live path uses, via a new `ToolCallRow.mark_historic`
+      (neutral "•" marker and no elapsed time, since `is_error`/duration
+      were never persisted on `Message`) — `ChatPanel.load_history` recovers
+      each call's original arguments by scanning the matching assistant
+      message's `tool_calls`. A tool-call-only assistant turn (no text) now
+      also produces no bubble, mirroring the live `TextStarted`-deferred
+      behavior.
+      (b): schema v2 adds `artifacts.seq` (nullable — old rows and any
+      future caller that doesn't know the owning message's seq yet just
+      fall back to v1's "append at the end" behavior). `ChatSession` tags
+      each recorded artifact with `ConversationRecorder.next_message_seq()`
+      — the tool-result message an `ImageArtifactCreated`/
+      `FileArtifactCreated` event belongs to hasn't been persisted yet at
+      the point the event arrives (`AgentLoop.run` yields the artifact
+      event first), so this is the seq that message is *about* to receive,
+      computed live from the DB (`ConversationStore.next_seq`) rather than
+      assumed from in-memory bookkeeping — correct even after
+      `repair_tool_call_pairing` edits a resumed history. `MainWindow.
+      _load_resumed_history` replaces the old `_load_resumed_artifacts`:
+      queries `store.load_messages_with_seq` + `store.load_artifacts`
+      directly (rather than the in-memory, possibly-repaired
+      `session.messages`) and hands both to `ChatPanel.load_history`'s new
+      optional `seqs`/`artifacts_by_seq` parameters to interleave; any
+      artifact with no seq is still appended after the whole transcript,
+      same as v1. Tests: `tests/test_persistence_db.py` (a hand-built v1
+      DB migrates to v2 without data loss), `tests/test_persistence_store.py`
+      / `tests/test_persistence_recorder.py` (seq round-trips, `next_seq`/
+      `next_message_seq`), `tests/test_chat_cli.py` (two end-to-end cases
+      proving the recorded artifact's seq matches the tool message's actual
+      seq), `tests/ui/test_tool_call_widget.py` (`mark_historic`),
+      `tests/ui/test_chat_panel.py` (7 new cases: collapsed tool rows,
+      unmatched call_id, seq interleaving, missing-file skip, backward
+      compat with no seqs given, `artifact_widget_for`), and the existing
+      `test_resume_conversation_redisplays_prior_image_artifact` in
+      `tests/ui/test_main_window.py` (real mock-mcp subprocess) continues
+      to pass unchanged, now exercising the seq-based path end to end.
 
-- [ ] **(U7) Small paper cuts.**
+- [x] **(U7) Small paper cuts.**
       - `capability_notes` is stored but shown nowhere; display it in the
         profile selector tooltip / Settings list so the "small local model —
         prefer lean MCP groups" hints the config format was designed for are
@@ -401,6 +449,22 @@ first"). Closing this gap is the biggest usability win available.
       - A menu bar (File/Help) with "Open config folder", "Open records
         folder", "Documentation", "About" — cheap discoverability for exactly
         the folders users otherwise have to find by hand.
+      **Done (2026-08-22):** all three.
+      `ProfileSelector.set_profiles` gained an optional `capability_notes`
+      map setting each combo entry's tooltip (`Qt.ItemDataRole.ToolTipRole`);
+      `SettingsDialog`'s read-only profile list (`_profile_rows`) appends
+      `" — <capability_notes>"` when set. `MainWindow._restart_session` now
+      shows a status message + `QApplication.setOverrideCursor(Qt.
+      CursorShape.WaitCursor)` around the blocking `old_bridge.shutdown()`
+      call, restored in a `finally`. A new `_build_menu_bar` adds File
+      ("Open Config Folder", "Open Records Folder") and Help
+      ("Documentation" → the repo's GitHub URL, "About AIDA" → a
+      `QMessageBox.about` with the installed version) — the app previously
+      had no menu bar at all. Tests: `tests/ui/test_selectors.py` (2 new),
+      `tests/ui/test_settings_dialog.py` (1 new), and 6 new cases in
+      `tests/ui/test_main_window.py` (busy cursor set/restored around a
+      real `New Chat` restart, capability_notes tooltip wiring, menu
+      presence, and each of the four menu actions).
 
 ---
 

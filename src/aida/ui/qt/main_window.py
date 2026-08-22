@@ -20,8 +20,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from aida import __version__ as AIDA_VERSION
 from aida.config.logging_setup import configure_logging, get_logger
-from aida.config.paths import ensure_records_dir, skills_dir
+from aida.config.paths import config_dir, ensure_records_dir, skills_dir
 from aida.config.settings import Settings, save_app_config
 from aida.core.cost import estimate_cost_usd
 from aida.mcp.groups import resolve_group
@@ -31,16 +32,17 @@ from aida.providers.base import ImageRef
 from aida.ui.qt._qt import (
     QAction,
     QApplication,
+    QDesktopServices,
     QLabel,
     QMainWindow,
     QMessageBox,
     QSplitter,
     Qt,
     QToolBar,
+    QUrl,
     QVBoxLayout,
     QWidget,
 )
-from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
 from aida.ui.qt.bridge import AsyncLoopThread, ChatBridge
 from aida.ui.qt.chat_panel import ChatPanel
 from aida.ui.qt.code_editor_dialog import CodeEditorDialog
@@ -96,6 +98,8 @@ class MainWindow(QMainWindow):
     # --- construction ----------------------------------------------------
 
     def _build_ui(self) -> None:
+        self._build_menu_bar()
+
         toolbar = QToolBar("Session", self)
         self.addToolBar(toolbar)
         self.workspace_selector = WorkspaceSelector(self)
@@ -175,6 +179,47 @@ class MainWindow(QMainWindow):
         # so it stays visible turn over turn — see _update_usage_label.
         self._usage_label = QLabel("", self)
         self.statusBar().addPermanentWidget(self._usage_label)
+
+    def _build_menu_bar(self) -> None:
+        """U7 paper cut: "A menu bar (File/Help) with 'Open config folder',
+        'Open records folder', 'Documentation', 'About' — cheap
+        discoverability for exactly the folders users otherwise have to
+        find by hand." The app previously had no menu bar at all — every
+        action lived on the toolbar."""
+        file_menu = self.menuBar().addMenu("&File")
+        open_config_action = QAction("Open Config Folder", self)
+        open_config_action.triggered.connect(self._on_open_config_folder)
+        file_menu.addAction(open_config_action)
+
+        open_records_action = QAction("Open Records Folder", self)
+        open_records_action.triggered.connect(self._on_open_records_folder)
+        file_menu.addAction(open_records_action)
+
+        help_menu = self.menuBar().addMenu("&Help")
+        docs_action = QAction("Documentation", self)
+        docs_action.triggered.connect(self._on_open_documentation)
+        help_menu.addAction(docs_action)
+
+        about_action = QAction("About AIDA", self)
+        about_action.triggered.connect(self._on_show_about)
+        help_menu.addAction(about_action)
+
+    def _on_open_config_folder(self) -> None:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(config_dir())))
+
+    def _on_open_records_folder(self) -> None:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(ensure_records_dir(self.settings.app.records_dir))))
+
+    def _on_open_documentation(self) -> None:
+        QDesktopServices.openUrl(QUrl("https://github.com/jilavsky/aida"))
+
+    def _on_show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "About AIDA",
+            f"AIDA — AI Data Assistant\nVersion {AIDA_VERSION}\n\n"
+            "A local scientific agent workbench.\nhttps://github.com/jilavsky/aida",
+        )
 
     def _wire_ui_signals(self) -> None:
         self.input_box.send_requested.connect(self._on_send_requested)
@@ -263,10 +308,7 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(f"Ready — {session.profile_name}", 5000)
         if session.recorder is not None:
-            history = [m for m in session.messages if m.role != "system"]
-            if history:
-                self.chat_panel.load_history(history)
-                self._load_resumed_artifacts(session.recorder.conversation_id)
+            self._load_resumed_history(session.recorder.conversation_id)
         self._refresh_mcp_panel()
         self._refresh_folder_display()
         self._refresh_conversations_sidebar()
@@ -325,39 +367,42 @@ class MainWindow(QMainWindow):
         self.settings.app.last_profile_name = session.profile_name
         save_app_config(self.settings.app)
 
-    def _load_resumed_artifacts(self, conversation_id: str) -> None:
+    def _load_resumed_history(self, conversation_id: str) -> None:
         """Acceptance criterion "resume yesterday's conversation... images
-        still display": ``ChatPanel.load_history`` only replays the text
-        messages (see its docstring) since the original streaming
-        ``ImageArtifactCreated``/``FileArtifactCreated`` events aren't
-        persisted/replayed — artifact *metadata* is, in the ``artifacts``
-        table, so this re-derives one widget per still-present file
-        directly from there. v1 simplicity: appended after the whole text
-        history rather than interleaved at each artifact's original
-        position (``ArtifactRecord`` has no ``seq``/position to interleave
-        by); still satisfies "images still display" on resume."""
+        still display": ``ChatPanel.load_history`` only knows about
+        ``Message``s (the provider-facing wire type), not artifacts, so
+        this queries the DB directly for both — the messages paired with
+        their ``seq`` and the conversation's ``ArtifactRecord``s grouped by
+        the ``seq`` they were recorded at (U6(b)) — and hands both to
+        ``ChatPanel.load_history`` to interleave. Artifacts with no seq
+        (recorded before U6(b) added the column, or any future caller that
+        doesn't know it) are appended after the whole transcript instead,
+        same as v1's behavior."""
         store = ConversationStore()
         try:
+            rows = store.load_messages_with_seq(conversation_id)
             records: list[ArtifactRecord] = store.load_artifacts(conversation_id)
         finally:
             store.close()
+
+        artifacts_by_seq: dict[int, list[ArtifactRecord]] = {}
+        undated_records: list[ArtifactRecord] = []
         for record in records:
-            if not record.path or not Path(record.path).exists():
-                continue  # sidecar file moved/deleted since it was recorded
-            if record.kind == "ImageArtifact":
-                widget = InlineImageWidget(
-                    path=record.path,
-                    artifact_id=record.id,
-                    mime_type=record.mime_type or "image/png",
-                    parent=self.chat_panel,
-                )
-            elif record.kind == "FileArtifact":
-                widget = FileArtifactCard(
-                    path=record.path, artifact_id=record.id, mime_type=record.mime_type, parent=self.chat_panel
-                )
+            if record.seq is None:
+                undated_records.append(record)
             else:
-                continue
-            self.chat_panel.add_artifact_widget(widget)
+                artifacts_by_seq.setdefault(record.seq, []).append(record)
+
+        non_system = [(seq, message) for seq, message in rows if message.role != "system"]
+        if non_system:
+            seqs = [seq for seq, _ in non_system]
+            messages = [message for _, message in non_system]
+            self.chat_panel.load_history(messages, seqs=seqs, artifacts_by_seq=artifacts_by_seq)
+
+        for record in undated_records:
+            widget = self.chat_panel.artifact_widget_for(record)
+            if widget is not None:
+                self.chat_panel.add_artifact_widget(widget)
 
     def _on_startup_failed(self, message: str) -> None:
         self.statusBar().showMessage("Startup failed", 5000)
@@ -619,7 +664,17 @@ class MainWindow(QMainWindow):
         # turn before closing — see ChatBridge.shutdown. Without the latter,
         # hitting "New Chat" while a tool call was running left the old
         # turn streaming into the freshly-created panel.
-        old_bridge.shutdown()
+        #
+        # U7: this can block the Qt thread up to 5s, with nothing to show
+        # for it — the window just froze. A busy cursor + an explicit
+        # status message make that pause read as intentional instead of a
+        # hang.
+        self.statusBar().showMessage("Closing previous session…")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            old_bridge.shutdown()
+        finally:
+            QApplication.restoreOverrideCursor()
         # Retire the old bridge completely before the new one exists: its
         # signals are still connected to these same handlers, and every
         # handler resolves state through `self.bridge`. A superseded bridge
@@ -716,7 +771,15 @@ class MainWindow(QMainWindow):
 
     def _refresh_profile_selector(self) -> None:
         current = self.bridge.session.profile_name if self.bridge.session else None
-        self.profile_selector.set_profiles(sorted(self.settings.providers.profiles), current=current)
+        # U7: capability_notes was stored but shown nowhere — surfaced here
+        # as each combo entry's tooltip so the "small local model — prefer
+        # lean MCP groups" hints the config format was designed for are
+        # actually visible (also shown in the Settings dialog's read-only
+        # profile list — see settings_dialog._profile_rows).
+        capability_notes = {name: p.capability_notes for name, p in self.settings.providers.profiles.items()}
+        self.profile_selector.set_profiles(
+            sorted(self.settings.providers.profiles), current=current, capability_notes=capability_notes
+        )
 
     def _refresh_mcp_panel(self) -> None:
         session = self.bridge.session

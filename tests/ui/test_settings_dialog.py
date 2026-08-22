@@ -148,6 +148,21 @@ def test_max_context_tokens_zero_means_disabled(qapp):
     assert dialog.max_context_tokens() == 0
 
 
+def test_profile_row_shows_capability_notes_when_set(qapp):
+    """U7 paper cut: "capability_notes is stored but shown nowhere"."""
+    profiles = {
+        "local": ProviderProfile(
+            name="local", kind="openai_compat", model="llama", capability_notes="small local model — prefer lean MCP groups"
+        ),
+        "argo-claude": ProviderProfile(name="argo-claude", kind="anthropic", model="claude-x"),
+    }
+    dialog = SettingsDialog(AppConfig(), profiles)
+    items = [dialog._profiles_list.item(i).text() for i in range(dialog._profiles_list.count())]
+    assert any("small local model — prefer lean MCP groups" in text for text in items)
+    # A profile with no capability_notes gets no trailing " — " at all.
+    assert not any(text.startswith("argo-claude") and " — " in text for text in items)
+
+
 def test_theme_field_no_longer_exists_on_app_config(qapp):
     """U3: theme was a dead, write-only setting — removed rather than
     exposed in this dialog. Regression guard against it quietly coming

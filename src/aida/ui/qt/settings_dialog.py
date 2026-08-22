@@ -171,7 +171,15 @@ class SettingsDialog(QDialog):
 
 
 def _profile_rows(profiles: dict[str, ProviderProfile]) -> list[str]:
-    return [f"{name}  ({profile.kind}, model={profile.model})" for name, profile in sorted(profiles.items())]
+    # U7 paper cut: "capability_notes is stored but shown nowhere" — appended
+    # here when set, e.g. "small local model — prefer lean MCP groups".
+    rows = []
+    for name, profile in sorted(profiles.items()):
+        row = f"{name}  ({profile.kind}, model={profile.model})"
+        if profile.capability_notes:
+            row += f" — {profile.capability_notes}"
+        rows.append(row)
+    return rows
 
 
 __all__ = ["SettingsDialog"]

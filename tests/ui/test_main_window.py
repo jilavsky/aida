@@ -25,7 +25,7 @@ from aida.config.settings import (
 )
 from aida.persistence.store import ConversationStore
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
-from aida.ui.qt._qt import QDialog, QMessageBox
+from aida.ui.qt._qt import QApplication, QDesktopServices, QDialog, QMessageBox, Qt
 from aida.ui.qt.artifact_widgets import InlineImageWidget
 from aida.ui.qt.chat_panel import MessageBubble
 from aida.ui.qt.main_window import MainWindow
@@ -220,11 +220,13 @@ def test_resume_conversation_redisplays_prior_image_artifact(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     """The other half of "resume yesterday's conversation... images still
-    display": ChatPanel.load_history only replays text (see its docstring),
-    so MainWindow._load_resumed_artifacts must independently re-derive an
-    InlineImageWidget from the persisted `artifacts` table. Uses the same
-    real mock-mcp subprocess as the flagship-demo test above to produce a
-    real on-disk PNG worth resuming."""
+    display": MainWindow._load_resumed_history queries the `artifacts`
+    table directly (ChatPanel.load_history only knows about Messages) and
+    hands both to ChatPanel.load_history to build an InlineImageWidget.
+    Uses the same real mock-mcp subprocess as the flagship-demo test above
+    to produce a real on-disk PNG worth resuming — this also exercises
+    U6(b)'s seq-based interleaving end to end (the image lands at its
+    recorded seq, not just appended after the whole transcript)."""
     settings = _settings_with_profile()
     settings.mcp = McpConfig(
         servers={
@@ -799,6 +801,137 @@ def test_new_chat_declined_keeps_current_session(qapp, loop_thread, aida_home: P
         window._on_new_chat_requested()
         qapp.processEvents()
         assert window.bridge.session.recorder.conversation_id == conv_id  # unchanged
+    finally:
+        window.close()
+
+
+def test_restart_session_shows_busy_cursor_while_shutting_down_the_old_bridge(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """U7 paper cut: ChatBridge.shutdown() can block the Qt thread up to 5s
+    with nothing to show for it — a busy cursor marks that pause as
+    intentional rather than a hang, and must always be restored again
+    afterward regardless of how shutdown() behaves."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        observed_cursors = []
+        original_shutdown = window.bridge.shutdown
+
+        def _spy_shutdown():
+            observed_cursors.append(QApplication.overrideCursor())
+            original_shutdown()
+
+        monkeypatch.setattr(window.bridge, "shutdown", _spy_shutdown)
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+        )
+        window._on_new_chat_requested()
+
+        assert observed_cursors and observed_cursors[0] is not None
+        assert observed_cursors[0].shape() == Qt.CursorShape.WaitCursor
+        assert QApplication.overrideCursor() is None  # restored once shutdown() returns
+    finally:
+        window.close()
+
+
+def test_refresh_profile_selector_passes_capability_notes_as_tooltips(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """U7 paper cut: "capability_notes is stored but shown nowhere"."""
+    settings = _settings_with_profile("mock-profile")
+    settings.providers.profiles["mock-profile"].capability_notes = "small local model — prefer lean MCP groups"
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        index = window.profile_selector._combo.findText("mock-profile")
+        assert (
+            window.profile_selector._combo.itemData(index, Qt.ItemDataRole.ToolTipRole)
+            == "small local model — prefer lean MCP groups"
+        )
+    finally:
+        window.close()
+
+
+# --- U7: File/Help menu bar --------------------------------------------------
+
+
+def test_menu_bar_has_file_and_help_menus(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    """U7 paper cut: "A menu bar (File/Help) with 'Open config folder',
+    'Open records folder', 'Documentation', 'About' — cheap discoverability
+    for exactly the folders users otherwise have to find by hand." The app
+    previously had no menu bar at all."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        menu_titles = [action.text().replace("&", "") for action in window.menuBar().actions()]
+        assert "File" in menu_titles
+        assert "Help" in menu_titles
+
+        file_menu = next(a.menu() for a in window.menuBar().actions() if a.text().replace("&", "") == "File")
+        file_actions = [a.text() for a in file_menu.actions()]
+        assert "Open Config Folder" in file_actions
+        assert "Open Records Folder" in file_actions
+
+        help_menu = next(a.menu() for a in window.menuBar().actions() if a.text().replace("&", "") == "Help")
+        help_actions = [a.text() for a in help_menu.actions()]
+        assert "Documentation" in help_actions
+        assert "About AIDA" in help_actions
+    finally:
+        window.close()
+
+
+def test_open_config_folder_opens_the_config_dir(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    from aida.config.paths import config_dir
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        opened = []
+        monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+        window._on_open_config_folder()
+        assert opened == [str(config_dir())]
+    finally:
+        window.close()
+
+
+def test_open_records_folder_opens_the_records_dir(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    from aida.config.paths import default_records_dir
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        opened = []
+        monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+        window._on_open_records_folder()
+        assert opened == [str(default_records_dir())]
+    finally:
+        window.close()
+
+
+def test_open_documentation_opens_the_project_url(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        opened = []
+        monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+        window._on_open_documentation()
+        assert opened == ["https://github.com/jilavsky/aida"]
+    finally:
+        window.close()
+
+
+def test_show_about_displays_the_version(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    from aida import __version__
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        shown = []
+        monkeypatch.setattr(QMessageBox, "about", lambda *a, **kw: shown.append(a[2]))
+        window._on_show_about()
+        assert shown and __version__ in shown[0]
     finally:
         window.close()
 

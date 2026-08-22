@@ -21,6 +21,7 @@ from aida.ui.qt._qt import (
     QLabel,
     QLineEdit,
     QPushButton,
+    Qt,
     QVBoxLayout,
     QWidget,
     Signal,
@@ -81,10 +82,21 @@ class ProfileSelector(QWidget):
         self._combo.currentTextChanged.connect(self._on_changed)
         layout.addWidget(self._combo)
 
-    def set_profiles(self, names: list[str], *, current: str | None = None) -> None:
+    def set_profiles(
+        self, names: list[str], *, current: str | None = None, capability_notes: dict[str, str] | None = None
+    ) -> None:
+        """``capability_notes`` (U7 paper cut: "capability_notes is stored
+        but shown nowhere") sets each entry's tooltip to its profile's
+        ``ProviderProfile.capability_notes``, when non-empty — e.g. "small
+        local model — prefer lean MCP groups"."""
         self._combo.blockSignals(True)
         self._combo.clear()
         self._combo.addItems(names)
+        notes = capability_notes or {}
+        for index, name in enumerate(names):
+            note = notes.get(name)
+            if note:
+                self._combo.setItemData(index, note, Qt.ItemDataRole.ToolTipRole)
         if current:
             index = self._combo.findText(current)
             if index >= 0:

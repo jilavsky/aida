@@ -13,10 +13,13 @@ be driven directly in tests without a real bridge/session.
 
 from __future__ import annotations
 
+import itertools
 import re
 from collections.abc import Iterable
 from datetime import datetime
+from pathlib import Path
 
+from aida.persistence.store import ArtifactRecord
 from aida.providers.base import Message
 from aida.ui.qt._qt import (
     QFrame,
@@ -526,23 +529,90 @@ class ChatPanel(QWidget):
             banner = ErrorBanner(layer=event.layer, message=event.message, detail=event.detail, parent=self._content)
             self._append_widget(banner)
 
-    def load_history(self, messages: Iterable[Message]) -> None:
+    def load_history(
+        self,
+        messages: Iterable[Message],
+        *,
+        seqs: Iterable[int | None] | None = None,
+        artifacts_by_seq: dict[int, list[ArtifactRecord]] | None = None,
+    ) -> None:
         """Render already-persisted messages (resume path) directly, since
         the individual streaming/tool events that originally produced them
-        aren't replayed — one bubble per user/assistant/tool message, in
-        order. Artifacts referenced by a resumed tool message are shown as
-        their text-policy description only in v1 (re-displaying resumed
-        images inline is Phase 5 acceptance criterion "resume yesterday's
-        conversation... images still display", covered by
-        ``aida.ui.qt.main_window`` re-loading artifact rows from the
-        conversation store, not by this method)."""
+        aren't replayed — one row per user/assistant/tool message, in
+        order.
+
+        U6: a resumed ``role="tool"`` message used to render as a full text
+        bubble, which for a real analysis session (many tool calls, each
+        with a sizeable JSON/text result) "replays as a wall of raw tool
+        output" (bug report). It's now rendered as the same collapsed
+        ``ToolCallRow`` the live path uses, just built from the persisted
+        message instead of a ``ToolCallStarted``/``ToolCallFinished`` pair
+        (see ``ToolCallRow.mark_historic``); the matching call's original
+        arguments are recovered from the assistant message that requested
+        it. A tool-call-only assistant turn (no text, only ``tool_calls``)
+        produces no bubble, mirroring the live path's ``TextStarted``
+        handling.
+
+        ``seqs``/``artifacts_by_seq`` (both optional, and only ever passed
+        together by ``aida.ui.qt.main_window``) let artifacts interleave
+        at their original position instead of being appended after the
+        whole transcript: pass each message's DB ``seq`` (same order/length
+        as ``messages``, ``None`` for one AIDA never recorded) and a
+        ``{seq: [ArtifactRecord, ...]}`` map: right after the message with
+        a given seq is rendered, any artifacts recorded at that seq are
+        appended too."""
+        messages = list(messages)
+        artifacts_by_seq = artifacts_by_seq or {}
+        seq_iter = iter(seqs) if seqs is not None else itertools.repeat(None)
+
+        call_arguments: dict[str, dict] = {}
         for message in messages:
+            for tool_call in message.tool_calls:
+                call_arguments[tool_call.id] = tool_call.arguments
+
+        for message, seq in zip(messages, seq_iter, strict=False):
             if message.role == "system":
                 continue
-            bubble = MessageBubble(message.role, self._content)
-            bubble.set_text(message.content or "")
-            self._relay_code_editor_requests(bubble)
-            self._append_widget(bubble)
+            if message.role == "tool":
+                row = ToolCallRow(
+                    call_id=message.tool_call_id or "",
+                    tool_name=message.name or "tool",
+                    arguments=call_arguments.get(message.tool_call_id, {}),
+                    parent=self._content,
+                )
+                row.mark_historic(result=message.content)
+                self._append_widget(row)
+            elif message.role == "assistant" and not message.content and message.tool_calls:
+                pass  # tool-call-only turn — nothing to show, see docstring
+            else:
+                bubble = MessageBubble(message.role, self._content)
+                bubble.set_text(message.content or "")
+                self._relay_code_editor_requests(bubble)
+                self._append_widget(bubble)
+            if seq is not None:
+                for record in artifacts_by_seq.get(seq, []):
+                    widget = self.artifact_widget_for(record)
+                    if widget is not None:
+                        self.add_artifact_widget(widget)
+
+    def artifact_widget_for(self, record: ArtifactRecord) -> QWidget | None:
+        """Build the widget a persisted ``ArtifactRecord`` renders as
+        (``None`` for an unknown kind, or a sidecar file that's since been
+        moved/deleted) — shared by ``load_history``'s interleaving above
+        and ``aida.ui.qt.main_window``'s fallback for artifacts recorded
+        before U6(b) added ``seq`` (those have nothing to interleave by and
+        are appended after the whole transcript, same as v1)."""
+        if not record.path or not Path(record.path).exists():
+            return None
+        if record.kind == "ImageArtifact":
+            return InlineImageWidget(
+                path=record.path, artifact_id=record.id, mime_type=record.mime_type or "image/png", parent=self._content
+            )
+        if record.kind == "FileArtifact":
+            return FileArtifactCard(
+                path=record.path, artifact_id=record.id, mime_type=record.mime_type, parent=self._content
+            )
+        return None
 
     def clear(self) -> None:
         while self._content_layout.count() > 1:

@@ -412,6 +412,15 @@ class ChatSession:
                         path=event.path,
                         mime_type=event.mime_type,
                         call_id=event.call_id,
+                        # U6(b): the tool-result message this artifact
+                        # belongs with hasn't been persisted yet at this
+                        # point (agent.py yields ImageArtifactCreated/
+                        # FileArtifactCreated before appending that
+                        # message — see AgentLoop.run) — next_message_seq()
+                        # is exactly the seq it's about to receive, so the
+                        # GUI resume path can interleave this artifact
+                        # right after that message.
+                        message_seq=self.recorder.next_message_seq(),
                     )
                 elif isinstance(event, FileArtifactCreated):
                     self.recorder.record_artifact_fields(
@@ -420,6 +429,7 @@ class ChatSession:
                         path=event.path,
                         mime_type=event.mime_type,
                         call_id=event.call_id,
+                        message_seq=self.recorder.next_message_seq(),
                     )
 
             # A turn's final assistant message (the one that ends it with no

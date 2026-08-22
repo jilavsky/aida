@@ -12,6 +12,7 @@ actually calls into ``aida.persistence``/``aida.cli.conversations``.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 
 from aida.persistence.store import ConversationSummary
 from aida.ui.qt._qt import (
@@ -21,6 +22,7 @@ from aida.ui.qt._qt import (
     QFormLayout,
     QHBoxLayout,
     QInputDialog,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -32,10 +34,27 @@ from aida.ui.qt._qt import (
 )
 
 
+def _format_timestamp(iso_str: str) -> str:
+    """Local short date/time for a sidebar row — bug report: "these
+    date/times are not very convenient to use" (row labels used to show the
+    raw UTC ISO-8601 string, e.g. "2026-08-22T14:03:22.123456+00:00...").
+    ``updated_at`` is always written by ``aida.persistence.recorder._now_iso``
+    (``datetime.now(UTC).isoformat()``); shown here converted to the
+    viewer's own local timezone as e.g. "Aug 22 09:03". Falls back to the
+    raw string on anything unparseable — a hand-edited or foreign DB row
+    must not crash the sidebar."""
+    try:
+        parsed = datetime.fromisoformat(iso_str)
+    except (TypeError, ValueError):
+        return iso_str
+    return parsed.astimezone().strftime("%b %d %H:%M")
+
+
 def _row_label(summary: ConversationSummary) -> str:
     title = summary.title or "(untitled)"
     workspace = summary.workspace_name or "-"
-    return f"{summary.updated_at}  [{workspace}]  {title}"
+    when = _format_timestamp(summary.updated_at)
+    return f"{when}  [{workspace}]  {title}"
 
 
 class CleanupDialog(QDialog):
@@ -87,8 +106,23 @@ class ConversationsSidebar(QWidget):
         super().__init__(parent)
         self._ids_by_row: list[str] = []
         self._titles_by_row: list[str] = []
+        # U5: the full, unfiltered set from the last set_conversations() —
+        # _apply_filter() re-derives the visible rows from this, so a
+        # refresh (resume/delete/rename/cleanup all call set_conversations
+        # again) re-applies whatever the user has typed instead of
+        # silently clearing it.
+        self._all_summaries: list[ConversationSummary] = []
 
         layout = QVBoxLayout(self)
+
+        # U5 bug report follow-up: "the list grows fast in real use" — a
+        # substring filter over the title, applied live as the user types.
+        self._search_edit = QLineEdit(self)
+        self._search_edit.setPlaceholderText("Search conversations…")
+        self._search_edit.setClearButtonEnabled(True)
+        self._search_edit.textChanged.connect(self._apply_filter)
+        layout.addWidget(self._search_edit)
+
         self._list = QListWidget(self)
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._list.itemDoubleClicked.connect(self._on_double_click)
@@ -113,10 +147,20 @@ class ConversationsSidebar(QWidget):
         layout.addLayout(buttons)
 
     def set_conversations(self, summaries: Iterable[ConversationSummary]) -> None:
+        self._all_summaries = list(summaries)
+        self._apply_filter(self._search_edit.text())
+
+    def _apply_filter(self, query: str) -> None:
+        query = query.strip().lower()
+        visible = (
+            self._all_summaries
+            if not query
+            else [s for s in self._all_summaries if query in (s.title or "").lower()]
+        )
         self._list.clear()
         self._ids_by_row = []
         self._titles_by_row = []
-        for summary in summaries:
+        for summary in visible:
             item = QListWidgetItem(_row_label(summary))
             self._list.addItem(item)
             self._ids_by_row.append(summary.id)

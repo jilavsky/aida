@@ -60,6 +60,10 @@ class ToolCallRow(QFrame):
         self._started_at = time.monotonic()
         self._elapsed: float | None = None
         self._expanded = False
+        # U6: set by mark_historic() for a row rebuilt from a resumed
+        # conversation's persisted ``Message`` — see that method's docstring
+        # for why it can't know success/failure or elapsed time.
+        self._historic = False
         self.setFrameShape(QFrame.Shape.StyledPanel)
 
         outer = QVBoxLayout(self)
@@ -91,7 +95,14 @@ class ToolCallRow(QFrame):
         args = _format_arguments(self.arguments)
         base = f"{self.tool_name}({args})"
         if self.is_error is None:
-            self._summary_label.setText(f"⏳ {base} …")
+            if self._historic:
+                # U6: a resumed tool row — success/failure was never
+                # persisted on the ``Message`` this was rebuilt from (see
+                # mark_historic), so a neutral marker is shown rather than
+                # guessing ✓/✗.
+                self._summary_label.setText(f"• {base}")
+            else:
+                self._summary_label.setText(f"⏳ {base} …")
         else:
             mark = "✗" if self.is_error else "✓"
             elapsed = f"{self._elapsed:.1f}s" if self._elapsed is not None else "?"
@@ -101,6 +112,23 @@ class ToolCallRow(QFrame):
         self.result = result
         self.is_error = is_error
         self._elapsed = time.monotonic() - self._started_at
+        self._refresh_summary()
+        self._detail_text.setPlainText(f"Arguments:\n{self.arguments!r}\n\nResult:\n{result}")
+
+    def mark_historic(self, *, result: object) -> None:
+        """U6: render as a collapsed, already-finished row for a tool
+        message rebuilt from persisted history (``ChatPanel.load_history``)
+        rather than a live ``ToolCallFinished`` event — ``Message`` doesn't
+        persist ``is_error`` or elapsed time (see ``aida.core.agent``), so
+        this shows a neutral "•" marker and no duration instead of guessing
+        ✓/✗. Collapsing every resumed tool message into one of these rows
+        (instead of a full-text bubble, the previous behavior) is the fix
+        for the bug report that a resumed analysis session "replays as a
+        wall of raw tool output"."""
+        self.result = result
+        self.is_error = None
+        self._elapsed = None
+        self._historic = True
         self._refresh_summary()
         self._detail_text.setPlainText(f"Arguments:\n{self.arguments!r}\n\nResult:\n{result}")
 
