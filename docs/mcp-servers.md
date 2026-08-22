@@ -25,7 +25,7 @@ clients simply ignore:
 |---|---|---|
 | `command` | standard | Executable to launch (stdio transport) |
 | `args` | standard | Command-line arguments, in order |
-| `env` | standard | Environment variables passed to the subprocess |
+| `env` | standard | Environment variables passed to the subprocess. A value of `keyring:NAME` or `secret:NAME` defers to the OS keychain instead of a plaintext value — see [Storing secrets in the OS keychain](#storing-secrets-in-the-os-keychain) |
 | `groups` | AIDA | Named group(s) this server belongs to (see [Groups](#groups)) |
 | `skills` | AIDA | Skill file names to load into context when this server is active |
 | `disabled_tools` | AIDA | Tool names hidden from the model entirely (see [Per-tool permissions](#per-tool-permissions)) |
@@ -114,6 +114,34 @@ This actually launches the server, initializes the connection, and lists
 its tools — `OK — 12 tool(s), 0.34s` (or `FAILED — <error>`) rather than
 just checking that the config entry exists.
 
+### Storing secrets in the OS keychain
+
+Any `env` value can be written as `keyring:NAME` or `secret:NAME` (both
+accepted — `keyring:` reads more naturally standalone, `secret:` mirrors
+provider profiles' own `secret_ref` terminology) instead of a plaintext
+value. AIDA resolves it via the same `aida.config.secrets` store the model
+providers use — the OS keychain, or an `AIDA_SECRET_<NAME>` environment
+variable as a fallback — right before launching the server subprocess, so
+the real value never sits in `mcp.json` at all. A reference to a name with
+nothing stored under it fails that one server's startup with a clear
+message rather than launching a subprocess that's silently missing a
+credential it needs.
+
+```bash
+aida config secret set pyirena_api_key
+```
+
+then in `mcp.json`:
+
+```json
+{"env": {"PYIRENA_API_KEY": "keyring:pyirena_api_key"}}
+```
+
+The GUI's Add/Edit Server form has a **Store Value in Keychain…** button
+next to the Env field: pick which `KEY=VALUE` line to convert, name it in
+the keychain, enter the value once, and the form swaps that line for
+`KEY=keyring:name` for you.
+
 ## Adding/editing via the GUI
 
 The **MCP Servers…** toolbar action opens the `McpManagementDialog`, a
@@ -122,11 +150,17 @@ immediately, no separate "Save" step for most actions).
 
 - **Add Server…** opens a form with fields for name, command, args
   (one per line), env (`KEY=VALUE` per line, with a "Hide values" toggle to
-  mask them on screen), and checkable lists for **groups** (with an inline
-  "add a new group" box) and **skills**. **Edit…** opens the same form
-  pre-filled for the selected server (name isn't editable once created).
+  mask them on screen, and a **Store Value in Keychain…** button — see
+  [Storing secrets in the OS keychain](#storing-secrets-in-the-os-keychain)),
+  and checkable lists for **groups** (with an inline "add a new group" box)
+  and **skills**. **Edit…** opens the same form pre-filled for the selected
+  server (name isn't editable once created).
 - **Start / Stop / Restart** control the server's live subprocess for the
-  current session, without restarting the whole app.
+  current session, without restarting the whole app. Starting multiple
+  servers at once (e.g. at workspace launch) launches them concurrently
+  rather than one after another, so N servers cost roughly the slowest
+  single handshake, not the sum of all of them; one server failing to
+  start still leaves the rest running normally.
 - **Test Connection** does the same initialize-and-list-tools check as
   `aida mcp server test`, reporting tool count and timing (or the error).
 - **Import mcp.json…** file-picks a config and merges it the same
@@ -147,7 +181,8 @@ immediately, no separate "Save" step for most actions).
   (rendered Markdown), open in your external editor, or create a new skill
   from a blank template.
 - **Groups…** opens an editor listing every group name currently in use
-  and its member servers, with **Rename…** and **Delete…** — see below.
+  and its member servers, with **Add Group…**, **Rename…**, and
+  **Delete…** — see below.
 
 ## Groups
 
@@ -158,6 +193,25 @@ and reports which group names are referenced and by whom. Renaming or
 deleting a group (`aida mcp group rename <old> <new>` / `aida mcp group
 delete <name>`) rewrites that name in every server's `groups` list — there
 is no registry entry to update separately.
+
+Because a group is purely derived from who references it, a group with
+zero members can't be represented at all — there's nothing to "create" in
+isolation. So creating one always means naming it *and* picking at least
+one existing server for it in the same step:
+
+```bash
+aida mcp group add pyirena-analysis --servers pyirena-mcp,bait-mcp
+```
+
+`--servers` is a comma-separated list of already-configured server names;
+an unknown name is rejected rather than silently skipped. Naming an
+existing group adds the given servers to it instead of erroring. In the
+GUI, the Groups… dialog's **Add Group…** button opens a small picker (a
+name field plus a checklist of every configured server) — this is also
+reachable one server at a time from that server's own Add/Edit form via
+its inline "add a new group" box, but the Groups… dialog's version handles
+several servers at once. Picking a name that already exists asks for
+confirmation before adding the checked servers to it.
 
 A [workspace](workspaces.md) picks exactly one group via
 `WorkspaceConfig.mcp_group`; every server listing that group name is

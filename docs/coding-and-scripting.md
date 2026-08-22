@@ -8,7 +8,7 @@
 ## The pieces
 
 A workspace controls whether the agent can run code at all, and how, through
-five `WorkspaceConfig` fields:
+six `WorkspaceConfig` fields:
 
 | Field | Default | What it does |
 |---|---|---|
@@ -17,6 +17,7 @@ five `WorkspaceConfig` fields:
 | `templates_dir` | `None` | A flat folder of `.py` files whose docstrings get surfaced to the model as house-convention templates. |
 | `saved_scripts_dir` | `None` | Where the Code Editor's Save/Save As write to. `None` defaults to `<target_folder>/saved_scripts`. |
 | `command_allowlist` | `[]` | Shell command patterns `run_command` may run without asking — see [safety-and-permissions.md](safety-and-permissions.md). |
+| `script_timeout_seconds` | `30.0` | Seconds a `run_python_script`/`run_command` invocation (or a Code Editor **Run**) gets before its subprocess is killed — see below. |
 
 ## `scripting_enabled` — the master switch
 
@@ -62,6 +63,29 @@ picker) in the toolbar's Folders panel — see
 Run button and the model's own `run_python_script` calls use this same
 interpreter.
 
+## `script_timeout_seconds` — killing runaway scripts
+
+Every `run_python_script`/`run_command` invocation runs as a real subprocess
+under a timeout. `script_timeout_seconds` sets that ceiling for the
+workspace and defaults to **30 seconds**. On timeout the subprocess is
+killed (`Process.kill()`) and the tool result reports `TIMED OUT — process
+was killed` with `is_error=True`; stdout/stderr aren't included in that
+result — the process is killed mid-`communicate()`, so whatever it had
+already written isn't reliably recoverable at that point.
+
+The model can also ask for a longer timeout on an individual call, via each
+tool's `timeout` argument (for one long-running reduction script, say) —
+but that request is **capped at the workspace's `script_timeout_seconds`**,
+not honored unbounded; omitting it just uses the workspace default. So
+`script_timeout_seconds` is a true per-workspace ceiling, not merely a
+default.
+
+There's no `aida workspace edit` flag for this field (and `aida workspace
+show` doesn't print it either) — set it via the GUI's **Script/command
+timeout** spinner (1-3600s) in the Workspace Management dialog, or by
+editing `workspaces.yaml` directly. The Code Editor's **Run** button uses
+the same workspace-configured value.
+
 ## `run_python_script` vs `run_command` — which to use
 
 This is the part that causes real confusion, so it's worth stating plainly:
@@ -71,7 +95,8 @@ goes through the normal folder-safety check (is the script inside an
 allowed folder, and does the workspace's `confirm`/`relaxed` mode allow
 running it) — the same rule that governs any other write or delete. It runs
 a real subprocess (`asyncio.create_subprocess_exec`, never a shell) with a
-timeout, using the workspace's `python_interpreter`.
+timeout (see `script_timeout_seconds` above), using the workspace's
+`python_interpreter`.
 
 **`run_command` is gated by both** folder containment *and* the command
 allowlist (see [safety-and-permissions.md](safety-and-permissions.md) for
@@ -149,8 +174,9 @@ Once open:
   resolved `saved_scripts_dir`.
 - **Run** saves your latest edits first, then executes the script with the
   workspace's configured `python_interpreter` as a real subprocess (with a
-  timeout — 30 seconds by default), streaming exit code, stdout, and stderr
-  back into the output pane below the editor.
+  timeout — the workspace's `script_timeout_seconds`, 30 seconds by
+  default), streaming exit code, stdout, and stderr back into the output
+  pane below the editor.
 - **Kill** stops a script that's currently running.
 
 Running from the Code Editor uses the same execution path

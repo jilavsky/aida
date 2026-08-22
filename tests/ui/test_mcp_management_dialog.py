@@ -20,13 +20,14 @@ from aida.config.settings import (
     load_settings,
 )
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
-from aida.ui.qt._qt import QMessageBox
+from aida.ui.qt._qt import QDialog, QMessageBox, Qt
 from aida.ui.qt.bridge import ChatBridge
 from aida.ui.qt.mcp_management_dialog import (
     GroupsDialog,
     McpManagementDialog,
     RawResultDialog,
     ServerFormDialog,
+    _AddGroupDialog,
     _ToolPermissionRow,
 )
 from tests.ui._qt_test_utils import pump_until
@@ -227,6 +228,64 @@ def test_import_conflict_prompts_and_respects_no(qapp, aida_home: Path, tmp_path
 
 
 # --- groups editor ----------------------------------------------------------
+
+
+def test_groups_dialog_add_creates_a_brand_new_group_from_selected_servers(qapp, aida_home: Path, monkeypatch):
+    """Regression: the Groups dialog had Rename/Delete but no way to
+    actually create a new group short of opening a server's own edit form
+    and typing it there, one server at a time."""
+    settings = load_settings()
+    settings.mcp = McpConfig(
+        servers={
+            "pyirena": McpServerConfig(name="pyirena", command="/x", groups=["analysis"]),
+            "bait": McpServerConfig(name="bait", command="/y"),
+        }
+    )
+    changed = []
+    dialog = GroupsDialog(settings.mcp, on_changed=lambda: changed.append(True))
+
+    def fake_exec(self):
+        self._name_edit.setText("everything")
+        for row in range(self._servers_list.count()):
+            self._servers_list.item(row).setCheckState(Qt.CheckState.Checked)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_AddGroupDialog, "exec", fake_exec)
+    dialog._on_add()
+
+    assert settings.mcp.servers["pyirena"].groups == ["analysis", "everything"]
+    assert settings.mcp.servers["bait"].groups == ["everything"]
+    assert "everything" in [dialog._list.item(r).text().split("  —  ")[0] for r in range(dialog._list.count())]
+    assert changed == [True]
+
+
+def test_groups_dialog_add_cancelled_makes_no_changes(qapp, aida_home: Path, monkeypatch):
+    settings = load_settings()
+    settings.mcp = McpConfig(servers={"pyirena": McpServerConfig(name="pyirena", command="/x")})
+    dialog = GroupsDialog(settings.mcp, on_changed=lambda: None)
+
+    monkeypatch.setattr(_AddGroupDialog, "exec", lambda self: QDialog.DialogCode.Rejected)
+    dialog._on_add()
+
+    assert settings.mcp.servers["pyirena"].groups == []
+
+
+def test_groups_dialog_add_with_no_servers_configured_warns_instead_of_opening(qapp, aida_home: Path, monkeypatch):
+    settings = load_settings()
+    settings.mcp = McpConfig(servers={})
+    dialog = GroupsDialog(settings.mcp, on_changed=lambda: None)
+
+    opened = []
+    monkeypatch.setattr(_AddGroupDialog, "exec", lambda self: opened.append(True))
+    warned = []
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.information",
+        lambda *a, **k: warned.append(True),
+    )
+    dialog._on_add()
+
+    assert warned == [True]
+    assert opened == []  # never even constructed/shown the picker
 
 
 def test_groups_dialog_rename(qapp, aida_home: Path, monkeypatch):

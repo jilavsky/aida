@@ -4,6 +4,7 @@ import pytest
 
 from aida.config.settings import McpConfig, McpServerConfig
 from aida.mcp.groups import (
+    add_group,
     delete_group,
     known_group_names,
     rename_group,
@@ -64,6 +65,47 @@ def test_resolve_explicit_empty_list_returns_empty():
 
 def test_known_group_names_sorted_and_deduplicated():
     assert known_group_names(_config()) == ["analysis", "full"]
+
+
+# --- add_group (GUI "Add Group…" — B: MCP Groups widget had no way to
+# create a brand-new group short of editing a server's own form) ------------
+
+
+def test_add_group_creates_a_brand_new_group_from_selected_servers():
+    cfg = _config()
+    updated = add_group(cfg, "brand-new", ["pyirena", "notes"])
+    assert updated == 2
+    assert cfg.servers["pyirena"].groups == ["analysis", "full", "brand-new"]
+    assert cfg.servers["notes"].groups == ["brand-new"]
+    assert cfg.servers["bait"].groups == ["full"]  # not selected, untouched
+    assert "brand-new" in known_group_names(cfg)
+
+
+def test_add_group_to_existing_group_adds_the_new_members_only():
+    cfg = _config()
+    updated = add_group(cfg, "full", ["notes"])
+    assert updated == 1
+    assert cfg.servers["notes"].groups == ["full"]
+    assert cfg.servers["pyirena"].groups == ["analysis", "full"]  # already had it, untouched
+
+
+def test_add_group_is_a_noop_for_a_server_that_already_has_it():
+    cfg = _config()
+    assert add_group(cfg, "full", ["pyirena"]) == 0
+    assert cfg.servers["pyirena"].groups == ["analysis", "full"]
+
+
+def test_add_group_skips_unknown_server_names():
+    cfg = _config()
+    updated = add_group(cfg, "brand-new", ["pyirena", "does-not-exist"])
+    assert updated == 1
+    assert cfg.servers["pyirena"].groups == ["analysis", "full", "brand-new"]
+
+
+def test_add_group_empty_server_list_is_a_noop():
+    cfg = _config()
+    assert add_group(cfg, "brand-new", []) == 0
+    assert "brand-new" not in known_group_names(cfg)
 
 
 # --- rename_group / delete_group (Phase 7 groups editor) --------------------

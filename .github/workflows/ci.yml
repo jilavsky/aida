@@ -46,5 +46,24 @@ jobs:
       - name: Ruff lint
         run: ruff check .
 
-      - name: Pytest
-        run: pytest -v
+      # Two invocations, not one `pytest -v` over the whole tree: every GUI
+      # test shares a single process-wide QApplication (Qt disallows more
+      # than one) plus a fresh QThread+asyncio loop per test
+      # (tests/ui/conftest.py's `loop_thread`), and the non-GUI suite spawns
+      # its own real subprocesses (MCP manager/server tests, coding-tool
+      # tests). Combined into one pytest process, the two together push
+      # cumulative Qt object/thread churn on one long-lived QApplication
+      # high enough to occasionally hit a native crash deep in Qt's own
+      # event/timer dispatch — a segfault on Linux, an access violation on
+      # Windows, at a different call site each time, always somewhere under
+      # ChatBridge's background loop or later Qt event delivery, never at a
+      # line this project owns. Splitting the run in two roughly halves the
+      # cumulative churn either half accumulates and has not reproduced the
+      # crash across many repeated local runs (see
+      # planning/improvement_plan_2026-08.md's "Known issues" section for
+      # the full writeup and the longer-term follow-up options).
+      - name: Pytest (non-GUI)
+        run: pytest -v --ignore=tests/ui
+
+      - name: Pytest (GUI)
+        run: pytest -v tests/ui

@@ -26,6 +26,10 @@ explains its fields and behavior.
   [mcp-servers.md](mcp-servers.md).
 - **Knowledge Bases…** — opens the knowledge base management dialog. See
   [knowledge-bases.md](knowledge-bases.md).
+- **Providers…** — opens the provider/embedding profiles dialog (add/edit/
+  remove profiles). See [providers-and-secrets.md](providers-and-secrets.md).
+- **Workspaces…** — opens the workspace management dialog (add/edit/remove
+  named workspaces). See [workspaces.md](workspaces.md).
 - **Settings…** — opens the settings dialog (font size, records folder, log
   level, max agent iterations, profile list view).
 
@@ -37,15 +41,21 @@ The window splits into three columns:
 - **Chat column** (center) — the message transcript plus the input box
   (attachments, drag-and-drop, cancel/send).
 - **Session column** (right) — the active workspace's live state:
-  - **FolderDisplay** shows the workspace's source folders, target folder,
-    sidecar folder name, allowed commands, and Python interpreter, each
-    editable in place with a "Save to Workspace" button — see
-    [workspaces.md](workspaces.md) and
+  - **FolderDisplay** — labeled "Workspace permissions" in the UI, since it
+    covers everything a session may touch, not just folders — shows the
+    workspace's source folders, target folder, sidecar folder name, allowed
+    commands, and Python interpreter, each editable in place with a "Save to
+    Workspace" button — see [workspaces.md](workspaces.md) and
     [coding-and-scripting.md](coding-and-scripting.md) (for the command
     allowlist and interpreter).
-  - **McpQuickPanel** shows the workspace's resolved MCP group and a
-    checkbox per known server — which servers this workspace would use next
-    session. See [mcp-servers.md](mcp-servers.md).
+  - **McpQuickPanel** — labeled "MCP Servers" in the UI — shows the
+    workspace's resolved MCP group and a checkbox per known server. Each
+    checkbox is a live control: ticking/unticking it actually starts or
+    stops that server right now (not merely a preference for next session),
+    and the checked state always reflects which servers are actually
+    running, refreshed after every start/stop. A "MCP Servers…" button below
+    the checkboxes opens the full management dialog. See
+    [mcp-servers.md](mcp-servers.md).
 
 ## Conversations sidebar
 
@@ -65,6 +75,11 @@ Resuming replays chat history and any still-present image/file artifacts.
 - **Knowledge Bases dialog** (`knowledge_management_dialog.py`) — add/edit/
   remove RAG knowledge bases and build/update their indexes. See
   [knowledge-bases.md](knowledge-bases.md).
+- **Providers dialog** (`profiles_dialog.py`) — add/edit/remove provider and
+  embedding profiles. See [providers-and-secrets.md](providers-and-secrets.md).
+- **Workspace Management dialog** (`workspace_management_dialog.py`) —
+  add/edit/remove named workspaces (`workspaces.yaml`) from the GUI instead
+  of hand-editing YAML. See [workspaces.md](workspaces.md).
 - **Code Editor dialog** (`code_editor_dialog.py`) — write, save, and run
   Python scripts against the workspace's saved-scripts folder and
   interpreter. See [coding-and-scripting.md](coding-and-scripting.md).
@@ -72,8 +87,10 @@ Resuming replays chat history and any still-present image/file artifacts.
 ## Status bar
 
 Shows session status messages (e.g. "Starting session…", "Ready — \<profile\>",
-"Startup failed") and a permanent token/cost label — input/output token
-counts and an estimated USD cost, updated after every turn. Confirmation
+"Startup failed", or a transient "Context trimmed: dropped N old turns (~M
+tokens now)" whenever old history is cut to fit the context window) and a
+permanent token/cost label — input/output token counts and an estimated USD
+cost, updated after every turn. Confirmation
 prompts (for actions gated by the safety model, workspace switches, deletes,
 etc.) appear as modal dialogs, not in the status bar — see
 [safety-and-permissions.md](safety-and-permissions.md).

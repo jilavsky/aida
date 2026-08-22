@@ -37,6 +37,7 @@ editor, from the toolbar in the GUI.
 | `scripting_enabled` | `True` | On/off switch for `run_python_script`/`run_command` in this workspace — see [coding-and-scripting.md](coding-and-scripting.md). |
 | `templates_dir` | `None` | Folder of `.py` code templates offered to this workspace; `None` means no templates — see [coding-and-scripting.md](coding-and-scripting.md). |
 | `saved_scripts_dir` | `None` | Where the Code Editor saves scripts; `None` defaults to `<target_folder>/saved_scripts` — see [coding-and-scripting.md](coding-and-scripting.md). |
+| `script_timeout_seconds` | `30.0` | Seconds a `run_python_script`/`run_command` invocation gets before its subprocess is killed — a true per-workspace ceiling (a model-requested longer timeout is capped at this, not honored unbounded) — see [coding-and-scripting.md](coding-and-scripting.md). |
 
 ## CLI usage
 
@@ -56,6 +57,12 @@ flag you don't pass: on `new`, an unset flag falls back to that field's real
 default (e.g. `safety` becomes `"confirm"`, `scripting_enabled` becomes
 `True`); on `edit`, an unset flag leaves the existing value untouched — only
 the flags you actually pass get changed.
+
+`script_timeout_seconds` is the one field with no `new`/`edit` flag at all
+(and `aida workspace show` doesn't print it either) — both commands leave it
+at the `30.0` default regardless of what it was set to before, since neither
+reads nor writes it. Use the GUI's **Workspaces…** dialog, or edit
+`workspaces.yaml` directly, to set or preserve a non-default value.
 
 Example — create a workspace with a couple of flags, then tweak one field
 afterward:
@@ -95,15 +102,24 @@ All of these edits happen in memory only — nothing is written to
 `workspaces.yaml` until you click **Save to Workspace**. Switching away or
 closing the app without saving discards the changes.
 
+Separately, the toolbar's **Workspaces…** button opens the Workspace
+Management dialog — Add…/Edit…/Remove… against the full list of saved
+workspaces, persisted immediately (no "Save to Workspace" step). Its
+Add/Edit form covers every field except `templates_dir`/`saved_scripts_dir`
+(see the gap note below), including several the Folders panel above has no
+control for at all: `profile`, `mcp_group`, `skills`, `knowledge_bases`,
+`system_prompt`, `safety`, `scripting_enabled`, and the **Script/command
+timeout** spinner (1-3600s) for `script_timeout_seconds`.
+
 ## Current gap: no GUI editor yet
 
-Two fields are CLI/config-file only for now — there's no GUI control for
-either:
+Two fields are CLI/config-file only for now — neither the Folders panel nor
+the Workspace Management dialog has a control for either:
 
-- `skills`
 - `templates_dir`
+- `saved_scripts_dir`
 
-Edit these with `aida workspace edit <name> --skills ... --templates-dir ...`
+Edit these with `aida workspace edit <name> --templates-dir ... --saved-scripts-dir ...`
 or by hand-editing `workspaces.yaml`.
 
 ## Full example

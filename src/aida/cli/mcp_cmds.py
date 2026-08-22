@@ -24,7 +24,7 @@ from pathlib import Path
 
 from aida.config.settings import McpServerConfig, Settings, load_settings, save_mcp_config
 from aida.mcp.config_io import merge_mcp_config
-from aida.mcp.groups import delete_group, known_group_names, rename_group, resolve_group
+from aida.mcp.groups import add_group, delete_group, known_group_names, rename_group, resolve_group
 from aida.mcp.manager import McpManager
 
 
@@ -205,6 +205,25 @@ def cmd_group_list(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_group_add(args: argparse.Namespace) -> int:
+    settings = load_settings()
+    server_names = _split_csv(args.servers)
+    if not server_names:
+        print("--servers must name at least one existing server — a group with zero members can't be created.")
+        return 1
+    unknown = [name for name in server_names if name not in settings.mcp.servers]
+    if unknown:
+        print(f"Unknown server name(s): {', '.join(unknown)}")
+        return 1
+    updated = add_group(settings.mcp, args.name, server_names)
+    save_mcp_config(settings.mcp)
+    if updated == 0:
+        print(f"Group {args.name!r} already includes all of: {', '.join(server_names)} — nothing to do.")
+        return 0
+    print(f"Added group {args.name!r} to {updated} of {len(server_names)} requested server(s).")
+    return 0
+
+
 def cmd_group_rename(args: argparse.Namespace) -> int:
     settings = load_settings()
     updated = rename_group(settings.mcp, args.old, args.new)
@@ -325,6 +344,11 @@ def _build_parser() -> argparse.ArgumentParser:
     group = sub.add_parser("group", help="Manage MCP server groups (derived from each server's own groups: list)")
     group_sub = group.add_subparsers(dest="group_subcommand", required=True)
     group_sub.add_parser("list", help="List every group and its member servers")
+    group_add = group_sub.add_parser(
+        "add", help="Create (or add members to) a group — a group with zero members can't exist"
+    )
+    group_add.add_argument("name")
+    group_add.add_argument("--servers", required=True, help="Comma-separated names of existing servers to add")
     rename = group_sub.add_parser("rename", help="Rename a group across every server that references it")
     rename.add_argument("old")
     rename.add_argument("new")
@@ -359,6 +383,7 @@ _SERVER_HANDLERS = {
 
 _GROUP_HANDLERS = {
     "list": cmd_group_list,
+    "add": cmd_group_add,
     "rename": cmd_group_rename,
     "delete": cmd_group_delete,
 }

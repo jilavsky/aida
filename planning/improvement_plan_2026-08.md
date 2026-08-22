@@ -524,6 +524,62 @@ first"). Closing this gap is the biggest usability win available.
       real `New Chat` restart, capability_notes tooltip wiring, menu
       presence, and each of the four menu actions).
 
+- [x] **(U8) MCP Groups dialog had no way to create a group.** A server's own
+      edit form lets you add it to a new group name, but the standalone
+      "MCP Groups" dialog only had Rename/Delete — with several servers to
+      put in one new group, that meant opening each server's form
+      individually and typing the same new group name into each one. A
+      group has no separate registry (`aida.mcp.groups`'s design: purely
+      derived from which servers reference it), so there was never a
+      not-yet-wired "create" path to find — it needed building.
+
+      **Done (2026-08-22):** new `aida.mcp.groups.add_group(mcp_config,
+      name, server_names)` adds a group name to each named server's
+      `groups` list (skips a server that already has it or an unknown
+      name, mirroring `rename_group`/`delete_group`'s existing
+      no-op/skip conventions). The Groups dialog gained an "Add Group…"
+      button opening a small picker (`_AddGroupDialog`): a name field plus
+      a checklist of every configured server, OK disabled in spirit until
+      at least one is checked (enforced on accept with a warning dialog).
+      Picking a name that already exists asks to confirm before adding the
+      selected servers to it rather than silently merging. Tests:
+      `tests/test_mcp_groups.py` (5 new cases for `add_group` itself),
+      `tests/ui/test_mcp_management_dialog.py` (3 new cases: creates a
+      group, cancel makes no changes, no-servers-configured warns instead
+      of opening the picker).
+
+      **CLI parity (2026-08-22):** the CLI had the identical gap (`aida mcp
+      group` only had `list`/`rename`/`delete`) — adding a new
+      `cmd_group_add` handler plus `aida mcp group add <name> --servers
+      s1,s2` parser wiring keeps the CLI and GUI at the same capability
+      level rather than leaving the docs to describe an asymmetric feature
+      set. Unknown server names are rejected outright (not silently
+      skipped, unlike `add_group` itself) since a CLI invocation has no
+      picker UI to catch a typo before it's submitted. Tests: 5 new cases
+      in `tests/test_mcp_cmds.py`.
+
+- [x] **(U9) Documentation sync.** `docs/*.md` had fallen behind several
+      features already shipped this cycle: B4's concurrent MCP startup,
+      B5's `script_timeout_seconds`, B6's `keyring:`/`secret:` env secrets,
+      U8's Add Group flow, the McpQuickPanel's live start/stop checkboxes
+      (superseding the older read-only fix described in §1), the
+      "Workspace permissions" panel rename, the context-trim status bar
+      message, and the Providers…/Workspaces… toolbar actions from U1/U2.
+      **Done (2026-08-22):** swept all 9 files in `docs/`. Updated:
+      `mcp-servers.md` (new "Storing secrets in the OS keychain" section,
+      B4 concurrency note, Groups section documents `aida mcp group add`
+      and the GUI's Add Group… button), `workspaces.md` (`script_timeout_seconds`
+      row + the fact it has no CLI flag, Workspaces… dialog documented),
+      `coding-and-scripting.md` (new `script_timeout_seconds` section:
+      default, kill behavior, per-call cap), `gui-overview.md` ("Workspace
+      permissions" label, McpQuickPanel's live-control behavior, the
+      transient context-trim status message, Providers…/Workspaces…
+      toolbar entries), `installation.md` (pip fallback command was
+      missing the `docs` extra). `README.md`, `knowledge-bases.md`,
+      `providers-and-secrets.md`, and `safety-and-permissions.md` were
+      checked line-by-line against their corresponding source and found
+      already accurate — no changes made to those four.
+
 ---
 
 ## 4. Suggested schedule (1–2 weeks, in dependency order)
@@ -559,3 +615,72 @@ decision in PLAN.md gets a dated note there.
 - Two AIDA instances sharing `~/.aida` (SQLite + config writes) is unguarded;
   single-user assumption is fine for now, but a simple lock file would make the
   failure mode explicit if it ever comes up.
+
+---
+
+## 6. Known issues
+
+### CI crashed (segfault on Linux, access violation on Windows) mid-`pytest -v` (2026-08-22)
+
+**Report:** CI's `pytest -v` step (the whole suite, `tests/` and `tests/ui/`
+together, in one process) crashed the interpreter — a native crash, not a test
+failure — at a different call site each time: Linux inside
+`persistence/db.py`'s sqlite3 migration during `ChatBridge._start`, Windows
+inside `artifacts_dir()`'s `Path.mkdir`, and locally (reproduced repeatedly)
+inside Qt's own `QCoreApplication::notifyInternal2`/
+`QTimerInfoList::activateTimers`. Always several hundred tests into the run,
+never in a small subset run alone.
+
+**Diagnosis:** every GUI test in `tests/ui` shares one process-wide
+`QApplication` (Qt disallows more than one), and `MessageBubble`
+(`aida.ui.qt.chat_panel`) parents a single-shot `QTimer` to itself to coalesce
+streamed-text renders. None of the ~50+ tests that build a real `MainWindow`
+tear it down via `deleteLater()` — most just let the local variable go out of
+scope at the end of the test function. Python's *cyclic* garbage collector
+doesn't run on every refcount drop, only once its generational allocation
+thresholds are crossed, so a `MainWindow`'s widget tree (including any
+`MessageBubble` with a still-active `_render_timer`) can survive, unreferenced
+but uncollected, for many tests before finally being reaped — possibly mid a
+*later, unrelated* test's `qapp.processEvents()` call. A `QTimer` whose owning
+QObject is destroyed at that moment can still have a pending entry in Qt's
+internal timer list; the next tick delivers the timeout event to freed
+memory — a native crash, invisible to Python's own exception handling, which
+is why it surfaces as a segfault/access violation rather than a clean test
+failure. This explains every observed property: needs a *large* combined
+volume of tests to reproduce (crossing the GC threshold), never reproduces in
+a small file subset, and the actual crash site is wherever the interpreter
+happens to be executing when the stale timer fires — unrelated to whatever
+code is "blamed" in the traceback.
+
+Reproduced locally with `gdb` attached to a full `pytest -v` run (3/3
+crashes, always at the same test given the same execution order) — see the
+transcript referenced in this session's delivery notes for the full native
+backtrace confirming the crash address is inside Qt's timer dispatch on the
+main thread, not anywhere in `aida`'s own code.
+
+**Fix (2026-08-22):**
+1. `tests/ui/conftest.py` gained an autouse `_drain_qt_garbage_after_each_test`
+   fixture: `gc.collect()` + `qapp.processEvents()`, twice, after every GUI
+   test. This forces each test's own garbage to be reaped (and any
+   `deleteLater()`-queued deletions to actually run) right after that test,
+   in a window where nothing else is mid-dispatch, instead of leaving it to
+   float until the cyclic collector's next arbitrary run. Verified: 3/3 full
+   `pytest -v` runs crashed before this fix, 2/2 passed cleanly after it
+   (only the pre-existing root-user chmod environment failure in
+   `test_knowledge_ingest.py` remains).
+2. `MessageBubble` gained `stop_pending_render()`, called from
+   `ChatPanel.clear()` before `deleteLater()` — belt-and-suspenders: stops the
+   coalescing timer explicitly wherever a bubble is deliberately retired,
+   on top of the test-side mitigation above.
+3. `.github/workflows/ci.yml`'s Pytest step split into two invocations
+   (`pytest -v --ignore=tests/ui` then `pytest -v tests/ui`) — halves the
+   cumulative Qt/thread churn either process accumulates, as a second,
+   independent safety margin on top of (1).
+
+**Not fully closed:** this is a mitigation with strong empirical support, not
+a mathematical guarantee — the underlying mechanism (deferred GC racing Qt's
+timer dispatch) is a known class of PySide/PyQt issue, not something `aida`
+can fully rule out from application code alone. If it recurs as the test
+suite keeps growing, the next escalation is running each `tests/ui/*.py` file
+in its own subprocess (e.g. `pytest-forked` or one `pytest` invocation per
+file) so no single process ever accumulates enough GUI-test garbage to matter.

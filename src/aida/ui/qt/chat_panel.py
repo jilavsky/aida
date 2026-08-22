@@ -301,6 +301,22 @@ class MessageBubble(QFrame):
         _unwrap_preformatted_blocks(self._view.document())
         self._update_open_in_editor_visibility()
 
+    def stop_pending_render(self) -> None:
+        """Stop the coalescing timer before this bubble is torn down.
+
+        ``QTimer(self)`` being parented normally means Qt's own destructor
+        chain unregisters it safely, but that only holds for deletion that
+        actually goes through Qt (``deleteLater()`` or synchronous C++
+        teardown at a safe point). This bubble can also be reclaimed by
+        Python's cyclic GC at an arbitrary later point (see
+        ``tests/ui/conftest.py``'s ``_drain_qt_garbage_after_each_test``
+        for the full story on why that's dangerous with a still-active
+        timer) — calling this explicitly wherever a bubble is deliberately
+        being retired removes one more way to reach that race, on top of
+        the test-side mitigation."""
+        if self._render_timer.isActive():
+            self._render_timer.stop()
+
     def append_meta(self, text: str) -> None:
         """Adds a " · "-separated suffix to the header's timestamp label —
         used to attach the tok/sec + duration line once a UsageInfo event
@@ -619,6 +635,8 @@ class ChatPanel(QWidget):
             item = self._content_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                if isinstance(widget, MessageBubble):
+                    widget.stop_pending_render()
                 widget.deleteLater()
         self._current_assistant_bubble = None
         self._last_assistant_bubble = None

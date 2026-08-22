@@ -39,7 +39,7 @@ from aida.config.secrets import set_secret
 from aida.config.settings import McpConfig, McpServerConfig, Settings, save_mcp_config
 from aida.core.context import list_skills
 from aida.mcp.config_io import merge_mcp_config
-from aida.mcp.groups import delete_group, known_group_names, rename_group, resolve_group
+from aida.mcp.groups import add_group, delete_group, known_group_names, rename_group, resolve_group
 from aida.mcp.manager import ConnectionTestResult
 from aida.mcp.server import ToolCallRecord
 from aida.ui.qt._qt import (
@@ -354,10 +354,63 @@ class RawResultDialog(QDialog):
 # --- Groups editor -----------------------------------------------------------
 
 
+class _AddGroupDialog(QDialog):
+    """Prompts for a new group name plus which configured servers belong
+    to it. The only way to bring a brand-new group into existence: a group
+    has no separate registry (see ``aida.mcp.groups``'s docstring — it's
+    derived purely from server membership), so a zero-member group can't
+    be represented at all, and this dialog's OK button is disabled until
+    at least one server is checked."""
+
+    def __init__(self, mcp_config: McpConfig, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add Group")
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("Group name:", self))
+        self._name_edit = QLineEdit(self)
+        layout.addWidget(self._name_edit)
+
+        layout.addWidget(QLabel("Servers in this group:", self))
+        self._servers_list = QListWidget(self)
+        for name in sorted(mcp_config.servers):
+            item = QListWidgetItem(name, self._servers_list)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+        layout.addWidget(self._servers_list)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
+        button_box.accepted.connect(self._on_accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def _on_accept(self) -> None:
+        if not self._name_edit.text().strip():
+            QMessageBox.warning(self, "Name Required", "A group needs a name.")
+            return
+        if not self.selected_servers():
+            QMessageBox.warning(self, "No Servers Selected", "Check at least one server to add to the group.")
+            return
+        self.accept()
+
+    def group_name(self) -> str:
+        return self._name_edit.text().strip()
+
+    def selected_servers(self) -> list[str]:
+        return [
+            self._servers_list.item(row).text()
+            for row in range(self._servers_list.count())
+            if self._servers_list.item(row).checkState() == Qt.CheckState.Checked
+        ]
+
+
 class GroupsDialog(QDialog):
-    """Rename/delete groups — a group has no separate registry (it's
+    """Add/rename/delete groups — a group has no separate registry (it's
     derived from who references it, see ``aida.mcp.groups``'s docstring),
-    so this dialog is a thin front end over ``rename_group``/``delete_group``.
+    so this dialog is a thin front end over ``add_group``/``rename_group``/
+    ``delete_group``.
     """
 
     def __init__(self, mcp_config: McpConfig, *, on_changed, parent: QWidget | None = None) -> None:
@@ -372,6 +425,9 @@ class GroupsDialog(QDialog):
         self._refresh()
 
         buttons = QHBoxLayout()
+        add_button = QPushButton("Add Group…", self)
+        add_button.clicked.connect(self._on_add)
+        buttons.addWidget(add_button)
         rename_button = QPushButton("Rename…", self)
         rename_button.clicked.connect(self._on_rename)
         buttons.addWidget(rename_button)
@@ -396,6 +452,31 @@ class GroupsDialog(QDialog):
         if item is None:
             return None
         return item.text().split("  —  ")[0]
+
+    def _on_add(self) -> None:
+        if not self._mcp_config.servers:
+            QMessageBox.information(
+                self, "No Servers Configured", "Add an MCP server first — a group needs at least one member."
+            )
+            return
+        dialog = _AddGroupDialog(self._mcp_config, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        name = dialog.group_name()
+        if name in known_group_names(self._mcp_config):
+            answer = QMessageBox.question(
+                self,
+                "Group Already Exists",
+                f"{name!r} already exists — add the selected server(s) to it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        add_group(self._mcp_config, name, dialog.selected_servers())
+        save_mcp_config(self._mcp_config)
+        self._refresh()
+        self._on_changed()
 
     def _on_rename(self) -> None:
         old = self._selected_group_name()

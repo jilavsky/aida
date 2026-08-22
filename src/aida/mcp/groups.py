@@ -75,6 +75,29 @@ def rename_group(mcp_config: McpConfig, old: str, new: str) -> int:
     return updated
 
 
+def add_group(mcp_config: McpConfig, name: str, server_names: list[str]) -> int:
+    """Creates ``name`` by adding it to each named server's ``groups``
+    list. There is nothing else to "create" — a group is purely derived
+    from who references it (see this module's docstring) — so a group
+    with zero members can't be represented at all; this is the only way a
+    brand-new group name comes into existence.
+
+    Returns the number of servers actually updated (a name already unknown
+    in ``mcp_config.servers`` is silently skipped rather than raising —
+    same "warn in the GUI, don't crash the whole action" posture as the
+    rest of this module's callers use). De-duplicates like
+    ``rename_group``: a server that already has ``name`` in its
+    ``groups`` is left with a single entry, not two."""
+    updated = 0
+    for server_name in server_names:
+        server = mcp_config.servers.get(server_name)
+        if server is None or name in server.groups:
+            continue
+        server.groups = [*server.groups, name]
+        updated += 1
+    return updated
+
+
 def delete_group(mcp_config: McpConfig, name: str) -> int:
     """Removes ``name`` from every server's ``groups`` list. Returns the
     number of servers updated. A workspace whose ``mcp_group`` still names
@@ -93,6 +116,7 @@ def delete_group(mcp_config: McpConfig, name: str) -> int:
 
 __all__ = [
     "NO_GROUP",
+    "add_group",
     "delete_group",
     "known_group_names",
     "rename_group",

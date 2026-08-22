@@ -179,6 +179,49 @@ def test_group_list_shows_members(aida_home: Path, capsys):
     assert "bait" in out and "pyirena" in out
 
 
+def test_group_add_creates_a_brand_new_group(aida_home: Path, capsys):
+    main(["server", "add", "pyirena", "--command", "/x"])
+    main(["server", "add", "bait", "--command", "/y"])
+    rc = main(["group", "add", "everything", "--servers", "pyirena,bait"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Added group 'everything' to 2 of 2 requested server(s)." in out
+
+    loaded = load_mcp_config(aida_home)
+    assert loaded.servers["pyirena"].groups == ["everything"]
+    assert loaded.servers["bait"].groups == ["everything"]
+
+
+def test_group_add_to_existing_group_only_updates_new_members(aida_home: Path, capsys):
+    main(["server", "add", "pyirena", "--command", "/x", "--groups", "analysis"])
+    main(["server", "add", "bait", "--command", "/y"])
+    rc = main(["group", "add", "analysis", "--servers", "pyirena,bait"])
+    assert rc == 0
+    assert "Added group 'analysis' to 1 of 2 requested server(s)." in capsys.readouterr().out
+    assert load_mcp_config(aida_home).servers["bait"].groups == ["analysis"]
+
+
+def test_group_add_already_present_on_all_named_servers(aida_home: Path, capsys):
+    main(["server", "add", "pyirena", "--command", "/x", "--groups", "analysis"])
+    rc = main(["group", "add", "analysis", "--servers", "pyirena"])
+    assert rc == 0
+    assert "nothing to do" in capsys.readouterr().out
+
+
+def test_group_add_unknown_server_name(aida_home: Path, capsys):
+    main(["server", "add", "pyirena", "--command", "/x"])
+    rc = main(["group", "add", "everything", "--servers", "pyirena,typo-name"])
+    assert rc == 1
+    assert "Unknown server name(s): typo-name" in capsys.readouterr().out
+    assert load_mcp_config(aida_home).servers["pyirena"].groups == []
+
+
+def test_group_add_requires_at_least_one_server(aida_home: Path, capsys):
+    rc = main(["group", "add", "everything", "--servers", ""])
+    assert rc == 1
+    assert "zero members" in capsys.readouterr().out
+
+
 def test_group_rename_updates_every_server(aida_home: Path):
     main(["server", "add", "pyirena", "--command", "/x", "--groups", "analysis"])
     main(["server", "add", "bait", "--command", "/y", "--groups", "analysis"])

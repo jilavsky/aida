@@ -15,8 +15,10 @@ conda activate aida
 aida doctor
 ```
 
-The GUI needs the `gui` extra (PySide6) — included by `environment.yml`;
-with plain `pip install -e ".[dev,gui]"` if you're not using conda.
+The GUI needs the `gui` extra (PySide6), and reading/indexing PDF, DOCX,
+XLSX, or PPTX files needs the `docs` extra (pymupdf, python-docx, openpyxl,
+python-pptx, Pillow) — both are included by `environment.yml`; with plain
+pip, that's `pip install -e ".[dev,gui,docs]"` if you're not using conda.
 
 ## `aida doctor`
 
