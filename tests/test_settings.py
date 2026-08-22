@@ -143,6 +143,61 @@ def test_providers_config_roundtrip(aida_home: Path):
     assert "sk-" not in raw
 
 
+def test_provider_profile_sampling_and_cost_fields_roundtrip(aida_home: Path):
+    """B2: max_tokens/temperature/usd_per_m_input/usd_per_m_output/
+    supports_vision round-trip through providers.yaml like every other
+    field."""
+    from aida.config.settings import ProviderProfile
+
+    cfg = ProvidersConfig(
+        profiles={
+            "argo-claude": ProviderProfile(
+                name="argo-claude",
+                kind="anthropic",
+                model="claude-sonnet",
+                max_tokens=8192,
+                temperature=0.3,
+                usd_per_m_input=3.0,
+                usd_per_m_output=15.0,
+                supports_vision=True,
+            )
+        }
+    )
+    save_providers_config(cfg, aida_home)
+    loaded = load_providers_config(aida_home).profiles["argo-claude"]
+    assert loaded.max_tokens == 8192
+    assert loaded.temperature == 0.3
+    assert loaded.usd_per_m_input == 3.0
+    assert loaded.usd_per_m_output == 15.0
+    assert loaded.supports_vision is True
+
+
+def test_provider_profile_sampling_fields_default_to_none():
+    """A profile that never set these must behave exactly as before B2 —
+    None means "use CompletionSettings' own defaults", not zero."""
+    from aida.config.settings import ProviderProfile
+
+    profile = ProviderProfile.from_dict("local-ollama", {"kind": "openai_compat", "model": "qwen"})
+    assert profile.max_tokens is None
+    assert profile.temperature is None
+    assert profile.usd_per_m_input is None
+    assert profile.usd_per_m_output is None
+    assert profile.supports_vision is False
+
+
+def test_provider_profile_rejects_a_badly_typed_sampling_field():
+    """A hand-quoted max_tokens: "lots" must not crash config loading — it
+    should fall back to None (built-in default) with a warning, same as
+    every other coercion guard in this module."""
+    from aida.config.settings import ProviderProfile
+
+    profile = ProviderProfile.from_dict(
+        "argo-claude", {"kind": "anthropic", "model": "claude-sonnet", "max_tokens": "lots", "temperature": {}}
+    )
+    assert profile.max_tokens is None
+    assert profile.temperature is None
+
+
 def test_workspaces_config_roundtrip(aida_home: Path):
     from aida.config.settings import WorkspaceConfig
 

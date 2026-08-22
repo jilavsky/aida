@@ -141,12 +141,24 @@ class UsageInfo:
     usage belongs to — rather than by any individual provider, so it's
     available uniformly regardless of whether a given provider's API
     reports timing at all.
+
+    ``cache_creation_input_tokens``/``cache_read_input_tokens`` (B3,
+    Anthropic only — always 0 for a provider that doesn't do prompt
+    caching): what prompt caching actually cost and saved this turn.
+    ``cache_read_input_tokens`` is the number that matters for "the
+    savings are visible" — tokens served from cache instead of being
+    billed at full input price; ``cache_creation_input_tokens`` is the
+    (one-time, slightly pricier) cost of writing the cache in the first
+    place, normally only nonzero on a session's first turn or right after
+    the system prompt/tools actually change.
     """
 
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int | None = None
     duration_seconds: float | None = None
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
     to_dict = _base_dict
 

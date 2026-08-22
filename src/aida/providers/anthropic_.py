@@ -38,8 +38,16 @@ from aida.core.events import (
     UsageInfo,
 )
 from aida.providers.base import CompletionSettings, LLMProvider, Message, ToolSchema
+from aida.providers.vision import images_within_cap, read_image_b64
 
 DEFAULT_MAX_TOKENS = 4096
+
+#: Anthropic's cache_control marker for a "cache this, reuse for ~5 min"
+#: breakpoint (B3). Ephemeral is the only kind AIDA needs — there is no
+#: cross-session cache to keep warm on purpose, just the same system
+#: prompt + tool schema list resent unchanged on every turn of one running
+#: session.
+_EPHEMERAL_CACHE_CONTROL = {"type": "ephemeral"}
 
 # Anthropic stop_reason -> AIDA's normalized MessageFinished.stop_reason.
 _STOP_REASON_MAP = {
@@ -50,7 +58,24 @@ _STOP_REASON_MAP = {
 }
 
 
-def to_anthropic_params(messages: list[Message]) -> tuple[str | None, list[dict[str, Any]]]:
+def _anthropic_image_blocks(images: list[Any]) -> list[dict[str, Any]]:
+    """``ImageRef`` list -> Anthropic ``image`` content blocks, skipping any
+    that can no longer be read (see ``read_image_b64``). Anthropic's own
+    guidance is to place image blocks before the text that refers to them,
+    so callers prepend this to the text block rather than appending it."""
+    blocks: list[dict[str, Any]] = []
+    for ref in images:
+        encoded = read_image_b64(ref)
+        if encoded is None:
+            continue
+        mime_type, data = encoded
+        blocks.append({"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": data}})
+    return blocks
+
+
+def to_anthropic_params(
+    messages: list[Message], *, supports_vision: bool = False
+) -> tuple[str | None, list[dict[str, Any]]]:
     """AIDA ``Message`` list -> (system prompt string, Anthropic ``messages``).
 
     Anthropic takes the system prompt as a separate top-level parameter, not
@@ -68,17 +93,29 @@ def to_anthropic_params(messages: list[Message]) -> tuple[str | None, list[dict[
     precisely because pyIrena MCP work is full of "plot all of these"
     fan-outs. So consecutive ``role="tool"`` messages are merged into one
     user message, in order.
+
+    **Vision (B1).** When ``supports_vision`` is true, the most recent
+    ``aida.providers.vision.MAX_ATTACHED_IMAGES`` image-bearing messages
+    (tool results carrying an ``ImageArtifact``, or a GUI image attachment)
+    get their actual pixels attached as ``image`` content blocks — a
+    ``tool_result`` can hold them directly; a plain ``user`` message gets a
+    multi-part ``content`` list instead of a bare string. Every other
+    image-bearing message (older than the cap, or when ``supports_vision``
+    is false) still carries its text-policy description exactly as before
+    — only the pixels are capped/gated, never the fact that an image
+    exists at all.
     """
     system_parts: list[str] = []
     out: list[dict[str, Any]] = []
     pending_tool_results: list[dict[str, Any]] = []
+    image_indices = images_within_cap(messages) if supports_vision else set()
 
     def flush_tool_results() -> None:
         if pending_tool_results:
             out.append({"role": "user", "content": list(pending_tool_results)})
             pending_tool_results.clear()
 
-    for m in messages:
+    for idx, m in enumerate(messages):
         if m.role != "tool":
             flush_tool_results()
 
@@ -95,18 +132,28 @@ def to_anthropic_params(messages: list[Message]) -> tuple[str | None, list[dict[
                 )
             out.append({"role": "assistant", "content": content})
         elif m.role == "tool":
+            # An empty tool_result content block is rejected by the API; a
+            # tool that legitimately returned nothing still needs to say so.
+            text = m.content or "(no output)"
+            image_blocks = _anthropic_image_blocks(m.images) if idx in image_indices and m.images else []
             pending_tool_results.append(
                 {
                     "type": "tool_result",
                     "tool_use_id": m.tool_call_id,
-                    # An empty tool_result content block is rejected by the
-                    # API; a tool that legitimately returned nothing still
-                    # needs to say so.
-                    "content": m.content or "(no output)",
+                    "content": [*image_blocks, {"type": "text", "text": text}] if image_blocks else text,
                 }
             )
-        elif m.content:
-            out.append({"role": m.role, "content": m.content})
+        elif m.content or (idx in image_indices and m.images):
+            image_blocks = _anthropic_image_blocks(m.images) if idx in image_indices and m.images else []
+            if image_blocks:
+                out.append(
+                    {
+                        "role": m.role,
+                        "content": [*image_blocks, {"type": "text", "text": m.content}] if m.content else image_blocks,
+                    }
+                )
+            else:
+                out.append({"role": m.role, "content": m.content})
         # else: a message with no content and no tool calls is dropped.
         # The API rejects an empty content block outright ("all messages
         # must have non-empty content"), and an assistant turn *can*
@@ -119,6 +166,34 @@ def to_anthropic_params(messages: list[Message]) -> tuple[str | None, list[dict[
     flush_tool_results()
     system = "\n\n---\n\n".join(system_parts) if system_parts else None
     return system, out
+
+
+def to_cached_system_param(system: str | None) -> str | list[dict[str, Any]] | None:
+    """Wrap the system prompt as a single cached text block (B3).
+
+    Every turn of a session resends the same workspace context + skills +
+    MCP server instructions unchanged — Anthropic's prompt cache is exactly
+    for that. A ``cache_control: {"type": "ephemeral"}`` marker on this one
+    block tells the API "cache everything up to here"; the system prompt is
+    always the first thing in the request, so one marker covers all of it.
+    ``None``/empty pass through unchanged — nothing to cache."""
+    if not system:
+        return system
+    return [{"type": "text", "text": system, "cache_control": dict(_EPHEMERAL_CACHE_CONTROL)}]
+
+
+def to_cached_tools_param(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mark the *last* tool definition as a cache breakpoint (B3).
+
+    Anthropic caches everything up to and including a ``cache_control``
+    marker, so one marker on the last tool in the list covers the entire
+    tool schema array — often 100+ namespaced MCP tools resent unchanged on
+    every turn. Returns ``tools`` unchanged if empty."""
+    if not tools:
+        return tools
+    tools = list(tools)
+    tools[-1] = {**tools[-1], "cache_control": dict(_EPHEMERAL_CACHE_CONTROL)}
+    return tools
 
 
 def to_anthropic_tools(tools: list[ToolSchema]) -> list[dict[str, Any]]:
@@ -136,6 +211,11 @@ class _StreamState:
     stop_reason: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    #: B3: cache stats, reported alongside input/output tokens so the
+    #: savings prompt caching is meant to produce are actually visible
+    #: rather than an invisible backend detail — see UsageInfo.
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
     def full_text(self) -> str:
         return "".join(self.text_parts)
@@ -158,6 +238,11 @@ def process_anthropic_event(event: Any, state: _StreamState) -> list[AgentEvent]
         usage = getattr(event.message, "usage", None)
         if usage:
             state.input_tokens = usage.input_tokens or 0
+            # Cache stats are only ever reported here (message_start), not
+            # on the later message_delta — that one only ever carries
+            # output_tokens.
+            state.cache_creation_input_tokens = getattr(usage, "cache_creation_input_tokens", None) or 0
+            state.cache_read_input_tokens = getattr(usage, "cache_read_input_tokens", None) or 0
 
     elif etype == "content_block_start":
         block = event.content_block
@@ -212,7 +297,12 @@ def process_anthropic_event(event: Any, state: _StreamState) -> list[AgentEvent]
         )
         if state.input_tokens or state.output_tokens:
             events.append(
-                UsageInfo(input_tokens=state.input_tokens, output_tokens=state.output_tokens)
+                UsageInfo(
+                    input_tokens=state.input_tokens,
+                    output_tokens=state.output_tokens,
+                    cache_creation_input_tokens=state.cache_creation_input_tokens,
+                    cache_read_input_tokens=state.cache_read_input_tokens,
+                )
             )
 
     return events
@@ -235,7 +325,7 @@ class AnthropicProvider(LLMProvider):
     ) -> AsyncIterator[AgentEvent]:
         message_id = f"anthropic-{id(messages)}-{len(messages)}"
         state = _StreamState(message_id=message_id)
-        system, anthropic_messages = to_anthropic_params(messages)
+        system, anthropic_messages = to_anthropic_params(messages, supports_vision=settings.supports_vision)
 
         kwargs: dict[str, Any] = {
             "model": settings.model or self.model,
@@ -246,9 +336,11 @@ class AnthropicProvider(LLMProvider):
             **settings.extra,
         }
         if system is not None:
-            kwargs["system"] = system
+            # B3: cached as a single ephemeral block — see
+            # to_cached_system_param's docstring.
+            kwargs["system"] = to_cached_system_param(system)
         if tools:
-            kwargs["tools"] = to_anthropic_tools(tools)
+            kwargs["tools"] = to_cached_tools_param(to_anthropic_tools(tools))
 
         try:
             stream = await self._client.messages.create(**kwargs)
@@ -302,4 +394,6 @@ __all__ = [
     "process_anthropic_event",
     "to_anthropic_params",
     "to_anthropic_tools",
+    "to_cached_system_param",
+    "to_cached_tools_param",
 ]

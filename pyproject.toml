@@ -42,7 +42,7 @@ Issues = "https://github.com/jilavsky/aida/issues"
 
 [project.optional-dependencies]
 gui = ["PySide6>=6.6"]
-docs = ["pymupdf>=1.24", "python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=0.6.23"]
+docs = ["pymupdf>=1.24", "python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=0.6.23", "Pillow>=10.0"]
 dev = [
     "pytest>=8.0",
     "pytest-timeout>=2.3",

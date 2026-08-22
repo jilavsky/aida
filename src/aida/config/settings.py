@@ -103,6 +103,25 @@ def _coerce_str_list(
     return default
 
 
+def _coerce_optional_number(source: str, field_name: str, value: Any, *, kind: type) -> Any | None:
+    """Coerce a YAML value that should be an optional ``int``/``float`` —
+    ``None``/missing passes through as ``None`` (the field's "not set, use
+    the built-in default" state); a value of the wrong type is dropped
+    (warned, same "old/wrong configs must still load" rule as ``_coerce``)
+    rather than crashing later, deep inside a provider request, on
+    something like a hand-quoted ``max_tokens: "4096"``."""
+    if value is None:
+        return None
+    if isinstance(kind, type) and kind is int and isinstance(value, bool):  # bool is an int subclass
+        _logger.warning("%s: ignoring %s=%r — expected a number, got a boolean", source, field_name, value)
+        return None
+    try:
+        return kind(value)
+    except (TypeError, ValueError):
+        _logger.warning("%s: ignoring %s=%r — expected a number", source, field_name, value)
+        return None
+
+
 def _coerced_fields(
     data: dict[str, Any], field_kinds: dict[str, str], *, source: str
 ) -> dict[str, Any]:
@@ -259,7 +278,30 @@ _APP_FIELD_KINDS: dict[str, str] = {
 
 @dataclass
 class ProviderProfile:
-    """A named provider profile. NO secrets inline — secret refs only."""
+    """A named provider profile. NO secrets inline — secret refs only.
+
+    ``max_tokens``/``temperature`` (B2): per-profile sampling defaults —
+    PLAN.md §4 always described a profile as including these ("provider
+    type, base URL, model name, secret reference, sampling defaults,
+    capability notes"), but there was nowhere to put them until now.
+    ``None`` means "use the built-in default" (``CompletionSettings``'s own
+    defaults — temperature 0.7, provider-default max_tokens), so an
+    existing profile with neither set behaves exactly as before.
+
+    ``usd_per_m_input``/``usd_per_m_output`` (B2): this profile's actual
+    billing rate, for an honest ``estimate_cost_usd`` — the previous single
+    fixed rate applied to every profile alike, which is actively misleading
+    for a free local model. ``None`` falls back to the same fixed default
+    rate as before.
+
+    ``supports_vision`` (B1): opt-in per profile, default ``False`` — not
+    every endpoint AIDA talks to understands image content blocks (a small
+    text-only local model can error on one), so this is never assumed from
+    ``kind`` alone. Set it ``true`` on a Claude/Argo profile, or an
+    Ollama/LM Studio profile actually running a vision-capable model, to
+    have tool-result plots and GUI-attached images actually reach the
+    model — see ``aida.providers.vision``.
+    """
 
     name: str
     kind: str = "openai_compat"  # "openai_compat" | "anthropic"
@@ -267,9 +309,15 @@ class ProviderProfile:
     model: str = ""
     secret_ref: str | None = None  # key into aida.config.secrets, not a value
     capability_notes: str = ""
+    max_tokens: int | None = None
+    temperature: float | None = None
+    usd_per_m_input: float | None = None
+    usd_per_m_output: float | None = None
+    supports_vision: bool = False
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> ProviderProfile:
+        source = f"providers.yaml (profile {name!r})"
         return cls(
             name=name,
             kind=data.get("kind", "openai_compat"),
@@ -277,6 +325,15 @@ class ProviderProfile:
             model=data.get("model", ""),
             secret_ref=data.get("secret_ref"),
             capability_notes=data.get("capability_notes", ""),
+            max_tokens=_coerce_optional_number(source, "max_tokens", data.get("max_tokens"), kind=int),
+            temperature=_coerce_optional_number(source, "temperature", data.get("temperature"), kind=float),
+            usd_per_m_input=_coerce_optional_number(
+                source, "usd_per_m_input", data.get("usd_per_m_input"), kind=float
+            ),
+            usd_per_m_output=_coerce_optional_number(
+                source, "usd_per_m_output", data.get("usd_per_m_output"), kind=float
+            ),
+            supports_vision=bool(data.get("supports_vision", False)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -286,6 +343,11 @@ class ProviderProfile:
             "model": self.model,
             "secret_ref": self.secret_ref,
             "capability_notes": self.capability_notes,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "usd_per_m_input": self.usd_per_m_input,
+            "usd_per_m_output": self.usd_per_m_output,
+            "supports_vision": self.supports_vision,
         }
 
 

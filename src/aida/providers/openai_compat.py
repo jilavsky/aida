@@ -36,6 +36,7 @@ from aida.core.events import (
     UsageInfo,
 )
 from aida.providers.base import CompletionSettings, LLMProvider, Message, ToolSchema
+from aida.providers.vision import images_within_cap, read_image_b64
 
 # Provider-normalized stop reasons (aida.core.events.MessageFinished.stop_reason).
 _FINISH_REASON_MAP = {
@@ -46,10 +47,37 @@ _FINISH_REASON_MAP = {
 }
 
 
-def to_openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
-    """AIDA ``Message`` list -> OpenAI chat-completions ``messages`` list."""
+def _openai_image_parts(images: list[Any]) -> list[dict[str, Any]]:
+    """``ImageRef`` list -> OpenAI ``image_url`` content parts (data URLs),
+    skipping any that can no longer be read (see ``read_image_b64``)."""
+    parts: list[dict[str, Any]] = []
+    for ref in images:
+        encoded = read_image_b64(ref)
+        if encoded is None:
+            continue
+        mime_type, data = encoded
+        parts.append({"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{data}"}})
+    return parts
+
+
+def to_openai_messages(messages: list[Message], *, supports_vision: bool = False) -> list[dict[str, Any]]:
+    """AIDA ``Message`` list -> OpenAI chat-completions ``messages`` list.
+
+    **Vision (B1).** When ``supports_vision`` is true, the most recent
+    ``aida.providers.vision.MAX_ATTACHED_IMAGES`` image-bearing *user*
+    messages (GUI image attachments) get ``image_url`` data-URL parts
+    alongside their text — the shape Ollama/LM Studio's vision models
+    expect. Deliberately **not** extended to ``role="tool"`` messages: the
+    OpenAI chat-completions wire format only allows multi-part content on
+    user/assistant messages, so a tool-result image on this provider stays
+    text-described only (its ``ImageArtifact`` was never attached to a
+    ``tool`` message's ``images`` for this reason — see
+    ``aida.core.agent``). Anthropic's ``to_anthropic_params`` has no such
+    restriction and does attach both.
+    """
     out: list[dict[str, Any]] = []
-    for m in messages:
+    image_indices = images_within_cap(messages) if supports_vision else set()
+    for idx, m in enumerate(messages):
         if m.role == "assistant" and m.tool_calls:
             out.append(
                 {
@@ -77,7 +105,12 @@ def to_openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
                 }
             )
         else:
-            out.append({"role": m.role, "content": m.content})
+            image_parts = _openai_image_parts(m.images) if idx in image_indices and m.images else []
+            if image_parts:
+                content: Any = [*image_parts, {"type": "text", "text": m.content}] if m.content else image_parts
+                out.append({"role": m.role, "content": content})
+            else:
+                out.append({"role": m.role, "content": m.content})
     return out
 
 
@@ -210,7 +243,7 @@ class OpenAICompatProvider(LLMProvider):
         state = _StreamState(message_id=message_id)
         kwargs: dict[str, Any] = {
             "model": settings.model or self.model,
-            "messages": to_openai_messages(messages),
+            "messages": to_openai_messages(messages, supports_vision=settings.supports_vision),
             "temperature": settings.temperature,
             "stream": True,
             "stream_options": {"include_usage": True},

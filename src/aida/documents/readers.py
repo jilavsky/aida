@@ -19,15 +19,17 @@ typed ``Artifact`` types (PLAN.md hard rule 3) rather than one giant
   loaded into memory — the GUI's ``InlineImageWidget`` reads straight off
   disk via the path, same as a live ``ImageArtifactCreated`` event)
 
-**Known v1 limitation, called out explicitly rather than silently**: an
-``ImageArtifact`` read this way is *not* sent to the model as vision input.
-``aida.providers.base.Message.content`` is plain ``str`` throughout this
-codebase's provider layer — there is no multipart/vision message shape
-anywhere yet, so "images... passed to vision-capable models" (PLAN.md) is
-only partially true here: the image displays in the GUI and the model is
-told it exists (via ``describe_for_model``), but its pixels never reach the
-model's context. Real vision support needs a provider-layer change (a
-multipart ``Message.content``) that's out of scope for this phase.
+**Vision input (B1).** An ``ImageArtifact`` read this way (a GUI drag-and-
+drop or "Attach…" image) is described in text (via ``describe_for_model``,
+as every artifact type is) *and*, when the active profile has
+``supports_vision: true``, has its actual pixels attached as vision input —
+see ``aida.ui.qt.main_window._augment_with_attachments`` and
+``aida.providers.vision``. ``aida.providers.base.Message.content`` itself
+stays plain ``str`` throughout the provider layer; the image travels
+alongside it on ``Message.images`` rather than being folded into content.
+Without ``supports_vision`` set (the default — not every endpoint AIDA
+talks to understands image content blocks), the image still displays in
+the GUI and is still described in text, exactly as before B1.
 
 HDF5 is deliberately **not** implemented here — that's pyIrena MCP's job
 (Phase 3 already covers science-data formats via MCP), not a general
@@ -198,6 +200,15 @@ def is_supported(path: str | Path) -> bool:
     return suffix in _READERS or suffix in _TEXT_SUFFIXES or suffix in _IMAGE_SUFFIXES or suffix == ""
 
 
+def is_image_path(path: str | Path) -> bool:
+    """Whether ``path`` is one of the image formats this module reads as an
+    ``ImageArtifact`` (B1: the single source of truth for "is this an
+    image attachment" — used by ``aida.ui.qt.main_window`` to decide
+    whether a GUI-attached file should also be sent as vision input, not
+    just described in text)."""
+    return Path(path).suffix.lower() in _IMAGE_SUFFIXES
+
+
 def read_document(
     path: str | Path,
     *,
@@ -241,6 +252,7 @@ __all__ = [
     "DEFAULT_MAX_ROWS_PER_SHEET",
     "DEFAULT_MAX_SHEETS",
     "UnsupportedDocumentFormatError",
+    "is_image_path",
     "is_supported",
     "read_document",
 ]

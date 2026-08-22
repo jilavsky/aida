@@ -191,6 +191,58 @@ def test_print_event_usage_info_with_no_tokens_prints_nothing(capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_print_event_usage_info_shows_cache_read_tokens_when_present(capsys):
+    """B3: prompt-caching savings must actually be visible, not just an
+    invisible backend detail — the CLI usage line grows a ", N cached"
+    suffix whenever a provider reports cache_read_input_tokens."""
+    print_event(UsageInfo(input_tokens=100, output_tokens=50, cache_read_input_tokens=80))
+    out = capsys.readouterr().out
+    assert "80 cached" in out
+
+
+def test_print_event_usage_info_omits_cache_note_when_zero(capsys):
+    print_event(UsageInfo(input_tokens=100, output_tokens=50))
+    out = capsys.readouterr().out
+    assert "cached" not in out
+
+
+def test_print_event_usage_info_with_duration_shows_cache_note_too(capsys):
+    print_event(UsageInfo(input_tokens=100, output_tokens=50, duration_seconds=2.0, cache_read_input_tokens=30))
+    out = capsys.readouterr().out
+    assert "30 cached" in out
+    assert "25.0 tok/s" in out
+
+
+# --- _completion_settings_for_profile (B2) -----------------------------------
+
+
+def test_completion_settings_for_profile_falls_back_to_defaults_when_unset(aida_home: Path, records_home: Path):
+    from aida.cli.chat import _completion_settings_for_profile
+
+    settings = _settings_with_profile()
+    profile = settings.providers.profiles["mock-profile"]
+
+    completion_settings = _completion_settings_for_profile(profile)
+
+    assert completion_settings.model == "mock-model"
+    assert completion_settings.temperature == 0.7  # CompletionSettings' own default
+    assert completion_settings.max_tokens is None
+    assert completion_settings.supports_vision is False
+
+
+def test_completion_settings_for_profile_uses_profile_overrides(aida_home: Path, records_home: Path):
+    from aida.cli.chat import _completion_settings_for_profile
+
+    settings = _settings_with_profile(temperature=0.2, max_tokens=512, supports_vision=True)
+    profile = settings.providers.profiles["mock-profile"]
+
+    completion_settings = _completion_settings_for_profile(profile)
+
+    assert completion_settings.temperature == 0.2
+    assert completion_settings.max_tokens == 512
+    assert completion_settings.supports_vision is True
+
+
 # --- cli_confirm (Phase 6 default ConfirmCallback) --------------------------
 
 
@@ -238,6 +290,45 @@ async def test_chat_session_send_streams_and_updates_history(monkeypatch, aida_h
     assert session.messages[-2].role == "user"
     assert session.messages[-1].role == "assistant"
     assert session.messages[-1].content == "hi there"
+
+
+@pytest.mark.asyncio
+async def test_chat_session_send_attaches_images_to_the_user_message(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """B1: ChatSession.send's optional images kwarg lands on the outgoing
+    user Message's .images, not folded into .content — so a vision-capable
+    profile's translation layer can pick them up (see
+    test_provider_translation.py) while a non-vision profile just ignores
+    them, exactly as before B1 existed."""
+    from aida.providers.base import ImageRef
+
+    settings = _settings_with_profile()
+    provider = MockProvider([MockTurn(text="looks like a plot")])
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+
+    session = ChatSession(settings, "mock-profile")
+    refs = [ImageRef(path="/tmp/plot.png", mime_type="image/png")]
+    events = [e async for e in session.send("what is this?", images=refs)]
+
+    assert any(isinstance(e, TextFinished) for e in events)
+    user_message = next(m for m in session.messages if m.role == "user" and m.content == "what is this?")
+    assert user_message.images == refs
+
+
+@pytest.mark.asyncio
+async def test_chat_session_send_with_no_images_defaults_to_empty_list(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    settings = _settings_with_profile()
+    provider = MockProvider([MockTurn(text="hi there")])
+    monkeypatch.setattr("aida.cli.chat.build_provider", lambda profile: provider)
+
+    session = ChatSession(settings, "mock-profile")
+    _ = [e async for e in session.send("hello")]
+
+    user_message = next(m for m in session.messages if m.role == "user")
+    assert user_message.images == []
 
 
 @pytest.mark.asyncio

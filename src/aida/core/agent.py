@@ -31,7 +31,14 @@ from aida.core.events import (
     UsageInfo,
 )
 from aida.core.tools import NativeTool
-from aida.providers.base import CompletionSettings, LLMProvider, Message, ToolCall, ToolSchema
+from aida.providers.base import (
+    CompletionSettings,
+    ImageRef,
+    LLMProvider,
+    Message,
+    ToolCall,
+    ToolSchema,
+)
 
 DEFAULT_MAX_ITERATIONS = 10
 
@@ -239,12 +246,26 @@ class AgentLoop:
                             mime_type=artifact.mime_type,
                         )
 
+                # B1: any ImageArtifact this tool result produced is
+                # attached to the tool message so a later provider call can
+                # send it as vision input (aida.providers.vision) — it's
+                # already on disk with a path by this point (McpManager
+                # saves before returning), so there is nothing more to do
+                # here than remember where. A path-less ImageArtifact
+                # (shouldn't happen post-save, but defensive) is skipped
+                # rather than attached with nothing to read later.
+                image_refs = [
+                    ImageRef(path=a.path, mime_type=a.mime_type)
+                    for a in result_artifacts
+                    if isinstance(a, ImageArtifact) and a.path
+                ]
                 messages.append(
                     Message(
                         role="tool",
                         content=_stringify(result_content),
                         tool_call_id=tc.id,
                         name=tc.name,
+                        images=image_refs,
                     )
                 )
 

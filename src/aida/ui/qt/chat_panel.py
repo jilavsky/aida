@@ -514,9 +514,14 @@ class ChatPanel(QWidget):
             # its tokens still count toward MainWindow's running-total label.
             if self._last_assistant_bubble is not None and event.output_tokens and event.duration_seconds:
                 rate = event.output_tokens / event.duration_seconds
-                self._last_assistant_bubble.append_meta(
-                    f"{event.output_tokens} tok · {event.duration_seconds:.1f}s · {rate:.1f} tok/s"
-                )
+                meta = f"{event.output_tokens} tok · {event.duration_seconds:.1f}s · {rate:.1f} tok/s"
+                # B3: cache_read_input_tokens is "the savings are visible"
+                # — only ever nonzero for a caching provider (Anthropic)
+                # with caching actually hitting, so a non-caching turn's
+                # meta line is unchanged from before.
+                if event.cache_read_input_tokens:
+                    meta += f" · {event.cache_read_input_tokens} cached"
+                self._last_assistant_bubble.append_meta(meta)
         elif name == "AgentError":
             banner = ErrorBanner(layer=event.layer, message=event.message, detail=event.detail, parent=self._content)
             self._append_widget(banner)

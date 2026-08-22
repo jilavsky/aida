@@ -126,7 +126,7 @@ is cumbersome" experience.
 
 ## 2. Backend improvements (highest value first)
 
-- [ ] **(B1) Vision input — let the model actually see the plots.** Today an
+- [x] **(B1) Vision input — let the model actually see the plots.** Today an
       `ImageArtifact` from pyIrena MCP displays in the GUI, but its pixels never
       reach the model (`Message.content` is plain `str` everywhere; readers.py
       documents this as the known v1 limitation). For a tool whose flagship use
@@ -145,8 +145,33 @@ is cumbersome" experience.
          to bound tokens), and GUI attachments of image files.
       4. Persist nothing new: images are already on disk with paths recorded.
       This is a few days of work and each step is testable with MockProvider.
+      **Done (2026-08-22):** implemented per the plan above, plus a new
+      `ImageRef`/`aida.providers.vision` module shared by both providers
+      (`images_within_cap` for the recency cap — default 4 — and
+      `read_image_b64` for read+downscale+encode, using Pillow when
+      installed and falling back to original-size bytes otherwise). Pillow
+      added as a lazy import in the `docs` extra, same pattern as
+      pymupdf/python-docx. `supports_vision` defaults to `False` on both
+      `ProviderProfile` and `CompletionSettings` — opt-in per profile, since
+      a default of `True` would risk breaking existing small local models
+      the moment a tool result carries an `ImageArtifact`. One deliberate
+      scope decision: OpenAI chat-completions rejects multi-part content on
+      `role="tool"` messages (a hard API constraint), so tool-result images
+      are only attached for Anthropic; GUI image attachments (user-role
+      messages) work on both. Wired end to end: agent.py attaches
+      `ImageRef`s from `ImageArtifact` tool results, and the GUI's
+      Attach/drag-and-drop flow (`MainWindow._augment_with_attachments`)
+      builds one per attached image file, through `ChatBridge`/`ChatSession`
+      to the outgoing `Message`. Tests: `test_agent_loop.py` (tool-result
+      image attachment, and the no-image-artifacts case), a dozen new cases
+      in `test_provider_translation.py` (Anthropic tool-result/user-message
+      image blocks, the recency cap, an unreadable-path skip, OpenAI-compat
+      user-message-only attachment, `providers/vision.py` unit tests),
+      `test_provider_lifecycle.py` (settings.supports_vision reaching the
+      real SDK call kwargs for both providers), and two GUI integration
+      tests in `test_main_window.py` (image vs. non-image attachment).
 
-- [ ] **(B2) Per-profile sampling settings + honest cost.** PLAN.md §4 promised
+- [x] **(B2) Per-profile sampling settings + honest cost.** PLAN.md §4 promised
       "a profile = … sampling defaults", but `ProviderProfile` has no
       `max_tokens`/`temperature`, and `ChatSession` builds
       `CompletionSettings(model=…)` with hardcoded temperature 0.7 and
@@ -156,8 +181,26 @@ is cumbersome" experience.
       `estimate_cost_usd` (which currently uses one fixed rate for every
       provider — misleading when the active profile is a free local model).
       Small change, removes two real annoyances at once.
+      **Done (2026-08-22):** added `max_tokens`, `temperature`,
+      `usd_per_m_input`, `usd_per_m_output` (all optional, `None` = fall back
+      to the previous fixed defaults) plus `supports_vision` (B1) to
+      `ProviderProfile`, coerced/validated in `from_dict` the same way as
+      phase-1's `_coerce_str_list` fix. A new
+      `_completion_settings_for_profile` helper (used by both
+      `ChatSession.__init__` and `switch_profile`, so the two can't drift)
+      builds `CompletionSettings` from a profile's overrides.
+      `estimate_cost_usd` gained optional `input_usd_per_million`/
+      `output_usd_per_million` keyword args (`None` keeps today's fixed
+      rate), threaded through at all three call sites: the CLI's
+      session-total cost line and the GUI's live usage label both now pass
+      `session.profile.usd_per_m_input`/`usd_per_m_output`. Tests:
+      `test_settings.py` (roundtrip, defaulting, a badly-typed field
+      rejected) and `test_cost.py` (override applied, override replaces only
+      the given rate, `None` falls back to default), plus
+      `test_chat_cli.py` covering `_completion_settings_for_profile`'s
+      fallback and override behavior.
 
-- [ ] **(B3) Anthropic prompt caching.** Every turn resends the whole system
+- [x] **(B3) Anthropic prompt caching.** Every turn resends the whole system
       block — workspace context + skills + pyirena-mcp's long `instructions` —
       plus the full tool schema list (100+ tools namespaced). Adding
       `cache_control: {"type": "ephemeral"}` markers on the system prompt and
@@ -165,6 +208,21 @@ is cumbersome" experience.
       typically cuts input-token cost by 5–10× for multi-turn tool-heavy
       sessions (exactly the UC3/UC4 pattern). Report `cache_read_input_tokens`
       in `UsageInfo` so the savings are visible.
+      **Done (2026-08-22):** added `to_cached_system_param`/
+      `to_cached_tools_param` in `anthropic_.py` — an ephemeral
+      `cache_control` marker on the system prompt's single text block, and
+      on the last entry of the tools array (Anthropic caches everything up
+      to and including a marker, so one marker per array covers it all).
+      `UsageInfo` gained `cache_creation_input_tokens`/
+      `cache_read_input_tokens`, populated from the SDK's `message_start`
+      usage object (the only event that carries them) via `_StreamState`.
+      Both the CLI's `[usage]` line and the GUI's assistant-bubble meta line
+      now append a ", N cached" note whenever a turn actually hit the cache.
+      Tests: new cases in `test_provider_translation.py` (both cache-param
+      helpers, including the empty/None passthrough and that the input list
+      isn't mutated in place) and `test_provider_lifecycle.py` (cache_control
+      actually reaching the real `messages.create` kwargs); CLI cache-note
+      display covered in `test_chat_cli.py`.
 
 - [ ] **(B4) Parallel MCP server startup.** `McpManager.start_all` launches
       servers sequentially; with 2–3 servers at up to 30 s startup timeout each,

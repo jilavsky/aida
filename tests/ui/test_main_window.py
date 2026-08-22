@@ -1012,3 +1012,69 @@ def test_startup_failure_shows_error_and_leaves_session_none(
         assert window.bridge.session is None
     finally:
         window.close()
+
+
+# ---------------------------------------------------------------------------
+# B1 (vision): a GUI-attached image file becomes an ImageRef on the outgoing
+# user Message, end to end through InputBox -> MainWindow._on_send_requested
+# -> ChatBridge.send -> ChatSession.send.
+# ---------------------------------------------------------------------------
+
+# Smallest possible valid PNG (1x1), same fixture used in
+# tests/test_provider_translation.py's vision tests.
+_TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+
+
+def test_send_with_image_attachment_records_an_image_ref_on_the_sent_message(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    import base64
+
+    from aida.providers.base import ImageRef
+
+    image_path = tmp_path / "plot.png"
+    image_path.write_bytes(base64.b64decode(_TINY_PNG_B64))
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="got it")], profile_name="mock-profile")
+    try:
+        window.input_box.add_attachment(str(image_path))
+        window.input_box.set_text("what is this?")
+        window.input_box._send_button.click()
+
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+
+        sent_messages = window.bridge.session.provider.calls[-1][0]
+        last_user_message = [m for m in sent_messages if m.role == "user"][-1]
+        assert "what is this?" in last_user_message.content
+        assert "plot.png" in last_user_message.content  # still described in text too
+        assert len(last_user_message.images) == 1
+        assert isinstance(last_user_message.images[0], ImageRef)
+        assert Path(last_user_message.images[0].path) == image_path
+
+        # Attachments are cleared after send, same as any other attachment.
+        assert window.input_box.attached_paths() == []
+    finally:
+        window.close()
+
+
+def test_send_with_non_image_attachment_records_no_image_ref(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    note = tmp_path / "notes.txt"
+    note.write_text("the sample was annealed at 400C", encoding="utf-8")
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="got it")], profile_name="mock-profile")
+    try:
+        window.input_box.add_attachment(str(note))
+        window.input_box.set_text("please summarize")
+        window.input_box._send_button.click()
+
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+
+        sent_messages = window.bridge.session.provider.calls[-1][0]
+        last_user_message = [m for m in sent_messages if m.role == "user"][-1]
+        assert last_user_message.images == []
+    finally:
+        window.close()

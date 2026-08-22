@@ -27,6 +27,7 @@ from aida.core.cost import estimate_cost_usd
 from aida.mcp.groups import resolve_group
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
 from aida.persistence.store import ArtifactRecord, ConversationStore
+from aida.providers.base import ImageRef
 from aida.ui.qt._qt import (
     QAction,
     QApplication,
@@ -280,7 +281,14 @@ class MainWindow(QMainWindow):
         if session is None:
             self._usage_label.setText("")
             return
-        cost = estimate_cost_usd(session.total_input_tokens, session.total_output_tokens)
+        # B2: priced at the active profile's own rate when it has one, same
+        # fallback-to-default behavior as the CLI's session-total line.
+        cost = estimate_cost_usd(
+            session.total_input_tokens,
+            session.total_output_tokens,
+            input_usd_per_million=session.profile.usd_per_m_input,
+            output_usd_per_million=session.profile.usd_per_m_output,
+        )
         self._usage_label.setText(
             f"Tokens: {session.total_input_tokens:,} in / {session.total_output_tokens:,} out (~${cost:.3f} est.)"
         )
@@ -363,7 +371,7 @@ class MainWindow(QMainWindow):
         self.input_box.clear_attachments()
         self.chat_panel.add_user_message(text)
         try:
-            outgoing, failures = self._augment_with_attachments(text, attachments)
+            outgoing, failures, images = self._augment_with_attachments(text, attachments)
         except Exception as exc:  # noqa: BLE001 - belt-and-suspenders: see _read_attachment_for_model's
             # docstring for the real bug this whole two-layer defense is
             # guarding against — a send must never silently vanish.
@@ -373,9 +381,11 @@ class MainWindow(QMainWindow):
         if failures:
             names = ", ".join(Path(p).name for p in failures)
             self.statusBar().showMessage(f"Could not read attachment(s): {names} — see chat for details", 8000)
-        self.bridge.send(outgoing)
+        self.bridge.send(outgoing, images=images)
 
-    def _augment_with_attachments(self, text: str, attachments: list[str]) -> tuple[str, list[str]]:
+    def _augment_with_attachments(
+        self, text: str, attachments: list[str]
+    ) -> tuple[str, list[str], list[ImageRef]]:
         """Drag & drop onto the chat -- "included in the next sent message"
         (PLAN.md Phase 6): each attached path's content is read directly via
         ``aida.documents.readers`` (dispatched by extension, same as the
@@ -389,21 +399,35 @@ class MainWindow(QMainWindow):
         rule), not a human manually attaching a file they already have
         access to.
 
-        Returns ``(message_text, failed_paths)`` — a failed read still gets
-        an inline "could not read" note in the message (so both the human
-        and the model see it plainly) rather than being silently dropped or
-        aborting the whole send; ``failed_paths`` is just so the caller can
-        also flag it in the status bar without re-parsing the text."""
+        An attached image (B1) gets both: the same text placeholder every
+        artifact type gets (so it's referenced in the message even when
+        vision isn't active for the current profile), *and* an ``ImageRef``
+        in the returned list so ``ChatSession.send`` can attach its actual
+        pixels — whether that happens at all still depends on the active
+        profile's ``supports_vision``, decided at translation time
+        (``aida.providers.vision``), not here.
+
+        Returns ``(message_text, failed_paths, images)`` — a failed read
+        still gets an inline "could not read" note in the message (so both
+        the human and the model see it plainly) rather than being silently
+        dropped or aborting the whole send; ``failed_paths`` is just so the
+        caller can also flag it in the status bar without re-parsing the
+        text."""
         if not attachments:
-            return text, []
+            return text, [], []
+        from aida.documents.readers import is_image_path
+
         sections = [text] if text else []
         failures: list[str] = []
+        images: list[ImageRef] = []
         for path in attachments:
             rendered, ok = self._read_attachment_for_model(path)
             sections.append(rendered)
             if not ok:
                 failures.append(path)
-        return "\n\n".join(sections), failures
+            elif is_image_path(path):
+                images.append(ImageRef(path=path))
+        return "\n\n".join(sections), failures, images
 
     def _read_attachment_for_model(self, path: str) -> tuple[str, bool]:
         """Returns ``(rendered_text, ok)`` — never raises. **Real bug this

@@ -253,6 +253,39 @@ async def test_image_artifact_in_tool_result_emits_image_artifact_created():
     # whole point of a typed event over a flattened string.
     assert not hasattr(created, "data")
 
+    # B1 (vision input): the tool-result Message appended to the shared
+    # history must carry an ImageRef pointing at the artifact's on-disk
+    # path, so a vision-capable provider can attach the actual pixels —
+    # the raw bytes themselves are never copied onto the Message.
+    tool_message = next(m for m in messages if m.role == "tool" and m.tool_call_id == "call_1")
+    assert len(tool_message.images) == 1
+    assert tool_message.images[0].path == "/tmp/plot.png"
+    assert tool_message.images[0].mime_type == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_tool_result_with_no_image_artifacts_leaves_message_images_empty():
+    async def _get_time(_args):
+        return ToolResult(content={"utc_iso": "2026-08-18T00:00:00Z"})
+
+    tool = NativeTool(
+        schema=ToolSchema(name="get_current_time", description="", parameters={"type": "object"}),
+        func=_get_time,
+    )
+    provider = MockProvider(
+        [
+            MockTurn(tool_calls=[MockToolCall(name="get_current_time", id="call_1")]),
+            MockTurn(text="it is time"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"get_current_time": tool})
+    messages = [Message(role="user", content="what time is it")]
+
+    [e async for e in loop.run(messages)]
+
+    tool_message = next(m for m in messages if m.role == "tool" and m.tool_call_id == "call_1")
+    assert tool_message.images == []
+
 
 @pytest.mark.asyncio
 async def test_file_artifact_in_tool_result_emits_file_artifact_created():

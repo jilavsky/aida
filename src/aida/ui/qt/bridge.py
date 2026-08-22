@@ -45,6 +45,7 @@ from aida.knowledge.rag.ingest import update as ingest_update
 from aida.mcp.manager import NAMESPACE_SEPARATOR, McpManager
 from aida.mcp.server import McpServerError
 from aida.persistence.recorder import ConversationNotFoundError
+from aida.providers.base import ImageRef
 from aida.providers.profiles import UnknownProviderKindError, build_embeddings_provider
 from aida.ui.qt._qt import QObject, QThread, Signal
 
@@ -240,17 +241,20 @@ class ChatBridge(QObject):
 
     # --- turns ---------------------------------------------------------------
 
-    def send(self, user_text: str) -> None:
+    def send(self, user_text: str, *, images: list[ImageRef] | None = None) -> None:
         """Start a new turn. No-op if the session hasn't finished starting
         yet — callers (the input box) should be disabled until
-        ``session_ready``."""
+        ``session_ready``.
+
+        ``images`` (B1): GUI image attachments, passed straight through to
+        ``ChatSession.send`` — see its docstring for what happens to them."""
         if self.session is None or self._closing:
             return
         self._turn_future = asyncio.run_coroutine_threadsafe(
-            self._drain(user_text), self._loop_thread.loop
+            self._drain(user_text, images), self._loop_thread.loop
         )
 
-    async def _drain(self, user_text: str) -> None:
+    async def _drain(self, user_text: str, images: list[ImageRef] | None = None) -> None:
         """Stream one turn's events out as signals.
 
         Every emit is gated on ``self._closing``: once this bridge is being
@@ -266,7 +270,7 @@ class ChatBridge(QObject):
         if not self._closing:
             self.turn_started.emit()
         try:
-            async for event in self.session.send(user_text):
+            async for event in self.session.send(user_text, images=images):
                 if not self._closing:
                     self.event_received.emit(event)
         except Exception as exc:  # noqa: BLE001 - must never crash the loop thread

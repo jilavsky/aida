@@ -63,7 +63,7 @@ from aida.mcp.groups import resolve_explicit, resolve_group
 from aida.mcp.manager import NAMESPACE_SEPARATOR, McpManager
 from aida.persistence.recorder import ConversationNotFoundError, ConversationRecorder
 from aida.persistence.store import ConversationStore
-from aida.providers.base import CompletionSettings, Message
+from aida.providers.base import CompletionSettings, ImageRef, Message
 from aida.providers.profiles import (
     UnknownProviderKindError,
     build_embeddings_provider,
@@ -138,14 +138,19 @@ def print_event(event: AgentEvent) -> None:
         # previously swallowed, "for a future --verbose flag") — a provider
         # that doesn't report usage just never emits this event at all, so
         # there's nothing spurious to gate behind a flag.
+        # B3: cache_read_input_tokens is "the savings are visible" —
+        # appended only when a provider actually reports it (Anthropic with
+        # caching active; always 0 otherwise), so a non-caching turn's line
+        # is unchanged from before.
+        cache_note = f", {event.cache_read_input_tokens} cached" if event.cache_read_input_tokens else ""
         if event.output_tokens and event.duration_seconds:
             rate = event.output_tokens / event.duration_seconds
             print(
-                f"[usage] {event.input_tokens} in / {event.output_tokens} out tokens, "
+                f"[usage] {event.input_tokens} in / {event.output_tokens} out tokens{cache_note}, "
                 f"{event.duration_seconds:.1f}s ({rate:.1f} tok/s)"
             )
         elif event.input_tokens or event.output_tokens:
-            print(f"[usage] {event.input_tokens} in / {event.output_tokens} out tokens")
+            print(f"[usage] {event.input_tokens} in / {event.output_tokens} out tokens{cache_note}")
     elif isinstance(event, AgentError):
         detail = f" ({event.detail})" if event.detail else ""
         print(f"\n[error:{event.layer}] {event.message}{detail}")
@@ -176,6 +181,20 @@ def resolve_profile(settings: Settings, name: str):
         available = ", ".join(sorted(settings.providers.profiles)) or "(none configured)"
         raise UnknownProfileError(f"Unknown profile {name!r}. Configured profiles: {available}")
     return profile
+
+
+def _completion_settings_for_profile(profile) -> CompletionSettings:
+    """Build the ``CompletionSettings`` for one provider request from a
+    profile (B2) — ``None`` on ``max_tokens``/``temperature`` falls back to
+    ``CompletionSettings``'s own defaults, exactly matching pre-B2 behavior
+    for a profile that never set them. Shared by ``ChatSession.__init__``
+    and ``switch_profile`` so the two construction sites can't drift."""
+    kwargs: dict[str, object] = {"model": profile.model, "supports_vision": profile.supports_vision}
+    if profile.temperature is not None:
+        kwargs["temperature"] = profile.temperature
+    if profile.max_tokens is not None:
+        kwargs["max_tokens"] = profile.max_tokens
+    return CompletionSettings(**kwargs)
 
 
 def _format_retrieved_context(passages_by_kb: dict[str, list[RetrievedPassage]]) -> str:
@@ -219,7 +238,7 @@ class ChatSession:
         self.profile_name = profile_name
         self.profile = resolve_profile(settings, profile_name)
         self.provider = build_provider(self.profile)
-        self.completion_settings = CompletionSettings(model=self.profile.model)
+        self.completion_settings = _completion_settings_for_profile(self.profile)
         self.loop = AgentLoop(
             self.provider, self.completion_settings, self.tools, max_iterations=settings.app.max_agent_iterations
         )
@@ -261,7 +280,7 @@ class ChatSession:
         self.profile = new_profile
         self.profile_name = name
         self.provider = build_provider(self.profile)
-        self.completion_settings = CompletionSettings(model=self.profile.model)
+        self.completion_settings = _completion_settings_for_profile(self.profile)
         self.loop = AgentLoop(self.provider, self.completion_settings, self.tools, max_iterations=max_iterations)
         # self.messages is intentionally left untouched: history carries over.
         await old_provider.aclose()
@@ -327,7 +346,7 @@ class ChatSession:
             persisted += 1
         return persisted
 
-    async def send(self, user_text: str):
+    async def send(self, user_text: str, *, images: list[ImageRef] | None = None):
         """Run one turn. Phase 8 (RAG): if any knowledge bases are active,
         retrieves passages for ``user_text`` and injects them as a
         *strictly ephemeral* extra message — appended to ``self.messages``
@@ -336,8 +355,14 @@ class ChatSession:
         ends, and explicitly excluded from persistence throughout. This
         keeps ``self.messages`` the one canonical mutable list without ever
         writing stale retrieved context to the DB or re-sending it next
-        turn with a different question."""
-        user_message = Message(role="user", content=user_text)
+        turn with a different question.
+
+        ``images`` (B1): GUI image attachments — additive, keyword-only,
+        defaults to none so the CLI's plain ``session.send(line)`` call is
+        unaffected. Whether they actually reach the model as vision input
+        this turn still depends on the active profile's ``supports_vision``
+        and the recency cap — see ``aida.providers.vision``."""
+        user_message = Message(role="user", content=user_text, images=list(images or []))
         self.messages.append(user_message)
         if self.recorder is not None:
             self.recorder.record_message(user_message)
@@ -569,7 +594,16 @@ async def _repl_loop(session: ChatSession) -> None:
             continue
 
         if session.total_input_tokens or session.total_output_tokens:
-            cost = estimate_cost_usd(session.total_input_tokens, session.total_output_tokens)
+            # B2: priced at the active profile's own rate when it has one
+            # (usd_per_m_input/usd_per_m_output) — falls back to the fixed
+            # default rate for a profile that doesn't set them, same as
+            # before B2.
+            cost = estimate_cost_usd(
+                session.total_input_tokens,
+                session.total_output_tokens,
+                input_usd_per_million=session.profile.usd_per_m_input,
+                output_usd_per_million=session.profile.usd_per_m_output,
+            )
             print(
                 f"[session total] {session.total_input_tokens} in / {session.total_output_tokens} out "
                 f"tokens, ~${cost:.4f} est."
