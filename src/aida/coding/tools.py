@@ -14,7 +14,6 @@ are a per-workspace on/off switch away from being registered at all
 
 from __future__ import annotations
 
-import shlex
 from typing import Any
 
 from aida.coding.runner import RunResult, run_subprocess
@@ -22,6 +21,7 @@ from aida.coding.runner import run_python_script as _run_python_script
 from aida.config.settings import WorkspaceConfig
 from aida.core.tools import NativeTool, ToolResult, wrap_tool_errors
 from aida.providers.base import ToolSchema
+from aida.workspace.command_allowlist import split_command
 from aida.workspace.safety import ConfirmationDenied, SafetyGuard
 
 _tool = wrap_tool_errors(ConfirmationDenied, OSError, TimeoutError, ValueError)
@@ -75,7 +75,7 @@ def default_coding_tools(guard: SafetyGuard, *, workspace: WorkspaceConfig | Non
             )
         cwd = await guard.authorize_execute(command, cwd_arg)
         try:
-            argv = shlex.split(command)
+            argv = split_command(command)
         except ValueError as exc:
             return ToolResult(content=f"Could not parse command {command!r}: {exc}", is_error=True)
         result = await run_subprocess(argv, cwd=cwd)
