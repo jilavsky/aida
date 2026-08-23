@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from mcp.types import Tool as McpTool
 
 from aida.artifacts.base import ImageArtifact
 from aida.artifacts.store import ArtifactStore
@@ -525,3 +526,96 @@ async def test_recent_calls_content_preview_has_no_raw_image_bytes(tmp_path):
         assert "data" not in image_preview
     finally:
         await manager.aclose()
+
+
+# --- argument coercion (real report: Playwright's MCP server rejecting
+# `browser_snapshot`/`browser_take_screenshot` because the model sent quoted
+# `"3"`/`"true"` for schema-typed number/boolean params) -------------------
+
+
+def _playwright_like_tool(name: str = "browser_snapshot") -> McpTool:
+    return McpTool(
+        name=name,
+        description="",
+        inputSchema={
+            "type": "object",
+            "properties": {"depth": {"type": "number"}, "fullPage": {"type": "boolean"}},
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_tool_call_corrects_malformed_arguments_before_dispatch(tmp_path):
+    """`_build_native_tool`'s wrapper must actually apply
+    `aida.mcp.argument_coercion.coerce_arguments` before calling
+    `_call_tool` — not just have the module exist unused somewhere."""
+    manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
+    received: dict = {}
+
+    async def _fake_call_tool(server_name, tool_name, arguments):
+        received["arguments"] = arguments
+        from aida.core.tools import ToolResult
+
+        return ToolResult(content="ok")
+
+    manager._call_tool = _fake_call_tool  # type: ignore[method-assign]
+    tool = manager._build_native_tool("playwright", _playwright_like_tool())
+
+    await tool.func({"depth": "3", "fullPage": "true"})
+
+    assert received["arguments"] == {"depth": 3, "fullPage": True}
+
+
+@pytest.mark.asyncio
+async def test_native_tool_call_leaves_well_typed_arguments_alone(tmp_path):
+    manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
+    received: dict = {}
+
+    async def _fake_call_tool(server_name, tool_name, arguments):
+        received["arguments"] = arguments
+        from aida.core.tools import ToolResult
+
+        return ToolResult(content="ok")
+
+    manager._call_tool = _fake_call_tool  # type: ignore[method-assign]
+    tool = manager._build_native_tool("playwright", _playwright_like_tool())
+
+    await tool.func({"depth": 3, "fullPage": True})
+
+    assert received["arguments"] == {"depth": 3, "fullPage": True}
+
+
+@pytest.mark.asyncio
+async def test_native_tool_call_logs_a_warning_when_it_corrects_something(tmp_path, caplog):
+    manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
+
+    async def _fake_call_tool(server_name, tool_name, arguments):
+        from aida.core.tools import ToolResult
+
+        return ToolResult(content="ok")
+
+    manager._call_tool = _fake_call_tool  # type: ignore[method-assign]
+    tool = manager._build_native_tool("playwright", _playwright_like_tool())
+
+    with caplog.at_level("WARNING", logger="aida.mcp"):
+        await tool.func({"depth": "3", "fullPage": True})
+
+    assert any("auto-corrected" in message and "depth" in message for message in caplog.messages)
+
+
+@pytest.mark.asyncio
+async def test_native_tool_call_logs_nothing_when_arguments_are_already_valid(tmp_path, caplog):
+    manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
+
+    async def _fake_call_tool(server_name, tool_name, arguments):
+        from aida.core.tools import ToolResult
+
+        return ToolResult(content="ok")
+
+    manager._call_tool = _fake_call_tool  # type: ignore[method-assign]
+    tool = manager._build_native_tool("playwright", _playwright_like_tool())
+
+    with caplog.at_level("WARNING", logger="aida.mcp"):
+        await tool.func({"depth": 3, "fullPage": True})
+
+    assert caplog.messages == []

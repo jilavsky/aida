@@ -22,12 +22,16 @@ from mcp.types import Tool as McpTool
 from aida.artifacts.base import Artifact, FileArtifact, ImageArtifact
 from aida.artifacts.policy import describe_for_model
 from aida.artifacts.store import ArtifactStore
+from aida.config.logging_setup import get_logger
 from aida.config.settings import McpServerConfig
 from aida.core.confirmation import ConfirmationRequest, ConfirmCallback, deny_all
 from aida.core.tools import NativeTool, ToolResult
+from aida.mcp.argument_coercion import coerce_arguments
 from aida.mcp.results import convert_result
 from aida.mcp.server import McpServerError, McpServerHandle, ToolCallRecord
 from aida.providers.base import ToolSchema
+
+logger = get_logger("mcp")
 
 # A "." separator looked natural but is invalid: both Anthropic and
 # OpenAI-compatible tool-calling APIs require a tool's name to match
@@ -292,6 +296,25 @@ class McpManager:
         tool_name = tool.name
 
         async def _call(arguments: dict[str, Any]) -> ToolResult:
+            # Some models emit every tool-call argument as a quoted JSON
+            # string, even for a parameter the schema types as a number or
+            # boolean (e.g. `{"depth": "3"}` instead of `{"depth": 3}`) — an
+            # MCP server that validates strictly (Playwright's, via Zod)
+            # rejects the call outright on that technicality alone, and the
+            # model then has to rediscover the fix itself, often over
+            # several failed turns. Repair what we can against the tool's
+            # own schema before ever sending the call — see
+            # aida.mcp.argument_coercion for exactly what this does and
+            # does not touch.
+            arguments, notes = coerce_arguments(arguments, schema.parameters)
+            if notes:
+                logger.warning(
+                    "mcp tool call %s: model sent %d malformed argument(s), auto-corrected before "
+                    "sending to the server: %s",
+                    schema.name,
+                    len(notes),
+                    "; ".join(notes),
+                )
             return await self._call_tool(server_name, tool_name, arguments)
 
         return NativeTool(schema=schema, func=_call)

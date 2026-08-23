@@ -1,0 +1,381 @@
+- generic [active] [ref=f2e1]:
+  - table [ref=f2e2]:
+    - rowgroup [ref=f2e3]:
+      - row [ref=f2e4]:
+        - cell "APS - ESAF Search Criteria" [ref=f2e5]
+  - table [ref=f2e6]:
+    - rowgroup [ref=f2e7]:
+      - row [ref=f2e8]:
+        - cell [ref=f2e9]:
+          - link "Main Menu" [ref=f2e10] [cursor=pointer]:
+            - /url: esaf0004.display_menu?i_pid=828354000718975
+          - text: "|"
+          - link "Search Criteria" [ref=f2e11] [cursor=pointer]:
+            - /url: esaf0005.display_criteria_page?i_pid=828354000718975&i_calling_app=
+          - text: "|"
+          - link "Logout" [ref=f2e12] [cursor=pointer]:
+            - /url: log0002.log_out
+          - text: "|"
+  - paragraph
+  - table [ref=f2e15]:
+    - rowgroup [ref=f2e16]:
+      - row [ref=f2e17]:
+        - cell "Clicking the \"Submit Query\" button without entering any search criteria will display every ESAF that you are eligible to view. If you would like to refine the search, please enter the appropriate criteria." [ref=f2e18]
+      - row [ref=f2e20]:
+        - cell [ref=f2e21]
+        - 'cell "Note : You may use \"%\" for wildcard searches." [ref=f2e22]'
+      - row [ref=f2e23]:
+        - cell "ESAF ID:" [ref=f2e24]
+        - cell [ref=f2e25]:
+          - textbox [ref=f2e26]
+      - row [ref=f2e27]:
+        - cell "Proposal ID :" [ref=f2e28]
+        - cell [ref=f2e29]:
+          - textbox [ref=f2e30]
+      - row [ref=f2e31]:
+        - cell "Pen :" [ref=f2e32]
+        - cell [ref=f2e33]:
+          - textbox [ref=f2e34]
+      - row [ref=f2e35]:
+        - cell "Sequence :" [ref=f2e36]
+        - cell [ref=f2e37]:
+          - textbox [ref=f2e38]
+      - row [ref=f2e39]:
+        - cell "Badge No. :" [ref=f2e40]
+        - cell [ref=f2e41]:
+          - textbox [ref=f2e42]
+      - row [ref=f2e43]:
+        - cell [ref=f2e44]
+        - cell [ref=f2e45]:
+          - separator [ref=f2e46]
+      - row [ref=f2e47]:
+        - cell "Sector :" [ref=f2e48]
+        - cell [ref=f2e49]:
+          - combobox [ref=f2e50]:
+            - option [selected]
+            - option "01 - XSD-01-ID"
+            - option "01 - XSD-01-BM"
+            - option "02 - XSD-02-ID"
+            - option "02 - XSD-02-BM"
+            - option "03 - XSD-03"
+            - option "04 - XSD-04"
+            - option "05 - DND-CAT"
+            - option "06 - SEES/XSD-06"
+            - option "06 - XSD-06-ID"
+            - option "07 - XSD-07-ID"
+            - option "07 - XSD-07-BM"
+            - option "08 - XSD-08-BM"
+            - option "08 - XSD-08-ID"
+            - option "09 - XSD-9-BM"
+            - option "09 - XSD-9-ID"
+            - option "10 - MR-CAT"
+            - option "11 - XSD-11"
+            - option "12 - XSD-12"
+            - option "13 - GSECARS"
+            - option "14 - BioCARS"
+            - option "15 - ChemMatCARS"
+            - option "16 - HPCAT-XSD"
+            - option "17 - IMCA-CAT-17-ID"
+            - option "17 - XSD-17-BM"
+            - option "18 - BIO-CAT"
+            - option "19 - XSD-19-ID"
+            - option "19 - XSD-19-BM"
+            - option "20 - XSD-20-ID"
+            - option "20 - XSD-20-BM"
+            - option "21 - LS-CAT"
+            - option "22 - SER-CAT"
+            - option "23 - GM/CA"
+            - option "24 - NE-CAT"
+            - option "25 - XSD-25-ID"
+            - option "26 - CNM/XSD"
+            - option "27 - XSD-27"
+            - option "28 - XSD-28-ID"
+            - option "29 - XSD-29"
+            - option "30 - XSD-30"
+            - option "31 - XSD-31"
+            - option "31 - LRL-CAT"
+            - option "32 - XSD-32"
+            - option "33 - XSD-33-ID"
+            - option "33 - XSD-33-BM"
+            - option "34 - XSD-34"
+            - option "35 - DCS"
+            - option "35 - ASD-35-BM"
+            - option "38 - ASD-38-AM"
+            - option "70 - XSD-OPT"
+            - option "71 - XSD-CMS"
+            - option "75 - XSD-MIC"
+            - option "78 - SPC-SSM-TRR"
+            - option "80 - XSD-SSM-MIC"
+            - option "83 - XSD-DET"
+            - option "84 - XSD-APCF"
+            - option "85 - HPLAB"
+            - option "95 - ASD"
+            - option "96 - ITS"
+            - option "97 - NULL-CAT GROUP"
+            - option "98 - NULL-CAT BEAM"
+      - row [ref=f2e51]:
+        - cell "Beamline Approval Status :" [ref=f2e52]
+        - cell [ref=f2e53]:
+          - combobox [ref=f2e54]:
+            - option [selected]
+            - option "Pending"
+            - option "Approved"
+            - option "Rejected"
+            - option "Conditional Approval"
+      - row [ref=f2e55]:
+        - cell "APS Approval Status :" [ref=f2e56]
+        - cell [ref=f2e57]:
+          - combobox [ref=f2e58]:
+            - option [selected]
+            - option "Pending"
+            - option "Approved"
+            - option "Rejected"
+            - option "Conditional Approval"
+      - row [ref=f2e59]:
+        - cell [ref=f2e60]
+        - cell [ref=f2e61]:
+          - separator [ref=f2e62]
+      - row [ref=f2e63]:
+        - cell "Material :" [ref=f2e64]
+        - cell [ref=f2e65]:
+          - textbox [ref=f2e66]
+      - row [ref=f2e67]:
+        - cell "Collaborator (Last Name) :" [ref=f2e68]
+        - cell "P.I. Only" [ref=f2e69]:
+          - textbox [ref=f2e70]
+          - text: P.I. Only
+          - checkbox [ref=f2e71]
+      - row [ref=f2e72]:
+        - cell [ref=f2e73]
+        - cell [ref=f2e74]:
+          - separator [ref=f2e75]
+      - row [ref=f2e76]:
+        - cell "Submitted Date Between :" [ref=f2e77]
+        - cell "AND (MM/DD/YYYY)" [ref=f2e78]:
+          - textbox [ref=f2e79]
+          - text: AND
+          - textbox [ref=f2e80]
+          - text: (MM/DD/YYYY)
+      - row [ref=f2e81]:
+        - cell "Start Date Between :" [ref=f2e82]
+        - cell "AND (MM/DD/YYYY)" [ref=f2e83]:
+          - textbox [ref=f2e84]
+          - text: AND
+          - textbox [ref=f2e85]
+          - text: (MM/DD/YYYY)
+      - row [ref=f2e86]:
+        - cell "Hazard Class :" [ref=f2e87]
+        - cell [ref=f2e88]:
+          - table [ref=f2e89]:
+            - rowgroup [ref=f2e90]:
+              - row [ref=f2e91]:
+                - cell "1.0" [ref=f2e92]:
+                  - checkbox [ref=f2e93]
+                  - text: "1.0"
+                - cell "2.0" [ref=f2e94]:
+                  - checkbox [ref=f2e95]
+                  - text: "2.0"
+                - cell "3.0" [ref=f2e96]:
+                  - checkbox [ref=f2e97]
+                  - text: "3.0"
+                - cell "3.1" [ref=f2e98]:
+                  - checkbox [ref=f2e99]
+                  - text: "3.1"
+                - cell "3.2" [ref=f2e100]:
+                  - checkbox [ref=f2e101]
+                  - text: "3.2"
+                - cell "3.3" [ref=f2e102]:
+                  - checkbox [ref=f2e103]
+                  - text: "3.3"
+                - cell "3.4" [ref=f2e104]:
+                  - checkbox [ref=f2e105]
+                  - text: "3.4"
+                - cell "4.0" [ref=f2e106]:
+                  - checkbox [ref=f2e107]
+                  - text: "4.0"
+                - cell "4.2" [ref=f2e108]:
+                  - checkbox [ref=f2e109]
+                  - text: "4.2"
+                - cell "4.3a" [ref=f2e110]:
+                  - checkbox [ref=f2e111]
+                  - text: 4.3a
+              - row [ref=f2e112]:
+                - cell "4.3b" [ref=f2e113]:
+                  - checkbox [ref=f2e114]
+                  - text: 4.3b
+                - cell "4.4" [ref=f2e115]:
+                  - checkbox [ref=f2e116]
+                  - text: "4.4"
+                - cell "4.5" [ref=f2e117]:
+                  - checkbox [ref=f2e118]
+                  - text: "4.5"
+                - cell "4.6" [ref=f2e119]:
+                  - checkbox [ref=f2e120]
+                  - text: "4.6"
+                - cell "4.7" [ref=f2e121]:
+                  - checkbox [ref=f2e122]
+                  - text: "4.7"
+                - cell "5.0" [ref=f2e123]:
+                  - checkbox [ref=f2e124]
+                  - text: "5.0"
+                - cell "5.1" [ref=f2e125]:
+                  - checkbox [ref=f2e126]
+                  - text: "5.1"
+                - cell "5.2" [ref=f2e127]:
+                  - checkbox [ref=f2e128]
+                  - text: "5.2"
+                - cell "5.3" [ref=f2e129]:
+                  - checkbox [ref=f2e130]
+                  - text: "5.3"
+                - cell "5.4" [ref=f2e131]:
+                  - checkbox [ref=f2e132]
+                  - text: "5.4"
+              - row [ref=f2e133]:
+                - cell "5.5" [ref=f2e134]:
+                  - checkbox [ref=f2e135]
+                  - text: "5.5"
+                - cell "6.0" [ref=f2e136]:
+                  - checkbox [ref=f2e137]
+                  - text: "6.0"
+                - cell "6.1" [ref=f2e138]:
+                  - checkbox [ref=f2e139]
+                  - text: "6.1"
+                - cell "6.2" [ref=f2e140]:
+                  - checkbox [ref=f2e141]
+                  - text: "6.2"
+                - cell "6.3" [ref=f2e142]:
+                  - checkbox [ref=f2e143]
+                  - text: "6.3"
+                - cell "6.4" [ref=f2e144]:
+                  - checkbox [ref=f2e145]
+                  - text: "6.4"
+                - cell "6.5" [ref=f2e146]:
+                  - checkbox [ref=f2e147]
+                  - text: "6.5"
+                - cell "6.6" [ref=f2e148]:
+                  - checkbox [ref=f2e149]
+                  - text: "6.6"
+                - cell "6.7" [ref=f2e150]:
+                  - checkbox [ref=f2e151]
+                  - text: "6.7"
+                - cell "7.0" [ref=f2e152]:
+                  - checkbox [ref=f2e153]
+                  - text: "7.0"
+              - row [ref=f2e154]:
+                - cell "7.1" [ref=f2e155]:
+                  - checkbox [ref=f2e156]
+                  - text: "7.1"
+                - cell "7.2" [ref=f2e157]:
+                  - checkbox [ref=f2e158]
+                  - text: "7.2"
+                - cell "7.3" [ref=f2e159]:
+                  - checkbox [ref=f2e160]
+                  - text: "7.3"
+                - cell "7.4" [ref=f2e161]:
+                  - checkbox [ref=f2e162]
+                  - text: "7.4"
+                - cell "7.5" [ref=f2e163]:
+                  - checkbox [ref=f2e164]
+                  - text: "7.5"
+                - cell "8.0" [ref=f2e165]:
+                  - checkbox [ref=f2e166]
+                  - text: "8.0"
+                - cell "8.0b" [ref=f2e167]:
+                  - checkbox [ref=f2e168]
+                  - text: 8.0b
+                - cell "8.1" [ref=f2e169]:
+                  - checkbox [ref=f2e170]
+                  - text: "8.1"
+                - cell "8.2" [ref=f2e171]:
+                  - checkbox [ref=f2e172]
+                  - text: "8.2"
+                - cell "8.3" [ref=f2e173]:
+                  - checkbox [ref=f2e174]
+                  - text: "8.3"
+              - row [ref=f2e175]:
+                - cell "8.4" [ref=f2e176]:
+                  - checkbox [ref=f2e177]
+                  - text: "8.4"
+                - cell "9.0" [ref=f2e178]:
+                  - checkbox [ref=f2e179]
+                  - text: "9.0"
+                - cell "10.0" [ref=f2e180]:
+                  - checkbox [ref=f2e181]
+                  - text: "10.0"
+                - cell "10.1" [ref=f2e182]:
+                  - checkbox [ref=f2e183]
+                  - text: "10.1"
+                - cell "10.2" [ref=f2e184]:
+                  - checkbox [ref=f2e185]
+                  - text: "10.2"
+                - cell "12.0" [ref=f2e186]:
+                  - checkbox [ref=f2e187]
+                  - text: "12.0"
+                - cell "13.0" [ref=f2e188]:
+                  - checkbox [ref=f2e189]
+                  - text: "13.0"
+                - cell "14.0" [ref=f2e190]:
+                  - checkbox [ref=f2e191]
+                  - text: "14.0"
+                - cell "14.1" [ref=f2e192]:
+                  - checkbox [ref=f2e193]
+                  - text: "14.1"
+                - cell "14.2" [ref=f2e194]:
+                  - checkbox [ref=f2e195]
+                  - text: "14.2"
+              - row [ref=f2e196]:
+                - cell "14.3" [ref=f2e197]:
+                  - checkbox [ref=f2e198]
+                  - text: "14.3"
+                - cell "15.1" [ref=f2e199]:
+                  - checkbox [ref=f2e200]
+                  - text: "15.1"
+                - cell "15.2" [ref=f2e201]:
+                  - checkbox [ref=f2e202]
+                  - text: "15.2"
+                - cell "15.3" [ref=f2e203]:
+                  - checkbox [ref=f2e204]
+                  - text: "15.3"
+      - row [ref=f2e205]:
+        - cell "Include Expired ESAFs" [ref=f2e206]
+        - cell [ref=f2e207]:
+          - checkbox [ref=f2e208]
+      - row [ref=f2e209]:
+        - cell "Expired ESAFs Only" [ref=f2e210]
+        - cell [ref=f2e211]:
+          - checkbox [ref=f2e212]
+      - row [ref=f2e213]:
+        - cell "Order By" [ref=f2e214]
+        - cell "Experiments Per Page" [ref=f2e215]:
+          - combobox [ref=f2e216]:
+            - option [selected]
+            - option "PEN"
+            - option "PEN Descending"
+            - option "Submitted Date"
+            - option "Title"
+            - option "Sector"
+            - option "P.I."
+            - option "Start Date"
+          - text: Experiments Per Page
+          - textbox [ref=f2e217]
+      - row [ref=f2e218]:
+        - cell [ref=f2e219]
+      - row [ref=f2e220]:
+        - cell [ref=f2e221]:
+          - button "Submit" [ref=f2e222]
+  - paragraph
+  - table [ref=f2e223]:
+    - rowgroup [ref=f2e224]:
+      - row [ref=f2e225]:
+        - cell [ref=f2e226]:
+          - link "Main Menu" [ref=f2e227] [cursor=pointer]:
+            - /url: esaf0004.display_menu?i_pid=828354000718975
+          - text: "|"
+          - link "Search Criteria" [ref=f2e228] [cursor=pointer]:
+            - /url: esaf0005.display_criteria_page?i_pid=828354000718975&i_calling_app=
+          - text: "|"
+          - link "Logout" [ref=f2e229] [cursor=pointer]:
+            - /url: log0002.log_out
+          - text: "|"
+  - paragraph
+  - generic [ref=f2e230]: ANL

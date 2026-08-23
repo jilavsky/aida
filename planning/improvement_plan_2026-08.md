@@ -321,6 +321,55 @@ is cumbersome" experience.
       module's globals, so the old string patches would otherwise have
       silently stopped intercepting anything.
 
+- [x] **(B9) MCP tool calls had no argument-type coercion against the
+      tool's own schema.** A user hit `browser_snapshot`/
+      `browser_take_screenshot` (Playwright's MCP server) failing with Zod
+      validation errors (`expected number, received string → at depth`,
+      `expected boolean, received string → at fullPage`) — the model had
+      sent `{"depth": "3"}`/`{"fullPage": "true"}` (quoted) where the
+      schema wants a bare number/boolean. Traced the call path
+      (`anthropic_.py`/`openai_compat.py`'s `json.loads(builder["arguments"])`
+      → `ToolCallStarted.arguments` → `AgentLoop` → `McpManager._call_tool`
+      → `McpServerHandle.call_tool`) and confirmed AIDA did no
+      transformation of argument values anywhere in it — whatever Python
+      types `json.loads` produced from the model's own generated JSON text
+      were passed straight through to the MCP server unmodified. So the
+      failure originates with the model (a known characteristic of some
+      models' function-calling output — quoting every leaf value as a
+      string, even for typed parameters), not a bug in AIDA's dispatch
+      code — but it cost several failed turns of the model re-guessing the
+      same call before the user gave up, and AIDA already has the tool's
+      real JSON schema on hand at the exact point it dispatches the call.
+
+      **Done (2026-08-23):** new `aida.mcp.argument_coercion.coerce_arguments`
+      — walks a tool call's arguments against its `inputSchema`/
+      `ToolSchema.parameters` and repairs a value that fails to match its
+      declared type by trying `json.loads` on it (recovers exactly the
+      "quoted number/boolean/array/object" case) plus, only when the
+      schema unambiguously wants `"boolean"`, a case-insensitive
+      `"true"`/`"false"` text fallback for JSON-invalid capitalizations
+      like Python's `"True"`. Recurses into already-correctly-typed
+      objects/arrays so a nested mis-typed value (e.g. one bad entry in an
+      otherwise-valid list) still gets fixed. Deliberately conservative: a
+      value that already matches its schema's type is never touched (a
+      string that happens to look numeric stays a string if the schema
+      says `"string"`), and a value with no confidently-resolvable
+      declared type (`$ref`, `allOf`, missing `type`, ...) is left alone
+      rather than guessed at — this repairs one specific, common,
+      mechanical failure mode, not a general validator. Wired into
+      `McpManager._build_native_tool`'s call wrapper, immediately before
+      dispatch; when it corrects anything, a `WARNING`-level
+      `aida.mcp`-logger line names exactly what was changed, so a
+      malformed-argument model isn't a silent black box — console-visible
+      the same way the existing `system_prompt`-file-not-found warning is.
+      Tests: `tests/test_mcp_argument_coercion.py` (17 cases covering the
+      pure coercion logic — scalars, unions, `anyOf`, arrays, nested
+      objects, and every "must NOT touch this" guard), 4 new cases in
+      `tests/test_mcp_manager.py` (the wrapper actually applies it before
+      calling `_call_tool`, well-typed arguments pass through unchanged,
+      and the warning log fires only when something was actually
+      corrected).
+
 Deliberately *not* recommended right now: swapping the RAG store for a vector
 DB, adopting an agent framework, or a web frontend — the plan's original
 reasoning still holds, and nothing in this review contradicts it.
@@ -615,6 +664,31 @@ decision in PLAN.md gets a dated note there.
 - Two AIDA instances sharing `~/.aida` (SQLite + config writes) is unguarded;
   single-user assumption is fine for now, but a simple lock file would make the
   failure mode explicit if it ever comes up.
+- **(2026-08-23, from user question) Preinstall Node/npx + offer common
+  `npx`-based MCP servers (Playwright, etc.) at install time.** Right now a
+  user who wants an `npx`-launched MCP server (e.g. `npx -y
+  @playwright/mcp@latest`) has to have Node/npx on their machine already —
+  nothing in AIDA's own install path provides it. Two independent pieces:
+  (a) **Node itself**: `environment.yml`'s conda path could add a `nodejs`
+  dependency from conda-forge, so `conda env create` gives you `npx`
+  alongside AIDA for free; the plain `pip install -e ".[dev,gui,docs]"`
+  fallback has no equivalent (pip can't install Node), so that path would
+  still need Node installed separately, or `aida doctor` could at least
+  detect its absence and say so. (b) **Offering specific servers**: an
+  `npx`-based server doesn't need a real "install" step beyond the config
+  entry — `npx -y <pkg>` downloads and caches the package on first launch —
+  so "preconfigured" mostly means shipping a ready-to-enable config entry
+  (e.g. in `examples/config/mcp.json`) or a one-click "Add browser
+  automation (Playwright)" in the onboarding dialog (U4) / doctor output,
+  reusing the existing `aida mcp server add`/`import` path. Deliberately
+  **not** auto-enabled with no user action: an MCP server is code AIDA
+  will execute on the user's machine, and everything else in AIDA's design
+  (secrets, confirm-before-run) requires an explicit opt-in — this should
+  be a one-click *offer*, not something that ships pre-turned-on. Also
+  worth remembering: first real launch still needs network access to fetch
+  the npm package unless the npx cache is pre-warmed during install, so
+  "preinstalled" isn't quite "works fully offline on first run" without
+  that extra step.
 
 ---
 
