@@ -29,7 +29,15 @@ from aida.ui.qt._qt import (
     QUrl,
     QVBoxLayout,
     QWidget,
+    Signal,
 )
+
+#: Bug report: "agent writes correctly py file into target folder... but
+#: when I try to open, it opens in system (text) editor... code editor has
+#: no way in." Only Python files get the Code Editor shortcut below — the
+#: dialog itself is Python-specific (syntax highlighting, Run/Kill via
+#: run_python_script).
+CODE_EDITOR_SUFFIXES = (".py",)
 
 INLINE_MAX_WIDTH = 480
 
@@ -132,8 +140,16 @@ class InlineImageWidget(QFrame):
 
 
 class FileArtifactCard(QFrame):
-    """A card for one ``FileArtifactCreated`` event: filename, Open, and
-    Reveal actions."""
+    """A card for one ``FileArtifactCreated`` event: filename, Open, Reveal,
+    and (Python files only) Open in Code Editor actions."""
+
+    #: Bug report: "agent writes correctly py file into target folder...
+    #: perfect. But then when I try to open, it opens in system (text)
+    #: editor... code editor has no way in." Carries this card's file path;
+    #: ChatPanel relays it up to MainWindow the same way MessageBubble's
+    #: code_editor_requested already is, and MainWindow opens the file
+    #: in-place (not just pre-filled text) so Save/Run act on the real file.
+    open_in_code_editor_requested = Signal(str)
 
     def __init__(self, *, path: str, artifact_id: str, mime_type: str | None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -149,6 +165,16 @@ class FileArtifactCard(QFrame):
         open_button = QPushButton("Open", self)
         open_button.clicked.connect(self.open_file)
         layout.addWidget(open_button)
+
+        #: None for anything that isn't a CODE_EDITOR_SUFFIXES file — kept
+        #: as an attribute (not just a local var) so tests can assert on
+        #: its presence/absence directly, same as every other action here
+        #: being both a button and a plain callable method.
+        self._editor_button: QPushButton | None = None
+        if Path(path).suffix in CODE_EDITOR_SUFFIXES:
+            self._editor_button = QPushButton("Open in Code Editor", self)
+            self._editor_button.clicked.connect(lambda: self.open_in_code_editor_requested.emit(self.path))
+            layout.addWidget(self._editor_button)
 
         reveal_button = QPushButton("Reveal", self)
         reveal_button.clicked.connect(self.reveal_in_file_manager)

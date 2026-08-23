@@ -34,7 +34,13 @@ from aida.artifacts.store import ArtifactStore
 from aida.coding.templates import load_templates, templates_context_text
 from aida.coding.tools import default_coding_tools
 from aida.config.logging_setup import get_logger
-from aida.config.paths import artifacts_dir, ensure_records_dir, knowledge_db_path, skills_dir
+from aida.config.paths import (
+    artifacts_dir,
+    ensure_records_dir,
+    ensure_scratch_dir,
+    knowledge_db_path,
+    skills_dir,
+)
 from aida.config.settings import McpConfig, McpServerConfig, Settings, WorkspaceConfig
 from aida.core.agent import AgentLoop
 from aida.core.context import (
@@ -576,6 +582,11 @@ async def start_session(
         )
 
     effective_safety_mode = workspace.safety if workspace else settings.app.default_safety_mode
+    # Bug report: "Agents seem to be saving temporary files ... in random
+    # places" — one well-known scratch folder every agent/MCP server can
+    # write to without confirmation, same "always-allow just this subfolder"
+    # treatment as artifacts_dir() below.
+    scratch = ensure_scratch_dir(settings.app.scratch_dir)
     guard = SafetyGuard.for_workspace(
         source_folders=workspace.source_folders if workspace else [],
         target_folder=workspace.target_folder if workspace else None,
@@ -583,8 +594,8 @@ async def start_session(
         # output folder) always asked for confirmation, since nothing put it
         # in any allowed-folders list. Always-allow just that subfolder, not
         # the rest of ~/.aida (config.yaml, secrets refs, and the DB live
-        # there too and stay gated).
-        global_allowed_folders=[*settings.app.allowed_folders, str(artifacts_dir())],
+        # there too and stay gated). Same treatment for the scratch folder.
+        global_allowed_folders=[*settings.app.allowed_folders, str(artifacts_dir()), str(scratch)],
         mode=effective_safety_mode,
         confirm_callback=confirm_callback,
         # Phase 9: union'd the same way allowed folders already are — a
@@ -605,6 +616,7 @@ async def start_session(
         global_allowed_folders=settings.app.allowed_folders,
         sidecar_dirname=sidecar_dirname,
         safety_mode=effective_safety_mode,
+        scratch_dir=str(scratch),
     )
     if folder_context:
         extra_context_texts.append(folder_context)
@@ -689,7 +701,9 @@ async def start_session(
         # MCP tool always refuse, silently — this is the wiring that makes
         # the feature actually reachable in a real session, not just in
         # McpManager's own unit tests.
-        mcp_manager = McpManager(mcp_servers, artifact_store=artifact_store, confirm_callback=confirm_callback)
+        mcp_manager = McpManager(
+            mcp_servers, artifact_store=artifact_store, confirm_callback=confirm_callback, scratch_dir=scratch
+        )
         mcp_tools = await mcp_manager.start_all()
         tools.update(mcp_tools)
         for skill in mcp_manager.skills():

@@ -23,7 +23,7 @@ from pathlib import Path
 from aida import __version__ as AIDA_VERSION
 from aida.coding.runner import DEFAULT_RUN_TIMEOUT_SECONDS
 from aida.config.logging_setup import configure_logging, get_logger
-from aida.config.paths import config_dir, ensure_records_dir, skills_dir
+from aida.config.paths import config_dir, ensure_records_dir, ensure_scratch_dir, skills_dir
 from aida.config.settings import Settings, save_app_config
 from aida.core.cost import estimate_cost_usd
 from aida.core.events import ContextTrimmed
@@ -196,6 +196,16 @@ class MainWindow(QMainWindow):
         open_records_action.triggered.connect(self._on_open_records_folder)
         file_menu.addAction(open_records_action)
 
+        # Bug report: "Agents seem to be saving temporary files ... in
+        # random places" — this is the one well-known scratch folder every
+        # MCP server subprocess now gets launched in (aida.core.session,
+        # aida.mcp.server), surfaced the same "cheap discoverability" way as
+        # the config/records folders above so the user can find and clean
+        # it out without hunting for it.
+        open_scratch_action = QAction("Open Scratch Folder", self)
+        open_scratch_action.triggered.connect(self._on_open_scratch_folder)
+        file_menu.addAction(open_scratch_action)
+
         help_menu = self.menuBar().addMenu("&Help")
         docs_action = QAction("Documentation", self)
         docs_action.triggered.connect(self._on_open_documentation)
@@ -210,6 +220,9 @@ class MainWindow(QMainWindow):
 
     def _on_open_records_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(ensure_records_dir(self.settings.app.records_dir))))
+
+    def _on_open_scratch_folder(self) -> None:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(ensure_scratch_dir(self.settings.app.scratch_dir))))
 
     def _on_open_documentation(self) -> None:
         QDesktopServices.openUrl(QUrl("https://github.com/jilavsky/aida"))
@@ -230,6 +243,7 @@ class MainWindow(QMainWindow):
         self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
         self.sidebar.rename_requested.connect(self._on_rename_requested)
         self.chat_panel.code_editor_requested.connect(self._on_code_editor_requested)
+        self.chat_panel.open_in_code_editor_requested.connect(self._on_open_in_code_editor_requested)
         self.workspace_selector.workspace_changed.connect(self._on_workspace_changed)
         self.profile_selector.profile_changed.connect(self._on_profile_changed)
         self.folder_display.source_folders_changed.connect(self._on_source_folders_changed)
@@ -955,15 +969,21 @@ class MainWindow(QMainWindow):
 
     # --- code editor (Phase 9) -------------------------------------------------
 
-    def open_code_editor_dialog(self, *, initial_text: str = "") -> None:
-        """Opens blank from the toolbar action, or pre-filled with a
-        message's first code block via ``_on_code_editor_requested``.
-        Saved-scripts location and interpreter come from the active
-        workspace, if any — both are optional (``CodeEditorDialog`` falls
-        back to the user's home folder / ``sys.executable``)."""
+    def open_code_editor_dialog(self, *, initial_text: str = "", initial_path: str | None = None) -> None:
+        """Opens blank from the toolbar action, pre-filled with a message's
+        first code block via ``_on_code_editor_requested`` (a copy of its
+        text, no file behind it), or — bug report: "code editor has no way
+        in" — opened *at* a real file via ``initial_path`` (a chat file
+        artifact's own "Open in Code Editor" button, see
+        ``_on_open_in_code_editor_requested``), so Save/Run act on that
+        file directly rather than a disconnected copy. Saved-scripts
+        location and interpreter come from the active workspace, if any —
+        both are optional (``CodeEditorDialog`` falls back to the user's
+        home folder / ``sys.executable``)."""
         workspace = self._current_workspace_config
         dialog = CodeEditorDialog(
             initial_text=initial_text,
+            initial_path=initial_path,
             saved_scripts_dir=workspace.resolved_saved_scripts_dir() if workspace else None,
             python_interpreter=workspace.python_interpreter if workspace else None,
             script_timeout_seconds=workspace.script_timeout_seconds if workspace else DEFAULT_RUN_TIMEOUT_SECONDS,
@@ -974,6 +994,9 @@ class MainWindow(QMainWindow):
 
     def _on_code_editor_requested(self, code: str) -> None:
         self.open_code_editor_dialog(initial_text=code)
+
+    def _on_open_in_code_editor_requested(self, path: str) -> None:
+        self.open_code_editor_dialog(initial_path=path)
 
     # --- settings ------------------------------------------------------------
 

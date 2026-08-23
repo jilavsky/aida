@@ -29,10 +29,11 @@ import asyncio
 import concurrent.futures
 import contextlib
 import threading
+from pathlib import Path
 from typing import Any
 
 from aida.coding.runner import run_python_script
-from aida.config.paths import knowledge_db_path
+from aida.config.paths import ensure_scratch_dir, knowledge_db_path
 from aida.config.settings import (
     EmbeddingProfile,
     KnowledgeBaseConfig,
@@ -183,6 +184,12 @@ class ChatBridge(QObject):
         self._loop_thread = loop_thread
         self.session: ChatSession | None = None
         self.mcp_manager: McpManager | None = None
+        # Captured in start() from the Settings passed there — used only by
+        # _ensure_mcp_manager()'s live-add-server path below, which (unlike
+        # start_session) builds its own McpManager directly and would
+        # otherwise miss the scratch-folder wiring (see aida.core.session
+        # and aida.mcp.manager for why every MCP subprocess gets one).
+        self._scratch_dir: Path | None = None
         # Startup is asynchronous, so a bridge can be asked to shut down
         # while its session is still being built (the user switches
         # workspace, or closes the window, before MCP servers finish
@@ -226,6 +233,7 @@ class ChatBridge(QObject):
         would just block invisibly on stdin here since the GUI has no
         terminal)."""
         start_session_kwargs.setdefault("confirm_callback", self._confirm)
+        self._scratch_dir = ensure_scratch_dir(settings.app.scratch_dir)
         self._start_future = asyncio.run_coroutine_threadsafe(
             self._start(settings, start_session_kwargs), self._loop_thread.loop
         )
@@ -343,7 +351,9 @@ class ChatBridge(QObject):
             # this session) must not fall back to McpManager's own
             # deny_all default, or a confirm-flagged tool on it would
             # always silently refuse.
-            self.mcp_manager = McpManager([], confirm_callback=self._confirm)
+            self.mcp_manager = McpManager(
+                [], confirm_callback=self._confirm, scratch_dir=self._scratch_dir or ensure_scratch_dir()
+            )
         return self.mcp_manager
 
     def _drop_server_tools_from_session(self, name: str) -> None:

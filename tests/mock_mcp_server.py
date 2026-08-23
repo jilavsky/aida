@@ -72,6 +72,16 @@ def echo_env(name: str) -> str:
 
 
 @mcp.tool()
+def get_cwd() -> str:
+    """Return this process's own working directory — bug report: "Agents
+    seem to be saving temporary files ... in random places," traced in
+    part to MCP subprocesses inheriting AIDA's own cwd (nothing was ever
+    passed to StdioServerParameters). Lets a test verify McpServerHandle's
+    ``cwd=`` argument actually reaches the spawned subprocess."""
+    return os.getcwd()
+
+
+@mcp.tool()
 def always_fails() -> str:
     """Always raises, to exercise the tool-level error path."""
     raise RuntimeError("intentional failure for testing")

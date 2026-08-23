@@ -22,6 +22,7 @@ import asyncio
 import json
 from pathlib import Path
 
+from aida.config.paths import ensure_scratch_dir
 from aida.config.settings import McpServerConfig, Settings, load_settings, save_mcp_config
 from aida.mcp.config_io import merge_mcp_config
 from aida.mcp.groups import add_group, delete_group, known_group_names, rename_group, resolve_group
@@ -281,7 +282,7 @@ def cmd_test(args: argparse.Namespace) -> int:
         print(f"Unknown MCP server {args.name!r}.")
         return 1
 
-    manager = McpManager([])
+    manager = McpManager([], scratch_dir=ensure_scratch_dir(settings.app.scratch_dir))
     result = asyncio.run(manager.test_connection(server))
     if result.ok:
         print(f"OK — {result.tool_count} tool(s), {result.elapsed_seconds:.2f}s")

@@ -822,6 +822,76 @@ def test_clicking_open_in_editor_in_chat_opens_the_code_editor_dialog(
         window.close()
 
 
+def test_clicking_open_in_code_editor_on_a_generated_py_file_opens_it(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    """Bug report: "agent writes correctly py file into target folder...
+    perfect. But then when I try to open, it opens in system (text)
+    editor... code editor has no way in." End-to-end through the real
+    write_file tool -> FileArtifactCreated -> FileArtifactCard ->
+    ChatPanel.open_in_code_editor_requested -> MainWindow chain — the
+    dialog must open *at* the real file (Save/Run act on it directly), not
+    a disconnected copy of its text."""
+    from aida.ui.qt.artifact_widgets import FileArtifactCard
+
+    target_dir = tmp_path / "out"
+    target_dir.mkdir()
+    script_path = target_dir / "reduce.py"
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "use-ws": WorkspaceConfig(
+                name="use-ws", profile="mock-profile", mcp_group="none", target_folder=str(target_dir), safety="relaxed"
+            )
+        }
+    )
+    script = [
+        MockTurn(
+            tool_calls=[
+                MockToolCall(
+                    name="write_file",
+                    id="call_1",
+                    arguments={"path": str(script_path), "content": "print('generated')"},
+                )
+            ]
+        ),
+        MockTurn(text="wrote it"),
+    ]
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, script, workspace_name="use-ws")
+    try:
+        captured = {}
+
+        def _fake_exec(self):
+            captured["dialog"] = self
+            return QDialog.DialogCode.Rejected
+
+        monkeypatch.setattr("aida.ui.qt.code_editor_dialog.CodeEditorDialog.exec", _fake_exec)
+
+        window.input_box.set_text("write a script")
+        window.input_box._send_button.click()
+
+        assert pump_until(
+            qapp,
+            lambda: any(
+                isinstance(window.chat_panel.widget_at(i), FileArtifactCard)
+                for i in range(window.chat_panel.widget_count)
+            ),
+            timeout=10.0,
+        )
+        card = next(
+            window.chat_panel.widget_at(i)
+            for i in range(window.chat_panel.widget_count)
+            if isinstance(window.chat_panel.widget_at(i), FileArtifactCard)
+        )
+        card._editor_button.click()
+
+        dialog = captured["dialog"]
+        assert dialog.current_path == script_path
+        assert dialog.text() == "print('generated')"
+    finally:
+        window.close()
+
+
 def test_window_state_persisted_on_close(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
     settings = _settings_with_profile()
     window = _make_window(
@@ -1049,6 +1119,26 @@ def test_open_records_folder_opens_the_records_dir(qapp, loop_thread, aida_home:
         # this compares via Path rather than a raw string.
         assert len(opened) == 1
         assert Path(opened[0]) == default_records_dir()
+    finally:
+        window.close()
+
+
+def test_open_scratch_folder_opens_the_scratch_dir(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    """Bug report: "Agents seem to be saving temporary files ... in random
+    places" — the File-menu button that opens the one well-known scratch
+    folder, mirroring test_open_records_folder_opens_the_records_dir."""
+    from aida.config.paths import default_scratch_dir
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        opened = []
+        monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+        window._on_open_scratch_folder()
+        # See test_open_config_folder_opens_the_config_dir's comment on why
+        # this compares via Path rather than a raw string.
+        assert len(opened) == 1
+        assert Path(opened[0]) == default_scratch_dir()
     finally:
         window.close()
 

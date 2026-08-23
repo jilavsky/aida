@@ -74,6 +74,35 @@ async def test_echo_text_tool_round_trips(tmp_path):
         await manager.aclose()
 
 
+def test_handle_kwargs_omits_cwd_when_no_scratch_dir_given():
+    manager = McpManager([])
+    assert "cwd" not in manager._handle_kwargs()
+
+
+def test_handle_kwargs_includes_cwd_when_scratch_dir_given(tmp_path):
+    manager = McpManager([], scratch_dir=tmp_path)
+    assert manager._handle_kwargs()["cwd"] == tmp_path
+
+
+@pytest.mark.asyncio
+async def test_scratch_dir_reaches_the_launched_subprocess_as_its_cwd(tmp_path):
+    """End-to-end through the manager layer (not just McpServerHandle
+    directly, see test_mcp_server.py): a manager given ``scratch_dir=``
+    launches every server it starts inside that folder — bug report:
+    "Agents seem to be saving temporary files ... in random places."""
+    import os
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    manager = McpManager([_mock_server_config()], scratch_dir=scratch)
+    try:
+        tools = await manager.start_all()
+        result = await tools["mock-mcp__get_cwd"].func({})
+        assert os.path.realpath(str(scratch)) in result.content
+    finally:
+        await manager.aclose()
+
+
 @pytest.mark.asyncio
 async def test_get_image_tool_saves_artifact_and_returns_path(tmp_path):
     manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))

@@ -36,6 +36,51 @@ def test_set_text_replaces_content(qapp):
     assert dialog.text() == "new"
 
 
+# --- initial_path / Open… (bug report: "code editor has no way in" for an
+# agent-written file, and no way to load an existing file at all) ----------
+
+
+def test_dialog_seeds_from_initial_path(qapp, tmp_path: Path):
+    script = tmp_path / "reduce.py"
+    script.write_text("print('from disk')", encoding="utf-8")
+    dialog = CodeEditorDialog(initial_path=script)
+    assert dialog.text() == "print('from disk')"
+    assert dialog.current_path == script
+    assert "reduce.py" in dialog.windowTitle()
+
+
+def test_save_after_initial_path_writes_to_that_same_file_not_save_as(qapp, tmp_path: Path):
+    """The whole point of opening a real file (vs. initial_text) — Save
+    must act on it directly, no Save As round trip."""
+    script = tmp_path / "reduce.py"
+    script.write_text("v1", encoding="utf-8")
+    dialog = CodeEditorDialog(initial_path=script)
+    dialog.set_text("v2")
+    dialog._on_save()
+    assert script.read_text(encoding="utf-8") == "v2"
+
+
+def test_on_open_loads_the_chosen_file(qapp, monkeypatch, tmp_path: Path):
+    script = tmp_path / "existing.py"
+    script.write_text("print('opened')", encoding="utf-8")
+    dialog = CodeEditorDialog(initial_text="blank editor")
+    monkeypatch.setattr(
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getOpenFileName", lambda *a, **kw: (str(script), "")
+    )
+    dialog._on_open()
+    assert dialog.text() == "print('opened')"
+    assert dialog.current_path == script
+    assert "existing.py" in dialog.windowTitle()
+
+
+def test_on_open_cancelled_leaves_the_editor_unchanged(qapp, monkeypatch):
+    dialog = CodeEditorDialog(initial_text="unchanged")
+    monkeypatch.setattr("aida.ui.qt.code_editor_dialog.QFileDialog.getOpenFileName", lambda *a, **kw: ("", ""))
+    dialog._on_open()
+    assert dialog.text() == "unchanged"
+    assert dialog.current_path is None
+
+
 def test_save_with_no_path_falls_back_to_save_as(qapp, monkeypatch, tmp_path: Path):
     dialog = CodeEditorDialog(initial_text="print(1)", saved_scripts_dir=str(tmp_path))
     target = tmp_path / "script.py"

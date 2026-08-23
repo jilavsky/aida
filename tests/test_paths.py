@@ -38,3 +38,20 @@ def test_ensure_records_dir_override(tmp_path: Path):
     result = paths.ensure_records_dir(custom)
     assert result == custom
     assert custom.is_dir()
+
+
+def test_default_scratch_dir_under_app_dir(aida_home: Path):
+    assert paths.default_scratch_dir() == aida_home / "tmp"
+
+
+def test_ensure_scratch_dir_creates_default(aida_home: Path):
+    result = paths.ensure_scratch_dir()
+    assert result == aida_home / "tmp"
+    assert result.is_dir()
+
+
+def test_ensure_scratch_dir_override(tmp_path: Path):
+    custom = tmp_path / "somewhere" / "scratch"
+    result = paths.ensure_scratch_dir(custom)
+    assert result == custom
+    assert custom.is_dir()

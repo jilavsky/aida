@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from mcp.types import Tool as McpTool
@@ -83,6 +84,7 @@ class McpManager:
         call_timeout_seconds: float | None = None,
         startup_timeout_seconds: float | None = None,
         confirm_callback: ConfirmCallback = deny_all,
+        scratch_dir: Path | None = None,
     ) -> None:
         self._configs = {s.name: s for s in servers}
         self._handles: dict[str, McpServerHandle] = {}
@@ -90,6 +92,13 @@ class McpManager:
         self._call_timeout_seconds = call_timeout_seconds
         self._startup_timeout_seconds = startup_timeout_seconds
         self._confirm_callback = confirm_callback
+        # Bug report: "Agents seem to be saving temporary files ... in
+        # random places" — every server subprocess this manager launches is
+        # given this as both its cwd and its TMPDIR/TEMP/TMP (see
+        # McpServerHandle), so a tool that just does the OS-default thing
+        # (write to cwd, or to $TMPDIR) lands here instead of wherever AIDA
+        # itself happened to be launched from.
+        self._scratch_dir = scratch_dir
         self.start_errors: dict[str, str] = {}
 
     @property
@@ -176,6 +185,8 @@ class McpManager:
             kwargs["call_timeout_seconds"] = self._call_timeout_seconds
         if self._startup_timeout_seconds is not None:
             kwargs["startup_timeout_seconds"] = self._startup_timeout_seconds
+        if self._scratch_dir is not None:
+            kwargs["cwd"] = self._scratch_dir
         return kwargs
 
     def _tools_for(

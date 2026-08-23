@@ -395,6 +395,13 @@ class ChatPanel(QWidget):
     #: open_code_editor_dialog, one connection instead of one per bubble.
     code_editor_requested = Signal(str)
 
+    #: Bug report: "code editor has no way in" for an agent-written .py
+    #: file — re-emitted from whichever FileArtifactCard's own "Open in
+    #: Code Editor" button was clicked. Carries the file's path (not its
+    #: text), unlike code_editor_requested above, so MainWindow can open
+    #: the dialog *at* that file rather than with a copy of its text.
+    open_in_code_editor_requested = Signal(str)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         outer = QVBoxLayout(self)
@@ -424,6 +431,9 @@ class ChatPanel(QWidget):
 
     def _relay_code_editor_requests(self, bubble: MessageBubble) -> None:
         bubble.code_editor_requested.connect(self.code_editor_requested.emit)
+
+    def _relay_file_card_requests(self, card: FileArtifactCard) -> None:
+        card.open_in_code_editor_requested.connect(self.open_in_code_editor_requested.emit)
 
     def _scroll_to_bottom(self) -> None:
         bar = self._scroll_area.verticalScrollBar()
@@ -517,6 +527,7 @@ class ChatPanel(QWidget):
             widget = FileArtifactCard(
                 path=event.path, artifact_id=event.artifact_id, mime_type=event.mime_type, parent=self._content
             )
+            self._relay_file_card_requests(widget)
             self._append_widget(widget)
         elif name == "RetrievalPerformed":
             row = RetrievalRow(passages_by_kb=event.passages_by_kb, parent=self._content)
@@ -625,9 +636,11 @@ class ChatPanel(QWidget):
                 path=record.path, artifact_id=record.id, mime_type=record.mime_type or "image/png", parent=self._content
             )
         if record.kind == "FileArtifact":
-            return FileArtifactCard(
+            card = FileArtifactCard(
                 path=record.path, artifact_id=record.id, mime_type=record.mime_type, parent=self._content
             )
+            self._relay_file_card_requests(card)
+            return card
         return None
 
     def clear(self) -> None:

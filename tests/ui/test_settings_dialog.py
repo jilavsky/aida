@@ -81,6 +81,58 @@ def test_browse_cancelled_leaves_records_dir_unchanged(qapp, monkeypatch):
     assert dialog.records_dir() == "/keep/me"
 
 
+# --- scratch_dir (bug report: "Agents seem to be saving temporary files
+# ... in random places") — mirrors the records_dir tests above exactly.
+
+
+def test_dialog_seeds_scratch_dir_from_app_config(qapp):
+    cfg = AppConfig(scratch_dir="/data/scratch")
+    dialog = SettingsDialog(cfg)
+    assert dialog.scratch_dir() == "/data/scratch"
+
+
+def test_editing_scratch_dir_field_and_reading_back(qapp):
+    cfg = AppConfig()
+    dialog = SettingsDialog(cfg)
+    dialog._scratch_dir_edit.setText("/new/scratch")
+    assert dialog.scratch_dir() == "/new/scratch"
+
+
+def test_blank_scratch_dir_returns_none(qapp):
+    cfg = AppConfig(scratch_dir="/data")
+    dialog = SettingsDialog(cfg)
+    dialog._scratch_dir_edit.setText("   ")
+    assert dialog.scratch_dir() is None
+
+
+def test_updated_app_config_includes_edited_scratch_dir(qapp):
+    cfg = AppConfig(scratch_dir="/old/scratch")
+    dialog = SettingsDialog(cfg)
+    dialog._scratch_dir_edit.setText("/new/scratch")
+
+    updated = dialog.updated_app_config()
+    assert updated.scratch_dir == "/new/scratch"
+    assert cfg.scratch_dir == "/old/scratch"  # original untouched
+
+
+def test_browse_button_sets_scratch_dir(qapp, monkeypatch, tmp_path):
+    cfg = AppConfig()
+    dialog = SettingsDialog(cfg)
+    monkeypatch.setattr(
+        "aida.ui.qt.settings_dialog.QFileDialog.getExistingDirectory", lambda *a, **kw: str(tmp_path)
+    )
+    dialog._on_browse_scratch_dir()
+    assert dialog.scratch_dir() == str(tmp_path)
+
+
+def test_browse_cancelled_leaves_scratch_dir_unchanged(qapp, monkeypatch):
+    cfg = AppConfig(scratch_dir="/keep/me")
+    dialog = SettingsDialog(cfg)
+    monkeypatch.setattr("aida.ui.qt.settings_dialog.QFileDialog.getExistingDirectory", lambda *a, **kw: "")
+    dialog._on_browse_scratch_dir()
+    assert dialog.scratch_dir() == "/keep/me"
+
+
 def test_profiles_shown_read_only(qapp):
     profiles = {
         "argo-claude": ProviderProfile(name="argo-claude", kind="anthropic", model="claude-x"),

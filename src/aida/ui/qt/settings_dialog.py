@@ -64,6 +64,19 @@ class SettingsDialog(QDialog):
         records_row.addWidget(browse_button)
         form.addRow("Records folder:", records_row)
 
+        # Bug report: "Agents seem to be saving temporary files ... in
+        # random places." One well-known, overridable scratch folder every
+        # MCP server subprocess is launched in — see aida.core.session and
+        # aida.mcp.server.
+        scratch_row = QHBoxLayout()
+        self._scratch_dir_edit = QLineEdit(app_config.scratch_dir or "", self)
+        self._scratch_dir_edit.setPlaceholderText("Default: ~/.aida/tmp")
+        scratch_row.addWidget(self._scratch_dir_edit)
+        scratch_browse_button = QPushButton("Browse…", self)
+        scratch_browse_button.clicked.connect(self._on_browse_scratch_dir)
+        scratch_row.addWidget(scratch_browse_button)
+        form.addRow("Scratchpad folder:", scratch_row)
+
         self._log_level_combo = QComboBox(self)
         self._log_level_combo.addItems(LOG_LEVELS)
         index = self._log_level_combo.findText(app_config.log_level)
@@ -126,6 +139,11 @@ class SettingsDialog(QDialog):
         if folder:
             self._records_dir_edit.setText(folder)
 
+    def _on_browse_scratch_dir(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Scratchpad Folder", self._scratch_dir_edit.text())
+        if folder:
+            self._scratch_dir_edit.setText(folder)
+
     # --- edited values ---------------------------------------------------
 
     def font_size(self) -> int:
@@ -133,6 +151,10 @@ class SettingsDialog(QDialog):
 
     def records_dir(self) -> str | None:
         text = self._records_dir_edit.text().strip()
+        return text or None
+
+    def scratch_dir(self) -> str | None:
+        text = self._scratch_dir_edit.text().strip()
         return text or None
 
     def log_level(self) -> str:
@@ -161,6 +183,7 @@ class SettingsDialog(QDialog):
             self._original,
             font_size=self.font_size(),
             records_dir=self.records_dir(),
+            scratch_dir=self.scratch_dir(),
             log_level=self.log_level(),
             max_agent_iterations=self.max_agent_iterations(),
             default_safety_mode=self.default_safety_mode(),

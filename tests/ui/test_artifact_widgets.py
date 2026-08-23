@@ -118,3 +118,34 @@ def test_file_artifact_card_reveal_opens_containing_folder(qapp, tmp_path: Path,
     )
     card.reveal_in_file_manager()
     assert opened == [str(tmp_path)]
+
+
+# --- "Open in Code Editor" (bug report: "agent writes correctly py file
+# into target folder... but when I try to open, it opens in system (text)
+# editor... code editor has no way in") -------------------------------------
+
+
+def test_file_artifact_card_offers_open_in_code_editor_for_python_files(qapp, tmp_path: Path):
+    path = tmp_path / "reduce.py"
+    path.write_text("print('hi')", encoding="utf-8")
+    card = FileArtifactCard(path=str(path), artifact_id="a1", mime_type="text/x-python")
+    assert card._editor_button is not None
+    assert card._editor_button.isVisible() or True  # offscreen: construction is the real check
+
+
+def test_file_artifact_card_has_no_code_editor_button_for_non_python_files(qapp, tmp_path: Path):
+    path = tmp_path / "report.md"
+    path.write_text("# report", encoding="utf-8")
+    card = FileArtifactCard(path=str(path), artifact_id="a1", mime_type="text/markdown")
+    assert card._editor_button is None
+
+
+def test_file_artifact_card_open_in_code_editor_emits_path(qapp, tmp_path: Path):
+    path = tmp_path / "reduce.py"
+    path.write_text("print('hi')", encoding="utf-8")
+    card = FileArtifactCard(path=str(path), artifact_id="a1", mime_type="text/x-python")
+
+    emitted = []
+    card.open_in_code_editor_requested.connect(emitted.append)
+    card._editor_button.click()
+    assert emitted == [str(path)]

@@ -16,6 +16,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -62,6 +63,27 @@ def resolve_env_secrets(env: dict[str, str]) -> dict[str, str]:
             )
         resolved[key] = secret_value
     return resolved
+
+
+def _scratch_env_defaults(cwd: Path | None) -> dict[str, str]:
+    """``TMPDIR``/``TEMP``/``TMP`` pointed at ``cwd``, or ``{}`` if unset.
+
+    Bug report: "Agents seem to be saving temporary files ... in random
+    places" — traced to two independent causes: this server's subprocess
+    previously had no ``cwd`` at all (inherited AIDA's own, wherever the
+    user happened to launch it from), and separately, the ``mcp`` SDK's
+    ``get_default_environment()`` never inherits ``TMPDIR``/``TEMP``/``TMP``
+    from AIDA's own process regardless of what AIDA has set — so a tool
+    that does the OS-default thing (``tempfile.mkdtemp()``, ``os.getcwd()``)
+    had no way to land anywhere predictable. Setting all three covers every
+    platform (``TMPDIR`` POSIX, ``TEMP``/``TMP`` Windows) without needing to
+    know which one a given tool actually reads.
+    """
+    if cwd is None:
+        return {}
+    value = str(cwd)
+    return {"TMPDIR": value, "TEMP": value, "TMP": value}
+
 
 #: How long ``start()`` waits for a server to launch, answer the MCP
 #: ``initialize`` handshake, and list its tools.
@@ -262,11 +284,17 @@ class McpServerHandle:
         call_timeout_seconds: float = DEFAULT_CALL_TIMEOUT_SECONDS,
         startup_timeout_seconds: float = DEFAULT_STARTUP_TIMEOUT_SECONDS,
         stop_timeout_seconds: float = DEFAULT_STOP_TIMEOUT_SECONDS,
+        cwd: Path | None = None,
     ) -> None:
         self.config = config
         self.call_timeout_seconds = call_timeout_seconds
         self.startup_timeout_seconds = startup_timeout_seconds
         self.stop_timeout_seconds = stop_timeout_seconds
+        #: Working directory (and TMPDIR/TEMP/TMP source) for this server's
+        #: subprocess — see ``_scratch_env_defaults``. ``None`` preserves the
+        #: old behavior (inherit AIDA's own cwd/env) for any caller that
+        #: doesn't pass one, e.g. direct unit tests of this class.
+        self._cwd = cwd
         self.stderr: StderrCapture | None = None
         self.calls: list[ToolCallRecord] = []
         #: The server's own ``instructions`` string from the MCP
@@ -307,8 +335,10 @@ class McpServerHandle:
         # B6: resolved here, synchronously, before the subprocess is even
         # spawned — a missing/misspelled secret reference fails immediately
         # with a clear message rather than launching a process that's
-        # quietly missing a credential it needs.
-        self._resolved_env = resolve_env_secrets(self.config.env)
+        # quietly missing a credential it needs. Scratch TMPDIR/TEMP/TMP
+        # defaults go first so the server config's own `env` (if it sets
+        # any of these explicitly) always wins.
+        self._resolved_env = {**_scratch_env_defaults(self._cwd), **resolve_env_secrets(self.config.env)}
 
         self._stop_event = asyncio.Event()
         self._start_error = None
@@ -346,7 +376,10 @@ class McpServerHandle:
         self.stderr = stderr
         try:
             params = StdioServerParameters(
-                command=self.config.command, args=self.config.args, env=self._resolved_env or None
+                command=self.config.command,
+                args=self.config.args,
+                env=self._resolved_env or None,
+                cwd=self._cwd,
             )
             async with (
                 stdio_client(params, errlog=stderr) as (read_stream, write_stream),

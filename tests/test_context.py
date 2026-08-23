@@ -92,6 +92,30 @@ def test_workspace_context_block_mentions_global_allowed_folders_even_with_no_wo
     assert "/shared/reference" in block
 
 
+# --- scratch_dir (bug report: "Agents seem to be saving temporary files
+# ... in random places") ----------------------------------------------------
+
+
+def test_workspace_context_block_none_stays_none_without_scratch_dir():
+    assert (
+        build_workspace_context_block(
+            source_folders=[], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
+            safety_mode="confirm", scratch_dir=None,
+        )
+        is None
+    )
+
+
+def test_workspace_context_block_mentions_scratch_dir_even_with_no_workspace():
+    block = build_workspace_context_block(
+        source_folders=[], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
+        safety_mode="confirm", scratch_dir="/Users/me/.aida/tmp",
+    )
+    assert block is not None
+    assert "/Users/me/.aida/tmp" in block
+    assert "Scratch folder" in block
+
+
 # --- build_coding_context_block (regression: the model resorted to a raw
 # `python3 -c "..."` probe via run_command, needing confirmation, just to
 # discover its interpreter/packages) ----------------------------------------

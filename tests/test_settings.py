@@ -613,6 +613,13 @@ def test_app_config_accepts_null_only_for_optional_fields():
     assert AppConfig.from_dict({"log_level": None}).log_level == AppConfig().log_level
 
 
+def test_app_config_scratch_dir_defaults_to_none_and_round_trips():
+    assert AppConfig().scratch_dir is None
+    config = AppConfig.from_dict({"scratch_dir": "/somewhere/scratch"})
+    assert config.scratch_dir == "/somewhere/scratch"
+    assert config.to_dict()["scratch_dir"] == "/somewhere/scratch"
+
+
 def test_app_config_still_ignores_unknown_keys():
     """``theme`` (U3) is itself a real example of this: removed as a dead
     setting, so an old config.yaml with ``theme: dark`` in it must load

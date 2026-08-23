@@ -16,6 +16,7 @@ its own test-body task.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -39,6 +40,7 @@ ALL_TOOL_NAMES = {
     "get_json_data",
     "get_multi_part",
     "echo_env",
+    "get_cwd",
     "always_fails",
     "hang_forever",
     "crash_process",
@@ -339,6 +341,85 @@ async def test_start_resolves_keyring_env_value_and_child_sees_the_real_value(mo
     text_artifacts = [a for a in artifacts if isinstance(a, TextArtifact)]
     assert len(text_artifacts) == 1
     assert text_artifacts[0].text == "sk-actual-secret-value"
+
+
+# --- cwd / scratch-folder wiring (bug report: "Agents seem to be saving
+# temporary files ... in random places") ------------------------------------
+
+
+def test_scratch_env_defaults_empty_without_cwd():
+    from aida.mcp.server import _scratch_env_defaults
+
+    assert _scratch_env_defaults(None) == {}
+
+
+def test_scratch_env_defaults_sets_all_three_temp_vars(tmp_path: Path):
+    from aida.mcp.server import _scratch_env_defaults
+
+    assert _scratch_env_defaults(tmp_path) == {
+        "TMPDIR": str(tmp_path),
+        "TEMP": str(tmp_path),
+        "TMP": str(tmp_path),
+    }
+
+
+@pytest.mark.asyncio
+async def test_start_with_cwd_launches_the_subprocess_there(tmp_path: Path):
+    """End-to-end: a handle started with ``cwd=`` actually spawns its
+    subprocess in that directory — the first of the two root causes behind
+    "agents scatter temp files": nothing was ever passed to
+    StdioServerParameters, so every server inherited AIDA's own cwd."""
+    h = McpServerHandle(_mock_config(), cwd=tmp_path)
+    try:
+        await h.start()
+        result = await h.call_tool("get_cwd", {})
+    finally:
+        await h.stop()
+    artifacts = convert_result(result)
+    text_artifacts = [a for a in artifacts if isinstance(a, TextArtifact)]
+    assert len(text_artifacts) == 1
+    assert os.path.realpath(text_artifacts[0].text) == os.path.realpath(str(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_start_with_cwd_gives_the_child_that_tmpdir(tmp_path: Path):
+    """End-to-end: a handle started with ``cwd=`` launches its subprocess
+    with TMPDIR (and TEMP/TMP) pointed at that folder — the second of the
+    two root causes behind "agents scatter temp files": the ``mcp`` SDK's
+    own env defaults never inherit TMPDIR/TEMP/TMP from AIDA's process."""
+    h = McpServerHandle(_mock_config(), cwd=tmp_path)
+    try:
+        await h.start()
+        result = await h.call_tool("echo_env", {"name": "TMPDIR"})
+    finally:
+        await h.stop()
+    artifacts = convert_result(result)
+    text_artifacts = [a for a in artifacts if isinstance(a, TextArtifact)]
+    assert len(text_artifacts) == 1
+    assert text_artifacts[0].text == str(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_explicit_env_still_overrides_the_scratch_tmpdir_default(tmp_path: Path):
+    """A server config that sets TMPDIR itself must win over the scratch
+    default — same "explicit config always wins" rule as everything else
+    in this env-merging path."""
+    config = McpServerConfig(
+        name="mock-mcp",
+        command=sys.executable,
+        args=[str(MOCK_SERVER_PATH)],
+        env={"TMPDIR": "/explicitly/configured"},
+    )
+    h = McpServerHandle(config, cwd=tmp_path)
+    try:
+        await h.start()
+        result = await h.call_tool("echo_env", {"name": "TMPDIR"})
+    finally:
+        await h.stop()
+    artifacts = convert_result(result)
+    text_artifacts = [a for a in artifacts if isinstance(a, TextArtifact)]
+    assert len(text_artifacts) == 1
+    assert text_artifacts[0].text == "/explicitly/configured"
 
 
 # --- a server that starts but never answers initialize ---------------------

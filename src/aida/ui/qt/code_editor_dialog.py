@@ -28,6 +28,7 @@ class CodeEditorDialog(QDialog):
         self,
         *,
         initial_text: str = "",
+        initial_path: str | Path | None = None,
         saved_scripts_dir: str | None = None,
         python_interpreter: str | None = None,
         script_timeout_seconds: float = DEFAULT_RUN_TIMEOUT_SECONDS,
@@ -51,13 +52,30 @@ class CodeEditorDialog(QDialog):
         layout = QVBoxLayout(self)
 
         self._editor = QPlainTextEdit(self)
-        self._editor.setPlainText(initial_text)
+        # Bug report: "code editor has no way in" — a file the agent wrote
+        # (via write_file, into the target folder) had no path back into
+        # this dialog at all, only into the system's default text editor.
+        # initial_path opens the *real* file (Save writes back to it, Run
+        # runs it in place) rather than a disconnected copy of its text —
+        # unlike initial_text (the toolbar's blank-editor case, and the
+        # "Open in Editor" button on a chat message's own fenced code
+        # block, which has no file behind it to open).
+        if initial_path is not None:
+            self._current_path = Path(initial_path)
+            self._editor.setPlainText(self._current_path.read_text(encoding="utf-8"))
+            self.setWindowTitle(f"Code Editor — {self._current_path.name}")
+        else:
+            self._editor.setPlainText(initial_text)
         # Kept alive as an attribute — QSyntaxHighlighter's own C++ object
         # is only kept alive by whatever holds a Python reference to it.
         self._highlighter = PythonHighlighter(self._editor.document())
         layout.addWidget(self._editor, stretch=2)
 
         buttons = QHBoxLayout()
+        self._open_button = QPushButton("Open…", self)
+        self._open_button.clicked.connect(self._on_open)
+        buttons.addWidget(self._open_button)
+
         self._save_button = QPushButton("Save", self)
         self._save_button.clicked.connect(self._on_save)
         buttons.addWidget(self._save_button)
@@ -113,7 +131,21 @@ class CodeEditorDialog(QDialog):
     def output_text(self) -> str:
         return self._output_view.toPlainText()
 
-    # --- save ------------------------------------------------------------------
+    # --- open / save -------------------------------------------------------------
+
+    def _on_open(self) -> None:
+        """Bug report: "code editor has no way in" — the dialog previously
+        had Save/Save As but nothing to load an *existing* file with,
+        forcing a round trip through some other editor just to get code
+        into this one. Mirrors _on_save_as's own file-dialog pattern."""
+        default_dir = self._saved_scripts_dir or str(Path.home())
+        path_str, _selected_filter = QFileDialog.getOpenFileName(self, "Open Script", default_dir, "Python Files (*.py)")
+        if not path_str:
+            return
+        path = Path(path_str)
+        self._editor.setPlainText(path.read_text(encoding="utf-8"))
+        self._current_path = path
+        self.setWindowTitle(f"Code Editor — {path.name}")
 
     def _on_save(self) -> None:
         if self._current_path is None:

@@ -120,6 +120,7 @@ def build_workspace_context_block(
     global_allowed_folders: list[str],
     sidecar_dirname: str,
     safety_mode: str,
+    scratch_dir: str | None = None,
 ) -> str | None:
     """A short, factual block telling the model exactly which folders this
     session gives it access to, and what its safety mode means for them.
@@ -138,8 +139,15 @@ def build_workspace_context_block(
     Returns ``None`` when there is nothing to say (no source/target/global
     folders configured at all — e.g. a bare ``--profile`` chat with no
     workspace and nothing globally allowed).
+
+    ``scratch_dir`` (bug report: "Agents seem to be saving temporary files
+    ... in random places") is called out in its own paragraph rather than
+    folded into ``global_allowed_folders`` — it's always allowed already
+    (every MCP server is launched with it as its own working directory, see
+    ``aida.mcp.server``), so mentioning it here is purely to give the model
+    a stable place to *choose* to put scratch work, not to grant access.
     """
-    if not source_folders and not target_folder and not global_allowed_folders:
+    if not source_folders and not target_folder and not global_allowed_folders and not scratch_dir:
         return None
 
     lines = ["# Workspace folders"]
@@ -159,6 +167,14 @@ def build_workspace_context_block(
         lines.append("")
         lines.append("Also allowed, in every workspace:")
         lines.extend(f"- {folder}" for folder in global_allowed_folders)
+    if scratch_dir:
+        lines.append("")
+        lines.append(
+            f"Scratch folder — put temporary/working files here (throwaway scripts, downloads, "
+            f"intermediate output), not in a repo or the source/target folders above: {scratch_dir}\n"
+            "It is not backed up and may be cleared out periodically — don't rely on it for anything "
+            "the user needs kept."
+        )
 
     lines.append("")
     if safety_mode == "relaxed":

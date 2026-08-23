@@ -53,10 +53,11 @@ class _FakeMcpManager:
     #: into the session's system message.
     instructions_to_report: dict[str, str] = {}
 
-    def __init__(self, servers, *, artifact_store=None, confirm_callback=None) -> None:
+    def __init__(self, servers, *, artifact_store=None, confirm_callback=None, scratch_dir=None) -> None:
         self.servers = servers
         self.artifact_store = artifact_store
         self.confirm_callback = confirm_callback
+        self.scratch_dir = scratch_dir
         self.running_server_names: list[str] = [s.name for s in servers]
         self.start_errors: dict[str, str] = {}
         self.closed = False

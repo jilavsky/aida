@@ -429,6 +429,152 @@ is cumbersome" experience.
       and the warning log fires only when something was actually
       corrected).
 
+- [x] **(B10) No well-known scratch/temp folder for agents and MCP
+      servers.** User report: "Agents seem to be saving temporary files
+      (python scripts, web page descriptions, etc) in random places. /tmp,
+      repo home folder, .aida folder - quite randomly." Traced to two
+      independent root causes, both confirmed by reading the actual `mcp`
+      SDK source (`inspect.getsource`), not assumed: (1)
+      `McpServerHandle._serve()` built `StdioServerParameters(...)` with no
+      `cwd` at all, so every MCP server subprocess inherited *AIDA's own*
+      process cwd — whatever directory the user happened to launch
+      `aida-gui`/`aida` from in their shell (explains the "repo home
+      folder" symptom for a user who runs `aida-gui` from inside their
+      repo). (2) the `mcp` package's own `get_default_environment()` only
+      ever inherits `HOME`/`LOGNAME`/`PATH`/`SHELL`/`TERM`/`USER` from
+      AIDA's process — **never** `TMPDIR`/`TEMP`/`TMP`, regardless of what
+      AIDA itself has set — so a tool that does the OS-default thing
+      (`tempfile.mkdtemp()`) had nowhere predictable to land (explains the
+      `/tmp` scattering). Also confirmed it's always safe to pass a
+      populated `env` dict to `StdioServerParameters`: the SDK merges it on
+      top of its own safe defaults, never replaces `PATH`/`HOME`/etc.
+
+      **Design chosen** (mirrors the existing `records_dir` override
+      pattern exactly): one new well-known folder, `~/.aida/tmp` by
+      default (`paths.default_scratch_dir()`/`ensure_scratch_dir()`),
+      overridable via a new `AppConfig.scratch_dir` field. Deliberately
+      *not* defaulted under `~/Documents/Aida/` (the existing
+      human-readable-records root) despite it being the more discoverable
+      location — that folder may be inside a cloud-synced directory
+      (iCloud Drive/OneDrive), and a scratch folder churns (many small
+      files written and deleted in quick succession), which is exactly the
+      failure mode already diagnosed once in this codebase (a cloud-synced
+      Obsidian vault raising `PermissionError` under
+      `test_knowledge_ingest.py`). Discoverability is instead solved
+      directly, per the user's own suggestion, with a one-click "Open
+      Scratch Folder" File-menu action (mirroring "Open Records Folder").
+
+      **Done (2026-08-23):**
+      - `aida.config.paths`: new `default_scratch_dir()`/
+        `ensure_scratch_dir()`, mirroring `default_records_dir()`/
+        `ensure_records_dir()`.
+      - `AppConfig.scratch_dir: str | None = None` (settings.py's
+        dataclass field / `to_dict()` / `_APP_FIELD_KINDS`, kept in sync
+        per the existing consistency test).
+      - `aida.core.session.start_session`: computes the effective scratch
+        dir once per session, adds it to `SafetyGuard`'s
+        `global_allowed_folders` (same always-allowed treatment as
+        `artifacts_dir()` — writes there never need confirmation), passes
+        it to `McpManager(...)`, and tells the model about it via a new
+        `scratch_dir` paragraph in `build_workspace_context_block`
+        (its own labeled section: "not backed up, may be cleared
+        periodically").
+      - `aida.mcp.manager.McpManager`: new `scratch_dir` constructor
+        param, wired through the existing `_handle_kwargs()` helper so
+        all three `McpServerHandle` construction sites (`start_all`,
+        `start_server`/`restart_server`, `test_connection`) pick it up
+        automatically as `cwd=`.
+      - `aida.mcp.server.McpServerHandle`: new `cwd` param; passed to
+        `StdioServerParameters(cwd=...)` (root cause 1) and used to seed
+        `TMPDIR`/`TEMP`/`TMP` in the resolved env, via a new
+        `_scratch_env_defaults()` helper — merged in *before*
+        `resolve_env_secrets(self.config.env)` so an explicit
+        server-config env value always wins (root cause 2).
+      - `aida.ui.qt.bridge.ChatBridge`: captures the resolved scratch dir
+        in `start()` (a new `_scratch_dir` attribute) so
+        `_ensure_mcp_manager()`'s live-add-server path (which builds its
+        own `McpManager` directly, not through `start_session`) gets the
+        same wiring.
+      - `aida.cli.mcp_cmds.cmd_test`: passes `scratch_dir=` through too,
+        for parity with the other two `McpManager(` construction sites.
+      - `aida.ui.qt.settings_dialog.SettingsDialog`: new "Scratchpad
+        folder:" row (line edit + Browse…), mirroring "Records folder:"
+        exactly, including in `updated_app_config()`.
+      - `aida.ui.qt.main_window.MainWindow`: new File-menu "Open Scratch
+        Folder" action, mirroring "Open Records Folder" exactly — the
+        user-requested one-click way to find and periodically clean the
+        folder out.
+      - Tests: `tests/test_paths.py` (3 new), `tests/test_settings.py` (1
+        new), `tests/test_context.py` (2 new), `tests/test_mcp_server.py`
+        (4 new, including a new `get_cwd` tool on the real mock MCP
+        subprocess proving `cwd=` actually reaches the spawned process,
+        not just the constructor), `tests/test_mcp_manager.py` (3 new,
+        proving the wiring survives the manager layer end to end),
+        `tests/ui/test_settings_dialog.py` (6 new), `tests/ui/
+        test_main_window.py` (1 new). Full suite: 1237 passed (up from
+        1216), same one known pre-existing chmod-as-root failure in
+        `test_knowledge_ingest.py`, `ruff check .` clean.
+
+- [x] **(B11) Code Editor had no way in from a generated file.** User
+      report: "we have added code editor, but when I ask agent to write a
+      code, agent writes correctly py file into target folder - perfect.
+      But then when I try to open, it opens in system (text) editor. And
+      there is no way to open the generated code in the Aida code editor
+      and run from there or test it... Code editor has save and save as
+      buttons, no open button." Two separate gaps, both real: (1)
+      ``FileArtifactCard`` (the card a ``write_file`` tool call already
+      shows in the chat transcript — this part was already working) only
+      offered "Open" (``QDesktopServices`` → whatever the OS's own default
+      app is for ``.py``, a plain-text editor on most systems) and
+      "Reveal" — no path from there into AIDA's own ``CodeEditorDialog``
+      at all. (2) ``CodeEditorDialog`` itself only had Save/Save As/Run/
+      Kill — no way to *load* an existing file into it either, agent-
+      written or otherwise, short of retyping/pasting its contents.
+
+      **Done (2026-08-23):** both gaps closed.
+      - ``FileArtifactCard`` (``artifact_widgets.py``) gained a third
+        button, "Open in Code Editor", shown only for ``.py`` files (the
+        dialog itself is Python-specific — syntax highlighting, Run/Kill
+        via ``run_python_script``) — a new ``CODE_EDITOR_SUFFIXES``
+        constant, so widening it to other extensions later is a one-line
+        change. Clicking it emits a new ``open_in_code_editor_requested``
+        signal carrying the file's path, relayed up through ``ChatPanel``
+        (mirroring the existing ``code_editor_requested`` relay a chat
+        message's own fenced-code-block "Open in Editor" button already
+        used) at both places a card is built — the live
+        ``FileArtifactCreated`` event path and ``artifact_widget_for``
+        (resumed-conversation history), so a card opened from a past
+        session works identically to one from the live turn that just
+        wrote it.
+      - ``CodeEditorDialog`` gained an ``initial_path`` constructor
+        parameter (opens the *real* file — reads it from disk, sets
+        ``current_path``, so Save/Run act on that file directly rather
+        than a disconnected copy of its text, unlike ``initial_text``\'s
+        existing blank-editor/paste-a-code-block cases) and a new "Open…"
+        button (``QFileDialog.getOpenFileName``, mirroring "Save As…"\'s
+        own file-dialog pattern) so a file can be loaded into the dialog
+        directly, independent of any chat card, addressing "no open
+        button" literally.
+      - ``MainWindow.open_code_editor_dialog`` gained a matching
+        ``initial_path`` parameter, and a new ``_on_open_in_code_editor_
+        requested`` handler wired to ``ChatPanel.open_in_code_editor_
+        requested`` (alongside the existing ``code_editor_requested``
+        connection) completes the chain from a chat file card's button to
+        a real, editable, runnable file in the dialog.
+      - Tests: `tests/ui/test_artifact_widgets.py` (3 new: button shown
+        only for ``.py``, absent for other extensions, click emits the
+        real path), `tests/ui/test_chat_panel.py` (2 new: the relay from
+        both the live ``FileArtifactCreated`` path and the resumed-history
+        ``artifact_widget_for`` path), `tests/ui/test_code_editor_dialog.py`
+        (4 new: seeding from ``initial_path``, Save writing back to that
+        same file, "Open…" loading a chosen file, cancelling "Open…"
+        leaves the editor untouched), `tests/ui/test_main_window.py` (1
+        new end-to-end case: a real ``write_file`` tool call through
+        ``MockProvider`` → file card → "Open in Code Editor" click → the
+        dialog opens at the real generated file with the real content).
+        Full suite: 1247 passed (up from 1237), same one known
+        pre-existing chmod-as-root failure, `ruff check .` clean.
+
 Deliberately *not* recommended right now: swapping the RAG store for a vector
 DB, adopting an agent framework, or a web frontend — the plan's original
 reasoning still holds, and nothing in this review contradicts it.

@@ -108,6 +108,31 @@ def ensure_records_dir(path: Path | None = None) -> Path:
     return target
 
 
+def default_scratch_dir() -> Path:
+    """Default location for transient working files (scripts, downloads,
+    intermediate MCP-tool output) that agents and MCP servers need
+    *somewhere* to write.
+
+    Lives under ``~/.aida/`` rather than under ``~/Documents/Aida/`` on
+    purpose: this folder churns (many small files written and deleted in
+    quick succession), and ``~/Documents/Aida/`` may be inside a
+    cloud-synced folder (iCloud Drive, OneDrive, ...) — the same class of
+    problem already seen with cloud-synced Obsidian vaults raising
+    ``PermissionError`` on rapid writes (see ``test_knowledge_ingest.py``).
+    Overridable per-install via ``config.yaml``'s ``scratch_dir``; callers
+    that need the *effective* scratch dir should read it from settings, not
+    call this directly, except as the fallback default.
+    """
+    return app_dir() / "tmp"
+
+
+def ensure_scratch_dir(path: Path | None = None) -> Path:
+    """Create (if needed) and return the scratch dir, honoring an override."""
+    target = Path(path).expanduser() if path else default_scratch_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
 def unique_destination(path: Path) -> Path:
     """Collision-safe destination: ``name.ext`` -> ``name (1).ext`` ->
     ``name (2).ext`` ... — used by every writer that must never silently

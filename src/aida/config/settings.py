@@ -171,6 +171,13 @@ class AppConfig:
 
     config_version: int = CURRENT_CONFIG_VERSION
     records_dir: str | None = None  # None -> aida.config.paths.default_records_dir()
+    # Bug report: agents/MCP servers were writing temporary files (scripts,
+    # downloads, intermediate output) to whatever directory happened to be
+    # AIDA's own process cwd, or to the OS temp dir, scattered and hard to
+    # find or clean up. One well-known, globally-allowed scratch folder every
+    # MCP server subprocess is launched *in* (and told is its TMPDIR/TEMP/
+    # TMP), plus a File-menu button to open it. None -> paths.default_scratch_dir().
+    scratch_dir: str | None = None
     log_level: str = "INFO"
     default_safety_mode: str = "confirm"  # "relaxed" | "confirm"
     # Phase 6: folders implicitly allowed for every workspace/session, on
@@ -240,6 +247,7 @@ class AppConfig:
         return {
             "config_version": self.config_version,
             "records_dir": self.records_dir,
+            "scratch_dir": self.scratch_dir,
             "log_level": self.log_level,
             "default_safety_mode": self.default_safety_mode,
             "allowed_folders": self.allowed_folders,
@@ -264,6 +272,7 @@ class AppConfig:
 _APP_FIELD_KINDS: dict[str, str] = {
     "config_version": "int",
     "records_dir": "str?",
+    "scratch_dir": "str?",
     "log_level": "str",
     "default_safety_mode": "str",
     "allowed_folders": "list[str]",

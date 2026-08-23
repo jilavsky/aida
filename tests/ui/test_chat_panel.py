@@ -283,6 +283,25 @@ def test_file_artifact_created_adds_file_card(qapp, tmp_path: Path):
     assert isinstance(panel.widget_at(0), FileArtifactCard)
 
 
+def test_file_artifact_created_python_file_relays_open_in_code_editor(qapp, tmp_path: Path):
+    """Bug report: "agent writes correctly py file into target folder...
+    but when I try to open, it opens in system (text) editor... code
+    editor has no way in." The card's own signal must reach ChatPanel's,
+    the same relay MainWindow listens to for the toolbar/message-fence
+    path."""
+    file_path = tmp_path / "reduce.py"
+    file_path.write_text("print('hi')", encoding="utf-8")
+
+    panel = ChatPanel()
+    panel.handle_event(FileArtifactCreated(artifact_id="a1", call_id="c1", path=str(file_path), mime_type="text/x-python"))
+    card = panel.widget_at(0)
+
+    requested = []
+    panel.open_in_code_editor_requested.connect(requested.append)
+    card._editor_button.click()
+    assert requested == [str(file_path)]
+
+
 def test_agent_error_adds_error_banner_with_layer(qapp):
     panel = ChatPanel()
     panel.handle_event(AgentError(layer="provider", message="boom", detail="net down"))
@@ -453,6 +472,26 @@ def test_artifact_widget_for_builds_the_right_widget_kind(qapp, tmp_path: Path):
         )
     )
     assert unknown_widget is None
+
+
+def test_artifact_widget_for_python_file_relays_open_in_code_editor(qapp, tmp_path: Path):
+    """Same relay as the live FileArtifactCreated path, for a resumed
+    conversation's Python file artifact."""
+    file_path = tmp_path / "reduce.py"
+    file_path.write_text("print('hi')", encoding="utf-8")
+    panel = ChatPanel()
+
+    card = panel.artifact_widget_for(
+        ArtifactRecord(
+            id="a1", conversation_id="c1", call_id=None, kind="FileArtifact",
+            path=str(file_path), mime_type="text/x-python", created_at="2026-08-22T00:00:00",
+        )
+    )
+
+    requested = []
+    panel.open_in_code_editor_requested.connect(requested.append)
+    card._editor_button.click()
+    assert requested == [str(file_path)]
 
 
 def test_retrieval_performed_renders_a_retrieval_row(qapp):
