@@ -257,6 +257,26 @@ def test_shutdown_cancels_and_waits_for_an_in_flight_turn(
     assert pump_until(qapp, started.is_set)
 
     events_before = len(events)
+    # Windows CI flake (real report, not a theoretical worry): this used to
+    # be `call_soon_threadsafe(release.set)` immediately followed by
+    # `bridge.shutdown(...)`, racing two independent, unsynchronized actions
+    # on two different OS threads. `shutdown()`'s `self._closing = True` is
+    # the very first thing it does, synchronously, right here on this
+    # thread — but for the assertion below to hold, that write has to land
+    # before the *background loop thread* finishes processing `release.set`,
+    # resuming the blocked tool call, and emitting its `ToolCallFinished`
+    # event, which takes several loop-thread scheduling hops versus this
+    # thread's single next bytecode. That margin was apparently always wide
+    # enough on Linux/macOS CI to look deterministic, and wasn't always wide
+    # enough on Windows CI, which showed up as one extra event in the list —
+    # a race in this test's own instrumentation, not evidence ChatBridge
+    # actually leaked the event under real timing. Setting `_closing`
+    # directly here, before `release` is even scheduled to fire, makes the
+    # ordering this test cares about (turn in flight *and already closing*
+    # must not leak further events) true by construction instead of by
+    # scheduling luck — `bridge.shutdown()` below just re-sets the same
+    # flag, a harmless no-op, before doing its real async cleanup.
+    bridge._closing = True
     loop_thread.loop.call_soon_threadsafe(release.set)
     bridge.shutdown(timeout=10.0)
 

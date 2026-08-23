@@ -113,6 +113,37 @@ def test_profile_selector_shows_the_actual_active_profile_once_ready(
         window.close()
 
 
+def test_workspace_selector_shows_the_actual_active_workspace_once_ready(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: on startup the last workspace is clearly loaded (the
+    folder display/MCP panel/session all reflect it correctly) but the
+    toolbar's workspace dropdown shows "(no workspace)" regardless. Same
+    root cause and same fix as
+    ``test_profile_selector_shows_the_actual_active_profile_once_ready``:
+    __init__'s one-time ``_refresh_workspace_selector()`` call runs right
+    after ``bridge.start()`` kicks off session construction on the
+    background loop, so ``self.bridge.session`` is still ``None`` at that
+    point and the dropdown falls back to "(no workspace)" — and unlike the
+    profile selector, nothing ever refreshed it again for a normal
+    startup/resume, so it stayed wrong for the rest of the session even
+    though the session itself was using the right workspace the whole
+    time."""
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={"use-pyirena": WorkspaceConfig(name="use-pyirena", profile="mock-profile")}
+    )
+
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+    )
+    try:
+        assert window.bridge.session.recorder.workspace_name == "use-pyirena"
+        assert window.workspace_selector.current_workspace() == "use-pyirena"
+    finally:
+        window.close()
+
+
 def test_flagship_demo_tool_call_produces_inline_image(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):

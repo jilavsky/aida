@@ -122,6 +122,65 @@ is cumbersome" experience.
       **Done (2026-08-22):** `_extract_text` is now called via
       `asyncio.to_thread(...)` inside `_ingest_file`.
 
+- [x] **Workspace selector shows "(no workspace)" on startup even though
+      the last workspace actually loaded.** User report: on launch the
+      session clearly comes up in the right workspace (folder display, MCP
+      panel, etc. all correct), but the toolbar's workspace dropdown shows
+      "(no workspace)" regardless. Same root cause and same shape as an
+      earlier fixed bug ("I restored prior session and have selected local
+      AI ... I suspect it must be using cloud (Argo)", documented in the
+      code comment above `MainWindow._on_session_ready`'s
+      `_refresh_profile_selector()` call): `MainWindow.__init__` calls
+      `_refresh_workspace_selector()` exactly once, synchronously, right
+      after `bridge.start()` — but `bridge.start()` only *kicks off*
+      `start_session(...)` on the background asyncio loop and returns
+      immediately, so `self.bridge.session` is still `None` at that point
+      and the dropdown falls back to its "(no workspace)" default. Once
+      the session actually finishes starting (a moment later, on
+      `session_ready`), the profile selector *does* get refreshed a second
+      time in `_on_session_ready` — the earlier fix for the analogous
+      profile bug — but the workspace selector never did, so it stayed
+      wrong for the entire session.
+      **Done (2026-08-23):** added `self._refresh_workspace_selector()` to
+      `_on_session_ready`, alongside the existing profile-selector
+      refresh. Test: `tests/ui/test_main_window.py::
+      test_workspace_selector_shows_the_actual_active_workspace_once_ready`
+      (verified it actually catches the regression — fails with the fix
+      reverted, passes with it in place).
+
+- [x] **Windows CI flake:
+      `test_shutdown_cancels_and_waits_for_an_in_flight_turn`.** CI report
+      (`ubuntu`/`macos` green, `windows-latest` × Python 3.11 red):
+      `assert len(events) == events_before, "a closing bridge kept emitting
+      events"` failed — one extra `ToolCallFinished` event showed up after
+      `bridge.shutdown()`. Root cause traced to the test's own
+      instrumentation, not `ChatBridge`: the test does
+      `loop_thread.loop.call_soon_threadsafe(release.set)` (unblocks an
+      in-flight tool call, on the background loop thread) immediately
+      followed by `bridge.shutdown(timeout=10.0)` (whose very first line,
+      `self._closing = True`, runs synchronously on *this* — the test/Qt —
+      thread). The test's assertion implicitly depends on that
+      `self._closing = True` write landing before the background loop
+      thread finishes processing `release.set`, resuming the blocked tool
+      call, and emitting its `ToolCallFinished` event — but nothing
+      actually synchronizes those two independent, concurrently-scheduled
+      actions on two different OS threads; it only worked "by default" on
+      Linux/macOS because completing that whole chain of loop-thread
+      scheduling hops reliably took longer than this thread's single next
+      bytecode instruction. Windows CI's thread/loop scheduling closed that
+      margin often enough to occasionally lose the race. `ChatBridge`
+      itself behaves correctly here — `_drain`'s `if not self._closing:
+      emit(...)` gate is exactly the intended mechanism — this was purely
+      an unsynchronized-race bug in how the test triggered the scenario.
+      **Done (2026-08-23):** the test now sets `bridge._closing = True`
+      directly, *before* scheduling `release.set()`, making the ordering
+      the test actually cares about (turn in flight *and already closing*
+      → no further events) true by construction instead of by scheduling
+      luck; `bridge.shutdown()` immediately after just re-sets the same
+      flag, a harmless no-op, then does its real async cleanup exactly as
+      before. Verified: 20/20 repeated runs pass locally; full suite
+      (1216 tests, CI's combined `pytest -v` invocation) clean.
+
 ---
 
 ## 2. Backend improvements (highest value first)

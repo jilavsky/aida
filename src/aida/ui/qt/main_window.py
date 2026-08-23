@@ -340,6 +340,18 @@ class MainWindow(QMainWindow):
         # therefore show a profile that was never actually in use, for
         # every session (not just resumed ones).
         self._refresh_profile_selector()
+        # Same bug, same fix, workspace side: __init__'s one-time
+        # _refresh_workspace_selector() call (right after bridge.start())
+        # also runs before start_session()'s async resolution of the actual
+        # workspace has completed, so it always reads self.bridge.session
+        # as None and the toolbar dropdown falls back to "(no workspace)" —
+        # even though the session that finishes starting a moment later is
+        # correctly using the real (e.g. last-used) workspace the whole
+        # time. Unlike the profile selector, nothing ever refreshed this
+        # dropdown again afterward for a normal startup/resume, so it was
+        # stuck on "(no workspace)" for the rest of the session. Refreshing
+        # here, once the session is actually ready, fixes it the same way.
+        self._refresh_workspace_selector()
         self._save_last_session_selection()
         self._update_usage_label()
 
