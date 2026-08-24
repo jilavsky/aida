@@ -116,6 +116,24 @@ def test_workspace_context_block_mentions_scratch_dir_even_with_no_workspace():
     assert "Scratch folder" in block
 
 
+def test_workspace_context_block_scratch_dir_explains_mcp_relative_paths():
+    # Bug report: the model successfully called an MCP tool (Playwright
+    # screenshot) with a relative filename, then couldn't find the resulting
+    # file — it guessed the wrong absolute path and resorted to `find`.
+    # Every MCP server's cwd is the scratch dir (aida.mcp.server), so a
+    # relative path a tool resolves on its own lands there too; the model
+    # needs to be told that explicitly rather than discovering it via search.
+    block = build_workspace_context_block(
+        source_folders=[], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
+        safety_mode="confirm", scratch_dir="/Users/me/.aida/tmp",
+    )
+    assert block is not None
+    assert "MCP tool" in block
+    assert "working directory" in block
+    # The example resolution shown to the model uses the real configured dir.
+    assert "/Users/me/.aida/tmp/shot.png" in block
+
+
 # --- build_coding_context_block (regression: the model resorted to a raw
 # `python3 -c "..."` probe via run_command, needing confirmation, just to
 # discover its interpreter/packages) ----------------------------------------

@@ -173,7 +173,13 @@ def build_workspace_context_block(
             f"Scratch folder — put temporary/working files here (throwaway scripts, downloads, "
             f"intermediate output), not in a repo or the source/target folders above: {scratch_dir}\n"
             "It is not backed up and may be cleared out periodically — don't rely on it for anything "
-            "the user needs kept."
+            "the user needs kept.\n"
+            "Every MCP tool server also starts with this folder as its working directory. If an MCP "
+            "tool takes a relative filename/path argument (e.g. a browser tool's screenshot or "
+            f"download path) and you don't pass an absolute one, that's where it lands — e.g. a "
+            f"relative filename of 'shot.png' resolves to {scratch_dir}/shot.png. Prefer passing the "
+            "tool an absolute path built from the folder above in the first place; otherwise expect "
+            "its output there instead of guessing afterward or searching the filesystem for it."
         )
 
     lines.append("")
