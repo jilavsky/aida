@@ -240,6 +240,7 @@ class MainWindow(QMainWindow):
         self.input_box.folder_dropped.connect(self._on_folder_dropped)
         self.sidebar.resume_requested.connect(self._on_resume_requested)
         self.sidebar.delete_requested.connect(self._on_delete_requested)
+        self.sidebar.delete_many_requested.connect(self._on_delete_many_requested)
         self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
         self.sidebar.rename_requested.connect(self._on_rename_requested)
         self.chat_panel.code_editor_requested.connect(self._on_code_editor_requested)
@@ -718,6 +719,16 @@ class MainWindow(QMainWindow):
             old_bridge.shutdown()
         finally:
             QApplication.restoreOverrideCursor()
+        # Bug report: "Let's not add ... conversations which have no
+        # messages in them ... or remove automatically when new
+        # conversation is created." ChatSession's recorder creates its
+        # conversation row up front, at session-start time, before any
+        # message exists — every workspace switch / New Chat / Resume left
+        # the *previous* one behind as a permanent "(untitled)" row if the
+        # user never actually sent anything in it. Captured before
+        # deleteLater() below, straight off the now-closed session — its
+        # recorder/store aren't touched again, just read from.
+        self._delete_conversation_if_empty(self._active_conversation_id(old_bridge))
         # Retire the old bridge completely before the new one exists: its
         # signals are still connected to these same handlers, and every
         # handler resolves state through `self.bridge`. A superseded bridge
@@ -751,6 +762,35 @@ class MainWindow(QMainWindow):
         finally:
             store.close()
 
+    @staticmethod
+    def _active_conversation_id(bridge: ChatBridge) -> str | None:
+        """``bridge.session``/``session.recorder`` are both optional (no
+        session yet, or a recorder-less session — see ``ChatSession.
+        __init__``'s default) — this is the one guarded read shared by
+        every ``_delete_conversation_if_empty`` call site."""
+        session = bridge.session
+        if session is None or session.recorder is None:
+            return None
+        return session.recorder.conversation_id
+
+    def _delete_conversation_if_empty(self, conversation_id: str | None) -> None:
+        """See the call site in ``_restart_session``/``closeEvent`` — a
+        conversation row with zero messages was never actually used, so it
+        is deleted outright rather than left behind. A fresh
+        ``ConversationStore`` (the old session's own is already closed by
+        this point) mirrors every other sidebar action's own open/use/close
+        pattern (``_on_delete_requested`` etc.)."""
+        if conversation_id is None:
+            return
+        store = ConversationStore()
+        try:
+            summary = store.get_conversation(conversation_id)
+            if summary is not None and summary.message_count == 0:
+                records_dir = ensure_records_dir(self.settings.app.records_dir)
+                delete_conversation(store, conversation_id, records_dir=records_dir)
+        finally:
+            store.close()
+
     def _on_resume_requested(self, conversation_id: str) -> None:
         # Bug report: "I restored prior session and have selected local AI
         # ... I suspect it must be using cloud (Argo) because no local AI
@@ -773,6 +813,20 @@ class MainWindow(QMainWindow):
         try:
             records_dir = ensure_records_dir(self.settings.app.records_dir)
             delete_conversation(store, conversation_id, records_dir=records_dir)
+        finally:
+            store.close()
+        self._refresh_conversations_sidebar()
+
+    def _on_delete_many_requested(self, conversation_ids: list[str]) -> None:
+        """Bulk counterpart of ``_on_delete_requested`` — the sidebar's own
+        multi-select Delete already confirmed once for the whole batch, so
+        this just deletes each and refreshes once at the end, same
+        "loop then refresh once" shape as ``_on_cleanup_requested`` below."""
+        store = ConversationStore()
+        try:
+            records_dir = ensure_records_dir(self.settings.app.records_dir)
+            for conversation_id in conversation_ids:
+                delete_conversation(store, conversation_id, records_dir=records_dir)
         finally:
             store.close()
         self._refresh_conversations_sidebar()
@@ -1035,7 +1089,11 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
         capture_window_state(self, self.settings.app)
         save_app_config(self.settings.app)
+        conversation_id = self._active_conversation_id(self.bridge)
         self.bridge.shutdown()
+        # Same cleanup as _restart_session — quitting on a conversation
+        # nothing was ever typed into shouldn't leave it behind either.
+        self._delete_conversation_if_empty(conversation_id)
         super().closeEvent(event)
 
 

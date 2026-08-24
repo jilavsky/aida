@@ -575,6 +575,78 @@ is cumbersome" experience.
         Full suite: 1247 passed (up from 1237), same one known
         pre-existing chmod-as-root failure, `ruff check .` clean.
 
+- [x] **(B12) Conversations sidebar: empty rows, no right-click menu, no
+      multi-select.** User request, three parts. (1) "Let's not add in
+      this list (or remove automatically when new conversations is
+      created) conversations which have no messages in them. Currently
+      there are conversations which are empty (were created on start or
+      workspace change and never used). At this time they are called
+      (untitled)." Root cause: ``ChatSession``'s ``ConversationRecorder``
+      unconditionally calls ``store.create_conversation(...)`` at
+      session-*start* time — before any message exists — so every app
+      launch, workspace switch, "New Chat", and Resume left the
+      *previous* conversation behind as a permanent empty row the moment
+      the user didn't type anything into it. (2) "Add meaningful (one
+      conversation action) button functions to the right click (rename,
+      resume, delete)" — the sidebar had Resume/Rename…/Delete…/Clean Up…
+      buttons but no context menu at all. (3) "Enable multiple file
+      selection (usual shift click to select range and ctrl/cmd click to
+      select specific ones) useful for deleting multiple chats" — the
+      list was ``SingleSelection`` only.
+
+      **Done (2026-08-24):** all three.
+      - (1) Two layers, matching the user's own "not add... or remove
+        automatically" framing. Display: ``ConversationsSidebar.
+        set_conversations`` now filters to ``message_count > 0`` —
+        ``ConversationSummary`` already carried this field (used by U5's
+        search box), so this retroactively hides every already-
+        accumulated empty row too, no DB migration needed. Cleanup:
+        ``MainWindow`` gained ``_delete_conversation_if_empty(
+        conversation_id)`` (opens a fresh ``ConversationStore``,
+        deletes via the existing ``aida.persistence.cleanup.
+        delete_conversation`` if and only if ``message_count == 0``) and
+        a guarded ``_active_conversation_id(bridge)`` helper (``bridge.
+        session``/``session.recorder`` are both optional). Called from
+        ``_restart_session`` right after the old bridge's ``shutdown()``
+        (covers workspace switch, New Chat, and Resume — all three route
+        through it) and from ``closeEvent`` (quitting the app on an
+        untouched conversation shouldn't leave it behind either).
+      - (2) ``ConversationsSidebar``'s list gained a
+        ``CustomContextMenu``: right-click on a row already part of the
+        current selection acts on that whole selection; right-click
+        elsewhere selects just that row first (standard file-manager
+        behavior). One conversation selected offers Resume/Rename…/
+        Delete…; more than one offers Delete… only (Resume/Rename don't
+        make sense for several at once) — split into a testable
+        ``_build_context_menu()`` plus a tiny ``_popup_context_menu()``
+        wrapper around the actual ``QMenu.exec()`` call, since a compiled
+        Qt slot method can't be reliably monkeypatched in a test (a first
+        attempt at testing this directly hung the suite on a real modal
+        menu waiting for mouse input).
+      - (3) Selection mode changed from ``SingleSelection`` to
+        ``ExtendedSelection`` (Qt's own built-in shift-range/ctrl-toggle
+        behavior — no custom mouse handling needed). A new
+        ``selected_conversation_ids()`` (plural) backs bulk actions;
+        Delete now branches on selection size — one conversation still
+        emits the existing ``delete_requested`` signal unchanged (every
+        prior connection/test stays valid), several emit a new
+        ``delete_many_requested`` signal, handled by a new ``MainWindow.
+        _on_delete_many_requested`` that loops and refreshes the sidebar
+        once at the end, mirroring ``_on_cleanup_requested``'s existing
+        shape.
+      - Tests: `tests/ui/test_conversations_sidebar.py` (17 new: empty-
+        conversation filtering, ``ExtendedSelection`` is actually
+        configured, ``selected_conversation_ids()``, bulk vs. single
+        delete signal routing, context-menu contents for one vs. several
+        selected, right-click selection-fixup both when the clicked row
+        is and isn't already selected, right-click on empty space is a
+        no-op), `tests/ui/test_main_window.py` (7 new: the sidebar never
+        shows the conversation ``MainWindow.__init__`` creates up front,
+        New Chat/workspace-switch/window-close each delete an untouched
+        conversation but never one with real messages, bulk delete
+        end-to-end). Full suite: 1266 passed (up from 1247), same one
+        known pre-existing chmod-as-root failure, `ruff check .` clean.
+
 Deliberately *not* recommended right now: swapping the RAG store for a vector
 DB, adopting an agent framework, or a web frontend — the plan's original
 reasoning still holds, and nothing in this review contradicts it.

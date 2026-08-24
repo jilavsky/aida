@@ -5,11 +5,13 @@ from __future__ import annotations
 import re
 
 from aida.persistence.store import ConversationSummary
-from aida.ui.qt._qt import QDialog, QMessageBox
+from aida.ui.qt._qt import QAbstractItemView, QDialog, QMessageBox
 from aida.ui.qt.conversations_sidebar import CleanupDialog, ConversationsSidebar
 
 
-def _summary(conv_id: str, title: str = "chat", workspace: str | None = "use-pyirena") -> ConversationSummary:
+def _summary(
+    conv_id: str, title: str = "chat", workspace: str | None = "use-pyirena", *, message_count: int = 2
+) -> ConversationSummary:
     return ConversationSummary(
         id=conv_id,
         title=title,
@@ -19,7 +21,7 @@ def _summary(conv_id: str, title: str = "chat", workspace: str | None = "use-pyi
         created_at="2026-08-19T00:00:00",
         updated_at="2026-08-19T00:00:00",
         record_path=None,
-        message_count=2,
+        message_count=message_count,
     )
 
 
@@ -240,6 +242,163 @@ def test_clearing_search_restores_every_conversation(qapp):
     assert sidebar.count == 1
     sidebar._search_edit.setText("")
     assert sidebar.count == 2
+
+
+# --- empty conversations never show (bug report: "Let's not add in this
+# list ... conversations which have no messages in them") ------------------
+
+
+def test_set_conversations_hides_conversations_with_no_messages(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", message_count=0), _summary("id2", message_count=1)])
+    assert sidebar.count == 1
+    assert sidebar._ids_by_row == ["id2"]
+
+
+def test_set_conversations_with_only_empty_conversations_shows_nothing(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", message_count=0)])
+    assert sidebar.count == 0
+
+
+# --- multi-select (bug report: "Enable multiple file selection ... shift
+# click to select range and ctrl/cmd click ... useful for deleting multiple
+# chats") ---------------------------------------------------------------
+
+
+def test_selection_mode_is_extended(qapp):
+    """The actual shift-range/ctrl-toggle mouse behavior is Qt's own
+    ExtendedSelection implementation — this just pins down that the widget
+    is actually configured for it."""
+    sidebar = ConversationsSidebar()
+    assert sidebar._list.selectionMode() == QAbstractItemView.SelectionMode.ExtendedSelection
+
+
+def test_selected_conversation_ids_returns_every_selected_row(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1"), _summary("id2"), _summary("id3")])
+    sidebar._list.item(0).setSelected(True)
+    sidebar._list.item(2).setSelected(True)
+    assert sidebar.selected_conversation_ids() == ["id1", "id3"]
+
+
+def test_selected_conversation_ids_empty_when_nothing_selected(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1")])
+    sidebar._list.clearSelection()
+    assert sidebar.selected_conversation_ids() == []
+
+
+def test_delete_multiple_selected_emits_delete_many_requested(qapp, monkeypatch):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1"), _summary("id2"), _summary("id3")])
+    sidebar._list.item(0).setSelected(True)
+    sidebar._list.item(1).setSelected(True)
+    monkeypatch.setattr(
+        "aida.ui.qt.conversations_sidebar.QMessageBox.question",
+        lambda *a, **kw: QMessageBox.StandardButton.Yes,
+    )
+    single_deleted = []
+    many_deleted = []
+    sidebar.delete_requested.connect(single_deleted.append)
+    sidebar.delete_many_requested.connect(many_deleted.append)
+    sidebar._on_delete_clicked()
+    assert single_deleted == []
+    assert many_deleted == [["id1", "id2"]]
+
+
+def test_delete_multiple_declined_emits_nothing(qapp, monkeypatch):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1"), _summary("id2")])
+    sidebar._list.item(0).setSelected(True)
+    sidebar._list.item(1).setSelected(True)
+    monkeypatch.setattr(
+        "aida.ui.qt.conversations_sidebar.QMessageBox.question",
+        lambda *a, **kw: QMessageBox.StandardButton.No,
+    )
+    many_deleted = []
+    sidebar.delete_many_requested.connect(many_deleted.append)
+    sidebar._on_delete_clicked()
+    assert many_deleted == []
+
+
+def test_delete_single_selection_still_emits_the_singular_signal(qapp, monkeypatch):
+    """Backward-compat check: a plain single selection must still use
+    delete_requested, not the new bulk signal."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1"), _summary("id2")])
+    sidebar._list.item(0).setSelected(True)
+    monkeypatch.setattr(
+        "aida.ui.qt.conversations_sidebar.QMessageBox.question",
+        lambda *a, **kw: QMessageBox.StandardButton.Yes,
+    )
+    single_deleted = []
+    many_deleted = []
+    sidebar.delete_requested.connect(single_deleted.append)
+    sidebar.delete_many_requested.connect(many_deleted.append)
+    sidebar._on_delete_clicked()
+    assert single_deleted == ["id1"]
+    assert many_deleted == []
+
+
+# --- right-click context menu (bug report: "Add meaningful (one
+# conversation action) button functions to the right click (rename,
+# resume, delete)") ----------------------------------------------------
+
+
+def test_context_menu_on_a_single_row_offers_resume_rename_delete(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1")])
+    sidebar._list.item(0).setSelected(True)
+    menu = sidebar._build_context_menu()
+    labels = [action.text() for action in menu.actions() if not action.isSeparator()]
+    assert labels == ["Resume", "Rename…", "Delete…"]
+
+
+def test_context_menu_on_multiple_rows_offers_delete_only(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1"), _summary("id2")])
+    sidebar._list.item(0).setSelected(True)
+    sidebar._list.item(1).setSelected(True)
+    menu = sidebar._build_context_menu()
+    labels = [action.text() for action in menu.actions()]
+    assert labels == ["Delete…"]
+
+
+def test_right_clicking_an_unselected_row_selects_just_that_row(qapp, monkeypatch):
+    """Right-clicking outside the current selection must replace it (same
+    as a plain left click), not act on stale rows."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1"), _summary("id2"), _summary("id3")])
+    sidebar._list.item(0).setSelected(True)
+    monkeypatch.setattr(ConversationsSidebar, "_popup_context_menu", lambda self, menu, pos: None)
+
+    pos = sidebar._list.visualItemRect(sidebar._list.item(2)).center()
+    sidebar._on_context_menu_requested(pos)
+
+    assert sidebar.selected_conversation_ids() == ["id3"]
+
+
+def test_right_clicking_a_row_already_in_the_selection_keeps_the_whole_selection(qapp, monkeypatch):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1"), _summary("id2"), _summary("id3")])
+    sidebar._list.item(0).setSelected(True)
+    sidebar._list.item(1).setSelected(True)
+    monkeypatch.setattr(ConversationsSidebar, "_popup_context_menu", lambda self, menu, pos: None)
+
+    pos = sidebar._list.visualItemRect(sidebar._list.item(1)).center()
+    sidebar._on_context_menu_requested(pos)
+
+    assert sidebar.selected_conversation_ids() == ["id1", "id2"]
+
+
+def test_right_clicking_empty_space_does_not_raise(qapp, monkeypatch):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1")])
+    monkeypatch.setattr(ConversationsSidebar, "_popup_context_menu", lambda self, menu, pos: None)
+    from aida.ui.qt._qt import QPoint
+
+    sidebar._on_context_menu_requested(QPoint(0, 5000))  # well below the single row
 
 
 def test_refreshing_conversations_preserves_an_active_filter(qapp):

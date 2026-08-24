@@ -25,6 +25,7 @@ from aida.config.settings import (
 )
 from aida.core.events import ContextTrimmed
 from aida.persistence.store import ConversationStore
+from aida.providers.base import Message
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
 from aida.ui.qt._qt import QApplication, QDesktopServices, QDialog, QMessageBox, Qt
 from aida.ui.qt.artifact_widgets import InlineImageWidget
@@ -447,6 +448,163 @@ def test_delete_conversation_removes_from_sidebar_and_db(
         assert conv_id not in window.sidebar._ids_by_row
     finally:
         window.close()
+
+
+def test_delete_many_requested_removes_all_from_sidebar_and_db(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "Enable multiple file selection ... useful for deleting
+    multiple chats." — the sidebar's bulk-delete signal."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        conv_id = window.bridge.session.recorder.conversation_id
+        window.input_box.set_text("hello")
+        window.input_box._send_button.click()
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+
+        store = ConversationStore()
+        try:
+            other_id = store.create_conversation(timestamp="2026-08-23T00:00:00", workspace_name=None, profile_name=None)
+            store.append_message(other_id, Message(role="user", content="hi"), timestamp="2026-08-23T00:00:01")
+        finally:
+            store.close()
+        window._refresh_conversations_sidebar()
+        assert conv_id in window.sidebar._ids_by_row
+        assert other_id in window.sidebar._ids_by_row
+
+        window._on_delete_many_requested([conv_id, other_id])
+
+        store = ConversationStore()
+        try:
+            assert store.get_conversation(conv_id) is None
+            assert store.get_conversation(other_id) is None
+        finally:
+            store.close()
+        assert conv_id not in window.sidebar._ids_by_row
+        assert other_id not in window.sidebar._ids_by_row
+    finally:
+        window.close()
+
+
+# --- empty conversations are never left behind (bug report: "Let's not add
+# in this list ... conversations which have no messages in them ... or
+# remove automatically when new conversation is created") -------------------
+
+
+def test_sidebar_never_shows_the_freshly_started_empty_conversation(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        conv_id = window.bridge.session.recorder.conversation_id
+        window._refresh_conversations_sidebar()
+        assert conv_id not in window.sidebar._ids_by_row
+    finally:
+        window.close()
+
+
+def test_new_chat_on_an_untouched_conversation_deletes_it(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """The conversation MainWindow.__init__ creates up front is deleted
+    outright once New Chat replaces it, since nothing was ever sent to it —
+    it would otherwise sit in the DB forever as a permanent "(untitled)"
+    row (hidden from the sidebar by the fix above, but never cleaned up)."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        first_conv_id = window.bridge.session.recorder.conversation_id
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+        )
+        window._on_new_chat_requested()
+        assert pump_until(
+            qapp,
+            lambda: window.bridge.session is not None
+            and window.bridge.session.recorder.conversation_id != first_conv_id,
+        )
+
+        store = ConversationStore()
+        try:
+            assert store.get_conversation(first_conv_id) is None
+        finally:
+            store.close()
+    finally:
+        window.close()
+
+
+def test_workspace_switch_on_an_untouched_conversation_deletes_it(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={"plain-chat": WorkspaceConfig(name="plain-chat", profile="mock-profile", mcp_group="none")}
+    )
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        first_conv_id = window.bridge.session.recorder.conversation_id
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+        )
+        window._on_workspace_changed("plain-chat")
+        assert pump_until(
+            qapp,
+            lambda: window.bridge.session is not None
+            and window.bridge.session.recorder.conversation_id != first_conv_id,
+        )
+
+        store = ConversationStore()
+        try:
+            assert store.get_conversation(first_conv_id) is None
+        finally:
+            store.close()
+    finally:
+        window.close()
+
+
+def test_close_event_deletes_an_untouched_conversation(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    conv_id = window.bridge.session.recorder.conversation_id
+    window.close()
+
+    store = ConversationStore()
+    try:
+        assert store.get_conversation(conv_id) is None
+    finally:
+        store.close()
+
+
+def test_close_event_keeps_a_conversation_with_messages(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    conv_id = window.bridge.session.recorder.conversation_id
+    window.input_box.set_text("hello")
+    window.input_box._send_button.click()
+    assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+    window.close()
+
+    store = ConversationStore()
+    try:
+        assert store.get_conversation(conv_id) is not None
+    finally:
+        store.close()
 
 
 def test_mcp_quick_panel_manage_button_opens_management_dialog(

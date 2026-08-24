@@ -25,9 +25,11 @@ from aida.ui.qt._qt import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSpinBox,
+    Qt,
     QVBoxLayout,
     QWidget,
     Signal,
@@ -101,6 +103,12 @@ class ConversationsSidebar(QWidget):
     # use." set_title already exists on ConversationStore (used once, by
     # auto-titling) — this is the missing "rename it again" entry point.
     rename_requested = Signal(str, str)  # conversation_id, new_title
+    # Bug report: "Enable multiple file selection ... useful for deleting
+    # multiple chats." A separate signal from delete_requested (rather than
+    # a list there too) keeps every existing single-delete connection/test
+    # unchanged — MainWindow just adds one more connection, mirroring
+    # _on_cleanup_requested's own "loop then refresh once" shape.
+    delete_many_requested = Signal(list)  # list[str] of conversation_ids, already confirmed
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -124,8 +132,16 @@ class ConversationsSidebar(QWidget):
         layout.addWidget(self._search_edit)
 
         self._list = QListWidget(self)
-        self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # Bug report: "Enable multiple file selection (usual shift click to
+        # select range and ctrl/cmd click to select specific ones) useful
+        # for deleting multiple chats." ExtendedSelection is exactly that
+        # standard shift-range / ctrl-toggle behavior, built into Qt.
+        self._list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._list.itemDoubleClicked.connect(self._on_double_click)
+        # Bug report: "Add meaningful ... button functions to the right
+        # click (rename, resume, delete)."
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_context_menu_requested)
         layout.addWidget(self._list)
 
         buttons = QHBoxLayout()
@@ -147,7 +163,16 @@ class ConversationsSidebar(QWidget):
         layout.addLayout(buttons)
 
     def set_conversations(self, summaries: Iterable[ConversationSummary]) -> None:
-        self._all_summaries = list(summaries)
+        # Bug report: "Let's not add in this list ... conversations which
+        # have no messages in them. Currently there are conversations which
+        # are empty (were created on start or workspace change and never
+        # used)." A ChatSession's recorder creates its conversation row up
+        # front, before any message exists (see MainWindow's
+        # _delete_conversation_if_empty for the matching auto-delete side
+        # of this) — filtering here also retroactively hides any already-
+        # accumulated empty rows from *before* that existed, with no
+        # migration needed.
+        self._all_summaries = [s for s in summaries if s.message_count > 0]
         self._apply_filter(self._search_edit.text())
 
     def _apply_filter(self, query: str) -> None:
@@ -176,6 +201,13 @@ class ConversationsSidebar(QWidget):
             return None
         return self._ids_by_row[row]
 
+    def selected_conversation_ids(self) -> list[str]:
+        """Every currently-selected row's conversation id, in list order
+        (not selection/click order) — the multi-select counterpart of
+        ``selected_conversation_id`` above, used by bulk Delete."""
+        rows = sorted({index.row() for index in self._list.selectedIndexes()})
+        return [self._ids_by_row[row] for row in rows if 0 <= row < len(self._ids_by_row)]
+
     def select_row(self, index: int) -> None:
         self._list.setCurrentRow(index)
 
@@ -190,18 +222,35 @@ class ConversationsSidebar(QWidget):
             self.resume_requested.emit(conv_id)
 
     def _on_delete_clicked(self) -> None:
-        conv_id = self.selected_conversation_id()
-        if not conv_id:
+        """Deletes whatever is currently selected — one conversation
+        (``delete_requested``, unchanged from before multi-select existed)
+        or several at once (``delete_many_requested``). Shared by the
+        Delete… button and the right-click menu's Delete action."""
+        conv_ids = self.selected_conversation_ids()
+        if not conv_ids:
             return
+        if len(conv_ids) == 1:
+            title = "Delete Conversation"
+            message = "Delete this conversation? This removes its record, artifacts, and history permanently."
+        else:
+            title = "Delete Conversations"
+            message = (
+                f"Delete these {len(conv_ids)} conversations? "
+                "This removes their records, artifacts, and history permanently."
+            )
         answer = QMessageBox.question(
             self,
-            "Delete Conversation",
-            "Delete this conversation? This removes its record, artifacts, and history permanently.",
+            title,
+            message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-        if answer == QMessageBox.StandardButton.Yes:
-            self.delete_requested.emit(conv_id)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if len(conv_ids) == 1:
+            self.delete_requested.emit(conv_ids[0])
+        else:
+            self.delete_many_requested.emit(conv_ids)
 
     def _on_rename_clicked(self) -> None:
         row = self._list.currentRow()
@@ -218,6 +267,47 @@ class ConversationsSidebar(QWidget):
         days = CleanupDialog.get_cutoff_days(self)
         if days is not None:
             self.cleanup_requested.emit(days)
+
+    def _on_context_menu_requested(self, pos) -> None:
+        """Right-click menu — bug report: "Add meaningful (one conversation
+        action) button functions to the right click (rename, resume,
+        delete)." Right-clicking a row that's already part of the current
+        multi-selection acts on that whole selection (standard file-
+        manager behavior); right-clicking anywhere else selects just that
+        row first, same as a plain left click would."""
+        item = self._list.itemAt(pos)
+        if item is None:
+            return
+        if item not in self._list.selectedItems():
+            self._list.clearSelection()
+            item.setSelected(True)
+            self._list.setCurrentItem(item)
+
+        self._popup_context_menu(self._build_context_menu(), self._list.viewport().mapToGlobal(pos))
+
+    def _popup_context_menu(self, menu: QMenu, global_pos) -> None:
+        """Split out from ``_on_context_menu_requested`` purely so tests
+        can monkeypatch this one call: ``QMenu.exec()`` itself is a
+        compiled Qt slot, not overridable via a plain Python monkeypatch,
+        and would otherwise pop up a real modal menu that blocks waiting
+        for mouse input no automated test can provide."""
+        menu.exec(global_pos)
+
+    def _build_context_menu(self) -> QMenu:
+        """Split out from ``_on_context_menu_requested`` so tests can
+        inspect the built menu's actions without popping up a real, modal
+        native menu (``exec()`` blocks for real mouse/keyboard input).
+        Resume/Rename only make sense for exactly one conversation; a
+        multi-selection gets Delete only."""
+        menu = QMenu(self)
+        if len(self.selected_conversation_ids()) == 1:
+            menu.addAction("Resume", self._on_resume_clicked)
+            menu.addAction("Rename…", self._on_rename_clicked)
+            menu.addSeparator()
+            menu.addAction("Delete…", self._on_delete_clicked)
+        else:
+            menu.addAction("Delete…", self._on_delete_clicked)
+        return menu
 
 
 __all__ = ["CleanupDialog", "ConversationsSidebar"]
