@@ -647,6 +647,119 @@ is cumbersome" experience.
         end-to-end). Full suite: 1266 passed (up from 1247), same one
         known pre-existing chmod-as-root failure, `ruff check .` clean.
 
+- [x] **(B13) Model can't find its own MCP tool output afterward.** User
+      report, with a console log: the model correctly called
+      ``playwright__browser_take_screenshot`` (B9's argument coercion
+      working fine — ``fullPage``/``depth`` both auto-corrected), the file
+      landed at ``~/.aida/tmp/search_page.png`` exactly where B10 intends,
+      but the model then guessed a wrong absolute path (the workspace's
+      *target* folder), got "Not a file", and fell back to several
+      confirmation-gated ``find`` shell commands — including a whole-
+      filesystem ``find /`` — the last of which the user declined. Root
+      cause: Playwright MCP's ``browser_take_screenshot``/``browser_snapshot``
+      tools only ever report a path *relative* to the calling client's
+      workspace in their result text, never the resolved absolute path
+      (confirmed against the real ``microsoft/playwright-mcp`` source,
+      matching npm ``@playwright/mcp@0.0.79``) — so the model has no way to
+      recover the absolute path from the tool result alone. The relative
+      path resolves against the MCP server subprocess's OS ``cwd``, which
+      B10 already points at the scratch folder (``aida.mcp.server`` passes
+      ``cwd=`` to every server it launches) — AIDA doesn't implement the
+      MCP ``roots`` capability (checked: no reference in ``aida/mcp/
+      server.py`` or ``aida/mcp/manager.py``), so Playwright MCP falls back
+      to ``process.cwd()``, which is that same scratch folder. The
+      mechanism is reliable; the model just wasn't told about it. User's
+      own suggested fix: "May[be] we just need to add instructions for
+      agent where to look? ... it is dynamic location."
+
+      **Done (2026-08-24):** extended the scratch-folder paragraph
+      ``build_workspace_context_block`` already prints (added in B10) with
+      an explicit sentence connecting it to MCP tool behavior: every MCP
+      server starts with the scratch folder as its working directory, so a
+      relative filename/path argument an MCP tool accepts (e.g. a browser
+      tool's screenshot/download path) resolves there if the model doesn't
+      pass an absolute one — spelled out with a worked example
+      (``'shot.png'`` → ``{scratch_dir}/shot.png``) and a steer toward
+      passing an absolute path built from the folder in the first place,
+      instead of guessing afterward or reaching for ``find``. Purely a
+      system-context/prompt change — no MCP-protocol-level work (like
+      advertising ``roots``) needed, since the ``cwd`` fallback path B10
+      already relies on is confirmed to be what's actually in effect.
+      Tests: `tests/test_context.py` (1 new — asserts the block mentions
+      "MCP tool", "working directory", and the worked-example absolute
+      path). Full suite: 1267 passed (up from 1266), same one known
+      pre-existing chmod-as-root failure, `ruff check .` clean.
+
+- [x] **(B14) Workspace-scoped "Quick Tasks" panel.** User request: "Some
+      workspaces may have set of routine tasks which I would like to add to
+      some kind of quick selection methods. These must be Workspace
+      specific, somehow editable (add/remove/edit) and easily usable...
+      right hand panel where user could double click them and they would
+      get added to conversation... I hope to have at least 5-10 slots."
+
+      **Done (2026-08-26):** new ``QuickTasksPanel`` (``aida.ui.qt.
+      quick_tasks_panel``), a ``QGroupBox`` added to the existing right-
+      hand session column (below the MCP quick panel) — combines both of
+      the user's own suggested UIs rather than picking one: double-click a
+      row calls ``InputBox.set_text`` to drop the template into the input
+      box (confirming first if the box already has unsent text — never
+      auto-sent, so the user can fill in a sample name/scan number before
+      sending), right-click gives Add…/Edit…/Delete… (same testable
+      ``_build_context_menu``/``_popup_context_menu`` split as B12's
+      ``ConversationsSidebar``, since a real ``QMenu.exec()`` can't be
+      monkeypatched directly). Capped at ``MAX_QUICK_TASKS = 10`` in the
+      panel's own Add dialog (matches "at least 5-10 slots... we likely do
+      not need infinite number") — not enforced by the config loader, so a
+      hand-edited ``workspaces.yaml`` with more still loads every one.
+      Storage: new ``WorkspaceConfig.quick_tasks: list[QuickTask]`` (name +
+      text), workspace-scoped like the panel itself; malformed hand-edited
+      entries are skipped with a warning, same "old/wrong configs must
+      still load" rule as every other list field in ``aida.config``.
+      Add/Edit/Delete persist immediately (``save_workspace``), same
+      auto-save shape as the conversations sidebar's rename/delete —
+      unlike the free-typed folder fields, which need an explicit "Save to
+      Workspace" click.
+      Tests: `tests/test_settings.py` (6 new — roundtrip, defaults,
+      malformed-entry skipping), `tests/ui/test_quick_tasks_panel.py` (17
+      new — the widget in isolation), `tests/ui/test_main_window.py` (4
+      new — end-to-end: populated/disabled on workspace switch, edits
+      persist to ``workspaces.yaml`` and survive a reload, task_selected
+      fills the input box with a confirm-before-overwrite guard).
+
+- [x] **(B15) Model never knew its own name or anything about the user.**
+      User question: "I know there is per workspace system prompt. Is
+      there global system prompt and should we inject name Aida there, so
+      agent can be easier addressed... Should we somehow also inject user
+      name and some small user info? ... it would need to be editable by
+      users." Confirmed by reading the config code: no global system
+      prompt existed at all — only ``WorkspaceConfig.system_prompt``,
+      per-workspace, requiring the same detail retyped into every
+      workspace to have any effect.
+
+      **Done (2026-08-26):** new ``AppConfig.assistant_name`` (default
+      ``"Aida"``, always injected — blank values fall back to the default
+      in ``from_dict``) and ``AppConfig.user_context`` (a single free-text
+      field, empty by default — "Personal context" in Settings, e.g. "The
+      user is Jan, a beamline scientist at APS."), both global (apply to
+      every workspace) and editable from the Settings dialog. New
+      ``build_identity_context_block`` (``aida.core.context``) turns these
+      into a short block; ``build_system_message`` gained an
+      ``identity_text`` parameter that's placed *first* — ahead of even a
+      workspace's own ``system_prompt`` — since a domain persona ("You are
+      a synchrotron data-reduction assistant...") reads oddly opening a
+      conversation before the model knows its own name. ``aida.core.
+      session.start_session`` builds this once per session (global, not
+      per-``extra_context_texts`` — those already sit *after*
+      ``system_prompt``, the wrong side for this) and threads it through
+      ``ChatSession``.
+      Tests: `tests/test_settings.py` (3 new), `tests/test_context.py` (6
+      new — block ordering ahead of ``system_prompt``/``extra_texts``,
+      content), `tests/test_start_session.py` (1 new — end-to-end
+      ordering against a real workspace ``system_prompt``),
+      `tests/ui/test_settings_dialog.py` (5 new). Full suite (B14+B15
+      combined): 1307 passed (up from 1267), same one known pre-existing
+      chmod-as-root failure, `ruff check .` clean.
+
 Deliberately *not* recommended right now: swapping the RAG store for a vector
 DB, adopting an agent framework, or a web frontend — the plan's original
 reasoning still holds, and nothing in this review contradicts it.

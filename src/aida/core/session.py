@@ -45,6 +45,7 @@ from aida.config.settings import McpConfig, McpServerConfig, Settings, Workspace
 from aida.core.agent import AgentLoop
 from aida.core.context import (
     build_coding_context_block,
+    build_identity_context_block,
     build_system_message,
     build_workspace_context_block,
     estimate_message_tokens,
@@ -192,6 +193,7 @@ class ChatSession:
         initial_messages: list[Message] | None = None,
         extra_context_texts: list[str] | None = None,
         active_knowledge_bases: list[ActiveKnowledgeBase] | None = None,
+        identity_text: str | None = None,
     ) -> None:
         self.settings = settings
         self.tools = tools if tools is not None else default_native_tools()
@@ -219,7 +221,9 @@ class ChatSession:
         self.total_output_tokens = 0
 
         skill_texts = load_skill_texts(skills_dir(), skill_names or [])
-        system_message = build_system_message(system_prompt, skill_texts, extra_texts=extra_context_texts)
+        system_message = build_system_message(
+            system_prompt, skill_texts, extra_texts=extra_context_texts, identity_text=identity_text
+        )
         # Resumed history can arrive already broken: a session killed
         # (crash, force-quit) after an assistant message with tool calls was
         # persisted but before its results were leaves orphaned tool_use
@@ -536,6 +540,14 @@ async def start_session(
     effective_profile_name = profile_name or (resumed_summary.profile_name if resumed_summary else None)
     sidecar_dirname = resumed_summary.sidecar_dirname if resumed_summary else "figures"
 
+    # B15: global (workspace-independent) identity/user framing — see
+    # build_identity_context_block's docstring for why this is kept
+    # separate from extra_context_texts rather than folded in (ordering:
+    # it must land ahead of a workspace's own system_prompt, not after it).
+    identity_text = build_identity_context_block(
+        assistant_name=settings.app.assistant_name, user_context=settings.app.user_context
+    )
+
     all_skill_names = list(skill_names or [])
     system_prompt: str | None = None
     mcp_servers: list[McpServerConfig] = []
@@ -753,6 +765,7 @@ async def start_session(
             initial_messages=initial_messages,
             extra_context_texts=extra_context_texts,
             active_knowledge_bases=active_knowledge_bases,
+            identity_text=identity_text,
         )
     except UnknownProfileError:
         if mcp_manager is not None:

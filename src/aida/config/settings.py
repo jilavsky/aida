@@ -224,6 +224,17 @@ class AppConfig:
     # pattern allowed_folders/source_folders already use. Empty by default
     # (no command is allowlisted anywhere until the user adds one).
     command_allowlist: list[str] = field(default_factory=list)
+    # B15: the model was never actually told its own name or anything about
+    # the person it's talking to — nothing in the system context ever said
+    # "Aida" or the user's name/role, so the model couldn't be addressed
+    # naturally or tailor answers to who's asking without the user re-typing
+    # it into every workspace's own system_prompt. Global (not per-workspace)
+    # since it's the same fact/person regardless of which workspace is
+    # active. assistant_name is always injected, even if the user never
+    # touches Settings; user_context is empty by default and purely opt-in —
+    # a fresh install says nothing about the user until they fill it in.
+    assistant_name: str = "Aida"
+    user_context: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -241,6 +252,9 @@ class AppConfig:
                 "config.yaml: max_context_tokens=%r must not be negative; using the default instead",
                 filtered.pop("max_context_tokens"),
             )
+        if "assistant_name" in filtered and not filtered["assistant_name"].strip():
+            _logger.warning("config.yaml: assistant_name must not be blank; using the default instead")
+            filtered.pop("assistant_name")
         return cls(**filtered)
 
     def to_dict(self) -> dict[str, Any]:
@@ -261,6 +275,8 @@ class AppConfig:
             "max_agent_iterations": self.max_agent_iterations,
             "max_context_tokens": self.max_context_tokens,
             "command_allowlist": self.command_allowlist,
+            "assistant_name": self.assistant_name,
+            "user_context": self.user_context,
         }
 
 
@@ -286,6 +302,8 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "max_agent_iterations": "int",
     "max_context_tokens": "int",
     "command_allowlist": "list[str]",
+    "assistant_name": "str",
+    "user_context": "str",
 }
 
 
@@ -446,6 +464,51 @@ class ProvidersConfig:
 
 
 @dataclass
+class QuickTask:
+    """One saved routine-task prompt template (B14 — user request: "some
+    workspaces may have set of routine tasks which I would like to add to
+    some kind of quick selection methods... at least 5-10 slots"). ``name``
+    is the short label shown in the Quick Tasks panel; ``text`` is the
+    (often multi-line) prompt dropped into the input box on double-click,
+    for the user to review/fill in details before sending — never sent
+    automatically."""
+
+    name: str
+    text: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> QuickTask:
+        return cls(name=str(data.get("name", "")), text=str(data.get("text", "")))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "text": self.text}
+
+
+def _coerce_quick_tasks(source: str, value: Any) -> list[QuickTask]:
+    """Same "old/hand-edited configs must always load, warn rather than
+    crash" rule as ``_coerce_str_list`` — a malformed entry (not a dict, or
+    missing ``name``/``text``) is skipped with a warning rather than
+    aborting the whole workspace load. No slot-count limit is enforced
+    here: the Quick Tasks panel's own Add dialog is what caps new entries
+    at ``aida.ui.qt.quick_tasks_panel.MAX_QUICK_TASKS`` — a hand-edited
+    ``workspaces.yaml`` with more than that still loads every one of them,
+    same "don't silently truncate data the user put there" stance as the
+    rest of this module."""
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        _logger.warning("%s: quick_tasks must be a list — ignoring", source)
+        return []
+    tasks: list[QuickTask] = []
+    for item in value:
+        if not isinstance(item, dict) or not item.get("name") or not item.get("text"):
+            _logger.warning("%s: skipping malformed quick_tasks entry %r (need 'name' and 'text')", source, item)
+            continue
+        tasks.append(QuickTask.from_dict(item))
+    return tasks
+
+
+@dataclass
 class WorkspaceConfig:
     name: str
     profile: str | None = None
@@ -495,6 +558,10 @@ class WorkspaceConfig:
     #: workspace's long-running jobs shouldn't force every other workspace
     #: to wait as long for a runaway/hung script to be killed.
     script_timeout_seconds: float = 30.0
+    #: B14: workspace-scoped routine-task prompt templates, surfaced in the
+    #: GUI's Quick Tasks panel. Empty by default (no quick tasks until the
+    #: user adds one via the panel, or hand-edits workspaces.yaml).
+    quick_tasks: list[QuickTask] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> WorkspaceConfig:
@@ -516,6 +583,7 @@ class WorkspaceConfig:
             templates_dir=data.get("templates_dir"),
             saved_scripts_dir=data.get("saved_scripts_dir"),
             script_timeout_seconds=data.get("script_timeout_seconds", 30.0),
+            quick_tasks=_coerce_quick_tasks(source, data.get("quick_tasks")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -535,6 +603,7 @@ class WorkspaceConfig:
             "templates_dir": self.templates_dir,
             "saved_scripts_dir": self.saved_scripts_dir,
             "script_timeout_seconds": self.script_timeout_seconds,
+            "quick_tasks": [task.to_dict() for task in self.quick_tasks],
         }
 
     def resolved_saved_scripts_dir(self) -> str | None:

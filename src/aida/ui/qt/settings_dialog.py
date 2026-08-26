@@ -3,6 +3,9 @@
 (U3) the remaining ``AppConfig`` fields that previously required hand-
 editing ``config.yaml``: ``default_safety_mode``, the global
 ``allowed_folders``/``command_allowlist`` lists, and ``max_context_tokens``.
+(B15) also ``assistant_name``/``user_context`` — the global identity/user
+framing every session's system message opens with, see
+``aida.core.context.build_identity_context_block``.
 
 Never calls ``exec()`` from anywhere in ``aida.ui.qt`` itself and never
 touches ``aida.config`` I/O directly — it's constructed from an
@@ -55,6 +58,21 @@ class SettingsDialog(QDialog):
         self._font_size_spin.setRange(6, 48)
         self._font_size_spin.setValue(app_config.font_size)
         form.addRow("Font size:", self._font_size_spin)
+
+        # B15: the model was never told its own name or anything about the
+        # user — see aida.core.context.build_identity_context_block. Global
+        # (not per-workspace) since it's the same assistant/person
+        # regardless of which workspace is active.
+        self._assistant_name_edit = QLineEdit(app_config.assistant_name, self)
+        form.addRow("Assistant name:", self._assistant_name_edit)
+
+        self._user_context_edit = QPlainTextEdit(app_config.user_context, self)
+        self._user_context_edit.setPlaceholderText(
+            "Optional — a sentence or two the model always sees, e.g. "
+            "\"The user is Jan, a beamline scientist at APS.\""
+        )
+        self._user_context_edit.setMaximumHeight(60)
+        form.addRow("Personal context:", self._user_context_edit)
 
         records_row = QHBoxLayout()
         self._records_dir_edit = QLineEdit(app_config.records_dir or "", self)
@@ -149,6 +167,13 @@ class SettingsDialog(QDialog):
     def font_size(self) -> int:
         return self._font_size_spin.value()
 
+    def assistant_name(self) -> str:
+        text = self._assistant_name_edit.text().strip()
+        return text or self._original.assistant_name
+
+    def user_context(self) -> str:
+        return self._user_context_edit.toPlainText().strip()
+
     def records_dir(self) -> str | None:
         text = self._records_dir_edit.text().strip()
         return text or None
@@ -182,6 +207,8 @@ class SettingsDialog(QDialog):
         return dataclasses.replace(
             self._original,
             font_size=self.font_size(),
+            assistant_name=self.assistant_name(),
+            user_context=self.user_context(),
             records_dir=self.records_dir(),
             scratch_dir=self.scratch_dir(),
             log_level=self.log_level(),

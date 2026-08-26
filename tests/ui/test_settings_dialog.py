@@ -133,6 +133,50 @@ def test_browse_cancelled_leaves_scratch_dir_unchanged(qapp, monkeypatch):
     assert dialog.scratch_dir() == "/keep/me"
 
 
+# --- assistant_name / user_context (B15) --------------------------------
+
+
+def test_dialog_seeds_assistant_name_and_user_context_from_app_config(qapp):
+    cfg = AppConfig(assistant_name="Beamie", user_context="Jan, beamline scientist at APS.")
+    dialog = SettingsDialog(cfg)
+    assert dialog.assistant_name() == "Beamie"
+    assert dialog.user_context() == "Jan, beamline scientist at APS."
+
+
+def test_dialog_defaults_assistant_name_to_aida(qapp):
+    dialog = SettingsDialog(AppConfig())
+    assert dialog.assistant_name() == "Aida"
+    assert dialog.user_context() == ""
+
+
+def test_editing_assistant_name_and_user_context_and_reading_back(qapp):
+    cfg = AppConfig()
+    dialog = SettingsDialog(cfg)
+    dialog._assistant_name_edit.setText("Beamie")
+    dialog._user_context_edit.setPlainText("Jan, beamline scientist at APS.")
+    assert dialog.assistant_name() == "Beamie"
+    assert dialog.user_context() == "Jan, beamline scientist at APS."
+
+
+def test_blank_assistant_name_falls_back_to_the_original_value(qapp):
+    cfg = AppConfig(assistant_name="Beamie")
+    dialog = SettingsDialog(cfg)
+    dialog._assistant_name_edit.setText("   ")
+    assert dialog.assistant_name() == "Beamie"
+
+
+def test_updated_app_config_includes_edited_assistant_name_and_user_context(qapp):
+    cfg = AppConfig()
+    dialog = SettingsDialog(cfg)
+    dialog._assistant_name_edit.setText("Beamie")
+    dialog._user_context_edit.setPlainText("Jan, beamline scientist at APS.")
+
+    updated = dialog.updated_app_config()
+    assert updated.assistant_name == "Beamie"
+    assert updated.user_context == "Jan, beamline scientist at APS."
+    assert cfg.assistant_name == "Aida"  # original untouched
+
+
 def test_profiles_shown_read_only(qapp):
     profiles = {
         "argo-claude": ProviderProfile(name="argo-claude", kind="anthropic", model="claude-x"),

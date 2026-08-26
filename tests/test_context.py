@@ -5,6 +5,7 @@ from pathlib import Path
 from aida.core.context import (
     MISSING_TOOL_RESULT,
     build_coding_context_block,
+    build_identity_context_block,
     build_system_message,
     build_workspace_context_block,
     estimate_tokens,
@@ -39,6 +40,56 @@ def test_build_system_message_extra_texts_sit_between_prompt_and_skills():
     msg = build_system_message("Be concise.", ["skill text"], extra_texts=["folder facts"])
     order = [msg.content.index(p) for p in ("Be concise.", "folder facts", "skill text")]
     assert order == sorted(order), "extra_texts must land between system_prompt and skill_texts"
+
+
+# --- identity_text (B15 — "should we inject name Aida ... so agent can be
+# easier addressed") ordering: ahead of even the workspace's own
+# system_prompt, since a domain persona reads oddly before the model knows
+# its own name. --------------------------------------------------------
+
+
+def test_build_system_message_identity_text_comes_before_everything_else():
+    msg = build_system_message(
+        "Be concise.",
+        ["skill text"],
+        extra_texts=["folder facts"],
+        identity_text="Your name is Aida.",
+    )
+    order = [msg.content.index(p) for p in ("Your name is Aida.", "Be concise.", "folder facts", "skill text")]
+    assert order == sorted(order), "identity_text must come before system_prompt/extra_texts/skill_texts"
+
+
+def test_build_system_message_identity_text_optional():
+    msg = build_system_message("Be concise.", [])
+    assert "Aida" not in msg.content
+
+
+# --- build_identity_context_block (B15) -------------------------------
+
+
+def test_identity_context_block_names_the_assistant():
+    block = build_identity_context_block(assistant_name="Aida", user_context="")
+    assert block is not None
+    assert "Aida" in block
+
+
+def test_identity_context_block_includes_user_context_when_set():
+    block = build_identity_context_block(assistant_name="Aida", user_context="Jan, beamline scientist at APS.")
+    assert block is not None
+    assert "Jan, beamline scientist at APS." in block
+
+
+def test_identity_context_block_none_when_both_blank():
+    assert build_identity_context_block(assistant_name="", user_context="") is None
+
+
+def test_identity_context_block_user_context_alone_still_produces_a_block():
+    # Defensive case (AppConfig.assistant_name should never actually be
+    # blank in practice, see from_dict) — user_context alone is still worth
+    # saying something for.
+    block = build_identity_context_block(assistant_name="", user_context="Jan, beamline scientist at APS.")
+    assert block is not None
+    assert "Jan, beamline scientist at APS." in block
 
 
 # --- build_workspace_context_block (regression: "agent seems to have no

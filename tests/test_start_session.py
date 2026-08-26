@@ -218,6 +218,32 @@ async def test_start_session_tells_the_model_its_python_interpreter(
 
 
 @pytest.mark.asyncio
+async def test_start_session_tells_the_model_its_name_and_the_user_before_the_workspace_prompt(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """B15 — user request: "should we inject name Aida ... so agent can be
+    easier addressed... should we somehow also inject user name and some
+    small user info?" Global identity/user framing must reach the model,
+    and land ahead of the workspace's own system_prompt ("You are a
+    workspace assistant.") — a domain persona shouldn't open the
+    conversation before the model knows its own name."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
+    settings.app.user_context = "Jan, beamline scientist at APS."
+
+    session, mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        content = session.messages[0].content
+        assert "Aida" in content
+        assert "Jan, beamline scientist at APS." in content
+        assert content.index("Aida") < content.index("workspace assistant")
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
 async def test_start_session_no_coding_context_when_scripting_disabled(
     monkeypatch, aida_home: Path, records_home: Path
 ):

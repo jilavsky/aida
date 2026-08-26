@@ -18,6 +18,7 @@ from aida.config.settings import (
     McpConfig,
     McpServerConfig,
     ProviderProfile,
+    QuickTask,
     Settings,
     WorkspaceConfig,
     WorkspacesConfig,
@@ -418,6 +419,116 @@ def test_folder_display_shows_and_saves_command_allowlist_and_interpreter(
         reloaded = get_workspace(reloaded_settings, "use-pyirena")
         assert reloaded.command_allowlist == ["git status", "git log *"]
         assert reloaded.python_interpreter == "/usr/bin/python3"
+    finally:
+        window.close()
+
+
+# --- quick tasks panel (B14) --------------------------------------------
+
+
+def test_quick_tasks_panel_shows_workspace_tasks_and_edits_persist(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """User request: workspace-specific routine-task templates, editable
+    add/remove/edit. Verifies the same show-on-start + edit + auto-persist
+    round trip the folder fields get, minus an explicit "Save" step (quick
+    tasks persist immediately on every add/edit/delete, like the
+    conversations sidebar's rename/delete)."""
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "use-pyirena": WorkspaceConfig(
+                name="use-pyirena",
+                profile="mock-profile",
+                mcp_group="none",
+                quick_tasks=[QuickTask(name="Reduce data", text="Reduce today's USAXS runs.")],
+            )
+        }
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+    )
+    try:
+        assert window.quick_tasks_panel.count == 1
+        assert window.quick_tasks_panel.tasks()[0].name == "Reduce data"
+        assert window.quick_tasks_panel.isEnabled()
+
+        from aida.ui.qt.quick_tasks_panel import QuickTaskData
+
+        window.quick_tasks_panel.tasks_changed.emit(
+            [QuickTaskData(name="Reduce data", text="Reduce today's USAXS runs."), QuickTaskData(name="Fit Guinier", text="Fit a Guinier region.")]
+        )
+
+        saved = get_workspace(window.settings, "use-pyirena")
+        assert [t.name for t in saved.quick_tasks] == ["Reduce data", "Fit Guinier"]
+
+        reloaded_settings = load_settings()
+        reloaded = get_workspace(reloaded_settings, "use-pyirena")
+        assert [t.name for t in reloaded.quick_tasks] == ["Reduce data", "Fit Guinier"]
+    finally:
+        window.close()
+
+
+def test_quick_tasks_panel_empty_and_disabled_with_no_active_workspace(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        assert window.quick_tasks_panel.count == 0
+        assert not window.quick_tasks_panel.isEnabled()
+    finally:
+        window.close()
+
+
+def test_quick_task_selected_fills_the_input_box(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "use-pyirena": WorkspaceConfig(
+                name="use-pyirena",
+                profile="mock-profile",
+                mcp_group="none",
+                quick_tasks=[QuickTask(name="Reduce data", text="Reduce today's USAXS runs.")],
+            )
+        }
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+    )
+    try:
+        assert window.input_box.text() == ""
+        window.quick_tasks_panel.task_selected.emit("Reduce today's USAXS runs.")
+        assert window.input_box.text() == "Reduce today's USAXS runs."
+    finally:
+        window.close()
+
+
+def test_quick_task_selected_with_a_draft_asks_before_replacing(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Double-clicking a quick task while the user has unsent text in the
+    input box must not silently discard it."""
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={"use-pyirena": WorkspaceConfig(name="use-pyirena", profile="mock-profile", mcp_group="none")}
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+    )
+    try:
+        window.input_box.set_text("a draft the user was mid-typing")
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.No
+        )
+        window.quick_tasks_panel.task_selected.emit("Reduce today's USAXS runs.")
+        assert window.input_box.text() == "a draft the user was mid-typing"
+
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+        )
+        window.quick_tasks_panel.task_selected.emit("Reduce today's USAXS runs.")
+        assert window.input_box.text() == "Reduce today's USAXS runs."
     finally:
         window.close()
 

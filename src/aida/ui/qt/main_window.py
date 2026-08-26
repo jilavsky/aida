@@ -24,7 +24,7 @@ from aida import __version__ as AIDA_VERSION
 from aida.coding.runner import DEFAULT_RUN_TIMEOUT_SECONDS
 from aida.config.logging_setup import configure_logging, get_logger
 from aida.config.paths import config_dir, ensure_records_dir, ensure_scratch_dir, skills_dir
-from aida.config.settings import Settings, save_app_config
+from aida.config.settings import QuickTask, Settings, save_app_config
 from aida.core.cost import estimate_cost_usd
 from aida.core.events import ContextTrimmed
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
@@ -54,6 +54,7 @@ from aida.ui.qt.knowledge_management_dialog import KnowledgeManagementDialog
 from aida.ui.qt.mcp_management_dialog import McpManagementDialog
 from aida.ui.qt.onboarding_dialog import OnboardingDialog
 from aida.ui.qt.profiles_dialog import ProfilesDialog
+from aida.ui.qt.quick_tasks_panel import QuickTaskData, QuickTasksPanel
 from aida.ui.qt.selectors import FolderDisplay, McpQuickPanel, ProfileSelector, WorkspaceSelector
 from aida.ui.qt.settings_dialog import SettingsDialog
 from aida.ui.qt.window_state import apply_font_size, apply_window_state, capture_window_state
@@ -152,6 +153,7 @@ class MainWindow(QMainWindow):
         self.input_box = InputBox(self)
         self.folder_display = FolderDisplay(self)
         self.mcp_panel = McpQuickPanel(self)
+        self.quick_tasks_panel = QuickTasksPanel(self)
 
         chat_column = QWidget(self)
         chat_layout = QVBoxLayout(chat_column)
@@ -164,6 +166,7 @@ class MainWindow(QMainWindow):
         session_layout.setContentsMargins(0, 0, 0, 0)
         session_layout.addWidget(self.folder_display)
         session_layout.addWidget(self.mcp_panel)
+        session_layout.addWidget(self.quick_tasks_panel)
         session_layout.addStretch(1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -256,6 +259,8 @@ class MainWindow(QMainWindow):
         self.mcp_panel.manage_requested.connect(self.open_mcp_management_dialog)
         self.mcp_panel.server_start_requested.connect(self._on_mcp_server_start_requested)
         self.mcp_panel.server_stop_requested.connect(self._on_mcp_server_stop_requested)
+        self.quick_tasks_panel.task_selected.connect(self._on_quick_task_selected)
+        self.quick_tasks_panel.tasks_changed.connect(self._on_quick_tasks_changed)
 
     def _wire_bridge_signals(self) -> None:
         # Every connection here must have *this window* as the receiver, so
@@ -343,6 +348,7 @@ class MainWindow(QMainWindow):
             self._load_resumed_history(session.recorder.conversation_id)
         self._refresh_mcp_panel()
         self._refresh_folder_display()
+        self._refresh_quick_tasks_panel()
         self._refresh_conversations_sidebar()
         # Bug report: "I restored prior session and have selected local AI
         # ... I suspect it must be using cloud (Argo)." Root cause:
@@ -982,6 +988,54 @@ class MainWindow(QMainWindow):
             return
         save_workspace(self.settings, self._current_workspace_config)
         self.statusBar().showMessage(f"Saved folders to workspace {self._current_workspace_config.name}", 5000)
+
+    # --- quick tasks (B14) ---------------------------------------------------
+
+    def _refresh_quick_tasks_panel(self) -> None:
+        """Loads the active workspace's saved quick tasks — same "populate
+        from ``_current_workspace_config``, empty/disabled with no active
+        workspace" shape as ``_refresh_folder_display``. Quick tasks are
+        workspace-scoped data (a routine-task list only makes sense tied to
+        the source/target folders and skills that go with it), so there's
+        nowhere to save a new one without an active workspace."""
+        if self._current_workspace_config is not None:
+            self.quick_tasks_panel.set_tasks(
+                [QuickTaskData(name=t.name, text=t.text) for t in self._current_workspace_config.quick_tasks]
+            )
+        else:
+            self.quick_tasks_panel.set_tasks([])
+        self.quick_tasks_panel.setEnabled(self._current_workspace_config is not None)
+
+    def _on_quick_task_selected(self, text: str) -> None:
+        """Double-click in the Quick Tasks panel — drops the template into
+        the input box for the user to review/fill in details (a sample
+        name, a scan number) before sending; never sent automatically. If
+        the input box already has unsent text, confirm before discarding it
+        rather than silently clobbering something the user was mid-typing."""
+        if self.input_box.text().strip():
+            answer = QMessageBox.question(
+                self,
+                "Replace Draft Message?",
+                "The input box already has unsent text. Replace it with this quick task?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self.input_box.set_text(text)
+
+    def _on_quick_tasks_changed(self, tasks: list[QuickTaskData]) -> None:
+        """Add/Edit/Delete in the panel already asked the user to confirm
+        (or filled out the dialog) — this just persists the resulting full
+        list straight back to the active workspace's own config, same
+        "auto-save on every structured-record edit" shape as
+        ``ConversationsSidebar``'s rename/delete (unlike the folder fields,
+        which require an explicit "Save to Workspace" click since those are
+        free-typed, easy to fat-finger)."""
+        if self._current_workspace_config is None:
+            return
+        self._current_workspace_config.quick_tasks = [QuickTask(name=t.name, text=t.text) for t in tasks]
+        save_workspace(self.settings, self._current_workspace_config)
 
     # --- MCP management (Phase 7) -------------------------------------------
 

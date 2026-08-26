@@ -638,6 +638,88 @@ def test_every_app_config_field_is_loadable_from_disk():
     assert set(_APP_FIELD_KINDS) == set(AppConfig.__dataclass_fields__)
 
 
+# --- assistant_name / user_context (B15 — "should we inject name Aida ...
+# and should we somehow also inject user name and some small user info?")
+# --------------------------------------------------------------------------
+
+
+def test_app_config_assistant_name_defaults_to_aida_and_round_trips():
+    assert AppConfig().assistant_name == "Aida"
+    config = AppConfig.from_dict({"assistant_name": "Beamie"})
+    assert config.assistant_name == "Beamie"
+    assert config.to_dict()["assistant_name"] == "Beamie"
+
+
+def test_app_config_blank_assistant_name_falls_back_to_default():
+    config = AppConfig.from_dict({"assistant_name": "   "})
+    assert config.assistant_name == "Aida"
+
+
+def test_app_config_user_context_defaults_to_empty_and_round_trips():
+    assert AppConfig().user_context == ""
+    config = AppConfig.from_dict({"user_context": "Jan, beamline scientist at APS."})
+    assert config.user_context == "Jan, beamline scientist at APS."
+    assert config.to_dict()["user_context"] == "Jan, beamline scientist at APS."
+
+
+# --- WorkspaceConfig.quick_tasks (B14 — "some workspaces may have set of
+# routine tasks which I would like to add to some kind of quick selection
+# methods") -------------------------------------------------------------
+
+
+def test_workspace_quick_tasks_default_empty():
+    from aida.config.settings import WorkspaceConfig
+
+    assert WorkspaceConfig(name="plain").quick_tasks == []
+
+
+def test_workspace_quick_tasks_roundtrip(aida_home: Path):
+    from aida.config.settings import QuickTask, WorkspaceConfig
+
+    cfg = WorkspacesConfig(
+        workspaces={
+            "usaxs": WorkspaceConfig(
+                name="usaxs",
+                quick_tasks=[
+                    QuickTask(name="Reduce today's data", text="Reduce and plot today's USAXS runs."),
+                    QuickTask(name="Fit Guinier", text="Fit a Guinier region to the selected dataset."),
+                ],
+            )
+        }
+    )
+    save_workspaces_config(cfg, aida_home)
+    loaded = load_workspaces_config(aida_home).workspaces["usaxs"]
+    assert [t.name for t in loaded.quick_tasks] == ["Reduce today's data", "Fit Guinier"]
+    assert loaded.quick_tasks[0].text == "Reduce and plot today's USAXS runs."
+
+
+def test_workspace_quick_tasks_skips_malformed_entries(aida_home: Path):
+    """A hand-edited workspaces.yaml entry missing 'name' or 'text' is
+    skipped with a warning, not a crash — same "old/wrong configs must
+    still load" rule as every other list field here."""
+    from aida.config.settings import WorkspaceConfig
+
+    loaded = WorkspaceConfig.from_dict(
+        "usaxs",
+        {
+            "quick_tasks": [
+                {"name": "ok", "text": "Do the thing."},
+                {"name": "missing text"},
+                "not even a dict",
+                {"text": "missing name"},
+            ]
+        },
+    )
+    assert [t.name for t in loaded.quick_tasks] == ["ok"]
+
+
+def test_workspace_quick_tasks_non_list_value_ignored():
+    from aida.config.settings import WorkspaceConfig
+
+    loaded = WorkspaceConfig.from_dict("usaxs", {"quick_tasks": "not a list"})
+    assert loaded.quick_tasks == []
+
+
 def test_app_config_round_trips_max_context_tokens(tmp_path: Path, aida_home: Path):
     save_app_config(AppConfig(max_context_tokens=4321))
     assert load_app_config().max_context_tokens == 4321

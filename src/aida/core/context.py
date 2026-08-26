@@ -239,11 +239,47 @@ def build_coding_context_block(
     return "\n".join(lines)
 
 
+def build_identity_context_block(*, assistant_name: str, user_context: str) -> str | None:
+    """Global (not per-workspace) identity/user framing — B15 user request:
+    nothing in the system context ever told the model its own name or
+    anything about the person it's talking to; the user would otherwise
+    have to retype that into every workspace's own ``system_prompt``.
+
+    ``assistant_name`` is expected to always be set (``AppConfig.
+    assistant_name`` defaults to ``"Aida"`` and falls back to that default
+    for a blank value — see ``AppConfig.from_dict``), so this only returns
+    ``None`` if a caller passes both fields empty. ``user_context`` is
+    opt-in and empty by default — a fresh install says nothing about the
+    user until they fill in "Personal context" in Settings.
+    """
+    name = (assistant_name or "").strip()
+    context = (user_context or "").strip()
+    if not name and not context:
+        return None
+    lines = []
+    if name:
+        lines.append(f"Your name is {name}. The user may address you by that name.")
+    if context:
+        lines.append(context)
+    return "\n".join(lines)
+
+
 def build_system_message(
-    system_prompt: str | None, skill_texts: list[str], *, extra_texts: list[str] | None = None
+    system_prompt: str | None,
+    skill_texts: list[str],
+    *,
+    extra_texts: list[str] | None = None,
+    identity_text: str | None = None,
 ) -> Message:
     """Combine an optional system prompt, dynamically-generated context
     blocks, and any loaded skill texts into a single system ``Message``.
+
+    ``identity_text`` (B15 — ``build_identity_context_block``'s output)
+    comes first, ahead of even ``system_prompt``: a workspace's own persona
+    ("You are a synchrotron data-reduction assistant...") reads oddly
+    opening a conversation before the model even knows its own name, so the
+    global "who am I / who am I talking to" framing is foundational to
+    everything after it, including the workspace's own prompt.
 
     ``extra_texts`` sits between ``system_prompt`` and ``skill_texts`` —
     generated fresh at session-start time rather than loaded from a file
@@ -256,7 +292,12 @@ def build_system_message(
     """
     parts = [
         p
-        for p in ([system_prompt] if system_prompt else []) + (extra_texts or []) + skill_texts
+        for p in (
+            ([identity_text] if identity_text else [])
+            + ([system_prompt] if system_prompt else [])
+            + (extra_texts or [])
+            + skill_texts
+        )
         if p
     ]
     return Message(role="system", content="\n\n---\n\n".join(parts))
