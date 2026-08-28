@@ -77,7 +77,37 @@ implemented".
 - [ ] conda: keep `environment.yml` current; evaluate a conda-forge feedstock
       once PyPI releases are routine (record the decision either way).
 
-### 1.3 Verification owed (cannot be done from a sandbox)
+### 1.3 Context-window management and compaction
+
+The failure this prevents is the expensive one: a long pyIrena analysis
+conversation dying halfway through, with no in-app recovery. Full design,
+steps, and measured numbers in
+[`planning/context_management.md`](planning/context_management.md).
+
+- [ ] **Count what is actually sent.** The budget currently sums only the
+      message list — MCP tool schemas are passed to the provider separately
+      and never counted. Measured: pyirena-mcp's 68 tools are ~40.8 KB of
+      JSON ≈ **10,200 tokens on every request**, invisible to the budget.
+      Images aren't counted either, and the 4-chars-per-token estimator
+      undercounts exactly the dense JSON that tool results consist of.
+- [ ] **Per-profile `context_window`.** One global `max_context_tokens`
+      today: unsafe on a 128k local model once schemas are counted, and it
+      wastes ~88% of a 1M cloud window. Optional field on `ProviderProfile`,
+      falling back to the global value so nothing existing breaks. Note the
+      naming trap: `max_tokens` is the *output* cap, not the window.
+- [ ] **Context-fullness visibility.** The status-bar counter is the
+      cumulative session total, not fullness — it says nothing about how
+      close the wall is.
+- [ ] **Compaction.** Today trimming *discards* the oldest turns; nothing
+      summarizes them. Summarize-then-replace, plus a manual `/compact` and
+      a GUI action so it can be done at a task boundary rather than
+      mid-thought. Must fall back to plain trimming if summarization fails.
+- [ ] **Recovery from a full context.** Once the provider rejects a request
+      for length, every later turn in that conversation fails identically —
+      New Chat is the only escape. Compaction plus `/compact` is the fix.
+- [ ] Document it: `max_context_tokens` appears nowhere in `docs/` today.
+
+### 1.4 Verification owed (cannot be done from a sandbox)
 
 Every one of these is a *manual* check the phase files left open because no
 sandbox can perform it. They are the acceptance evidence for work already
@@ -107,7 +137,7 @@ believed complete.
 - [ ] Stop button interrupts a long generation cleanly and the app stays
       usable; manual smoke checklist on macOS *and* Windows.
 
-### 1.4 Small, decided, not yet done
+### 1.5 Small, decided, not yet done
 
 - [ ] Diff-style view when the agent proposes changes to an existing script
       (`phase09`, left open).
@@ -147,6 +177,15 @@ concrete asks for it.
   actually deployed on `usaxscontrol`; likely a thin "active user" layer over
   persistence, not real auth. The Phase 4 schema already carries a nullable
   `user` column as cheap insurance.
+- **Credentials for browser automation.** How an automated Playwright MCP
+  run could log in to a web system without the agent, the provider, or
+  AIDA's own records ever seeing the password — session reuse, a
+  non-interactive credential injected as MCP server env (which AIDA already
+  supports), or a `fill_secret`-style broker. Analysed and recorded in
+  [`planning/credentials_and_browser_automation.md`](planning/credentials_and_browser_automation.md),
+  including a traced map of the eight places a secret lands in AIDA today,
+  none of them redacted. No decision taken; the manual "log in once a day,
+  work inside that session" practice covers the attended case meanwhile.
 - **Two AIDA instances sharing `~/.aida`** (SQLite + config writes) is
   unguarded. The single-user assumption is fine today; a lock file would at
   least make the failure mode explicit.
@@ -195,7 +234,7 @@ concrete asks for it.
 - **Automatic knowledge-base refresh** via a folder watcher.
 - **Retrieval currently loads every chunk vector per query** — fine at present
   corpus sizes; revisit past roughly 10k chunks. This is the plan's own escape
-  hatch, and it needs the §1.3 benchmark before anyone acts on it.
+  hatch, and it needs the §1.4 benchmark before anyone acts on it.
 - **Parallel tool fan-out within a turn** ("plot all of these") would speed up
   UC3/UC4 but complicates cancellation and event ordering. Only if it becomes
   a felt bottleneck.
