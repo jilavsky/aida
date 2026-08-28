@@ -5,7 +5,7 @@
 > that has to change before 1.0 will be called out in the release notes.
 > See [`PLAN.md`](../PLAN.md) for what is still planned.
 
-**Related:** [installation.md](installation.md) · [workspaces.md](workspaces.md) · [knowledge-bases.md](knowledge-bases.md)
+**Related:** [installation.md](installation.md) · [workspaces.md](workspaces.md) · [knowledge-bases.md](knowledge-bases.md) · [context-and-limits.md](context-and-limits.md)
 
 A **provider profile** tells AIDA how to reach one LLM endpoint: a name, a
 `kind`, a `base_url`, a `model`, and a `secret_ref` pointing at the OS
@@ -27,8 +27,9 @@ Each entry under `profiles:` in `providers.yaml` has:
 | `temperature` | Sampling temperature. Omit/`null` for AIDA's default of `0.7` |
 | `supports_vision` | `true` lets AIDA send images to this model — plot PNGs that MCP tools return, and image files you attach in the GUI. Defaults to `false`, because a model that can't accept images errors out the moment a tool returns one. Turn it on for any vision-capable model (Claude, GPT-4o-class, a local vision model) |
 | `usd_per_m_input` / `usd_per_m_output` | Your actual price per million tokens, used for the session cost estimate. Set both to `0` for a free local model so the estimate stops pretending it costs anything; omit them and a generic default rate is used |
+| `context_window` | The model's TOTAL context window, in tokens. Omit/`null` to fall back to `config.yaml`'s global `max_context_tokens` (see [context-and-limits.md](context-and-limits.md)). **Not the same field as `max_tokens` above** — `max_tokens` caps the *output* this profile generates; `context_window` is the model's total window that the output, the conversation history, and every enabled MCP server's tool schemas all have to fit inside together |
 
-All five are optional and can be set per profile — that's the point of
+All six are optional and can be set per profile — that's the point of
 having several profiles for the same endpoint (a cheap fast one and a
 careful long-output one, say).
 
@@ -44,6 +45,7 @@ profiles:
     supports_vision: true       # let it actually look at the plots
     usd_per_m_input: 3.0
     usd_per_m_output: 15.0
+    context_window: 200000      # Claude's real window — see context-and-limits.md
 ```
 
 ### Vision: letting the model see the plots

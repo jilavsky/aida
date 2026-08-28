@@ -180,6 +180,21 @@ class ProviderProfileFormDialog(QDialog):
         )
         form.addRow("Output cost:", self._usd_output_row)
 
+        # PLAN.md §1.3: the model's TOTAL context window — distinct from
+        # Max tokens above, which caps only the *output*. None falls back
+        # to AppConfig.max_context_tokens (Settings dialog), same
+        # "unchecked means use the global default" meaning every other row
+        # here already has.
+        self._context_window_row = _OptionalNumberRow(
+            initial=profile.context_window if profile else None,
+            minimum=1,
+            maximum=10_000_000,
+            decimals=0,
+            step=1000,
+            suffix=" tok",
+        )
+        form.addRow("Context window:", self._context_window_row)
+
         self._supports_vision_checkbox = QCheckBox("This model can see attached images", self)
         self._supports_vision_checkbox.setChecked(bool(profile.supports_vision) if profile else False)
         form.addRow("Vision:", self._supports_vision_checkbox)
@@ -216,6 +231,7 @@ class ProviderProfileFormDialog(QDialog):
             usd_per_m_input=self._usd_input_row.value(),
             usd_per_m_output=self._usd_output_row.value(),
             supports_vision=self._supports_vision_checkbox.isChecked(),
+            context_window=(int(v) if (v := self._context_window_row.value()) is not None else None),
         )
 
 
@@ -307,6 +323,7 @@ def _provider_detail_lines(profile: ProviderProfile) -> list[str]:
         f"usd_per_m_input: {profile.usd_per_m_input if profile.usd_per_m_input is not None else '(default)'}",
         f"usd_per_m_output: {profile.usd_per_m_output if profile.usd_per_m_output is not None else '(default)'}",
         f"supports_vision: {profile.supports_vision}",
+        f"context_window: {profile.context_window if profile.context_window is not None else '(uses global max_context_tokens)'}",
     ]
     return lines
 

@@ -5,7 +5,7 @@
 > that has to change before 1.0 will be called out in the release notes.
 > See [`PLAN.md`](../PLAN.md) for what is still planned.
 
-**Related:** [workspaces.md](workspaces.md) · [safety-and-permissions.md](safety-and-permissions.md)
+**Related:** [workspaces.md](workspaces.md) · [safety-and-permissions.md](safety-and-permissions.md) · [context-and-limits.md](context-and-limits.md)
 
 
 ## Shortcut: pyIrena

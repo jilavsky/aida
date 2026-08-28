@@ -182,3 +182,67 @@ def test_pyirena_check_recognizes_the_python_dash_m_launch_form(aida_home, monke
     result = doctor._check_pyirena_mcp(settings)
 
     assert "configured as scattering" in result.detail
+
+
+# --- context_windows (PLAN.md §1.3 / planning/context_management.md §3.5) --
+
+
+def test_context_windows_check_ok_with_no_profiles(aida_home, records_home):
+    from aida.cli import doctor
+
+    result = doctor._check_context_windows(None)
+    assert result.ok
+    assert "skipped" in result.detail
+
+
+def test_context_windows_check_reports_profiles_with_no_context_window(aida_home, records_home):
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["local-qwen"] = ProviderProfile(
+        name="local-qwen", kind="openai_compat", model="qwen"
+    )
+
+    result = doctor._check_context_windows(settings)
+
+    assert result.ok  # informational, never a hard FAIL
+    assert "local-qwen" in result.detail
+    assert "no context_window set" in result.detail
+
+
+def test_context_windows_check_silent_when_every_profile_has_one_set(aida_home, records_home):
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["local-qwen"] = ProviderProfile(
+        name="local-qwen", kind="openai_compat", model="qwen", context_window=128_000
+    )
+
+    result = doctor._check_context_windows(settings)
+
+    assert result.ok
+    assert "every profile has an explicit context_window" in result.detail
+
+
+def test_context_windows_check_flags_a_global_default_larger_than_a_configured_window(aida_home, records_home):
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.app.max_context_tokens = 120_000
+    settings.providers.profiles["local-small"] = ProviderProfile(
+        name="local-small", kind="openai_compat", model="tiny", context_window=32_000
+    )
+
+    result = doctor._check_context_windows(settings)
+
+    assert result.ok
+    assert "local-small" in result.detail
+    assert "32,000" in result.detail
+
+
+def test_run_checks_includes_context_windows(aida_home: Path, records_home: Path):
+    results = run_checks()
+    assert any(r.name == "context_windows" for r in results)

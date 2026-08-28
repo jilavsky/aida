@@ -337,6 +337,20 @@ class ProviderProfile:
     Ollama/LM Studio profile actually running a vision-capable model, to
     have tool-result plots and GUI-attached images actually reach the
     model — see ``aida.providers.vision``.
+
+    ``context_window`` (PLAN.md §1.3, planning/context_management.md §3.1):
+    the model's TOTAL context window, in tokens — ``None`` falls back to
+    ``AppConfig.max_context_tokens`` (the same global number every profile
+    used unconditionally before this), so an existing profile that never
+    sets it behaves exactly as before. **Not the same field as
+    ``max_tokens``**: ``max_tokens`` caps the *output* this profile
+    generates; ``context_window`` is the model's *total* window that the
+    output, the conversation history, and the tool schemas all have to fit
+    inside together — see ``aida.core.context.history_budget``. Set this
+    per profile once tool-schema and per-model accounting matter (a 128k
+    local model is unsafe on the 120k global default once ~10k of tool
+    schemas are counted; a 1M cloud window wastes ~88% of itself under that
+    same default).
     """
 
     name: str
@@ -350,6 +364,7 @@ class ProviderProfile:
     usd_per_m_input: float | None = None
     usd_per_m_output: float | None = None
     supports_vision: bool = False
+    context_window: int | None = None
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> ProviderProfile:
@@ -370,6 +385,9 @@ class ProviderProfile:
                 source, "usd_per_m_output", data.get("usd_per_m_output"), kind=float
             ),
             supports_vision=bool(data.get("supports_vision", False)),
+            context_window=_coerce_optional_number(
+                source, "context_window", data.get("context_window"), kind=int
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -384,6 +402,7 @@ class ProviderProfile:
             "usd_per_m_input": self.usd_per_m_input,
             "usd_per_m_output": self.usd_per_m_output,
             "supports_vision": self.supports_vision,
+            "context_window": self.context_window,
         }
 
 

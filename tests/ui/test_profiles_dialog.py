@@ -71,6 +71,7 @@ def test_provider_profile_form_seeds_fields_when_editing(qapp):
         usd_per_m_input=3.0,
         usd_per_m_output=15.0,
         supports_vision=True,
+        context_window=200_000,
     )
     dialog = ProviderProfileFormDialog(profile=profile)
 
@@ -84,6 +85,7 @@ def test_provider_profile_form_seeds_fields_when_editing(qapp):
     assert dialog._usd_input_row.value() == 3.0
     assert dialog._usd_output_row.value() == 15.0
     assert dialog._supports_vision_checkbox.isChecked()
+    assert dialog._context_window_row.value() == 200_000
 
 
 def test_provider_profile_form_optional_fields_default_unchecked_when_adding(qapp):
@@ -93,6 +95,7 @@ def test_provider_profile_form_optional_fields_default_unchecked_when_adding(qap
     assert dialog._usd_input_row.value() is None
     assert dialog._usd_output_row.value() is None
     assert not dialog._supports_vision_checkbox.isChecked()
+    assert dialog._context_window_row.value() is None
 
 
 def test_provider_profile_form_result_profile_reflects_edited_fields(qapp):
@@ -103,6 +106,8 @@ def test_provider_profile_form_result_profile_reflects_edited_fields(qapp):
     dialog._max_tokens_row._checkbox.setChecked(True)
     dialog._max_tokens_row._spin.setValue(4096)
     dialog._supports_vision_checkbox.setChecked(True)
+    dialog._context_window_row._checkbox.setChecked(True)
+    dialog._context_window_row._spin.setValue(128_000)
 
     profile = dialog.result_profile()
     assert profile.name == "local"
@@ -111,6 +116,7 @@ def test_provider_profile_form_result_profile_reflects_edited_fields(qapp):
     assert profile.max_tokens == 4096
     assert profile.temperature is None  # left unchecked -> None, not 0.0
     assert profile.supports_vision is True
+    assert profile.context_window == 128_000
     assert profile.secret_ref == "local"  # defaults to the profile name
 
 

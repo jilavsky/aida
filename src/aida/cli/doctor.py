@@ -195,6 +195,45 @@ def _check_pyirena_mcp(settings: Settings | None) -> CheckResult:
     )
 
 
+def _check_context_windows(settings: Settings | None) -> CheckResult:
+    """PLAN.md §1.3 / planning/context_management.md §3.5: a profile with
+    no ``context_window`` set falls back to the global
+    ``AppConfig.max_context_tokens`` — fine for most models, but the one
+    combination this exists to catch is a real window *smaller* than that
+    default once tool schemas are counted (a 128k local model is unsafe on
+    the 120k global default the moment ~10k of pyirena-mcp schemas are
+    added). Informative, never a hard FAIL — same "inform, don't grade"
+    shape as the pyIrena check: not every user needs per-profile tuning,
+    and a profile that never touches a big MCP group is fine on the
+    default either way."""
+    if settings is None:
+        return CheckResult("context_windows", True, "skipped — config failed to load")
+    profiles = settings.providers.profiles
+    if not profiles:
+        return CheckResult("context_windows", True, "no provider profiles configured yet")
+
+    unset = sorted(name for name, profile in profiles.items() if profile.context_window is None)
+    configured = {name: profile.context_window for name, profile in profiles.items() if profile.context_window}
+
+    notes = []
+    if unset:
+        notes.append(
+            f"{', '.join(unset)}: no context_window set, falls back to the global "
+            f"max_context_tokens ({settings.app.max_context_tokens:,})"
+        )
+    if configured:
+        smallest_name, smallest_window = min(configured.items(), key=lambda item: item[1])
+        if settings.app.max_context_tokens > smallest_window:
+            notes.append(
+                f"the global max_context_tokens ({settings.app.max_context_tokens:,}) is larger than "
+                f"{smallest_name!r}'s configured context_window ({smallest_window:,}) — any other profile "
+                "still falling back to that global default could be using a real window smaller than it"
+            )
+    if not notes:
+        return CheckResult("context_windows", True, "every profile has an explicit context_window set")
+    return CheckResult("context_windows", True, "; ".join(notes))
+
+
 def run_checks() -> list[CheckResult]:
     results: list[CheckResult] = [_check_python_version()]
     settings, config_result = _load_settings_safely()
@@ -205,6 +244,7 @@ def run_checks() -> list[CheckResult]:
     results.append(_check_writable("records_dir", _effective_records_dir(settings)))
     results.append(_check_keyring())
     results.append(_check_pyirena_mcp(settings))
+    results.append(_check_context_windows(settings))
     results.extend(_check_provider_endpoints(settings))
     return results
 

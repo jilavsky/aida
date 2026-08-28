@@ -201,10 +201,22 @@ class ContextTrimmed:
     ``estimated_tokens`` is the *post*-trim estimate — what the sent
     history now costs, per ``aida.core.context.estimate_tokens`` (now
     tool-call-argument-aware) — so a frontend can show "trimmed to ~N
-    tokens" rather than just "trimmed"."""
+    tokens" rather than just "trimmed".
+
+    ``summarized``/``summary_tokens`` (PLAN.md §1.3, planning/
+    context_management.md §3.4): whether the dropped turns were replaced by
+    a compaction summary rather than plain-discarded — ``False``/``0`` for
+    a compaction call that itself failed (fell back to the pre-compaction
+    plain-drop behavior) or wasn't attempted. Added as new fields with
+    defaults rather than changing the meaning of the existing two, so every
+    site that already constructs or reads a ``ContextTrimmed`` (CLI, GUI,
+    tests) keeps working unchanged; both display sites just need wording
+    that distinguishes "summarized N turns" from "dropped N turns"."""
 
     dropped_turns: int
     estimated_tokens: int
+    summarized: bool = False
+    summary_tokens: int = 0
 
     to_dict = _base_dict
 

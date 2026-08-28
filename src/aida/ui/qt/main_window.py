@@ -183,6 +183,13 @@ class MainWindow(QMainWindow):
         # so it stays visible turn over turn — see _update_usage_label.
         self._usage_label = QLabel("", self)
         self.statusBar().addPermanentWidget(self._usage_label)
+        # PLAN.md §1.3 / planning/context_management.md §3.5: fullness
+        # ("how close to the wall am I"), a different question from the
+        # ever-growing cumulative total the label above already answers —
+        # a separate permanent label so the two are never confused with
+        # each other, see _update_context_label.
+        self._context_label = QLabel("", self)
+        self.statusBar().addPermanentWidget(self._context_label)
 
     def _build_menu_bar(self) -> None:
         """U7 paper cut: "A menu bar (File/Help) with 'Open config folder',
@@ -209,6 +216,15 @@ class MainWindow(QMainWindow):
         open_scratch_action.triggered.connect(self._on_open_scratch_folder)
         file_menu.addAction(open_scratch_action)
 
+        file_menu.addSeparator()
+
+        # PLAN.md §1.3 / planning/context_management.md §3.4: GUI parity
+        # with the CLI's /compact — summarize older turns at a natural task
+        # boundary rather than only ever compacting automatically mid-turn.
+        compact_action = QAction("Compact Conversation", self)
+        compact_action.triggered.connect(self._on_compact_requested)
+        file_menu.addAction(compact_action)
+
         help_menu = self.menuBar().addMenu("&Help")
         docs_action = QAction("Documentation", self)
         docs_action.triggered.connect(self._on_open_documentation)
@@ -226,6 +242,18 @@ class MainWindow(QMainWindow):
 
     def _on_open_scratch_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(ensure_scratch_dir(self.settings.app.scratch_dir))))
+
+    def _on_compact_requested(self) -> None:
+        """"Compact Conversation" File-menu action — see
+        ChatBridge.compact_context's docstring for why success reuses the
+        normal event_received path (same status-bar/context-label handling
+        as an automatic mid-turn compaction) while only the "nothing
+        happened" outcomes get their own status-bar message here."""
+        self.statusBar().showMessage("Compacting conversation…")
+        self.bridge.compact_context()
+
+    def _on_compaction_failed(self, message: str) -> None:
+        self.statusBar().showMessage(message, 8000)
 
     def _on_open_documentation(self) -> None:
         QDesktopServices.openUrl(QUrl("https://github.com/jilavsky/aida"))
@@ -279,10 +307,12 @@ class MainWindow(QMainWindow):
         self.bridge.turn_started.connect(self._on_turn_started)
         self.bridge.turn_finished.connect(self._on_turn_finished)
         self.bridge.turn_finished.connect(self._update_usage_label)
+        self.bridge.turn_finished.connect(self._update_context_label)
         self.bridge.turn_failed.connect(self._on_turn_failed)
         self.bridge.confirmation_requested.connect(self._on_confirmation_requested)
         self.bridge.profile_switched.connect(self._on_profile_switched)
         self.bridge.profile_switch_failed.connect(self._on_profile_switch_failed)
+        self.bridge.compaction_failed.connect(self._on_compaction_failed)
         self.bridge.mcp_server_status_changed.connect(self._on_mcp_server_status_changed)
         self.bridge.mcp_server_action_failed.connect(self._on_mcp_server_action_failed)
         self.input_box.cancel_requested.connect(self.bridge.cancel)
@@ -301,13 +331,24 @@ class MainWindow(QMainWindow):
             # line only) — the status bar is the same low-key channel
             # already used for "Ready — profile" / "Saved folders to
             # workspace X", so this doesn't interrupt the chat transcript
-            # the way an inline notice would.
+            # the way an inline notice would. PLAN.md §1.3: this also fires
+            # for a manual "Compact Conversation" (ChatBridge.compact_context
+            # emits the same event via event_received), not only an
+            # automatic mid-turn trim.
             turn_word = "turn" if event.dropped_turns == 1 else "turns"
-            self.statusBar().showMessage(
-                f"Context trimmed: dropped {event.dropped_turns} old {turn_word} "
-                f"(~{event.estimated_tokens} tokens now)",
-                8000,
-            )
+            if event.summarized:
+                self.statusBar().showMessage(
+                    f"Context compacted: summarized {event.dropped_turns} old {turn_word} into "
+                    f"~{event.summary_tokens} tokens (~{event.estimated_tokens} tokens now)",
+                    8000,
+                )
+            else:
+                self.statusBar().showMessage(
+                    f"Context trimmed: dropped {event.dropped_turns} old {turn_word} "
+                    f"(~{event.estimated_tokens} tokens now)",
+                    8000,
+                )
+            self._update_context_label()
         self.chat_panel.handle_event(event)
 
     def _on_turn_started(self) -> None:
@@ -375,6 +416,7 @@ class MainWindow(QMainWindow):
         self._refresh_workspace_selector()
         self._save_last_session_selection()
         self._update_usage_label()
+        self._update_context_label()
 
     def _update_usage_label(self) -> None:
         """Bug report: "Can we get cost estimate as I got to other tool?
@@ -384,7 +426,12 @@ class MainWindow(QMainWindow):
         needing a dedicated ChatBridge signal — session is already reachable
         from the Qt thread. A fresh/history-only session with no usage yet
         just shows zeros rather than being left blank, so the label doesn't
-        look broken."""
+        look broken.
+
+        "Session total:" (PLAN.md §1.3, context_management.md §3.5) — was
+        just "Tokens:" until the fullness label below existed alongside it;
+        renamed so the two ("the whole session so far" vs. "how full is
+        the window right now") can never be confused with each other."""
         session = self.bridge.session
         if session is None:
             self._usage_label.setText("")
@@ -398,8 +445,27 @@ class MainWindow(QMainWindow):
             output_usd_per_million=session.profile.usd_per_m_output,
         )
         self._usage_label.setText(
-            f"Tokens: {session.total_input_tokens:,} in / {session.total_output_tokens:,} out (~${cost:.3f} est.)"
+            f"Session total: {session.total_input_tokens:,} in / {session.total_output_tokens:,} out "
+            f"(~${cost:.3f} est.)"
         )
+
+    def _update_context_label(self) -> None:
+        """PLAN.md §1.3, context_management.md §3.5: fullness ("how close
+        to the wall am I"), not the ever-growing cumulative total
+        ``_update_usage_label`` shows — reads ``ChatSession.context_fullness()``
+        so this can never disagree with the number that actually drives
+        trimming/compaction. Refreshed after every turn and after any
+        compaction (automatic or manual — see ``_on_event_received``)."""
+        session = self.bridge.session
+        if session is None:
+            self._context_label.setText("")
+            return
+        used, budget = session.context_fullness()
+        if not budget:
+            self._context_label.setText("Context: trimming disabled")
+            return
+        pct = round(100 * used / budget)
+        self._context_label.setText(f"Context: {used // 1000:,}k / {budget // 1000:,}k ({pct}%)")
 
     def _save_last_session_selection(self) -> None:
         """"App does not seem to open with last set of settings": persists

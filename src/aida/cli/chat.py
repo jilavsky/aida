@@ -112,9 +112,17 @@ def print_event(event: AgentEvent) -> None:
         # B7: trimming used to be a log line only — nothing told the user
         # at the terminal that earlier turns had just been dropped to stay
         # under budget, so a suddenly-forgetful-seeming model looked like a
-        # bug rather than an expected trade-off.
+        # bug rather than an expected trade-off. PLAN.md §1.3: distinguishes
+        # a compaction summary from a plain drop — the two are very
+        # different outcomes for "will the model still remember this".
         turn_word = "turn" if event.dropped_turns == 1 else "turns"
-        print(f"[context] trimmed {event.dropped_turns} old {turn_word} to fit budget (~{event.estimated_tokens} tokens now)")
+        if event.summarized:
+            print(
+                f"[context] summarized {event.dropped_turns} old {turn_word} into ~{event.summary_tokens} "
+                f"tokens (~{event.estimated_tokens} tokens now)"
+            )
+        else:
+            print(f"[context] trimmed {event.dropped_turns} old {turn_word} to fit budget (~{event.estimated_tokens} tokens now)")
     elif isinstance(event, AgentError):
         detail = f" ({event.detail})" if event.detail else ""
         print(f"\n[error:{event.layer}] {event.message}{detail}")
@@ -129,7 +137,8 @@ async def _run_repl(session: ChatSession) -> None:
         print(f"[conversations] recording as {session.recorder.conversation_id}")
     print(
         "Type /exit to quit, /profile NAME to switch profiles mid-session, "
-        "/max-iterations N to raise the per-turn tool-call cap.\n"
+        "/max-iterations N to raise the per-turn tool-call cap, "
+        "/compact to summarize older turns now.\n"
     )
 
     try:
@@ -226,6 +235,16 @@ async def _repl_loop(session: ChatSession) -> None:
                 f"({session.profile.kind}, model={session.profile.model}). History carries over."
             )
             continue
+        if line == "/compact":
+            # PLAN.md §1.3 / context_management.md §3.4: manual compaction
+            # at a natural task boundary, rather than only ever triggering
+            # automatically mid-turn once the budget is already exceeded.
+            event = await session.compact_now()
+            if event is None:
+                print("[compact] nothing to compact yet — not enough history.")
+            else:
+                print_event(event)
+            continue
 
         try:
             with _cancel_turn_on_sigint(session):
@@ -253,6 +272,16 @@ async def _repl_loop(session: ChatSession) -> None:
                 f"[session total] {session.total_input_tokens} in / {session.total_output_tokens} out "
                 f"tokens, ~${cost:.4f} est."
             )
+
+        # planning/context_management.md §3.5: fullness (how close to the
+        # wall the *next* request is), not the ever-growing cumulative
+        # total printed just above — computed the same way ChatSession's
+        # own trim/compaction budget is, so the two can never disagree.
+        # Omitted entirely when trimming/compaction is disabled (budget 0).
+        used, budget = session.context_fullness()
+        if budget:
+            pct = round(100 * used / budget)
+            print(f"[context] {used:,} / {budget:,} tokens ({pct}%) — /compact to summarize older turns")
 
 
 def _build_parser() -> argparse.ArgumentParser:

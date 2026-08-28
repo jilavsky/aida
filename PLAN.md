@@ -77,35 +77,41 @@ implemented".
 - [ ] conda: keep `environment.yml` current; evaluate a conda-forge feedstock
       once PyPI releases are routine (record the decision either way).
 
-### 1.3 Context-window management and compaction
+### 1.3 Context-window management and compaction — done (2026-08-28)
 
-The failure this prevents is the expensive one: a long pyIrena analysis
-conversation dying halfway through, with no in-app recovery. Full design,
-steps, and measured numbers in
-[`planning/context_management.md`](planning/context_management.md).
+The failure this prevented: a long pyIrena analysis conversation dying
+halfway through, with no in-app recovery. Full design, steps, and measured
+numbers in
+[`planning/context_management.md`](planning/context_management.md) (now
+marked implemented); user-facing docs in
+[`docs/context-and-limits.md`](docs/context-and-limits.md).
 
-- [ ] **Count what is actually sent.** The budget currently sums only the
-      message list — MCP tool schemas are passed to the provider separately
-      and never counted. Measured: pyirena-mcp's 68 tools are ~40.8 KB of
-      JSON ≈ **10,200 tokens on every request**, invisible to the budget.
-      Images aren't counted either, and the 4-chars-per-token estimator
-      undercounts exactly the dense JSON that tool results consist of.
-- [ ] **Per-profile `context_window`.** One global `max_context_tokens`
-      today: unsafe on a 128k local model once schemas are counted, and it
-      wastes ~88% of a 1M cloud window. Optional field on `ProviderProfile`,
-      falling back to the global value so nothing existing breaks. Note the
-      naming trap: `max_tokens` is the *output* cap, not the window.
-- [ ] **Context-fullness visibility.** The status-bar counter is the
-      cumulative session total, not fullness — it says nothing about how
-      close the wall is.
-- [ ] **Compaction.** Today trimming *discards* the oldest turns; nothing
-      summarizes them. Summarize-then-replace, plus a manual `/compact` and
-      a GUI action so it can be done at a task boundary rather than
-      mid-thought. Must fall back to plain trimming if summarization fails.
-- [ ] **Recovery from a full context.** Once the provider rejects a request
-      for length, every later turn in that conversation fails identically —
-      New Chat is the only escape. Compaction plus `/compact` is the fix.
-- [ ] Document it: `max_context_tokens` appears nowhere in `docs/` today.
+- [x] **Count what is actually sent.** MCP tool schemas, tool-call
+      arguments/results (dense-estimated), and vision images are now all
+      counted (`aida.core.context.estimate_tool_schema_tokens`/
+      `estimate_message_tokens`) — previously the budget summed only the
+      plain message list, missing pyirena-mcp's measured ~10,200 tokens of
+      schema JSON on every request.
+- [x] **Per-profile `context_window`.** `ProviderProfile.context_window`
+      (falls back to `AppConfig.max_context_tokens`) plus
+      `aida.core.context.history_budget` (context window × 0.85 safety
+      fraction, minus reserved output tokens, minus tool-schema tokens,
+      clamped to an 8000-token floor). Editable in the Providers… dialog
+      and `providers.yaml`.
+- [x] **Context-fullness visibility.** A `[context]` line after every CLI
+      turn and a **Context: Nk / Mk (P%)** GUI status-bar label, separate
+      from the cumulative **Session total:** label.
+- [x] **Compaction.** `ChatSession._trim_context`/`_apply_trim_plan`
+      summarize dropped turns via the active provider instead of discarding
+      them, with a `/compact` CLI command and a **Compact Conversation**
+      GUI action for a manual trigger at a task boundary. Falls back to
+      plain trimming if the summarization call itself fails.
+- [x] **Recovery from a full context.** Compaction (automatic and manual)
+      is the fix — a conversation now recovers headroom instead of every
+      later turn failing identically.
+- [x] Documented in `docs/context-and-limits.md`, cross-linked from
+      `docs/providers-and-secrets.md`, `docs/mcp-servers.md`, and
+      `docs/pyirena.md`.
 
 ### 1.4 Verification owed (cannot be done from a sandbox)
 

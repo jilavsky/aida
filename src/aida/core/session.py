@@ -44,21 +44,28 @@ from aida.config.paths import (
 from aida.config.settings import McpConfig, McpServerConfig, Settings, WorkspaceConfig
 from aida.core.agent import AgentLoop
 from aida.core.context import (
+    DEFAULT_RESERVED_OUTPUT_TOKENS,
+    TrimPlan,
     build_coding_context_block,
     build_identity_context_block,
     build_system_message,
     build_workspace_context_block,
+    compaction_request_messages,
+    compaction_summary_message,
     estimate_message_tokens,
+    estimate_tool_schema_tokens,
+    history_budget,
     load_skill_texts,
+    plan_trim,
     repair_tool_call_pairing,
-    split_into_turns,
-    trim_history,
 )
 from aida.core.events import (
+    AgentError,
     ContextTrimmed,
     FileArtifactCreated,
     ImageArtifactCreated,
     RetrievalPerformed,
+    TextFinished,
     UsageInfo,
 )
 from aida.core.tools import NativeTool, default_native_tools
@@ -252,38 +259,150 @@ class ChatSession:
     def cancel(self) -> None:
         self.loop.cancel()
 
-    def _trim_context(self) -> ContextTrimmed | None:
-        """Drop the oldest whole turns from the in-memory history once it
-        exceeds ``AppConfig.max_context_tokens``.
+    def _history_budget(self) -> int | None:
+        """The token budget for *sent* history right now — per-profile
+        ``context_window`` (PLAN.md §1.3) falling back to the global
+        ``AppConfig.max_context_tokens``, exactly as before this existed for
+        a profile that never sets it. ``None`` means trimming/compaction is
+        disabled entirely (the global default is ``0``, same meaning it
+        always had)."""
+        context_window = self.profile.context_window or self.settings.app.max_context_tokens
+        if not context_window:
+            return None
+        reserved_output_tokens = (
+            self.profile.max_tokens if self.profile.max_tokens is not None else DEFAULT_RESERVED_OUTPUT_TOKENS
+        )
+        tool_schema_tokens = estimate_tool_schema_tokens([tool.schema for tool in self.tools.values()])
+        return history_budget(
+            context_window=context_window,
+            reserved_output_tokens=reserved_output_tokens,
+            tool_schema_tokens=tool_schema_tokens,
+        )
 
-        Nothing managed context size before this: ``self.messages`` grew for
-        the whole session until the provider rejected a request for length,
-        mid-analysis, with no way back short of starting over. Mutates
-        ``self.messages`` in place rather than rebinding it, because
-        ``AgentLoop.run`` appends to that same list object.
+    def context_fullness(self) -> tuple[int, int]:
+        """``(estimated tokens the next request would send, the usable
+        history budget it's measured against)`` — planning/
+        context_management.md §3.5's fullness indicator ("Context: 42k /
+        88k (48%)"), computed the exact same way ``_trim_context`` computes
+        its own budget so the two can never disagree. The second element is
+        ``0`` when trimming/compaction is disabled (``0`` budget) — a
+        caller displaying a percentage should treat that as "not
+        applicable", not divide by it."""
+        current = sum(estimate_message_tokens(m) for m in self.messages)
+        return current, (self._history_budget() or 0)
+
+    async def _compact_context(self, turns: list[list[Message]]) -> Message | None:
+        """Summarize ``turns`` (whole turns about to be dropped, oldest
+        first) via the *active* provider — no new provider API needed, see
+        ``compaction_request_messages``. Returns the replacement summary
+        ``Message``, or ``None`` if summarization didn't produce one (an
+        ``AgentError`` from the provider, an empty reply, or an outright
+        exception) — callers must fall back to plain dropping in that case.
+        Compaction failing must never fail the user's turn, so nothing here
+        raises."""
+        if not turns:
+            return None
+        request_messages = compaction_request_messages(turns)
+        # Low temperature, no tools: this is a factual-extraction request,
+        # not a creative turn, and the summarizer must never itself try to
+        # call a tool. Reuses the active profile/model rather than a
+        # separate "utility profile" — see context_management.md §6.
+        summary_settings = CompletionSettings(
+            model=self.completion_settings.model, temperature=0.0, supports_vision=False
+        )
+        try:
+            summary_text = ""
+            for_error: str | None = None
+            async for event in self.provider.complete(request_messages, [], summary_settings):
+                if isinstance(event, TextFinished):
+                    summary_text = event.text
+                elif isinstance(event, AgentError):
+                    for_error = f"{event.layer}: {event.message}"
+            if for_error is not None:
+                logger.warning("context compaction failed, falling back to plain trim: %s", for_error)
+                return None
+            if not summary_text.strip():
+                logger.warning("context compaction produced an empty summary, falling back to plain trim")
+                return None
+            return compaction_summary_message(summary_text)
+        except Exception as exc:  # noqa: BLE001 - compaction failing must never fail the turn
+            logger.warning("context compaction failed, falling back to plain trim: %s", exc)
+            return None
+
+    async def _apply_trim_plan(self, plan: TrimPlan) -> ContextTrimmed:
+        """Shared by the automatic (``_trim_context``) and manual
+        (``compact_now``) paths: try to summarize ``plan.dropped_turns``
+        (PLAN.md §1.3 compaction) and fall back to plain-discarding them if
+        summarization fails, then mutate ``self.messages`` in place (because
+        ``AgentLoop.run`` appends to that same list object) and report what
+        actually happened."""
+        summary_message = await self._compact_context(plan.dropped_turns)
+        if summary_message is not None:
+            new_messages = [*plan.system_messages, summary_message, *plan.kept_turn_messages]
+            summarized = True
+            summary_tokens = estimate_message_tokens(summary_message)
+        else:
+            new_messages = plan.kept_messages
+            summarized = False
+            summary_tokens = 0
+
+        dropped_turns = len(plan.dropped_turns)
+        estimated_tokens = sum(estimate_message_tokens(m) for m in new_messages)
+        logger.info(
+            "%s conversation history to fit ~%d tokens: %d message(s) -> %d (%d turn(s) %s)",
+            "compacted" if summarized else "trimmed",
+            estimated_tokens,
+            len(self.messages),
+            len(new_messages),
+            dropped_turns,
+            "summarized" if summarized else "dropped",
+        )
+        self.messages[:] = new_messages
+        return ContextTrimmed(
+            dropped_turns=dropped_turns,
+            estimated_tokens=estimated_tokens,
+            summarized=summarized,
+            summary_tokens=summary_tokens,
+        )
+
+    async def _trim_context(self) -> ContextTrimmed | None:
+        """Drop (or, PLAN.md §1.3, summarize) the oldest whole turns from
+        the in-memory history once it exceeds the active budget — see
+        ``_history_budget``.
+
+        Nothing managed context size before this existed at all:
+        ``self.messages`` grew for the whole session until the provider
+        rejected a request for length, mid-analysis, with no way back short
+        of starting over.
 
         B7: trimming used to be invisible outside a log line — returns a
         ``ContextTrimmed`` event (for ``send()`` to yield to the frontend)
-        when it actually dropped something, ``None`` otherwise (disabled,
+        when it actually changed something, ``None`` otherwise (disabled,
         or already under budget)."""
-        budget = self.settings.app.max_context_tokens
-        if not budget:
-            return None  # 0 disables trimming
-        turns_before = len(split_into_turns(self.messages))
-        trimmed, was_trimmed = trim_history(self.messages, budget)
-        if not was_trimmed:
+        budget = self._history_budget()
+        if budget is None:
+            return None  # 0 (global default or resolved profile window) disables trimming
+        plan = plan_trim(self.messages, budget)
+        if not plan.was_trimmed:
             return None
-        dropped_turns = turns_before - len(split_into_turns(trimmed))
-        estimated_tokens = sum(estimate_message_tokens(m) for m in trimmed)
-        logger.info(
-            "trimmed conversation history to fit ~%d tokens: %d message(s) -> %d (%d turn(s) dropped)",
-            budget,
-            len(self.messages),
-            len(trimmed),
-            dropped_turns,
-        )
-        self.messages[:] = trimmed
-        return ContextTrimmed(dropped_turns=dropped_turns, estimated_tokens=estimated_tokens)
+        return await self._apply_trim_plan(plan)
+
+    async def compact_now(self, *, min_recent_turns: int = 4) -> ContextTrimmed | None:
+        """Manual compaction — the CLI's ``/compact`` and the GUI's
+        "Compact Conversation" action (planning/context_management.md §3.4):
+        summarize everything but the most recent ``min_recent_turns`` turns
+        right now, regardless of whether the budget is currently exceeded,
+        so the user can compact at a natural task boundary instead of
+        waiting for it to trigger automatically mid-thought. Shares
+        ``_apply_trim_plan`` with the automatic path — same summarize/
+        fall-back-to-drop behavior, just with the trim threshold forced to
+        ``0`` so ``plan_trim`` always finds something to drop, short of the
+        ``min_recent_turns`` floor. Returns ``None`` if there's nothing to
+        compact (fewer turns than the floor)."""
+        plan = plan_trim(self.messages, 0, min_recent_turns=min_recent_turns)
+        if not plan.was_trimmed:
+            return None
+        return await self._apply_trim_plan(plan)
 
     async def _retrieve_context(self, user_text: str) -> dict[str, list[RetrievedPassage]]:
         """Query every active knowledge base for this turn's question.
@@ -345,7 +464,7 @@ class ChatSession:
         # here, before `persisted` is captured, because trimming shifts
         # every index in self.messages. Whole turns only, so a tool result
         # is never separated from the call it answers — see trim_history.
-        trim_event = self._trim_context()
+        trim_event = await self._trim_context()
         if trim_event is not None:
             yield trim_event
         persisted = len(self.messages)

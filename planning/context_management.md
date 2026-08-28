@@ -1,7 +1,11 @@
 # Context-window management and compaction
 
-**Status: planned, not implemented.** Written 2026-08-28 after an audit of
-what AIDA does today. Tracked from `PLAN.md` §1.3.
+**Status: implemented (2026-08-28).** Written 2026-08-28 after an audit of
+what AIDA did before this; implemented the same day. Tracked from `PLAN.md`
+§1.3 (now checked off there). User-facing docs:
+[`docs/context-and-limits.md`](../docs/context-and-limits.md). The design
+below is left as-written (it described the plan accurately and the
+implementation followed it) — only this status line changed.
 
 **Why this matters:** the target workload is a long analysis conversation
 driving pyIrena MCP — tens of tool calls, each returning dense numeric

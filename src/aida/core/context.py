@@ -12,18 +12,88 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from aida.providers.base import Message
+from aida.config.logging_setup import get_logger
+from aida.providers.base import Message, ToolSchema
+
+logger = get_logger("context")
 
 # Rough, deliberately simple token estimate (no tokenizer dependency in
 # Phase 2): ~4 characters per token is a reasonable average for English/code
 # and is only used for a soft trim budget, not billing.
 _CHARS_PER_TOKEN_ESTIMATE = 4
 
+# PLAN.md §1.3 / planning/context_management.md §2b: the 4-chars-per-token
+# average is fair for English prose, but JSON and dense numeric data (tool
+# call arguments, tool results — the bulk of a pyIrena session) tokenize
+# closer to ~3 chars/token, so the plain estimator systematically
+# *undercounts* exactly the content that matters most for a long analysis
+# conversation. Used wherever the content being estimated is one of those,
+# never for ordinary assistant/user prose.
+DENSE_CHARS_PER_TOKEN = 3
+
+# planning/context_management.md §3.3: a vision image's rough token cost —
+# derived from Anthropic's own ~(width x height)/750 rule for a ~1024px
+# image (AIDA already downscales tool-result/attached images to ~1024px in
+# aida.providers.vision before they're sent), i.e. roughly
+# (1024*1024)/750 ~= 1400, rounded up for headroom since not every image is
+# exactly square. Deliberately one flat number rather than reading actual
+# dimensions — good enough to decide "are we getting close to the limit",
+# not a billing figure.
+IMAGE_TOKEN_ESTIMATE = 1600
+
+# planning/context_management.md §3.2: covers estimator error (§2b) plus
+# each provider's own per-request overhead around the raw message content.
+# One knob, not five — every other constant below is either derived from
+# measurement (IMAGE_TOKEN_ESTIMATE) or a provider default
+# (DEFAULT_RESERVED_OUTPUT_TOKENS), not a second safety margin stacked on
+# top of this one.
+CONTEXT_SAFETY_FRACTION = 0.85
+
+# Anthropic's own default max_tokens when a profile doesn't set one — a
+# reasonable stand-in for an OpenAI-compatible endpoint too, where output is
+# otherwise unbounded and *something* has to be reserved out of the window
+# for the reply that's about to be generated.
+DEFAULT_RESERVED_OUTPUT_TOKENS = 4096
+
+# Below this, the computed budget is not "tight", it is a misconfiguration —
+# a window too small for the tool set actually enabled (see
+# estimate_tool_schema_tokens). Clamping to this floor rather than trimming
+# down to (near-)nothing keeps the very next turn answerable; the warning
+# logged when this fires is the signal to fix the real problem (a smaller
+# tool group, or an explicit larger context_window).
+MIN_HISTORY_BUDGET = 8000
+
 
 def estimate_tokens(text: str) -> int:
     """Cheap token estimate for context-size management. Not exact — good
     enough to decide "are we getting close to the limit"."""
     return max(1, len(text) // _CHARS_PER_TOKEN_ESTIMATE)
+
+
+def estimate_tokens_dense(text: str) -> int:
+    """Same shape as ``estimate_tokens``, but calibrated for dense JSON/
+    numeric content rather than English prose — see ``DENSE_CHARS_PER_TOKEN``.
+    Used for tool-call arguments and ``role="tool"`` message content inside
+    ``estimate_message_tokens``, and for tool schemas in
+    ``estimate_tool_schema_tokens``."""
+    return max(1, len(text) // DENSE_CHARS_PER_TOKEN)
+
+
+def estimate_tool_schema_tokens(tools: list[ToolSchema]) -> int:
+    """The token cost of the tool schemas sent on *every* request alongside
+    the message list — previously invisible to the budget entirely (PLAN.md
+    §1.3: pyirena-mcp's 68 tools measured at ~40.8 KB of JSON, ~10,200
+    tokens, on every single turn). Recomputed fresh each call rather than
+    cached: the enabled tool set can change mid-session (starting/stopping
+    an MCP server from the MCP dialog), and this is just a ``json.dumps``
+    plus a ``len`` — cheap enough that caching would be premature."""
+    if not tools:
+        return 0
+    payload = json.dumps(
+        [{"name": t.name, "description": t.description, "parameters": t.parameters} for t in tools],
+        default=str,
+    )
+    return estimate_tokens_dense(payload)
 
 
 def estimate_message_tokens(message: Message) -> int:
@@ -36,11 +106,20 @@ def estimate_message_tokens(message: Message) -> int:
     call's ``name``+``arguments`` on top of the content estimate; a message
     with no tool calls costs exactly what ``estimate_tokens(message.content)``
     already did, so this is purely additive, never a regression for plain
-    text turns."""
-    total = estimate_tokens(message.content)
+    text turns.
+
+    PLAN.md §1.3 (§2b/§3.3): tool-call arguments and ``role="tool"`` result
+    content are dense JSON/numeric data, not prose — estimated with
+    ``estimate_tokens_dense`` rather than the plain estimator, which
+    otherwise systematically undercounts exactly the bulk of a pyIrena
+    session. Vision images (``message.images``, B1) are counted too, at a
+    flat ``IMAGE_TOKEN_ESTIMATE`` each — previously not counted at all."""
+    is_dense_content = message.role == "tool"
+    total = estimate_tokens_dense(message.content) if is_dense_content else estimate_tokens(message.content)
     for call in message.tool_calls:
         payload = json.dumps({"name": call.name, "arguments": call.arguments}, default=str)
-        total += estimate_tokens(payload)
+        total += estimate_tokens_dense(payload)
+    total += IMAGE_TOKEN_ESTIMATE * len(message.images)
     return total
 
 
@@ -386,15 +465,38 @@ def repair_tool_call_pairing(
     return repaired
 
 
-def trim_history(
+@dataclass(frozen=True)
+class TrimPlan:
+    """What ``plan_trim`` decided: which whole turns to drop to fit
+    ``max_tokens``, without committing to *how* they get removed. Plain
+    discard (``trim_history``, still exactly what it always was) and
+    summarize-then-replace (``aida.core.session.ChatSession._trim_context``,
+    PLAN.md §1.3 compaction) both start from the same plan, so the two
+    policies can never disagree about *which* turns are old enough to go —
+    only about what replaces them."""
+
+    system_messages: list[Message]
+    kept_turn_messages: list[Message]
+    dropped_turns: list[list[Message]]
+    was_trimmed: bool
+
+    @property
+    def kept_messages(self) -> list[Message]:
+        """``system_messages + kept_turn_messages`` — the plain-discard
+        result ``trim_history`` returns."""
+        return self.system_messages + self.kept_turn_messages
+
+
+def plan_trim(
     messages: list[Message], max_tokens: int, *, min_recent_turns: int = 4
-) -> tuple[list[Message], bool]:
-    """Drop oldest whole turns until under ``max_tokens`` (estimated).
+) -> TrimPlan:
+    """Decide which oldest whole turns would need to go to fit
+    ``max_tokens`` (estimated), without dropping them — see ``TrimPlan``.
 
     Always keeps every ``role="system"`` message and at least
     ``min_recent_turns`` of the most recent turns, even if that means
     staying over budget — trimming should never make the very next turn
-    unanswerable. Returns ``(trimmed_messages, was_trimmed)``.
+    unanswerable.
 
     Whole *turns* (a user message plus the assistant/tool messages it
     produced — see ``split_into_turns``), never individual messages: cutting
@@ -420,20 +522,137 @@ def trim_history(
         dropped += 1
 
     if not dropped:
-        return list(messages), False
-    kept = [m for turn in turns[dropped:] for m in turn]
-    return system_messages + kept, True
+        all_turn_messages = [m for turn in turns for m in turn]
+        return TrimPlan(system_messages, all_turn_messages, [], False)
+    kept_turn_messages = [m for turn in turns[dropped:] for m in turn]
+    return TrimPlan(system_messages, kept_turn_messages, turns[:dropped], True)
+
+
+def trim_history(
+    messages: list[Message], max_tokens: int, *, min_recent_turns: int = 4
+) -> tuple[list[Message], bool]:
+    """Drop oldest whole turns until under ``max_tokens`` (estimated).
+    Returns ``(trimmed_messages, was_trimmed)``. A thin wrapper over
+    ``plan_trim`` — see its docstring and ``TrimPlan`` for the shared
+    decision both this and compaction build on."""
+    plan = plan_trim(messages, max_tokens, min_recent_turns=min_recent_turns)
+    return plan.kept_messages, plan.was_trimmed
+
+
+def history_budget(
+    *,
+    context_window: int,
+    reserved_output_tokens: int,
+    tool_schema_tokens: int,
+    safety_fraction: float = CONTEXT_SAFETY_FRACTION,
+) -> int:
+    """How many tokens of *history* (messages) can be sent, given a model's
+    total ``context_window`` — planning/context_management.md §3.2.
+
+    ``usable = context_window * safety_fraction`` (covers estimator error
+    plus each provider's own per-request overhead); the reply about to be
+    generated (``reserved_output_tokens``) and the tool schemas sent on
+    every request (``tool_schema_tokens``, see
+    ``estimate_tool_schema_tokens``) both come out of that before history
+    gets anything. If what's left is below ``MIN_HISTORY_BUDGET``, that is
+    a misconfiguration (a window too small for the enabled tool set) rather
+    than an honest tight budget — logged and clamped to the floor rather
+    than trimming the next turn down to unanswerable."""
+    usable = int(context_window * safety_fraction)
+    budget = usable - reserved_output_tokens - tool_schema_tokens
+    if budget < MIN_HISTORY_BUDGET:
+        logger.warning(
+            "context budget clamped to the %d-token floor: context_window=%d, "
+            "reserved_output_tokens=%d, tool_schema_tokens=%d leaves only %d — "
+            "consider a leaner MCP group or a larger context_window",
+            MIN_HISTORY_BUDGET,
+            context_window,
+            reserved_output_tokens,
+            tool_schema_tokens,
+            budget,
+        )
+        return MIN_HISTORY_BUDGET
+    return budget
+
+
+#: The instruction given to the model for compaction (planning/
+#: context_management.md §3.4) — facts, not prose, and explicitly asks it to
+#: preserve exactly the things a pyIrena session needs to keep: filenames
+#: and numeric results.
+COMPACTION_PROMPT = (
+    "The conversation turns below are about to be removed from your context to make room for "
+    "the rest of this session. Summarize them into a compact set of facts for your own future "
+    "reference — not a narrative retelling. Preserve exact filenames, folder paths, parameter "
+    "values, and numeric results (fit parameters, Rg, chi-squared, and similar) verbatim; do not "
+    "round or paraphrase a number. Cover: files and folders touched, parameters and results with "
+    "their exact numbers, decisions made and why, and anything the user explicitly asked to "
+    "remember. Write plain factual bullet points — no preamble, and do not restate this "
+    "instruction."
+)
+
+
+def _render_turns_for_summary(turns: list[list[Message]]) -> str:
+    """Flatten dropped turns into plain text for the compaction request —
+    the summarizer reads a transcript, not AIDA's internal ``Message``/
+    ``ToolCall`` shapes."""
+    lines: list[str] = []
+    for turn in turns:
+        for message in turn:
+            if message.role == "user":
+                lines.append(f"User: {message.content}")
+            elif message.role == "assistant":
+                if message.content:
+                    lines.append(f"Assistant: {message.content}")
+                for call in message.tool_calls:
+                    payload = json.dumps(call.arguments, default=str)
+                    lines.append(f"Assistant called tool {call.name}({payload})")
+            elif message.role == "tool":
+                lines.append(f"Tool result ({message.name}): {message.content}")
+    return "\n".join(lines)
+
+
+def compaction_request_messages(turns: list[list[Message]]) -> list[Message]:
+    """Build the (single-message) request that asks the active provider to
+    summarize ``turns`` (whole turns about to be dropped, oldest first —
+    see ``plan_trim``) — a bare ``role="user"`` request with
+    ``COMPACTION_PROMPT`` plus the rendered transcript, no tools, no system
+    prompt. Sent through the ordinary ``provider.complete()``, so no new
+    provider API is needed."""
+    transcript = _render_turns_for_summary(turns)
+    return [Message(role="user", content=f"{COMPACTION_PROMPT}\n\n---\n\n{transcript}")]
+
+
+def compaction_summary_message(summary_text: str) -> Message:
+    """Wrap a model-produced summary as the ``role="user"`` message that
+    replaces the turns it summarizes. User-role (not a synthetic assistant
+    message) is the safe choice across both API dialects — an assistant
+    message with no matching tool-call history risks confusing tool-call
+    pairing on the next request."""
+    return Message(role="user", content=f"# Summary of earlier conversation (compacted)\n\n{summary_text}")
 
 
 __all__ = [
+    "COMPACTION_PROMPT",
+    "CONTEXT_SAFETY_FRACTION",
+    "DEFAULT_RESERVED_OUTPUT_TOKENS",
+    "DENSE_CHARS_PER_TOKEN",
+    "IMAGE_TOKEN_ESTIMATE",
+    "MIN_HISTORY_BUDGET",
     "MISSING_TOOL_RESULT",
     "SkillInfo",
+    "TrimPlan",
     "build_system_message",
     "build_workspace_context_block",
+    "compaction_request_messages",
+    "compaction_summary_message",
     "estimate_message_tokens",
     "estimate_tokens",
+    "estimate_tokens_dense",
+    "estimate_tool_schema_tokens",
+    "history_budget",
     "list_skills",
     "load_skill_texts",
+    "plan_trim",
     "repair_tool_call_pairing",
     "skill_exists",
     "skill_path",

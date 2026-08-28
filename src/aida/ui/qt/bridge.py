@@ -142,6 +142,10 @@ class ChatBridge(QObject):
     turn_failed = Signal(str)
     profile_switched = Signal(str)
     profile_switch_failed = Signal(str)
+    # PLAN.md §1.3 / planning/context_management.md §3.4: the "Compact
+    # Conversation" menu action's failure/no-op path — success is
+    # deliberately *not* a separate signal, see compact_context's docstring.
+    compaction_failed = Signal(str)  # message: an error, or "nothing to compact yet"
     # Phase 6: emitted from the background asyncio thread whenever a
     # SafetyGuard-gated tool needs a yes/no answer. The second argument is a
     # plain concurrent.futures.Future the receiver (MainWindow, on the Qt
@@ -334,6 +338,37 @@ class ChatBridge(QObject):
             self.profile_switch_failed.emit(str(exc))
             return
         self.profile_switched.emit(name)
+
+    # --- manual compaction (PLAN.md §1.3 / context_management.md §3.4) ----
+
+    def compact_context(self) -> None:
+        """"Compact Conversation" menu action — GUI parity with the CLI's
+        ``/compact``: summarize everything but the most recent few turns
+        right now, regardless of whether the budget is currently exceeded.
+
+        Deliberately reuses ``event_received`` for a successful result
+        rather than a dedicated "finished" signal: the ``ContextTrimmed``
+        this produces is identical in shape to one an *automatic*
+        mid-turn compaction would emit, and ``MainWindow._on_event_received``
+        already renders that event (status-bar message, context-fullness
+        refresh) — a second code path would just be that same handling
+        duplicated. Only the "nothing happened" outcomes (no session, not
+        enough history yet, the summarization call itself failed) get their
+        own signal, since those have no ``AgentEvent`` to piggyback on."""
+        if self.session is None:
+            return
+        asyncio.run_coroutine_threadsafe(self._compact_context(), self._loop_thread.loop)
+
+    async def _compact_context(self) -> None:
+        try:
+            event = await self.session.compact_now()
+        except Exception as exc:  # noqa: BLE001 - must never crash the loop thread
+            self.compaction_failed.emit(str(exc))
+            return
+        if event is None:
+            self.compaction_failed.emit("Nothing to compact yet — not enough history.")
+            return
+        self.event_received.emit(event)
 
     # --- MCP server live control (Phase 7 management dialog) ---------------
 

@@ -3,18 +3,29 @@ from __future__ import annotations
 from pathlib import Path
 
 from aida.core.context import (
+    CONTEXT_SAFETY_FRACTION,
+    DEFAULT_RESERVED_OUTPUT_TOKENS,
+    IMAGE_TOKEN_ESTIMATE,
+    MIN_HISTORY_BUDGET,
     MISSING_TOOL_RESULT,
     build_coding_context_block,
     build_identity_context_block,
     build_system_message,
     build_workspace_context_block,
+    compaction_request_messages,
+    compaction_summary_message,
+    estimate_message_tokens,
     estimate_tokens,
+    estimate_tokens_dense,
+    estimate_tool_schema_tokens,
+    history_budget,
     load_skill_texts,
+    plan_trim,
     repair_tool_call_pairing,
     split_into_turns,
     trim_history,
 )
-from aida.providers.base import Message, ToolCall
+from aida.providers.base import ImageRef, Message, ToolCall, ToolSchema
 
 
 def test_estimate_tokens_roughly_four_chars_per_token():
@@ -393,3 +404,169 @@ def test_repair_leaves_a_healthy_history_alone():
     ]
 
     assert repair_tool_call_pairing(messages) == messages
+
+
+# --- PLAN.md §1.3 / planning/context_management.md: counting what is
+# actually sent (tool schemas, dense tool/JSON content, images) -------------
+
+
+def test_estimate_tokens_dense_uses_three_chars_per_token():
+    assert estimate_tokens_dense("") == 1  # never zero
+    assert estimate_tokens_dense("a" * 30) == 10
+
+
+def test_estimate_tool_schema_tokens_empty_list_costs_nothing():
+    assert estimate_tool_schema_tokens([]) == 0
+
+
+def test_estimate_tool_schema_tokens_scales_with_schema_size():
+    """Measured basis (context_management.md §2a): pyirena-mcp's 68 tools
+    cost ~10,200 tokens, invisible to the budget before this existed. A
+    small schema list should cost noticeably less than a large one, and a
+    schema with a bigger `parameters` object should cost more than a
+    trivial one."""
+    small = [ToolSchema(name="get_time", description="Get the time.")]
+    big = [
+        ToolSchema(
+            name=f"tool_{i}",
+            description="A tool with a fairly detailed description of what it does.",
+            parameters={
+                "type": "object",
+                "properties": {f"field_{j}": {"type": "string", "description": "x" * 40} for j in range(6)},
+                "required": [],
+            },
+        )
+        for i in range(20)
+    ]
+    assert estimate_tool_schema_tokens(big) > estimate_tool_schema_tokens(small) * 10
+
+
+def test_estimate_message_tokens_tool_result_uses_dense_estimator():
+    """A role="tool" message's content is dense JSON/numeric data (§2b), not
+    prose — it must cost more than the plain (4-chars-per-token) estimate
+    of the same text, since the dense estimator (3 chars/token) is what
+    estimate_message_tokens now applies to it."""
+    text = "x" * 300
+    tool_message = Message(role="tool", content=text, tool_call_id="c1", name="track")
+    assert estimate_message_tokens(tool_message) == estimate_tokens_dense(text)
+    assert estimate_message_tokens(tool_message) > estimate_tokens(text)
+
+
+def test_estimate_message_tokens_plain_user_message_unaffected():
+    # Regular prose stays on the plain (4-chars-per-token) estimator — only
+    # tool-role content and tool-call arguments moved to the dense one.
+    text = "just a normal question about the data"
+    assert estimate_message_tokens(Message(role="user", content=text)) == estimate_tokens(text)
+
+
+def test_estimate_message_tokens_counts_images():
+    """B1 images were never counted before this — a vision-heavy turn could
+    look cheap to the trim budget while actually costing real tokens."""
+    plain = Message(role="tool", content="a plot was generated", tool_call_id="c1", name="plot")
+    with_one_image = Message(
+        role="tool", content="a plot was generated", tool_call_id="c1", name="plot",
+        images=[ImageRef(path="/tmp/plot.png")],
+    )
+    with_two_images = Message(
+        role="tool", content="a plot was generated", tool_call_id="c1", name="plot",
+        images=[ImageRef(path="/tmp/plot1.png"), ImageRef(path="/tmp/plot2.png")],
+    )
+    assert estimate_message_tokens(with_one_image) == estimate_message_tokens(plain) + IMAGE_TOKEN_ESTIMATE
+    assert estimate_message_tokens(with_two_images) == estimate_message_tokens(plain) + 2 * IMAGE_TOKEN_ESTIMATE
+
+
+# --- history_budget (§3.2) --------------------------------------------------
+
+
+def test_history_budget_basic_arithmetic():
+    budget = history_budget(context_window=100_000, reserved_output_tokens=4096, tool_schema_tokens=10_000)
+    expected = int(100_000 * CONTEXT_SAFETY_FRACTION) - 4096 - 10_000
+    assert budget == expected
+
+
+def test_history_budget_uses_the_default_safety_fraction():
+    assert history_budget(context_window=200_000, reserved_output_tokens=0, tool_schema_tokens=0) == int(
+        200_000 * CONTEXT_SAFETY_FRACTION
+    )
+
+
+def test_history_budget_clamps_to_the_floor_when_over_committed():
+    """A 128k-class local model with pyirena-mcp's ~10k of tool schemas and
+    a generous max_tokens reservation can compute to a negative or tiny
+    budget — a misconfiguration, not an honest tight budget, so it clamps
+    to MIN_HISTORY_BUDGET rather than leaving the next turn unanswerable."""
+    budget = history_budget(context_window=20_000, reserved_output_tokens=8000, tool_schema_tokens=10_000)
+    assert budget == MIN_HISTORY_BUDGET
+
+
+def test_history_budget_respects_default_reserved_output_tokens_constant():
+    assert DEFAULT_RESERVED_OUTPUT_TOKENS == 4096  # Anthropic's own default
+
+
+# --- plan_trim / TrimPlan (§3.4 — the shared decision compaction and plain
+# trimming both build on) ----------------------------------------------------
+
+
+def test_plan_trim_reports_dropped_turns_as_whole_turns():
+    old_turns = []
+    for i in range(10):
+        old_turns.append(Message(role="user", content=f"q{i} " + "x" * 400))
+        old_turns.append(Message(role="assistant", content=f"a{i} " + "y" * 400))
+    messages = old_turns + [Message(role="user", content="recent")]
+
+    plan = plan_trim(messages, max_tokens=50, min_recent_turns=1)
+
+    assert plan.was_trimmed is True
+    assert len(plan.dropped_turns) > 0
+    # Every dropped turn is a whole turn (starts with the user message).
+    for turn in plan.dropped_turns:
+        assert turn[0].role == "user"
+    # trim_history's own plain-discard result matches kept_messages exactly.
+    trimmed, was_trimmed = trim_history(messages, max_tokens=50, min_recent_turns=1)
+    assert (trimmed, was_trimmed) == (plan.kept_messages, plan.was_trimmed)
+
+
+def test_plan_trim_noop_reports_no_dropped_turns():
+    messages = [Message(role="user", content="hi")]
+    plan = plan_trim(messages, max_tokens=10_000)
+    assert plan.was_trimmed is False
+    assert plan.dropped_turns == []
+    assert plan.kept_messages == messages
+
+
+# --- compaction (§3.4) ------------------------------------------------------
+
+
+def test_compaction_request_messages_is_one_user_message_with_the_transcript():
+    turns = [[Message(role="user", content="please plot the data")]]
+    request = compaction_request_messages(turns)
+    assert len(request) == 1
+    assert request[0].role == "user"
+    assert "please plot the data" in request[0].content
+
+
+def test_compaction_request_messages_includes_tool_calls_and_results():
+    turns = [
+        [
+            Message(role="user", content="fit the Guinier region"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[ToolCall(id="c1", name="fit_guinier", arguments={"file": "run_042.dat"})],
+            ),
+            Message(role="tool", content="Rg=32.4, I0=1050", tool_call_id="c1", name="fit_guinier"),
+            Message(role="assistant", content="Rg is 32.4 Angstrom."),
+        ]
+    ]
+    request = compaction_request_messages(turns)
+    text = request[0].content
+    assert "run_042.dat" in text
+    assert "Rg=32.4, I0=1050" in text
+    assert "Rg is 32.4 Angstrom." in text
+
+
+def test_compaction_summary_message_is_a_labeled_user_message():
+    message = compaction_summary_message("- fit run_042.dat: Rg=32.4")
+    assert message.role == "user"
+    assert "Summary of earlier conversation" in message.content
+    assert "Rg=32.4" in message.content

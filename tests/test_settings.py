@@ -197,6 +197,45 @@ def test_provider_profile_rejects_a_badly_typed_sampling_field():
     assert profile.temperature is None
 
 
+def test_provider_profile_context_window_roundtrip(aida_home: Path):
+    """PLAN.md §1.3: context_window is the model's TOTAL window, a
+    separate field from max_tokens (the output cap) — round-trips through
+    providers.yaml like every other optional numeric field."""
+    from aida.config.settings import ProviderProfile
+
+    cfg = ProvidersConfig(
+        profiles={
+            "local-qwen": ProviderProfile(
+                name="local-qwen", kind="openai_compat", model="qwen2.5", context_window=128_000
+            )
+        }
+    )
+    save_providers_config(cfg, aida_home)
+    loaded = load_providers_config(aida_home).profiles["local-qwen"]
+    assert loaded.context_window == 128_000
+
+
+def test_provider_profile_context_window_defaults_to_none():
+    """None means "fall back to AppConfig.max_context_tokens" — a profile
+    that never sets this must behave exactly as before this field existed."""
+    from aida.config.settings import ProviderProfile
+
+    profile = ProviderProfile.from_dict("local-ollama", {"kind": "openai_compat", "model": "qwen"})
+    assert profile.context_window is None
+
+
+def test_provider_profile_rejects_a_badly_typed_context_window():
+    """A hand-quoted context_window: "huge" must not crash config
+    loading — falls back to None (use AppConfig.max_context_tokens) with a
+    warning, same coercion guard every other optional numeric field uses."""
+    from aida.config.settings import ProviderProfile
+
+    profile = ProviderProfile.from_dict(
+        "argo-claude", {"kind": "anthropic", "model": "claude-sonnet", "context_window": "huge"}
+    )
+    assert profile.context_window is None
+
+
 def test_workspaces_config_roundtrip(aida_home: Path):
     from aida.config.settings import WorkspaceConfig
 

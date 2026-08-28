@@ -505,6 +505,53 @@ async def test_repl_max_iterations_command_rejects_non_numeric_input(
     assert "Not a number" in capsys.readouterr().out
 
 
+# --- /compact (PLAN.md §1.3 / planning/context_management.md §3.4) --------
+
+
+@pytest.mark.asyncio
+async def test_repl_compact_command_summarizes_and_prints_the_result(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
+    settings = _settings_with_profile()
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="- did some analysis")]),
+    )
+    session = ChatSession(settings, "mock-profile")
+    for i in range(10):
+        session.messages.append(Message(role="user", content=f"old question {i} " + "x" * 2000))
+        session.messages.append(Message(role="assistant", content="old answer " + "y" * 2000))
+
+    lines = iter(["/compact", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(lines))
+
+    await _repl_loop(session)
+    out = capsys.readouterr().out
+    assert "[context] summarized" in out
+
+
+@pytest.mark.asyncio
+async def test_repl_compact_command_reports_nothing_to_compact(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
+    settings = _settings_with_profile()
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([]))
+    session = ChatSession(settings, "mock-profile")
+
+    lines = iter(["/compact", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(lines))
+
+    await _repl_loop(session)
+    assert "nothing to compact yet" in capsys.readouterr().out
+
+
+def test_print_event_context_trimmed_summarized_wording(capsys):
+    print_event(ContextTrimmed(dropped_turns=3, estimated_tokens=512, summarized=True, summary_tokens=80))
+    out = capsys.readouterr().out
+    assert "summarized 3 old turns" in out
+    assert "~80 tokens" in out
+
+
 def test_chat_session_unknown_profile_raises(aida_home: Path, records_home: Path):
     settings = _settings_with_profile()
     with pytest.raises(UnknownProfileError):
@@ -722,14 +769,26 @@ async def test_send_with_no_active_knowledge_bases_performs_no_retrieval(
 async def test_send_trims_the_history_to_the_configured_budget(
     monkeypatch, aida_home: Path, records_home: Path
 ):
+    """PLAN.md §1.3: the real budget is now history_budget(context_window,
+    reserved_output_tokens, tool_schema_tokens) — a tiny max_context_tokens
+    like the old "200 (~800 characters)" setup gets clamped up to
+    MIN_HISTORY_BUDGET (8000) rather than taken literally, since a budget
+    that low is a misconfiguration, not an honest tight budget. So the
+    fixture history here is sized to clearly exceed that floor regardless.
+    Two scripted turns: compaction's own summarization call consumes the
+    first (see ChatSession._compact_context), the actual reply consumes the
+    second."""
     settings = _settings_with_profile()
-    settings.app.max_context_tokens = 200  # ~800 characters
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    settings.app.max_context_tokens = 200
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="summary of old turns"), MockTurn(text="ok")]),
+    )
 
     session = ChatSession(settings, "mock-profile")
     for i in range(40):
-        session.messages.append(Message(role="user", content=f"old question {i} " + "x" * 400))
-        session.messages.append(Message(role="assistant", content="old answer " + "y" * 400))
+        session.messages.append(Message(role="user", content=f"old question {i} " + "x" * 2000))
+        session.messages.append(Message(role="assistant", content="old answer " + "y" * 2000))
     before = len(session.messages)
 
     async for _event in session.send("the new question"):
@@ -766,21 +825,28 @@ async def test_send_yields_context_trimmed_event_when_it_actually_trims(
 ):
     """B7: trimming used to be a log line only — send() now yields a
     ContextTrimmed event the frontend can show, with a real dropped_turns
-    count and a post-trim token estimate."""
+    count and a post-trim token estimate. PLAN.md §1.3: with compaction
+    wired in and a working summarization call scripted, the drop is
+    reported as summarized rather than plain-dropped."""
     settings = _settings_with_profile()
-    settings.app.max_context_tokens = 200  # ~800 characters
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    settings.app.max_context_tokens = 200
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="summary of old turns"), MockTurn(text="ok")]),
+    )
 
     session = ChatSession(settings, "mock-profile")
     for i in range(40):
-        session.messages.append(Message(role="user", content=f"old question {i} " + "x" * 400))
-        session.messages.append(Message(role="assistant", content="old answer " + "y" * 400))
+        session.messages.append(Message(role="user", content=f"old question {i} " + "x" * 2000))
+        session.messages.append(Message(role="assistant", content="old answer " + "y" * 2000))
 
     events = [e async for e in session.send("the new question")]
     trim_events = [e for e in events if isinstance(e, ContextTrimmed)]
     assert len(trim_events) == 1
     assert trim_events[0].dropped_turns > 0
     assert trim_events[0].estimated_tokens > 0
+    assert trim_events[0].summarized is True
+    assert trim_events[0].summary_tokens > 0
     await session.aclose()
 
 

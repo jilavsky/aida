@@ -1482,7 +1482,7 @@ def test_usage_label_updates_after_a_turn_reports_usage(
         profile_name="mock-profile",
     )
     try:
-        assert window._usage_label.text() == "Tokens: 0 in / 0 out (~$0.000 est.)"
+        assert window._usage_label.text() == "Session total: 0 in / 0 out (~$0.000 est.)"
         window.input_box.set_text("hello")
         window.input_box._send_button.click()
         assert pump_until(qapp, lambda: "100" in window._usage_label.text())
@@ -1683,6 +1683,68 @@ def test_context_trimmed_event_shows_in_the_status_bar(
         message = window.statusBar().currentMessage()
         assert "5" in message
         assert "1234" in message
+    finally:
+        window.close()
+
+
+def test_context_trimmed_summarized_event_shows_compacted_wording(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """PLAN.md §1.3: a compacted drop reads differently from a plain one —
+    "the model still remembers a summary" is a materially different
+    outcome from "these turns are just gone"."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window._on_event_received(
+            ContextTrimmed(dropped_turns=5, estimated_tokens=1234, summarized=True, summary_tokens=90)
+        )
+        message = window.statusBar().currentMessage()
+        assert "compacted" in message.lower()
+        assert "5" in message
+        assert "90" in message
+    finally:
+        window.close()
+
+
+def test_context_label_shows_fullness_after_session_ready(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """planning/context_management.md §3.5: a separate "Context: Nk / Mk
+    (P%)" label, distinct from the ever-growing "Session total:" one."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        assert window._context_label.text().startswith("Context:")
+    finally:
+        window.close()
+
+
+def test_compact_conversation_action_triggers_bridge_and_updates_status(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """The "Compact Conversation" File-menu action end to end: it reaches
+    ChatBridge.compact_context, which (on success) re-emits the resulting
+    ContextTrimmed through the normal event_received path — the same
+    status-bar/context-label handling as an automatic mid-turn compaction."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="- summarized some old turns")],
+        profile_name="mock-profile",
+    )
+    try:
+        session = window.bridge.session
+        for i in range(10):
+            session.messages.append(Message(role="user", content=f"old question {i} " + "x" * 2000))
+            session.messages.append(Message(role="assistant", content="old answer " + "y" * 2000))
+
+        window._on_compact_requested()
+
+        assert pump_until(qapp, lambda: "compacted" in window.statusBar().currentMessage().lower())
     finally:
         window.close()
 
