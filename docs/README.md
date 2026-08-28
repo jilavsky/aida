@@ -21,6 +21,7 @@ commented example config files, see [`examples/config/`](../examples/config/).
 | [`coding-and-scripting.md`](coding-and-scripting.md) | Letting the agent run Python/shell commands, code templates, the Code Editor |
 | [`knowledge-bases.md`](knowledge-bases.md) | RAG: indexing your own documents so the agent can search them |
 | [`gui-overview.md`](gui-overview.md) | A spatial tour of the desktop app — what's where |
+| [`pyirena.md`](pyirena.md) | Using AIDA with pyIrena: one-click MCP setup, and sharing an environment between the two packages |
 
 New to AIDA? Start with `installation.md`, then `providers-and-secrets.md`,
 then `workspaces.md` — that's enough to have a working chat session. The

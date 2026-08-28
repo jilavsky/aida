@@ -41,7 +41,17 @@ Repository = "https://github.com/jilavsky/aida"
 Issues = "https://github.com/jilavsky/aida/issues"
 
 [project.optional-dependencies]
-gui = ["PySide6>=6.6"]
+# The exclusions mirror pyirena[gui]'s own PySide6 pin, on purpose. AIDA's
+# main audience installs both packages, often into one environment, and pip
+# resolving them *sequentially* (`pip install pyirena[gui]` then
+# `pip install aida-workbench[gui]`, or the reverse) only ever sees the
+# requirement it was asked for: a bare `PySide6>=6.6` here lets pip pick a
+# release pyIrena has excluded for a real reason, breaking the *other*
+# package with nothing worse than a warning. Matching the exclusions makes
+# any resolution order land on a version both accept. AIDA has no stake in
+# 6.7.x or 6.10.x specifically, so this costs nothing; if pyIrena ever adds
+# or drops an exclusion, mirror it here too.
+gui = ["PySide6>=6.6,!=6.7.*,!=6.10.*"]
 docs = ["pymupdf>=1.24", "python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=0.6.23", "Pillow>=10.0"]
 dev = [
     "pytest>=8.0",
@@ -56,6 +66,15 @@ aida-gui = "aida.cli.__main__:main_gui"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aida"]
+
+# The sample skills live at `skills/` in the repo (editable, reviewable,
+# referenced by the docs) but must also travel inside the wheel: a
+# `pip install aida-workbench` user has no repo to copy from, while
+# `workspaces.yaml` examples and the one-click pyIrena MCP setup both
+# reference these skills by name. `aida.config.paths.install_bundled_skills`
+# copies them into `~/.aida/skills/` on demand, never overwriting.
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "aida/resources/skills"
 
 [tool.ruff]
 line-length = 100

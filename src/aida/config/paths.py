@@ -15,6 +15,8 @@ with nothing on disk yet, must succeed and create what's missing.
 from __future__ import annotations
 
 import os
+import shutil
+from collections.abc import Sequence
 from pathlib import Path
 
 APP_DIR_ENV_VAR = "AIDA_HOME"
@@ -59,6 +61,61 @@ def skills_dir() -> Path:
     d = app_dir() / "skills"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def bundled_skills_dir() -> Path | None:
+    """Where AIDA's own sample skills live, or ``None`` if they aren't
+    there.
+
+    They are authored once, at `skills/` in the repo — editable,
+    reviewable, and linked from the docs — and `pyproject.toml`
+    force-includes that folder into the wheel as
+    `aida/resources/skills`, so there is one source file and two places it
+    can be found depending on how AIDA was installed. Checked in that
+    order: the packaged copy (a real `pip install`), then the repo folder
+    two levels above `src/aida` (an editable/`-e` install, where
+    force-include does not apply).
+
+    Before this existed, `skills/` was repo-only: a `pip install
+    aida-workbench` user had no skills at all, while the `workspaces.yaml`
+    examples and the one-click pyIrena MCP setup both reference them by
+    name — so a new user got "skill file(s) not found (will be skipped)"
+    and nothing to copy from.
+    """
+    packaged = Path(__file__).resolve().parent.parent / "resources" / "skills"
+    if packaged.is_dir():
+        return packaged
+    repo = Path(__file__).resolve().parents[3] / "skills"
+    return repo if repo.is_dir() else None
+
+
+def install_bundled_skills(names: Sequence[str] | None = None) -> list[str]:
+    """Copy AIDA's bundled sample skills into `~/.aida/skills/`, skipping
+    any that already exist, and return the names actually installed.
+
+    Never overwrites: once a skill is in the user's skills folder it is
+    *theirs* — edited, tailored to their beamline — and a later AIDA
+    upgrade silently replacing it would be the worst kind of data loss.
+    `names` limits the copy to specific skills (the pyIrena setup path
+    installs only the two it attaches); `None` installs all of them.
+    """
+    source_dir = bundled_skills_dir()
+    if source_dir is None:
+        return []
+    target_dir = skills_dir()
+    installed: list[str] = []
+    for source in sorted(source_dir.glob("*.md")):
+        if source.stem == "README" or (names is not None and source.stem not in names):
+            continue
+        destination = target_dir / source.name
+        if destination.exists():
+            continue
+        try:
+            shutil.copyfile(source, destination)
+        except OSError:
+            continue  # a read-only or full home directory must not break setup
+        installed.append(source.stem)
+    return installed
 
 
 def workflows_dir() -> Path:

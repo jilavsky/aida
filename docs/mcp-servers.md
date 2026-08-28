@@ -7,6 +7,17 @@
 
 **Related:** [workspaces.md](workspaces.md) · [safety-and-permissions.md](safety-and-permissions.md)
 
+
+## Shortcut: pyIrena
+
+If pyIrena is what you're here for, skip the manual setup below —
+`aida mcp add-pyirena` (or the MCP dialog's **Add pyIrena…** button) finds
+it and configures the server, its group, and its skills in one step. See
+[pyirena.md](pyirena.md). The rest of this file covers adding any other MCP
+server by hand.
+
+## What an MCP server is
+
 An **MCP server** is an external process (pyIrena's tool server, an
 instrument-control server, a web-search server, ...) that AIDA talks to over
 the [Model Context Protocol](https://modelcontextprotocol.io/) to get extra

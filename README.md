@@ -48,6 +48,17 @@ The PyPI distribution name is `aida-workbench`; the import package and the
 console scripts are `aida` / `aida-gui`. Extras: `gui` (PySide6 desktop app),
 `docs` (PDF/DOCX/XLSX/PPTX reading, image handling).
 
+Already using pyIrena? Install both — in either order, in one environment or
+two — and wire up its MCP tools with a single command:
+
+```bash
+pip install "aida-workbench[gui,docs]" "pyirena[all]"
+aida mcp add-pyirena
+```
+
+See [`docs/pyirena.md`](docs/pyirena.md) for the compatibility details and
+the GUI equivalent.
+
 From a git checkout, for development:
 
 ```bash

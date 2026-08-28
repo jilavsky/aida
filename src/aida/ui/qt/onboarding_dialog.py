@@ -26,6 +26,7 @@ from pathlib import Path
 
 from aida.cli.doctor import run_checks
 from aida.config.settings import Settings
+from aida.mcp.pyirena_setup import find_pyirena_mcp
 from aida.ui.qt._qt import (
     QDialog,
     QDialogButtonBox,
@@ -70,6 +71,17 @@ class OnboardingDialog(QDialog):
         self._workspace_button = QPushButton("Create a Workspace…", self)
         self._workspace_button.clicked.connect(self._on_add_workspace)
         layout.addWidget(self._workspace_button)
+
+        # Offered here, on first launch, only when pyIrena is actually
+        # installed on this machine: for the beamline audience that is the
+        # whole point of AIDA, and configuring an MCP server by hand is the
+        # hardest step in setup. Hidden entirely when pyIrena isn't
+        # present, so a user who installed AIDA for document work never
+        # sees a button for a package they don't have.
+        self._pyirena_button = QPushButton("Add pyIrena MCP Tools…", self)
+        self._pyirena_button.clicked.connect(self._on_add_pyirena)
+        self._pyirena_button.setVisible(bool(find_pyirena_mcp()))
+        layout.addWidget(self._pyirena_button)
 
         self._status_label = QLabel(self)
         self._status_label.setWordWrap(True)
@@ -121,6 +133,16 @@ class OnboardingDialog(QDialog):
 
         dialog = WorkspaceManagementDialog(self._settings, self._skills_dir, self)
         dialog.exec()
+        self._refresh_status()
+
+    def _on_add_pyirena(self) -> None:
+        """Hands straight off to the MCP dialog's own one-click pyIrena
+        setup rather than duplicating it — same reasoning as the profile
+        and workspace buttons above, which defer to the real editors."""
+        from aida.ui.qt.mcp_management_dialog import McpManagementDialog
+
+        dialog = McpManagementDialog(self._settings, self._bridge, self._skills_dir, self)
+        dialog.add_pyirena()
         self._refresh_status()
 
 

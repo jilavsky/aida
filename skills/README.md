@@ -1,8 +1,20 @@
 # Sample skills
 
-Example/starter skills shipped as samples only (PLAN.md §3's repo layout) —
-AIDA reads skills from `~/.aida/skills/`, not from this folder directly.
-Copy or symlink whichever of these you want into place:
+Example/starter skills. AIDA reads skills from `~/.aida/skills/`, not from
+this folder directly.
+
+**These ship inside the installed package too** (`pyproject.toml`
+force-includes this folder as `aida/resources/skills`), so a
+`pip install aida-workbench` user has them without a repo checkout — see
+`aida.config.paths.bundled_skills_dir`. To get them into place:
+
+- `aida mcp add-pyirena` installs `saxs-basics` and `pyirena-usage`
+  automatically, since it attaches both to the server it configures.
+- Anything already in `~/.aida/skills/` is **never overwritten** — once a
+  skill is there it's yours, tailored to your beamline, and an AIDA upgrade
+  must not replace it.
+
+Or copy/symlink by hand:
 
 ```bash
 cp skills/saxs-basics.md skills/pyirena-usage.md skills/review-checklist.md ~/.aida/skills/

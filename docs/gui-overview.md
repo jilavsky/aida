@@ -91,6 +91,10 @@ Resuming replays chat history and any still-present image/file artifacts.
 - **MCP Servers dialog** (`mcp_management_dialog.py`) — add/edit/remove MCP
   servers, per-tool permissions, groups, skills, live start/stop/restart,
   connection tests, and a tool-call log. See [mcp-servers.md](mcp-servers.md).
+  Its **Add pyIrena…** button is a one-click setup for pyIrena's MCP server:
+  it finds the installation, shows you what it found, and on confirmation
+  writes the server, its group, its skills, and its env vars —
+  see [pyirena.md](pyirena.md).
 - **Knowledge Bases dialog** (`knowledge_management_dialog.py`) — add/edit/
   remove RAG knowledge bases and build/update their indexes. See
   [knowledge-bases.md](knowledge-bases.md).
@@ -107,9 +111,10 @@ Resuming replays chat history and any still-present image/file artifacts.
 
 On a fresh install (no provider profiles configured), `aida-gui` opens an
 onboarding dialog that walks you through creating a first provider profile
-and workspace, so you don't have to hand-edit YAML to get started. Skipping
-it is fine — the same settings are reachable from **Providers…** and
-**Workspaces…** at any time. Afterwards the app reopens the workspace and
+and workspace, so you don't have to hand-edit YAML to get started. It also offers **Add pyIrena MCP Tools…**, but only when pyIrena is
+actually installed on the machine. Skipping any of it is fine — the same
+settings are reachable from **Providers…**, **Workspaces…**, and
+**MCP Servers…** at any time. Afterwards the app reopens the workspace and
 profile you last used.
 
 ## Status bar

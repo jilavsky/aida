@@ -191,7 +191,63 @@ context, first-run onboarding) documented.
 
 ---
 
-## 4. Items from the old "future ideas" list that have since shipped
+## 4. pyIrena interoperability round (2026-08-28)
+
+Prompted by the observation that AIDA's target audience runs pyIrena too,
+and may `pip install` both into one environment in either order.
+
+**Coexistence, verified empirically** (both install orders, in a clean venv,
+`pip check` clean afterwards, and AIDA's own `McpManager` launching the real
+`pyirena-mcp` — 68 tools discovered, server instructions received):
+
+- AIDA's `gui` extra now mirrors pyIrena's PySide6 exclusions
+  (`>=6.6,!=6.7.*,!=6.10.*`). Sequential `pip install` resolves only the
+  requirement it was asked for, so a bare `>=6.6` could land on a release
+  pyIrena has excluded and break it with nothing worse than a warning.
+- Found and documented: pyIrena 1.0.1 on PyPI does not cap `mcp`, so
+  `pip install "pyirena[mcp]"` alone pulls mcp 2.x and `pyirena-mcp` fails
+  at import (2.x removed `mcp.server.fastmcp`). Installing AIDA into the
+  same environment repairs it as a side effect, and pyIrena 1.1.0's own cap
+  fixes it properly.
+- The remaining hard edge is the Python floor: pyIrena allows 3.10, AIDA
+  needs 3.11. A 3.10 environment refuses the AIDA install with a clear
+  message rather than breaking anything.
+
+**One-click pyIrena MCP setup** — configuring an MCP server was the hardest
+thing a new user faced, and pyIrena is the one server this audience is
+guaranteed to want:
+
+- New `aida.mcp.pyirena_setup`: finds `pyirena-mcp` in AIDA's own
+  environment, on `PATH`, as `python -m pyirena.mcp.server`, or in sibling
+  conda/mamba environments; reports the pyIrena version behind each; builds
+  the server config (absolute path — a GUI app inherits no shell `PATH`,
+  which is the single most common MCP misconfiguration — plus the
+  `pyirena-analysis` group, both skills, and `PYIRENA_MAX_ARRAY_POINTS`,
+  with `PYIRENA_DATA_ROOT` on request).
+- `aida mcp add-pyirena` and `aida mcp find-pyirena`.
+- An **Add pyIrena…** button in the MCP management dialog, which shows what
+  it found and confirms before writing anything (an MCP server is code AIDA
+  launches on the user's machine), suggesting `PYIRENA_DATA_ROOT` from the
+  active workspace's source folder. Also offered on the onboarding screen,
+  and only when pyIrena is actually installed.
+- An `aida doctor` check reporting both halves — installed or not,
+  configured or not — always as OK, never a failure, since a user with no
+  interest in pyIrena must not see a red FAIL for a package they chose not
+  to install.
+
+**Bundled skills now ship in the wheel.** `skills/` was repo-only, so a
+`pip install aida-workbench` user had no skills at all while the
+`workspaces.yaml` examples and the pyIrena setup both reference them by
+name. They are force-included into the wheel and installed into
+`~/.aida/skills/` on demand by `install_bundled_skills`, which never
+overwrites a file the user already has.
+
+New docs: `docs/pyirena.md`, plus pointers from the README, `installation.md`,
+`mcp-servers.md`, and `gui-overview.md`.
+
+---
+
+## 5. Items from the old "future ideas" list that have since shipped
 
 - **GUI workspace editor, including knowledge-base selection** — shipped as
   `workspace_management_dialog.py` (U1). Was the biggest item in the first

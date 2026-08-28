@@ -35,12 +35,15 @@ import contextlib
 import json
 from pathlib import Path
 
+from aida.config.paths import install_bundled_skills
 from aida.config.secrets import set_secret
 from aida.config.settings import McpConfig, McpServerConfig, Settings, save_mcp_config
 from aida.core.context import list_skills
 from aida.mcp.config_io import merge_mcp_config
 from aida.mcp.groups import add_group, delete_group, known_group_names, rename_group, resolve_group
 from aida.mcp.manager import ConnectionTestResult
+from aida.mcp.pyirena_setup import DEFAULT_SERVER_NAME as PYIRENA_SERVER_NAME
+from aida.mcp.pyirena_setup import find_pyirena_mcp, pyirena_server_config, pyirena_version
 from aida.mcp.server import ToolCallRecord
 from aida.ui.qt._qt import (
     QAbstractItemView,
@@ -642,6 +645,7 @@ class McpManagementDialog(QDialog):
         server_buttons = QVBoxLayout()
         for label, handler in [
             ("Add Server…", self._on_add),
+            ("Add pyIrena…", self._on_add_pyirena),
             ("Remove…", self._on_remove),
             ("Start", self._on_start),
             ("Stop", self._on_stop),
@@ -851,6 +855,124 @@ class McpManagementDialog(QDialog):
         if self._bridge is not None:
             self._bridge.register_mcp_server(config)
         self._refresh_server_list()
+
+    def add_pyirena(self) -> None:
+        """Public entry point for the one-click pyIrena setup, so another
+        dialog (``OnboardingDialog``) can trigger it without reaching for a
+        private method or reimplementing any of it."""
+        self._on_add_pyirena()
+
+    def _on_add_pyirena(self) -> None:
+        """One-click setup for the one MCP server this audience is
+        practically guaranteed to want.
+
+        Adding pyIrena by hand through ``ServerFormDialog`` means knowing
+        that the executable is called ``pyirena-mcp``, finding its
+        *absolute* path (a GUI app inherits no shell ``PATH``, so a bare
+        name fails to launch with a confusing error), and knowing which
+        env vars, group, and skills to attach. All of that is mechanical —
+        see ``aida.mcp.pyirena_setup``. This button does it, then shows
+        exactly what it configured rather than silently writing config:
+        an MCP server is code AIDA will launch on this machine, so the
+        user confirms before anything is saved.
+        """
+        candidates = find_pyirena_mcp()
+        if not candidates:
+            QMessageBox.information(
+                self,
+                "pyIrena Not Found",
+                "No pyirena-mcp installation was found on this machine.\n\n"
+                'Install it with:\n    pip install "pyirena[mcp]"\n\n'
+                "It can go in this environment or in its own conda environment — AIDA "
+                "talks to it over stdio, so they do not have to share an interpreter. "
+                "Then click this button again, or use “Add Server…” and point it at "
+                "the pyirena-mcp executable.",
+            )
+            return
+
+        candidate = candidates[0]
+        if len(candidates) > 1:
+            labels = [found.display for found in candidates]
+            choice, accepted = QInputDialog.getItem(
+                self, "Choose pyIrena Installation", "Several were found — use:", labels, 0, False
+            )
+            if not accepted:
+                return
+            candidate = candidates[labels.index(choice)]
+
+        name = PYIRENA_SERVER_NAME
+        if name in self._configs():
+            answer = QMessageBox.question(
+                self,
+                "Already Configured",
+                f"An MCP server named {name!r} already exists. Replace its configuration "
+                "with the freshly detected one?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        data_root = self._suggested_pyirena_data_root()
+        config = pyirena_server_config(candidate, name=name, data_root=data_root)
+        version = pyirena_version(candidate)
+
+        summary = [
+            f"Command:  {' '.join([config.command, *config.args])}",
+            f"Found in: {candidate.source}",
+            f"Version:  pyIrena {version}" if version else "Version:  (could not determine)",
+            f"Group:    {', '.join(config.groups) or '(none)'}",
+            f"Skills:   {', '.join(config.skills) or '(none)'}",
+        ]
+        if config.env:
+            summary.append("Env:      " + ", ".join(f"{k}={v}" for k, v in config.env.items()))
+        answer = QMessageBox.question(
+            self,
+            "Add pyIrena MCP Server",
+            "AIDA will add this MCP server and launch it as a subprocess when a "
+            "workspace enables it:\n\n" + "\n".join(summary) + "\n\nAdd it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._settings.mcp.servers[config.name] = config
+        save_mcp_config(self._settings.mcp)
+        installed = install_bundled_skills(config.skills)
+        if self._bridge is not None:
+            self._bridge.register_mcp_server(config)
+        self._refresh_server_list()
+
+        note = (
+            f"\n\nInstalled the {', '.join(installed)} skill file(s) into your skills folder."
+            if installed
+            else ""
+        )
+        QMessageBox.information(
+            self,
+            "pyIrena Added",
+            f"Configured {config.name!r} in the {', '.join(config.groups) or 'default'} group."
+            f"{note}\n\nNext: set a workspace's MCP group to "
+            f"{config.groups[0] if config.groups else 'none'!r} so the tools are actually "
+            "offered to the model, then use “Test Connection” here to check it starts.",
+        )
+
+    def _suggested_pyirena_data_root(self) -> str | None:
+        """The active workspace's first source folder, if there is one.
+
+        ``PYIRENA_DATA_ROOT`` restricts every file pyirena-mcp can touch to
+        one subtree — pyIrena's own docs call it strongly recommended when
+        the server is exposed to an AI agent — and a workspace's source
+        folder is by definition the data the user meant to work on. Falls
+        back to unset (pyIrena's own default of "any absolute path") rather
+        than guessing a path the user never named."""
+        session = getattr(self._bridge, "session", None) if self._bridge is not None else None
+        workspace_name = getattr(getattr(session, "recorder", None), "workspace_name", None)
+        workspace = self._settings.workspaces.workspaces.get(workspace_name) if workspace_name else None
+        if workspace and workspace.source_folders:
+            return workspace.source_folders[0]
+        return None
 
     def _on_edit(self) -> None:
         name = self._selected_name()

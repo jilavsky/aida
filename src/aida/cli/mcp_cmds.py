@@ -22,11 +22,19 @@ import asyncio
 import json
 from pathlib import Path
 
-from aida.config.paths import ensure_scratch_dir
+from aida.config.paths import ensure_scratch_dir, install_bundled_skills
 from aida.config.settings import McpServerConfig, Settings, load_settings, save_mcp_config
 from aida.mcp.config_io import merge_mcp_config
 from aida.mcp.groups import add_group, delete_group, known_group_names, rename_group, resolve_group
 from aida.mcp.manager import McpManager
+from aida.mcp.pyirena_setup import (
+    DEFAULT_GROUP,
+    DEFAULT_SERVER_NAME,
+    DEFAULT_SKILLS,
+    find_pyirena_mcp,
+    pyirena_server_config,
+    pyirena_version,
+)
 
 
 def _split_csv(value: str) -> list[str]:
@@ -308,6 +316,101 @@ def _add_server_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -
     parser.add_argument("--skills", default="" if defaults else None, help="Comma-separated skill names")
 
 
+def cmd_add_pyirena(args: argparse.Namespace) -> int:
+    """``aida mcp add-pyirena`` — find pyirena-mcp and configure it in one
+    step. Configuring an MCP server by hand is the hardest thing a new AIDA
+    user faces, and pyIrena is the one server this audience is guaranteed to
+    want; everything about wiring it up is mechanical (see
+    ``aida.mcp.pyirena_setup``). Still an explicit command, never automatic:
+    an MCP server is code AIDA launches on the user's machine."""
+    settings = load_settings()
+
+    if args.command:
+        from aida.mcp.pyirena_setup import PyirenaMcpCandidate
+
+        candidate = PyirenaMcpCandidate(command=args.command, source="given with --command")
+    else:
+        candidates = find_pyirena_mcp()
+        if not candidates:
+            print("Could not find pyirena-mcp on this machine.")
+            print()
+            print("Install pyIrena's MCP server, either alongside AIDA:")
+            print('    pip install "pyirena[mcp]"')
+            print("or in its own conda environment (AIDA talks to it over stdio, so they")
+            print("do not have to share an interpreter) — then re-run this command, or")
+            print("point it straight at the executable:")
+            print("    aida mcp add-pyirena --command /path/to/envs/pyirena/bin/pyirena-mcp")
+            return 1
+        if len(candidates) > 1 and not args.first:
+            print(f"Found {len(candidates)} pyirena-mcp installations:")
+            for index, found in enumerate(candidates, start=1):
+                print(f"  {index}. {found.display}")
+            print()
+            print("The first is used by default. Re-run with --first to accept it, or with")
+            print("--command PATH to choose a different one.")
+            return 1
+        candidate = candidates[0]
+
+    existing = _get_server(settings, args.name)
+    if existing is not None and not args.force:
+        print(f"An MCP server named {args.name!r} is already configured (command: {existing.command}).")
+        print("Re-run with --force to replace it, or --name OTHER to add a second one.")
+        return 1
+
+    server = pyirena_server_config(
+        candidate,
+        name=args.name,
+        data_root=args.data_root or None,
+        group=args.group,
+        skills=DEFAULT_SKILLS,
+    )
+    settings.mcp.servers[server.name] = server
+    save_mcp_config(settings.mcp)
+
+    version = pyirena_version(candidate)
+    print(f"Configured MCP server {server.name!r}{f' (pyIrena {version})' if version else ''}.")
+    print(f"  command: {' '.join([server.command, *server.args])}")
+    print(f"  source:  {candidate.source}")
+    print(f"  group:   {args.group or '(none)'}")
+    if server.env:
+        print(f"  env:     {', '.join(f'{k}={v}' for k, v in server.env.items())}")
+
+    installed = install_bundled_skills(DEFAULT_SKILLS)
+    if installed:
+        print(f"  skills:  installed {', '.join(installed)} into your skills folder")
+
+    print()
+    print("Next: point a workspace at it —")
+    print(f"    aida workspace edit <workspace> --mcp-group {args.group}")
+    print(f"Then check it starts:  aida mcp test {server.name}")
+    if not args.data_root:
+        print()
+        print("Tip: --data-root DIR sets PYIRENA_DATA_ROOT, restricting every file")
+        print("pyirena-mcp can touch to that subtree. pyIrena recommends it whenever")
+        print("the server is exposed to an AI agent; your workspace's source folder is")
+        print("usually the right value.")
+    return 0
+
+
+def cmd_find_pyirena(_args: argparse.Namespace) -> int:
+    """``aida mcp find-pyirena`` — report what would be found, change
+    nothing. Separated from ``add-pyirena`` so "is it installed, and which
+    one would you pick?" is answerable without writing to ``mcp.json``."""
+    candidates = find_pyirena_mcp()
+    if not candidates:
+        print("No pyirena-mcp installation found.")
+        print('Install it with:  pip install "pyirena[mcp]"')
+        return 1
+    print(f"Found {len(candidates)} pyirena-mcp installation(s), best first:")
+    for index, candidate in enumerate(candidates, start=1):
+        version = pyirena_version(candidate)
+        suffix = f" — pyIrena {version}" if version else ""
+        print(f"  {index}. {candidate.display}{suffix}")
+    print()
+    print("Configure the first one with:  aida mcp add-pyirena")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aida mcp")
     sub = parser.add_subparsers(dest="subcommand", required=True)
@@ -367,6 +470,28 @@ def _build_parser() -> argparse.ArgumentParser:
     test = sub.add_parser("test", help="Test-connect to one configured server: initialize + list tools, report timing")
     test.add_argument("name")
 
+    sub.add_parser("find-pyirena", help="Report where pyirena-mcp is installed, without changing anything")
+
+    add_pyirena = sub.add_parser(
+        "add-pyirena", help="Find pyIrena's MCP server and configure it in one step"
+    )
+    add_pyirena.add_argument(
+        "--command", default="", help="Path to pyirena-mcp, skipping auto-detection"
+    )
+    add_pyirena.add_argument(
+        "--data-root",
+        default="",
+        help="Sets PYIRENA_DATA_ROOT — restricts every file pyirena-mcp may touch to this subtree (recommended)",
+    )
+    add_pyirena.add_argument("--name", default=DEFAULT_SERVER_NAME, help="Server name in mcp.json")
+    add_pyirena.add_argument("--group", default=DEFAULT_GROUP, help="MCP group to put it in")
+    add_pyirena.add_argument(
+        "--first", action="store_true", help="Accept the first candidate without asking when several are found"
+    )
+    add_pyirena.add_argument(
+        "--force", action="store_true", help="Replace an existing server config with the same name"
+    )
+
     return parser
 
 
@@ -399,4 +524,8 @@ def main(argv: list[str] | None = None) -> int:
         return _GROUP_HANDLERS[args.group_subcommand](args)
     if args.subcommand == "import":
         return cmd_import(args)
+    if args.subcommand == "add-pyirena":
+        return cmd_add_pyirena(args)
+    if args.subcommand == "find-pyirena":
+        return cmd_find_pyirena(args)
     return cmd_test(args)

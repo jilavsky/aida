@@ -335,3 +335,88 @@ def test_test_against_a_working_server(aida_home: Path, capsys):
 def test_bare_mcp_requires_a_subcommand():
     with pytest.raises(SystemExit):
         main([])
+
+
+# --- add-pyirena / find-pyirena -------------------------------------------
+
+
+def _fake_candidate(command: str = "/opt/envs/pyirena/bin/pyirena-mcp"):
+    from aida.mcp.pyirena_setup import PyirenaMcpCandidate
+
+    return PyirenaMcpCandidate(command=command, source="conda env 'pyirena'")
+
+
+def test_find_pyirena_reports_nothing_found(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_pyirena_mcp", list)
+    assert main(["find-pyirena"]) == 1
+    assert 'pip install "pyirena[mcp]"' in capsys.readouterr().out
+
+
+def test_add_pyirena_configures_the_server_group_and_skills(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_pyirena_mcp", lambda: [_fake_candidate()])
+    monkeypatch.setattr("aida.cli.mcp_cmds.pyirena_version", lambda _c: "1.1.0")
+
+    assert main(["add-pyirena"]) == 0
+
+    saved = load_mcp_config().servers["pyirena"]
+    assert saved.command == "/opt/envs/pyirena/bin/pyirena-mcp"
+    assert saved.groups == ["pyirena-analysis"]
+    assert "pyirena-usage" in saved.skills
+    out = capsys.readouterr().out
+    assert "pyIrena 1.1.0" in out
+    # The tip is the whole point of the command: a configured server nobody
+    # points a workspace at is invisible in the chat window.
+    assert "--mcp-group pyirena-analysis" in out
+
+
+def test_add_pyirena_sets_the_data_root_env_var(aida_home: Path, monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_pyirena_mcp", lambda: [_fake_candidate()])
+    monkeypatch.setattr("aida.cli.mcp_cmds.pyirena_version", lambda _c: None)
+
+    assert main(["add-pyirena", "--data-root", str(tmp_path)]) == 0
+
+    assert load_mcp_config().servers["pyirena"].env["PYIRENA_DATA_ROOT"] == str(tmp_path)
+
+
+def test_add_pyirena_asks_which_one_when_several_are_found(aida_home: Path, capsys, monkeypatch):
+    """Two candidates from genuinely different environments is a real
+    choice — silently taking one could point AIDA at a pyIrena the user
+    never meant to use."""
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_pyirena_mcp",
+        lambda: [_fake_candidate("/a/pyirena-mcp"), _fake_candidate("/b/pyirena-mcp")],
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.pyirena_version", lambda _c: None)
+
+    assert main(["add-pyirena"]) == 1
+    assert "--first" in capsys.readouterr().out
+    assert "pyirena" not in load_mcp_config().servers
+
+    assert main(["add-pyirena", "--first"]) == 0
+    assert load_mcp_config().servers["pyirena"].command == "/a/pyirena-mcp"
+
+
+def test_add_pyirena_refuses_to_clobber_without_force(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_pyirena_mcp", lambda: [_fake_candidate()])
+    monkeypatch.setattr("aida.cli.mcp_cmds.pyirena_version", lambda _c: None)
+    assert main(["add-pyirena"]) == 0
+
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_pyirena_mcp", lambda: [_fake_candidate("/other/pyirena-mcp")]
+    )
+    assert main(["add-pyirena"]) == 1
+    assert load_mcp_config().servers["pyirena"].command == "/opt/envs/pyirena/bin/pyirena-mcp"
+
+    assert main(["add-pyirena", "--force"]) == 0
+    assert load_mcp_config().servers["pyirena"].command == "/other/pyirena-mcp"
+
+
+def test_add_pyirena_accepts_an_explicit_command_without_detection(aida_home: Path, monkeypatch):
+    def _must_not_be_called():
+        raise AssertionError("--command must skip detection entirely")
+
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_pyirena_mcp", _must_not_be_called)
+    monkeypatch.setattr("aida.cli.mcp_cmds.pyirena_version", lambda _c: None)
+
+    assert main(["add-pyirena", "--command", "/custom/pyirena-mcp"]) == 0
+    assert load_mcp_config().servers["pyirena"].command == "/custom/pyirena-mcp"

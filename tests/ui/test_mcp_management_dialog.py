@@ -540,3 +540,79 @@ def test_closing_the_dialog_disconnects_it_from_the_bridge(
         assert len(popped) == 1, f"expected exactly one dialog, got {len(popped)}"
     finally:
         bridge.shutdown()
+
+
+# --- one-click pyIrena setup ---------------------------------------------
+
+
+def test_add_pyirena_explains_the_install_when_nothing_is_found(qapp, aida_home, monkeypatch):
+    """A dead-end message is the failure mode this button exists to avoid —
+    it must say what to install, not just "not found"."""
+    from aida.config.settings import load_settings
+
+    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.find_pyirena_mcp", list)
+    shown: list[tuple] = []
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.information",
+        lambda *args, **kwargs: shown.append(args),
+    )
+
+    settings = load_settings()
+    dialog = McpManagementDialog(settings, None, aida_home / "skills")
+    dialog.add_pyirena()
+
+    assert shown, "the user must be told something"
+    assert 'pip install "pyirena[mcp]"' in shown[0][2]
+    assert not settings.mcp.servers
+
+
+def test_add_pyirena_confirms_before_writing_anything(qapp, aida_home, monkeypatch):
+    """An MCP server is code AIDA launches on this machine — declining the
+    confirmation must leave mcp.json untouched."""
+    from aida.config.settings import load_settings
+    from aida.mcp.pyirena_setup import PyirenaMcpCandidate
+    from aida.ui.qt._qt import QMessageBox
+
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.find_pyirena_mcp",
+        lambda: [PyirenaMcpCandidate(command="/opt/pyirena-mcp", source="PATH")],
+    )
+    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.pyirena_version", lambda _c: "1.1.0")
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.question",
+        lambda *a, **k: QMessageBox.StandardButton.No,
+    )
+
+    settings = load_settings()
+    dialog = McpManagementDialog(settings, None, aida_home / "skills")
+    dialog.add_pyirena()
+
+    assert not settings.mcp.servers
+
+
+def test_add_pyirena_writes_the_server_and_installs_its_skills(qapp, aida_home, monkeypatch):
+    from aida.config.settings import load_settings
+    from aida.mcp.pyirena_setup import PyirenaMcpCandidate
+    from aida.ui.qt._qt import QMessageBox
+
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.find_pyirena_mcp",
+        lambda: [PyirenaMcpCandidate(command="/opt/pyirena-mcp", source="PATH")],
+    )
+    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.pyirena_version", lambda _c: "1.1.0")
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.question",
+        lambda *a, **k: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.information", lambda *a, **k: None
+    )
+
+    settings = load_settings()
+    dialog = McpManagementDialog(settings, None, aida_home / "skills")
+    dialog.add_pyirena()
+
+    server = settings.mcp.servers["pyirena"]
+    assert server.command == "/opt/pyirena-mcp"
+    assert server.groups == ["pyirena-analysis"]
+    assert "pyirena-usage" in server.skills

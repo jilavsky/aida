@@ -45,6 +45,14 @@ Nothing here is speculative work; it is what a beta is for.
 - [ ] Watch for the two things most likely to bite a new user: a provider
       profile that won't connect, and an MCP server that won't start. Both
       have diagnostics; the question is whether they are *findable*.
+- [ ] Verify the pyIrena coexistence matrix on a real beamline machine
+      (Windows and macOS, conda rather than a venv) — it has been verified
+      in a clean Linux venv, both install orders, but conda's own resolver
+      and Windows path handling are the ones that actually matter here.
+      See `docs/pyirena.md`.
+- [ ] Mirror any future pyIrena PySide6 pin change into AIDA's `gui` extra.
+      The two are deliberately kept identical so no pip resolution order can
+      break the other package; nothing enforces that automatically.
 
 ### 1.2 Phase 10 — automation and distribution (`phase10_automation_distribution.md`)
 
@@ -114,6 +122,14 @@ believed complete.
       figures after the body.
 - [ ] A cheaper `AnthropicProvider.ping()`: today every doctor run and profile
       validation sends a real 1-token paid message.
+- [ ] Extend the one-click MCP setup pattern beyond pyIrena — `bait_mcp`
+      first, then a small offer list of npx-based servers. The detection and
+      config-building shape in `aida.mcp.pyirena_setup` generalizes; what
+      does not is knowing *which* env vars and group each server wants,
+      which is exactly the per-server knowledge that makes it worth doing.
+- [ ] Offer to install the bundled skills from the GUI generally, not only
+      as a side effect of `add-pyirena` (`install_bundled_skills` already
+      does the work).
 
 ---
 

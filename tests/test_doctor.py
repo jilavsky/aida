@@ -109,3 +109,76 @@ def test_records_dir_check_honors_the_configured_override(aida_home: Path, recor
     records_result = next(r for r in results if r.name == "records_dir")
     assert str(configured) in records_result.detail
     assert configured.exists()
+
+
+# --- pyirena MCP check ----------------------------------------------------
+
+
+def _candidate(command: str = "/opt/envs/pyirena/bin/pyirena-mcp"):
+    from aida.mcp.pyirena_setup import PyirenaMcpCandidate
+
+    return PyirenaMcpCandidate(command=command, source="conda env 'pyirena'")
+
+
+def test_pyirena_check_is_never_a_failure_when_not_installed(aida_home, monkeypatch):
+    """A user running AIDA for document work must not see a red FAIL for a
+    package they deliberately did not install."""
+    from aida.cli import doctor
+
+    monkeypatch.setattr("aida.cli.doctor.find_pyirena_mcp", list)
+    result = doctor._check_pyirena_mcp(None)
+
+    assert result.ok
+    assert 'pip install "pyirena[mcp]"' in result.detail
+
+
+def test_pyirena_check_names_the_fix_when_installed_but_unconfigured(aida_home, monkeypatch):
+    """The failure a new user is least equipped to diagnose: the server is
+    perfectly installed while mcp.json has never heard of it, which looks
+    identical from the chat window."""
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    monkeypatch.setattr("aida.cli.doctor.find_pyirena_mcp", lambda: [_candidate()])
+    monkeypatch.setattr("aida.cli.doctor.pyirena_version", lambda _c: "1.1.0")
+
+    result = doctor._check_pyirena_mcp(load_settings())
+
+    assert result.ok
+    assert "NOT configured" in result.detail
+    assert "aida mcp add-pyirena" in result.detail
+
+
+def test_pyirena_check_reports_a_configured_server(aida_home, monkeypatch):
+    from aida.cli import doctor
+    from aida.config.settings import McpServerConfig, load_settings
+
+    monkeypatch.setattr("aida.cli.doctor.find_pyirena_mcp", lambda: [_candidate()])
+    monkeypatch.setattr("aida.cli.doctor.pyirena_version", lambda _c: "1.1.0")
+    settings = load_settings()
+    settings.mcp.servers["pyirena"] = McpServerConfig(
+        name="pyirena", command="/opt/envs/pyirena/bin/pyirena-mcp"
+    )
+
+    result = doctor._check_pyirena_mcp(settings)
+
+    assert result.ok
+    assert "configured as pyirena" in result.detail
+
+
+def test_pyirena_check_recognizes_the_python_dash_m_launch_form(aida_home, monkeypatch):
+    """A server configured as `python -m pyirena.mcp.server` has no
+    "pyirena" in its command at all — matching only on the executable name
+    would report it as unconfigured and tell the user to add a duplicate."""
+    from aida.cli import doctor
+    from aida.config.settings import McpServerConfig, load_settings
+
+    monkeypatch.setattr("aida.cli.doctor.find_pyirena_mcp", list)
+    settings = load_settings()
+    settings.mcp.servers["scattering"] = McpServerConfig(
+        name="scattering", command="/env/bin/python", args=["-m", "pyirena.mcp.server"]
+    )
+
+    result = doctor._check_pyirena_mcp(settings)
+
+    assert "configured as scattering" in result.detail

@@ -27,6 +27,7 @@ from pathlib import Path
 from aida.config import paths
 from aida.config.secrets import keyring_available
 from aida.config.settings import Settings, load_settings
+from aida.mcp.pyirena_setup import find_pyirena_mcp, pyirena_version
 from aida.providers.profiles import ProfileValidation, validate_profile
 
 
@@ -138,6 +139,62 @@ def _effective_records_dir(settings: Settings | None) -> Path:
     return paths.ensure_records_dir(Path(configured) if configured else None)
 
 
+def _check_pyirena_mcp(settings: Settings | None) -> CheckResult:
+    """Is pyIrena's MCP server installed, and is AIDA actually configured to
+    use it?
+
+    pyIrena is the one MCP server this audience is practically guaranteed to
+    want, and "my tools aren't there" is the failure a new user is least
+    equipped to diagnose — the server can be perfectly installed while
+    ``mcp.json`` has never heard of it, which looks identical from the chat
+    window. So this check reports the *combination* of the two, and always
+    names the one command that fixes whichever half is missing.
+
+    Never a hard failure. A user with no interest in pyIrena (running AIDA
+    for document work, say) must not see a red FAIL for a package they
+    deliberately did not install, so "not installed" reports OK with an
+    explanation — this check exists to inform, not to grade.
+    """
+    configured = []
+    if settings is not None:
+        configured = [
+            server.name
+            for server in settings.mcp.servers.values()
+            if "pyirena" in Path(server.command).name.lower()
+            or any("pyirena" in arg for arg in server.args)
+        ]
+
+    candidates = find_pyirena_mcp()
+
+    if configured and candidates:
+        version = pyirena_version(candidates[0])
+        suffix = f" (pyIrena {version} found on this machine)" if version else ""
+        return CheckResult(
+            "pyirena_mcp", True, f"configured as {', '.join(configured)}{suffix}"
+        )
+    if configured:
+        return CheckResult(
+            "pyirena_mcp",
+            True,
+            f"configured as {', '.join(configured)}, but no pyirena-mcp was found on this "
+            "machine — if it stops starting, re-run `aida mcp add-pyirena --force`",
+        )
+    if candidates:
+        version = pyirena_version(candidates[0])
+        suffix = f" (pyIrena {version})" if version else ""
+        return CheckResult(
+            "pyirena_mcp",
+            True,
+            f"installed{suffix} at {candidates[0].command} but NOT configured in AIDA — "
+            "add it with `aida mcp add-pyirena` (or the MCP dialog's \"Add pyIrena…\" button)",
+        )
+    return CheckResult(
+        "pyirena_mcp",
+        True,
+        'not installed (optional) — `pip install "pyirena[mcp]"`, then `aida mcp add-pyirena`',
+    )
+
+
 def run_checks() -> list[CheckResult]:
     results: list[CheckResult] = [_check_python_version()]
     settings, config_result = _load_settings_safely()
@@ -147,6 +204,7 @@ def run_checks() -> list[CheckResult]:
     results.append(_check_writable("artifacts_dir", paths.artifacts_dir()))
     results.append(_check_writable("records_dir", _effective_records_dir(settings)))
     results.append(_check_keyring())
+    results.append(_check_pyirena_mcp(settings))
     results.extend(_check_provider_endpoints(settings))
     return results
 

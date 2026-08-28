@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from aida.config import paths
 
 
@@ -55,3 +57,39 @@ def test_ensure_scratch_dir_override(tmp_path: Path):
     result = paths.ensure_scratch_dir(custom)
     assert result == custom
     assert custom.is_dir()
+
+
+# --- bundled skills -------------------------------------------------------
+
+
+def test_install_bundled_skills_copies_the_shipped_samples(aida_home):
+    """A `pip install aida-workbench` user has no repo to copy skills from,
+    while workspaces.yaml examples and the pyIrena MCP setup both reference
+    them by name."""
+    from aida.config.paths import bundled_skills_dir, install_bundled_skills, skills_dir
+
+    if bundled_skills_dir() is None:
+        pytest.skip("no bundled skills in this layout")
+
+    installed = install_bundled_skills(["saxs-basics"])
+
+    assert installed == ["saxs-basics"]
+    assert (skills_dir() / "saxs-basics.md").is_file()
+    # The README is documentation about the folder, not a skill.
+    assert not (skills_dir() / "README.md").exists()
+
+
+def test_install_bundled_skills_never_overwrites_a_users_edited_copy(aida_home):
+    """Once a skill is in the user's folder it is theirs — tailored to their
+    beamline. A later AIDA upgrade silently replacing it would be the worst
+    kind of data loss."""
+    from aida.config.paths import bundled_skills_dir, install_bundled_skills, skills_dir
+
+    if bundled_skills_dir() is None:
+        pytest.skip("no bundled skills in this layout")
+
+    mine = skills_dir() / "saxs-basics.md"
+    mine.write_text("# my own version\n", encoding="utf-8")
+
+    assert install_bundled_skills(["saxs-basics"]) == []
+    assert mine.read_text(encoding="utf-8") == "# my own version\n"

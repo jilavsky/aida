@@ -59,6 +59,18 @@ Once `aida doctor` is clean, you still need one provider profile and
 The GUI reopens the workspace and profile you last used, so this is a
 one-time setup.
 
+If you use pyIrena, add its MCP tools at the same time — one command, or one
+button on the onboarding screen:
+
+```bash
+pip install "pyirena[mcp]"    # if you don't have it already
+aida mcp add-pyirena
+```
+
+`aida doctor` reports whether pyIrena is installed and whether AIDA is
+configured to use it. See [pyirena.md](pyirena.md), which also covers
+installing both packages into one environment.
+
 ## `aida doctor`
 
 Run this after install, and any time something seems misconfigured. It
