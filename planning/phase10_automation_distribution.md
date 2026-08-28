@@ -1,5 +1,8 @@
 # Phase 10 — CLI automation, stored workflows & distribution
 
+> **Still the one open phase as of 0.1.0b1.** Tracked from `PLAN.md` §1.2;
+> this file stays the detailed checklist.
+
 **Goal:** AIDA is scriptable from data pipelines (`aida run`), users can record and
 replay **named workflows**, a simple scheduler covers timed reports, and the package
 ships properly on PyPI (+ conda story). This phase turns AIDA from an app into

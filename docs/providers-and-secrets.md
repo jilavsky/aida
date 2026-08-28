@@ -1,7 +1,9 @@
 # Providers and secrets
 
-> **Status: pre-alpha.** Config formats and CLI commands may change without
-> notice until Phase 5. See [`PLAN.md`](../PLAN.md) for the full roadmap.
+> **Status: beta (0.1.0b1).** Phases 1–9 are implemented and in daily use.
+> Config formats and CLI commands are stable enough to build on; anything
+> that has to change before 1.0 will be called out in the release notes.
+> See [`PLAN.md`](../PLAN.md) for what is still planned.
 
 **Related:** [installation.md](installation.md) · [workspaces.md](workspaces.md) · [knowledge-bases.md](knowledge-bases.md)
 
@@ -21,6 +23,43 @@ Each entry under `profiles:` in `providers.yaml` has:
 | `model` | Model name/id passed to the provider |
 | `secret_ref` | Name of a keychain entry (see [Secrets](#secrets)), or `null` if the endpoint needs no key |
 | `capability_notes` | Free-text note to yourself (e.g. "small local model — prefer lean MCP groups") |
+| `max_tokens` | Cap on the reply length, in tokens. Omit/`null` to use the provider default — **note that Anthropic's default is 4096**, which a long generated report will hit (you'll see a "reply hit the max-tokens limit" notice when it does) |
+| `temperature` | Sampling temperature. Omit/`null` for AIDA's default of `0.7` |
+| `supports_vision` | `true` lets AIDA send images to this model — plot PNGs that MCP tools return, and image files you attach in the GUI. Defaults to `false`, because a model that can't accept images errors out the moment a tool returns one. Turn it on for any vision-capable model (Claude, GPT-4o-class, a local vision model) |
+| `usd_per_m_input` / `usd_per_m_output` | Your actual price per million tokens, used for the session cost estimate. Set both to `0` for a free local model so the estimate stops pretending it costs anything; omit them and a generic default rate is used |
+
+All five are optional and can be set per profile — that's the point of
+having several profiles for the same endpoint (a cheap fast one and a
+careful long-output one, say).
+
+```yaml
+profiles:
+  argo-claude-long:
+    kind: anthropic
+    base_url: "https://apps.inside.anl.gov/argoapi/"
+    model: "claude-sonnet"
+    secret_ref: "argo-claude"
+    max_tokens: 16000           # long reports need the headroom
+    temperature: 0.2            # analysis, not prose
+    supports_vision: true       # let it actually look at the plots
+    usd_per_m_input: 3.0
+    usd_per_m_output: 15.0
+```
+
+### Vision: letting the model see the plots
+
+With `supports_vision: true`, an `ImageArtifact` a tool returns (a pyIrena
+fit or residuals plot, for instance) is attached to the tool result the
+model reads, so it can judge the fit rather than only reporting numbers.
+Images you attach or drag into the GUI's input box are sent the same way.
+Two limits worth knowing:
+
+- Only the few most recent images are attached (a recency cap), and they're
+  downscaled to bound token cost — that needs the `docs` extra (Pillow);
+  without it the original-size bytes are sent.
+- Tool-result images are only sent for `kind: anthropic`. OpenAI's
+  chat-completions API rejects multi-part content on `tool` messages, so on
+  `openai_compat` profiles only *your* attachments are sent as images.
 
 `kind` only picks the wire protocol — OpenAI, Ollama, LM Studio, Unsloth
 Desktop, or any other OpenAI-compatible server are all `kind: openai_compat`,

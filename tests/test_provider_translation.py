@@ -719,3 +719,108 @@ def test_process_anthropic_event_captures_cache_token_usage():
 def test_completion_settings_supports_vision_defaults_false():
     settings = CompletionSettings(model="gpt-x")
     assert settings.supports_vision is False
+
+
+def test_finalize_stream_terminates_a_turn_that_never_sent_a_finish_reason():
+    """Some OpenAI-*compatible* servers (and any dropped connection) end a
+    stream after the last content delta without ever sending a
+    ``finish_reason``. Without finalization the agent loop never saw a
+    TextFinished and appended an *empty* assistant message — the reply the
+    user just watched stream in vanished and was persisted blank."""
+    from openai.types.chat import ChatCompletionChunk
+    from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
+
+    from aida.core.events import MessageFinished, TextFinished
+    from aida.providers.openai_compat import _StreamState, finalize_stream, process_openai_chunk
+
+    state = _StreamState(message_id="m1")
+
+    def chunk(**kw):
+        return ChatCompletionChunk(id="1", created=0, model="x", object="chat.completion.chunk", **kw)
+
+    process_openai_chunk(
+        chunk(choices=[Choice(index=0, delta=ChoiceDelta(content="partial answer"), finish_reason=None)]),
+        state,
+    )
+
+    events = finalize_stream(state)
+
+    finished = next(e for e in events if isinstance(e, TextFinished))
+    assert finished.text == "partial answer"
+    assert any(isinstance(e, MessageFinished) for e in events)
+
+
+def test_finalize_stream_recovers_a_tool_call_the_truncated_stream_had_announced():
+    from openai.types.chat import ChatCompletionChunk
+    from openai.types.chat.chat_completion_chunk import (
+        Choice,
+        ChoiceDelta,
+        ChoiceDeltaToolCall,
+        ChoiceDeltaToolCallFunction,
+    )
+
+    from aida.core.events import ToolCallStarted
+    from aida.providers.openai_compat import _StreamState, finalize_stream, process_openai_chunk
+
+    state = _StreamState(message_id="m2")
+    process_openai_chunk(
+        ChatCompletionChunk(
+            id="1",
+            created=0,
+            model="x",
+            object="chat.completion.chunk",
+            choices=[
+                Choice(
+                    index=0,
+                    delta=ChoiceDelta(
+                        tool_calls=[
+                            ChoiceDeltaToolCall(
+                                index=0,
+                                id="call_1",
+                                function=ChoiceDeltaToolCallFunction(
+                                    name="list_directory", arguments='{"path": "."}'
+                                ),
+                            )
+                        ]
+                    ),
+                    finish_reason=None,
+                )
+            ],
+        ),
+        state,
+    )
+
+    events = finalize_stream(state)
+
+    call = next(e for e in events if isinstance(e, ToolCallStarted))
+    assert call.tool_name == "list_directory"
+    assert call.arguments == {"path": "."}
+
+
+def test_finalize_stream_is_a_no_op_after_a_normal_finish_reason():
+    from openai.types.chat import ChatCompletionChunk
+    from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
+
+    from aida.providers.openai_compat import _StreamState, finalize_stream, process_openai_chunk
+
+    state = _StreamState(message_id="m3")
+    process_openai_chunk(
+        ChatCompletionChunk(
+            id="1",
+            created=0,
+            model="x",
+            object="chat.completion.chunk",
+            choices=[Choice(index=0, delta=ChoiceDelta(content="done"), finish_reason="stop")],
+        ),
+        state,
+    )
+
+    assert finalize_stream(state) == []
+
+
+def test_finalize_stream_emits_nothing_when_the_stream_carried_no_content_at_all():
+    """An immediately-failed request already surfaces as an AgentError —
+    finalization must not invent an empty assistant turn on top of it."""
+    from aida.providers.openai_compat import _StreamState, finalize_stream
+
+    assert finalize_stream(_StreamState(message_id="m4")) == []

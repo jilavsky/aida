@@ -13,6 +13,7 @@ everything else as it was.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 
 from aida.config.settings import Settings, WorkspaceConfig, load_settings
 from aida.workspace.safety import relaxed_mode_warning_if_newly_enabled
@@ -120,27 +121,46 @@ def cmd_edit(args: argparse.Namespace) -> int:
         print(f"Unknown workspace {args.name!r} — use `aida workspace new` to create it.")
         return 1
 
-    ws = WorkspaceConfig(
-        name=args.name,
-        profile=args.profile if args.profile is not None else existing.profile,
-        source_folders=_split_csv(args.source_folders) if args.source_folders is not None else existing.source_folders,
-        target_folder=args.target_folder if args.target_folder is not None else existing.target_folder,
-        sidecar_folder_name=args.sidecar_folder_name
-        if args.sidecar_folder_name is not None
-        else existing.sidecar_folder_name,
-        mcp_group=args.mcp_group if args.mcp_group is not None else existing.mcp_group,
-        skills=_split_csv(args.skills) if args.skills is not None else existing.skills,
-        knowledge_bases=_split_csv(args.knowledge_bases) if args.knowledge_bases is not None else existing.knowledge_bases,
-        system_prompt=args.system_prompt if args.system_prompt is not None else existing.system_prompt,
-        safety=args.safety if args.safety is not None else existing.safety,
-        command_allowlist=_split_csv(args.command_allowlist)
-        if args.command_allowlist is not None
-        else existing.command_allowlist,
-        python_interpreter=args.python_interpreter if args.python_interpreter is not None else existing.python_interpreter,
-        scripting_enabled=args.scripting_enabled if args.scripting_enabled is not None else existing.scripting_enabled,
-        templates_dir=args.templates_dir if args.templates_dir is not None else existing.templates_dir,
-        saved_scripts_dir=args.saved_scripts_dir if args.saved_scripts_dir is not None else existing.saved_scripts_dir,
-    )
+    # `dataclasses.replace(existing, ...)` rather than rebuilding a
+    # WorkspaceConfig from the flags: a from-scratch rebuild silently reset
+    # every field `edit` has no flag for back to its dataclass default, so
+    # `aida workspace edit W --profile other` also wiped W's `quick_tasks`
+    # (up to ten saved prompt templates) and reset `script_timeout_seconds`
+    # to 30 — an unrelated one-flag edit destroying user data with no
+    # warning. Carrying `existing` forward and overriding only the flags
+    # actually passed also means a field added to WorkspaceConfig later is
+    # preserved here automatically instead of becoming the same bug again.
+    updates: dict[str, object] = {}
+    if args.profile is not None:
+        updates["profile"] = args.profile
+    if args.source_folders is not None:
+        updates["source_folders"] = _split_csv(args.source_folders)
+    if args.target_folder is not None:
+        updates["target_folder"] = args.target_folder
+    if args.sidecar_folder_name is not None:
+        updates["sidecar_folder_name"] = args.sidecar_folder_name
+    if args.mcp_group is not None:
+        updates["mcp_group"] = args.mcp_group
+    if args.skills is not None:
+        updates["skills"] = _split_csv(args.skills)
+    if args.knowledge_bases is not None:
+        updates["knowledge_bases"] = _split_csv(args.knowledge_bases)
+    if args.system_prompt is not None:
+        updates["system_prompt"] = args.system_prompt
+    if args.safety is not None:
+        updates["safety"] = args.safety
+    if args.command_allowlist is not None:
+        updates["command_allowlist"] = _split_csv(args.command_allowlist)
+    if args.python_interpreter is not None:
+        updates["python_interpreter"] = args.python_interpreter
+    if args.scripting_enabled is not None:
+        updates["scripting_enabled"] = args.scripting_enabled
+    if args.templates_dir is not None:
+        updates["templates_dir"] = args.templates_dir
+    if args.saved_scripts_dir is not None:
+        updates["saved_scripts_dir"] = args.saved_scripts_dir
+
+    ws = dataclasses.replace(existing, name=args.name, **updates)
     save_workspace(settings, ws)
     print(f"Updated workspace {args.name!r}.")
     warning = relaxed_mode_warning_if_newly_enabled(existing.safety, ws.safety)

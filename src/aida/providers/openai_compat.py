@@ -140,6 +140,11 @@ class _StreamState:
     text_parts: list[str] = field(default_factory=list)
     tool_call_builders: dict[int, dict[str, Any]] = field(default_factory=dict)
     started: bool = False
+    #: Set once a ``finish_reason`` chunk has produced the turn's
+    #: TextFinished/ToolCallStarted/MessageFinished events, so
+    #: ``finalize_stream`` can tell "the server ended the turn properly"
+    #: from "the stream just stopped".
+    finished: bool = False
 
     def full_text(self) -> str:
         return "".join(self.text_parts)
@@ -198,6 +203,7 @@ def process_openai_chunk(chunk: Any, state: _StreamState) -> list[AgentEvent]:
 
     finish_reason = getattr(choice, "finish_reason", None)
     if finish_reason:
+        state.finished = True
         _ensure_started(state, events)
         events.append(TextFinished(message_id=state.message_id, text=state.full_text()))
         for idx, builder in state.tool_call_builders.items():
@@ -219,6 +225,47 @@ def process_openai_chunk(chunk: Any, state: _StreamState) -> list[AgentEvent]:
             )
         )
 
+    return events
+
+
+def finalize_stream(state: _StreamState) -> list[AgentEvent]:
+    """Events for a stream that ended without ever sending a
+    ``finish_reason``, so the turn still terminates properly.
+
+    ``process_openai_chunk`` only emits ``TextFinished``/``ToolCallStarted``/
+    ``MessageFinished`` when a chunk carries a ``finish_reason``. OpenAI
+    itself always sends one, but OpenAI-*compatible* servers are a much
+    looser population — llama.cpp/LM Studio builds and proxies have been
+    seen ending a stream after the last content delta, and any dropped
+    connection does the same. AIDA then finished the turn having emitted
+    only ``TextDelta``s: ``AgentLoop`` never saw a ``TextFinished``, so it
+    appended an assistant message with **empty** content (and no tool
+    calls) and returned — the user watched text stream into the window and
+    then be replaced by nothing, with the reply also persisted empty, and
+    any tool call the model had actually requested silently dropped.
+    Reconstructing the turn from what did arrive is strictly better than
+    discarding it. Returns ``[]`` when the stream ended normally."""
+    if state.finished:
+        return []
+    if not state.started and not state.text_parts and not state.tool_call_builders:
+        return []  # nothing arrived at all — an AgentError already covers it
+    events: list[AgentEvent] = []
+    _ensure_started(state, events)
+    state.finished = True
+    events.append(TextFinished(message_id=state.message_id, text=state.full_text()))
+    for idx, builder in state.tool_call_builders.items():
+        try:
+            arguments = json.loads(builder["arguments"] or "{}")
+        except json.JSONDecodeError:
+            arguments = {"_unparsed_arguments": builder["arguments"]}
+        events.append(
+            ToolCallStarted(
+                call_id=builder["id"] or f"call-{idx}",
+                tool_name=builder["name"] or "",
+                arguments=arguments,
+            )
+        )
+    events.append(MessageFinished(message_id=state.message_id, stop_reason="stop"))
     return events
 
 
@@ -260,6 +307,11 @@ class OpenAICompatProvider(LLMProvider):
             async for chunk in stream:
                 for event in process_openai_chunk(chunk, state):
                     yield event
+            # A compatible server that ended the stream without a
+            # finish_reason would otherwise leave the turn unterminated —
+            # see finalize_stream.
+            for event in finalize_stream(state):
+                yield event
         except AuthenticationError as exc:
             yield AgentError(layer=self.layer_name, message="authentication failed", detail=str(exc))
         except NotFoundError as exc:
@@ -286,6 +338,7 @@ class OpenAICompatProvider(LLMProvider):
 
 __all__ = [
     "OpenAICompatProvider",
+    "finalize_stream",
     "process_openai_chunk",
     "to_openai_messages",
     "to_openai_tools",

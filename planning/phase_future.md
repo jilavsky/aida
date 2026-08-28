@@ -1,5 +1,12 @@
 # Future ideas — parked, not committed
 
+> **Superseded 2026-08-28.** This list was folded into `PLAN.md` §2
+> ("Considered — discussed, not committed"), which is now the live version:
+> it adds the items that came out of the 2026-08 review round and drops the
+> ones that have since shipped (the GUI workspace editor, below, is done —
+> see `COMPLETED.md`). Kept here unchanged as the historical record; add new
+> parked ideas to `PLAN.md` §2, not to this file.
+
 An idea log. Nothing here blocks the 10 phases; each item graduates by getting its
 own phase file (and a note in PLAN.md §2) when its time comes. Keep adding items
 here instead of growing phase scope.

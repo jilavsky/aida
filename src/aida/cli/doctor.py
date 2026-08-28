@@ -113,7 +113,7 @@ def _check_provider_endpoints(settings: Settings | None) -> list[CheckResult]:
                 "provider_endpoints",
                 True,
                 "no provider profiles configured yet — add one by editing "
-                f"{providers_yaml} (see PLAN.md / README for the profile format)",
+                f"{providers_yaml}, or use the GUI's Providers… dialog (profile format: docs/providers-and-secrets.md)",
             )
         ]
 

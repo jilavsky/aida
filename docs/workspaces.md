@@ -1,7 +1,9 @@
 # Workspaces
 
-> **Status: pre-alpha.** Config formats and CLI commands may change without
-> notice until Phase 5. See [`PLAN.md`](../PLAN.md) for the full roadmap.
+> **Status: beta (0.1.0b1).** Phases 1–9 are implemented and in daily use.
+> Config formats and CLI commands are stable enough to build on; anything
+> that has to change before 1.0 will be called out in the release notes.
+> See [`PLAN.md`](../PLAN.md) for what is still planned.
 
 **Related:** [safety-and-permissions.md](safety-and-permissions.md) · [mcp-servers.md](mcp-servers.md) · [coding-and-scripting.md](coding-and-scripting.md) · [knowledge-bases.md](knowledge-bases.md)
 
@@ -37,6 +39,7 @@ editor, from the toolbar in the GUI.
 | `scripting_enabled` | `True` | On/off switch for `run_python_script`/`run_command` in this workspace — see [coding-and-scripting.md](coding-and-scripting.md). |
 | `templates_dir` | `None` | Folder of `.py` code templates offered to this workspace; `None` means no templates — see [coding-and-scripting.md](coding-and-scripting.md). |
 | `saved_scripts_dir` | `None` | Where the Code Editor saves scripts; `None` defaults to `<target_folder>/saved_scripts` — see [coding-and-scripting.md](coding-and-scripting.md). |
+| `quick_tasks` | `[]` | Up to ten named prompt templates for this workspace's routine jobs, shown in the GUI's **Quick Tasks** panel — see [gui-overview.md](gui-overview.md). Each entry is a `name`/`text` pair; managed from the panel's right-click menu, no CLI flag. |
 | `script_timeout_seconds` | `30.0` | Seconds a `run_python_script`/`run_command` invocation gets before its subprocess is killed — a true per-workspace ceiling (a model-requested longer timeout is capped at this, not honored unbounded) — see [coding-and-scripting.md](coding-and-scripting.md). |
 
 ## CLI usage
@@ -58,11 +61,12 @@ default (e.g. `safety` becomes `"confirm"`, `scripting_enabled` becomes
 `True`); on `edit`, an unset flag leaves the existing value untouched — only
 the flags you actually pass get changed.
 
-`script_timeout_seconds` is the one field with no `new`/`edit` flag at all
-(and `aida workspace show` doesn't print it either) — both commands leave it
-at the `30.0` default regardless of what it was set to before, since neither
-reads nor writes it. Use the GUI's **Workspaces…** dialog, or edit
-`workspaces.yaml` directly, to set or preserve a non-default value.
+`script_timeout_seconds` and `quick_tasks` have no `new`/`edit` flag (and
+`aida workspace show` doesn't print them). `new` therefore creates a
+workspace with the defaults for both; `edit` **preserves** whatever they
+were set to, along with any other field you didn't pass a flag for. Set
+them from the GUI — the **Workspaces…** dialog for the timeout, the Quick
+Tasks panel for the tasks — or by editing `workspaces.yaml` directly.
 
 Example — create a workspace with a couple of flags, then tweak one field
 afterward:

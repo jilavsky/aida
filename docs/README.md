@@ -1,7 +1,9 @@
 # AIDA documentation
 
-> **Status: pre-alpha.** Config formats and CLI commands may change without
-> notice until Phase 5. See [`PLAN.md`](../PLAN.md) for the full roadmap.
+> **Status: beta (0.1.0b1).** Phases 1–9 are implemented and in daily use.
+> Config formats and CLI commands are stable enough to build on; anything
+> that has to change before 1.0 will be called out in the release notes.
+> See [`PLAN.md`](../PLAN.md) for what is still planned.
 
 Task-oriented setup and configuration guides, one file per subsystem. Each
 covers both the CLI and GUI way to configure that subsystem — most things
@@ -23,3 +25,11 @@ commented example config files, see [`examples/config/`](../examples/config/).
 New to AIDA? Start with `installation.md`, then `providers-and-secrets.md`,
 then `workspaces.md` — that's enough to have a working chat session. The
 rest are opt-in features you can add as you need them.
+
+## Not implemented yet
+
+So you don't go looking for them: `aida run` (headless one-shot execution),
+stored named workflows, and the scheduler are Phase 10 — `aida run` prints a
+"not yet implemented" message today. Remote (HTTP) MCP servers, voice
+input/output, and an alternative web frontend are parked ideas, not planned
+work. See [`PLAN.md`](../PLAN.md).

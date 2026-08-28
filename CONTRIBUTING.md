@@ -1,6 +1,6 @@
 # Contributing to AIDA
 
-AIDA is early-stage (pre-alpha) and currently developed against a phased plan
+AIDA is early-stage (beta) and currently developed against a phased plan
 in `PLAN.md` and `planning/`. Before opening a PR:
 
 1. Check `PLAN.md` §10 (phase map) and the relevant `planning/phaseNN_*.md`

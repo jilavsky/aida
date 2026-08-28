@@ -1,442 +1,205 @@
-# AIDA — AI Data Assistant
+# AIDA — open work
 
-**A local scientific agent workbench.**
+**A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
+`aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-Master implementation plan. This document supersedes and incorporates
-`local_scientific_ai_agent_proposal.md` (the prior planning session); where the two
-differ, this document wins. Section 2 lists every deliberate change from the prior
-proposal so nothing is lost silently.
+**Status: 0.1.0b1 (beta), 2026-08-28.** Phases 1–9 are implemented, tested
+(1319 tests, three OSes) and in daily use. This file now holds **only what is
+not done**.
 
-Progress is tracked in per-phase checklist files under `planning/` — one file per
-phase, each independently testable. See Section 10 for the phase map.
+- What AIDA is, and every design decision behind it → [`planning/DESIGN.md`](planning/DESIGN.md)
+- What has been delivered → [`planning/COMPLETED.md`](planning/COMPLETED.md)
+- Per-phase checklists → `planning/phase01…phase09_*.md`
+- User-facing setup and configuration → [`docs/`](docs/README.md)
 
-- Repo: `https://github.com/jilavsky/Aida`
-- Import package name: `aida` (unchanged — `import aida`, console scripts `aida` /
-  `aida-gui`)
-- PyPI distribution name: `aida-workbench` (bare `aida` was auto-blocked by PyPI as
-  a likely typosquat/name-confusion risk on first upload attempt — 2026-08-18; see
-  Section 2 changelog entry below. Install with `pip install aida-workbench[gui]`.)
-- License: MIT
-- Language: Python (>= 3.11)
-- Desktop GUI: PySide6 (Qt 6), following pyIrena conventions
-- Distribution: git + pip now, PyPI later, conda-forge possibly after that
+Code comments and docstrings that cite "PLAN.md §N" or "PLAN.md Phase N"
+refer to the sections and phase files as they were before this split — the
+numbered sections now live in `planning/DESIGN.md`, the phases in
+`planning/phase0N_*.md`. Nothing they describe has changed.
 
----
+Two lists follow, and the distinction between them is the point:
 
-## 1. Objective
+- **§1 Planned** — committed work. Each item has a decided shape; the only
+  question is when.
+- **§2 Considered** — discussed, understood, deliberately *not* committed. An
+  item graduates to §1 only when a concrete need appears; keep adding here
+  rather than growing §1.
 
-AIDA gives pyIrena and USAXS-instrument users a **simple, reliable GUI for using AI
-agents in scientific work**: conversation with local or cloud LLMs, correct use of
-domain MCP servers (pyIrena, bait_mcp, ...), correct display of rich tool results
-(especially PNG plots), reading and producing documents, and controlled access to
-the user's data folders.
-
-It is deliberately **not** a general-purpose AI platform. Existing tools
-(AnythingLLM, Witsy, Msty, Unsloth Desktop, ...) carry far more functionality than
-needed and still fail at the details that matter here — above all, handling MCP
-image results and working smoothly with our own MCP servers. AIDA implements a
-smaller feature set and implements it well, under our control.
-
-The one-sentence interaction model:
-
-> Here is my workspace — these folders, these tools, this model. Help me do the
-> work, show me what you produce, and save useful outputs back into my folders.
-
-### Driving use cases (from simple to complex)
-
-These are the acceptance scenarios the phases build toward. Each phase file names
-which of these it advances.
-
-- **UC1 — Ask with knowledge.** Talk to the agent; answers draw on selected skills
-  files and (later) RAG over documentation. BeamlineAdvisor-style Q&A.
-- **UC2 — Work on documents.** Give the agent one or more documents (PDF, MD,
-  DOCX...), ask questions, request edits or a new derived document written to the
-  user's target folder. Later: drag & drop onto the GUI.
-- **UC3 — MCP analysis with rich output.** Enable pyIrena MCP (+ its skills), ask
-  e.g. *"Find which data in folder X have Rg between 20 and 50 Å and plot them"* —
-  the plot displays inline and/or lands in an output document with figures.
-- **UC4 — Filtered analysis pipelines.** Use pyIrena MCP to find samples matching
-  conditions, then graph or run further analysis on the matches.
-- **UC5 — Instrument check/operate.** Run AIEvaluator scripts to check beamline
-  status, drive the instrument through bait_mcp, read results back through
-  pyIrena MCP.
-- **UC6 — Generated reports on demand or on schedule.** Agent produces a report via
-  MCP; optionally run by a simple scheduler or an external trigger. (Future.)
+Working agreements (unchanged): a new capability is a new item in this file,
+not silent scope growth; a decision that changes something in `DESIGN.md` §2
+gets a dated note appended there; error messages say *which* layer failed.
 
 ---
 
-## 2. Decisions, and changes from the prior proposal
+## 1. Planned
 
-The prior proposal's core ideas are **kept**: GUI-independent agent core, typed MCP
-results (never flatten images to text), event-based core↔GUI boundary, MCP as the
-extension mechanism, native workspace file tools, SQLite persistence, diagnostics
-as a feature, standard-style `mcp.json`.
+### 1.1 Beta feedback loop — the current priority
 
-Deliberate changes and additions:
+Nothing here is speculative work; it is what a beta is for.
 
-| # | Topic | Prior proposal | This plan |
-|---|-------|----------------|-----------|
-| 1 | Providers | Local-first; Unsloth Desktop + Muse-Glimmer as the initial and near-exclusive target | **Multi-provider from day one.** OpenAI-compatible endpoints (Ollama, LM Studio, Unsloth Desktop, OpenAI) via the `openai` SDK **and** Anthropic via the `anthropic` SDK, including custom `base_url` (ANL Argo proxy — the exact pattern BeamlineAdvisor already uses). Named provider profiles, quick switching from GUI. No Unsloth-specific assumptions anywhere. |
-| 2 | GUI | PySide6 recommended, NiceGUI optional prototype | **PySide6 from the start; no web prototype.** Phases before the GUI are headless (CLI harness). NiceGUI/web demoted to a possible future alternative frontend riding on the same event API. |
-| 3 | RAG | Deferred until direct file access proves insufficient | **Mid-priority phase (Phase 8).** UC1 is served earlier by skills files loaded directly into context (BeamlineAdvisor's "direct context" strategy); RAG arrives as its own phase for larger corpora, with local *or* cloud embedding providers configured like LLM providers. |
-| 4 | Workspaces | Single workspace root per conversation | **Named workspaces** — a workspace bundles provider profile, source folder(s), target folder, MCP group, skills, and system prompt. Users pick "use pyIrena" or "perform reviews" and get the whole environment. |
-| 5 | MCP | Flat server list | **MCP groups** (named sets of servers, switchable together — pyIrena's large tool list overloads small local models when not needed) and **skills linked to MCP servers**: enabling a server auto-includes its associated skills files in context. |
-| 6 | Safety | Confirm every destructive action | **Allowed-folders model with relaxed mode.** Folders are declared allowed; within them the agent may read/write/modify without per-action approval (folders are backed up — user's explicit choice). Clear warning at setup, confirmations reserved for actions *outside* allowed folders, non-allowlisted shell commands, and sending data out. |
-| 7 | Outputs | Generic file artifacts | **Markdown-in-Obsidian-structure is the default output format**: MD files with images attached by link, stored in a user-nameable sidecar folder. Target folder is user-defined and easily changed in the GUI. |
-| 8 | CLI | "CLI possible" someday | **CLI is first-class and comes before the GUI** (it is how phases 2–4 are tested), and later grows `aida run` for scripted/pipeline use and named stored workflows. |
-| 9 | Coding | Not covered | **Small-scale coding support** (BeamlineAdvisor parity): template-based generation of instrument functions, code editor widget, saving scripts, executing Python (AIEvaluator) with subprocess + timeout. Large programming stays in VS Code. |
-| 10 | Persistence location | `~/.local-scientific-agent/` | **`~/.aida/`** for app state/config/DB; human-readable conversation records under `~/Documents/Aida/` (configurable); conversation browsing + cleanup built in. |
-| 11 | Name | "scientific-agent" placeholder | **AIDA — AI Data Assistant**; repo `jilavsky/Aida`, package `aida`. |
-| 12 | Agent engine | Own loop (implied) | **Confirmed: own thin loop, no agent framework.** The `openai` + `anthropic` SDKs are the only LLM dependencies. Frameworks (LangChain, pydantic-ai...) would reintroduce exactly the opaque-abstraction problem AIDA exists to escape. |
+- [ ] Publish `aida-workbench` 0.1.0b1 to PyPI and verify
+      `pip install "aida-workbench[gui,docs]"` → working `aida-gui` on a
+      clean macOS, Windows, and Linux machine.
+- [ ] First outside users installing from PyPI, with issues triaged into this
+      file rather than fixed ad hoc.
+- [ ] Watch for the two things most likely to bite a new user: a provider
+      profile that won't connect, and an MCP server that won't start. Both
+      have diagnostics; the question is whether they are *findable*.
 
-Deferred/parked (see `planning/phase_future.md`): voice STT/TTS, per-user beamline
-credentials, external-trigger report generation, remote (HTTP) MCP servers,
-alternative web frontend.
+### 1.2 Phase 10 — automation and distribution (`phase10_automation_distribution.md`)
 
-### Changelog
+The one phase not started. `aida run` exists as a stub that prints "not yet
+implemented".
 
-- **2026-08-18** — Row 11 (Name): the bare PyPI name `aida` returned
-  `403 ... isn't allowed to upload to project 'aida'` on the first real upload
-  attempt — PyPI's automated typosquat/name-confusion protection (not an
-  auth/config problem, and not a genuine prior claim: `pypi.org/project/aida/`
-  still 404s). Per the fallback this document already flagged in Phase 1,
-  switched the **PyPI distribution name only** to `aida-workbench`. The import
-  package name (`aida`), repo (`jilavsky/aida`), and console scripts (`aida`,
-  `aida-gui`) are all unchanged — end users run `pip install aida-workbench[gui]`
-  and everything else works exactly as documented elsewhere in this plan.
+- [ ] `aida run --workspace W "prompt"` — non-interactive single turn: exit
+      codes, `--json` output, stdin prompt, `--input file…` attachments.
+- [ ] Headless confirmation policy: fail-with-message by default, with an
+      explicit opt-in flag for unattended relaxed operation.
+- [ ] Stored named workflows in `~/.aida/workflows/NAME.yaml` — workspace ref
+      plus steps, placeholder substitution, `aida workflow run/list/show/validate`.
+- [ ] "Save this conversation as a workflow" from the GUI, and a workflow
+      picker that runs one into a normal conversation view.
+- [ ] Failure semantics: a failed step stops the workflow with a clear report.
+- [ ] Simple scheduler: `aida schedule add NAME --workflow W --every 24h |
+      --at 07:00`, list/remove, last-run status, output into the target folder.
+- [ ] Tests: `aida run` end-to-end with MockProvider + mock-mcp in CI,
+      workflow parse/validate/run, scheduler against a fake clock.
+- [ ] Release automation: a GitHub Actions publish workflow with the version
+      in `pyproject.toml` authoritative and tag-checked.
+- [ ] conda: keep `environment.yml` current; evaluate a conda-forge feedstock
+      once PyPI releases are routine (record the decision either way).
 
----
+### 1.3 Verification owed (cannot be done from a sandbox)
 
-## 3. Architecture
+Every one of these is a *manual* check the phase files left open because no
+sandbox can perform it. They are the acceptance evidence for work already
+believed complete.
 
-Unchanged in spirit from the prior proposal; extended with providers, workspaces,
-skills, and groups.
+- [ ] CI green on all three OSes after the next push (phases 1, 3, 4, 6, 7, 8, 9
+      each left this box open for the same reason).
+- [ ] `aida chat --profile ollama-local` against a real local model, and
+      `--profile argo-claude` through the ANL proxy on-site.
+- [ ] **Keystone, against the real thing:** a real model calling real
+      pyirena-mcp, PNG decoded and displayed, saved to disk.
+- [ ] bait_mcp connects and lists its tools from AIDA (no instrument needed).
+- [ ] Switching MCP groups demonstrably changes the tool list the model sees.
+- [ ] **UC2:** drop a PDF and an MD file on the GUI, ask questions, get a new
+      MD plus figures sidecar in the target folder.
+- [ ] **UC3 full:** "find data in <source folder> with Rg 20–50 Å, plot them,
+      write it up" end to end.
+- [ ] **UC5:** check beamline status via an AIEvaluator script plus bait_mcp
+      from an AIDA workspace.
+- [ ] **UC1 full:** a documentation folder indexed, answers citing retrieved
+      passages, index rebuilt from the GUI; the same knowledge base working
+      with local *and* Argo embeddings; the ten canned USAXS questions
+      answered with correct citations.
+- [ ] RAG benchmark on a real corpus (USAXS instructions + a pyIrena docs
+      folder + an Obsidian vault) — the escape hatch to a vector DB is only
+      justified by measurement.
+- [ ] Stop button interrupts a long generation cleanly and the app stays
+      usable; manual smoke checklist on macOS *and* Windows.
 
-```text
-        ┌────────────────────────────────────────────┐
-        │                 Frontends                  │
-        │  PySide6 desktop app   │   CLI (aida ...)  │
-        │  (thin, replaceable)   │   (scriptable)    │
-        └──────────────┬─────────────────┬───────────┘
-                       │   event stream  │
-                       │   + commands    │
-        ┌──────────────▼─────────────────▼───────────┐
-        │                Agent Core                  │
-        │  conversation · agent loop · context mgmt  │
-        │  permissions · events · workflow runner    │
-        └───┬──────────┬──────────┬──────────┬───────┘
-            │          │          │          │
-   ┌────────▼───┐ ┌────▼─────┐ ┌──▼───────┐ ┌▼──────────────┐
-   │ Providers  │ │ MCP      │ │ Workspace│ │ Knowledge     │
-   │ LLM:       │ │ Manager  │ │ files    │ │ skills files  │
-   │  openai-   │ │ stdio    │ │ search   │ │ RAG (Phase 8) │
-   │  compat +  │ │ groups   │ │ allowed  │ │ embeddings    │
-   │  anthropic │ │ skills   │ │ folders  │ │ providers     │
-   │ Embeddings │ │ linkage  │ │ documents│ └───────────────┘
-   └────────────┘ └──────────┘ └──────────┘
-            │          │
-            ▼          ▼
-     Ollama / LM     pyirena-mcp · bait_mcp · future MCPs
-     Studio / Unsloth│(each optionally shipping skills files)
-     OpenAI / Claude │
-     ANL Argo proxy  │
-                     ▼
-        ┌────────────────────────────┐
-        │ Persistence (~/.aida)      │
-        │ SQLite · artifacts · logs  │
-        │ Records (~/Documents/Aida) │
-        └────────────────────────────┘
-```
+### 1.4 Small, decided, not yet done
 
-Hard rules (enforced by tests, mirroring pyIrena's layering invariants):
-
-1. `aida.core`, `aida.providers`, `aida.mcp`, `aida.workspace`, `aida.knowledge`,
-   `aida.persistence` **never import Qt**. `aida.ui` depends on core; core never
-   depends on ui. Verified by a grep-style contract test.
-2. All Qt imports in `aida.ui.qt` go through a single `_qt.py` shim (pyIrena
-   pattern), enabling PySide6/PyQt6 normalization and a contract test.
-3. **Typed results throughout.** MCP `ImageContent` becomes `ImageArtifact(bytes,
-   mime_type)` immediately; files become `FileArtifact`; JSON stays structured.
-   The GUI never guesses whether a long string is an image.
-4. Core↔frontend communication is an **event stream** (`TextDelta`,
-   `ToolCallStarted`, `ImageArtifactCreated`, `AgentError`, ...). Any frontend —
-   Qt, CLI, future web — subscribes to the same events.
-5. The agent loop has a configurable max-iterations guard and a user Stop.
-6. `aida.api`-style surfaces return JSON-serializable data only.
-
-### Agent loop
-
-```text
-user message → build context (system prompt + skills + retrieved docs
-             + conversation) → provider.complete(messages, tools)
-             → stream text deltas to UI
-             → on tool call: resolve (native workspace tool | MCP tool)
-                → permission check → execute → typed artifact
-                → artifact to UI + artifact store; result back to LLM
-             → repeat until final text or iteration cap
-```
-
-### Repository structure
-
-```text
-Aida/
-├── PLAN.md                      # this file
-├── planning/                    # per-phase checklists (phase01...phase10, future)
-├── pyproject.toml               # package `aida`, extras: gui, rag, docs, dev
-├── environment.yml              # conda env (aida)
-├── src/aida/
-│   ├── core/                    # agent.py, conversation.py, events.py, context.py,
-│   │                            # permissions.py, workflows.py
-│   ├── providers/               # base.py, openai_compat.py, anthropic_.py,
-│   │                            # embeddings_base.py, profiles.py
-│   ├── mcp/                     # manager.py, server.py, groups.py, results.py, config.py
-│   ├── workspace/               # workspace.py, files.py, search.py, safety.py
-│   ├── documents/               # readers (pdf/docx/xlsx/pptx/md/txt/code),
-│   │                            # writers (md_obsidian.py, docx.py ...)
-│   ├── knowledge/               # skills.py, rag/ (index, extraction, retrieval)
-│   ├── artifacts/               # base.py, image.py, file.py, table.py, store.py
-│   ├── persistence/             # database.py, records.py, cleanup.py
-│   ├── config/                  # settings.py, secrets.py, paths.py
-│   ├── coding/                  # templates.py, runner.py (subprocess + timeout)
-│   ├── cli/                     # chat.py, run.py, doctor.py, config_cmds.py
-│   └── ui/qt/                   # _qt.py, main_window.py, chat_panel.py,
-│                                # workspace_bar.py, mcp_panel.py, settings_dialog.py,
-│                                # code_panel.py, conversations_panel.py
-├── skills/                      # example/starter skills shipped as *samples* only
-├── examples/                    # scripted usage of the core (no GUI)
-└── tests/                       # incl. contract tests for layering + _qt + events
-```
+- [ ] Diff-style view when the agent proposes changes to an existing script
+      (`phase09`, left open).
+- [ ] Per-workspace extra skills selection beyond server-linked ones
+      (`phase07`, left open).
+- [ ] Show estimated tool count per group in the MCP dialog — the reminder of
+      why lean groups matter for small local models (`phase07`).
+- [ ] Set a workspace's default MCP group from the MCP dialog itself
+      (`phase07`).
+- [ ] Let the model place images *within* a generated report rather than
+      always appended at the end — `write_markdown_report` currently emits all
+      figures after the body.
+- [ ] A cheaper `AnthropicProvider.ping()`: today every doctor run and profile
+      validation sends a real 1-token paid message.
 
 ---
 
-## 4. Providers and configuration
+## 2. Considered — discussed, not committed
 
-### LLM providers
+Kept deliberately. Each line records something already thought through, so it
+does not have to be rediscovered — and so it stays *out* of §1 until something
+concrete asks for it.
 
-Two provider classes cover everything currently needed:
+### 2.1 Deployment and multi-user
 
-- `OpenAICompatProvider` (`openai` SDK, custom `base_url`): Ollama, LM Studio,
-  Unsloth Desktop, llama.cpp server, OpenAI itself, other compatible services.
-- `AnthropicProvider` (`anthropic` SDK, custom `base_url`): Claude direct **and**
-  Claude via ANL Argo proxy (`base_url=https://apps.inside.anl.gov/argoapi/`,
-  api_key = ANL username — as in BeamlineAdvisor).
+- **Per-user beamline credentials.** Username selection → per-user chats and
+  saved scripts, as in BeamlineAdvisor. Real overhead: data separation in the
+  DB, per-user records folders, per-user secrets. Revisit when AIDA is
+  actually deployed on `usaxscontrol`; likely a thin "active user" layer over
+  persistence, not real auth. The Phase 4 schema already carries a nullable
+  `user` column as cheap insurance.
+- **Two AIDA instances sharing `~/.aida`** (SQLite + config writes) is
+  unguarded. The single-user assumption is fine today; a lock file would at
+  least make the failure mode explicit.
+- **Preinstall Node/npx and offer common npx-based MCP servers** (Playwright
+  and friends). Two separable pieces: `environment.yml` could pull `nodejs`
+  from conda-forge so `npx` comes along, and AIDA could ship ready-to-enable
+  config entries plus a one-click "Add browser automation" offer in onboarding
+  or `aida doctor`. Deliberately an *offer*, never pre-enabled: an MCP server
+  is code AIDA executes on the user's machine. Note that first launch still
+  needs network to fetch the npm package.
 
-Both implement one interface: `complete(messages, tools, settings) → event stream`,
-including native tool-calling translation for each API dialect. Embedding
-providers follow the same pattern (`OpenAICompatEmbeddings`,
-local/Ollama embeddings, Argo cloud embeddings) but are not needed until Phase 8.
+### 2.2 Transport and integration
 
-### Provider profiles
+- **Remote MCP servers over HTTP/SSE** — instrument-side MCPs reachable from
+  an office machine. The manager was designed transport-pluggable; add when a
+  concrete remote server exists.
+- **MCP Apps / rich interactive tool outputs**, if the ecosystem standardizes
+  them.
+- **Interactive plots** (a pyqtgraph pane fed by structured data artifacts) as
+  an upgrade over static PNGs — coordinate with pyIrena MCP first.
+- **External event triggers** (something happened at the instrument → generate
+  a report) stay *external code invoking `aida run`*; Phase 10 gives the hook.
+  A folder-watcher inside AIDA only if the pattern actually repeats.
 
-Users configure **multiple named profiles** and switch between them routinely, from
-the GUI (toolbar dropdown) or CLI (`--profile`). A profile = provider type, base
-URL, model name, secret reference, sampling defaults, capability notes (e.g.
-"small local model — prefer lean MCP groups").
+### 2.3 Frontends and interaction
 
-### Configuration layout — on device, never in the repo
+- **Alternative web frontend** (NiceGUI or similar) on the same event API, for
+  browser access from beamline LAN machines. Only worthwhile once the event
+  API has proven stable through the PySide6 app.
+- **Voice STT input** — macOS dictation already covers it; Windows/Linux would
+  mean local Whisper, a heavy dependency. Criterion: real demand at the
+  beamline. If ever done: a mic button feeding the normal input box, nothing
+  deeper.
+- **TTS output** — unclear what it should even mean here. Revisit only if STT
+  ships and earns its keep.
+- **Extra GUI niceties**: per-display font/scaling profiles, more dockable
+  widgets.
+- **Native app bundles** (PyInstaller/Briefcase) — a timeboxed investigation
+  at most. `pip install aida-workbench[gui]` is acceptable for an audience
+  that already installs pyIrena that way.
 
-```text
-~/.aida/
-├── config.yaml          # general settings, paths, safety mode, UI prefs
-├── providers.yaml       # profiles (NO secrets inline — secret refs only)
-├── mcp.json             # standard-style MCP server defs (portable from
-│                        #   Claude Desktop etc.) + aida extras per server:
-│                        #   skills: [...], groups: [...]
-├── workspaces.yaml      # named workspace bundles
-├── skills/              # user's skills files (md), per-skill folders
-├── workflows/           # stored named workflows (Phase 10)
-├── aida.db              # SQLite: conversations, messages, tool calls, artifacts meta
-├── artifacts/           # binary artifacts (PNGs etc.) — files, not DB blobs
-└── logs/
+### 2.4 Knowledge and analysis
 
-~/Documents/Aida/        # (configurable) human-readable conversation records,
-                         # exported transcripts; safe to browse, safe to delete
-```
+- **RAG over past conversations** ("what did we conclude last week?").
+- **A reranking model** in retrieval, if quality plateaus.
+- **Automatic knowledge-base refresh** via a folder watcher.
+- **Retrieval currently loads every chunk vector per query** — fine at present
+  corpus sizes; revisit past roughly 10k chunks. This is the plan's own escape
+  hatch, and it needs the §1.3 benchmark before anyone acts on it.
+- **Parallel tool fan-out within a turn** ("plot all of these") would speed up
+  UC3/UC4 but complicates cancellation and event ordering. Only if it becomes
+  a felt bottleneck.
+- **HDF5/NeXus native reading** — pyirena-mcp owns this deliberately. Only if
+  a concrete non-pyIrena need appears.
 
-Secrets (API keys, ANL username) go to the **OS keychain via `keyring`** (already a
-pyIrena dependency), with environment-variable override for headless/pipeline use.
-`~/.aida` is never inside a repo; nothing secret is ever written to YAML/JSON.
+### 2.5 Sharing
 
-### Workspaces
-
-```yaml
-# workspaces.yaml (illustrative)
-workspaces:
-  use-pyirena:
-    profile: argo-claude          # or ollama-qwen, switchable
-    source_folders: ["/Volumes/data/USAXS_2026_08"]
-    target_folder: "~/Documents/Aida/analysis"
-    sidecar_folder_name: "figures"     # Obsidian-style attachments folder
-    mcp_group: pyirena-analysis
-    skills: [saxs-basics, pyirena-usage]
-    system_prompt: prompts/pyirena.md
-    safety: relaxed                    # relaxed | confirm
-  perform-reviews:
-    profile: argo-claude
-    source_folders: ["~/Documents/reviews/incoming"]
-    target_folder: "~/Documents/reviews/out"
-    mcp_group: none
-    skills: [review-checklist]
-    safety: confirm
-```
-
-### MCP groups and skills linkage
-
-- `mcp.json` stays close to the standard ecosystem format so configurations port
-  from Claude Desktop / other clients. AIDA-specific keys (`groups`, `skills`) live
-  in a parallel section or per-server extension block that other clients ignore.
-- A **group** is a named set of servers enabled/disabled together. Rationale:
-  pyIrena's tool list is large and needlessly overloads small local models when
-  those tools aren't needed.
-- Each MCP server may declare associated **skills files**; enabling the server (via
-  group or individually) automatically includes those skills in the system context.
-  Skills are plain Markdown folders — authorable by hand, shippable next to an MCP.
+- **Conversation export bundles** (a zip of transcript plus artifacts) for
+  sending an analysis session to a colleague.
+- **pynika and other package MCPs** as they appear — should "just work"
+  through the Phase 7 management UI; ship starter skills files alongside.
 
 ---
 
-## 5. Safety model
+## 3. Known open risk
 
-Premise (user decision): working folders are backed up; disaster recovery is
-"restore backup". Therefore per-action approval everywhere is wrong for this tool.
-
-- **Allowed folders**: user declares folders where the agent may list, read, write,
-  and modify freely. Source folders may be network mounts (appear as local paths —
-  no special handling expected; treat slow/missing mounts gracefully).
-- **Relaxed mode** (per workspace, default for analysis workspaces): no per-action
-  confirmation inside allowed folders. A clear one-time warning explains the deal.
-- **Confirm mode**: per-action confirmation for writes/deletes, for cautious users
-  or sensitive folders.
-- **Always confirmed regardless of mode**: any path outside allowed folders; shell
-  commands not on the command allowlist; anything that sends local content to a
-  network destination other than the configured LLM provider.
-- Command allowlist: a short, user-editable list of safe shell/python invocations
-  runnable inside allowed folders (Phase 9). `AppConfig.command_allowlist` (global)
-  and `WorkspaceConfig.command_allowlist` (per-workspace) union the same way
-  `allowed_folders`/`source_folders` already do. `SafetyGuard.authorize_execute`
-  requires *both* the working directory to be allowed *and* the command to match
-  the allowlist for relaxed/confirm mode to apply at all — either failing is an
-  always-confirm case, matching the rule above. Running a script that already
-  lives in an allowed folder (`run_python_script`) is mode-governed like any other
-  write/delete instead (`SafetyGuard.authorize_run_script`) — the allowlist is
-  specifically for raw shell command strings (`run_command`), not for content the
-  workspace's own folders already trust.
-- Deletions inside allowed folders prefer a `_trash/` move over true deletion where
-  cheap to do.
-- **Web search (Phase 9): MCP-server based, not a built-in adapter.** AIDA already
-  has full MCP client infrastructure (Phase 3/7, `aida mcp add`) — `web_search` is
-  satisfied by pointing a workspace at an existing community search MCP server
-  (Brave/Tavily/etc., the user's own choice of vendor/API key), with zero new AIDA
-  dependency or secret-handling code. `McpServerConfig.disabled_tools`/
-  `confirm_tools` already give per-tool visibility/confirmation, and a workspace's
-  `mcp_group` already gives "enable per workspace" — no new config surface needed.
-  `fetch_url` (a plain URL fetch, not a search) is a small stdlib-only native tool
-  instead, always requiring confirmation (no folder concept applies to a URL).
-
----
-
-## 6. Documents and outputs
-
-- **Read** (agent input): code/text, MD, PDF, DOCX, XLSX, PPTX, CSV, JSON, images.
-  Structured extraction where feasible rather than blind text-flattening. HDF5 is
-  *not* read natively — that is pyIrena MCP's job — unless a concrete need appears.
-- **Write** (agent output): default is **Markdown in Obsidian structure** — MD file
-  in the target folder, images stored in a user-nameable sidecar folder and
-  referenced by link. Also: plain MD/TXT, and DOCX where users need Office output.
-- Target folder is workspace-level, visible and changeable in the GUI at all times.
-- Generated files surface in the conversation as artifacts with Open / Reveal
-  actions.
-
----
-
-## 7. Testing philosophy
-
-Every phase ends with a **demonstrable, testable milestone** — its phase file lists
-the acceptance checklist. Standing rules:
-
-- pytest suite from Phase 1; headless (no display) like pyIrena's; contract tests
-  guard layering, `_qt` usage, and event/JSON serializability.
-- A `MockProvider` (scripted responses + tool calls) makes the agent loop testable
-  without any model; a `mock-mcp` fixture server (returns text, image, JSON,
-  errors) makes MCP handling testable without pyIrena.
-- Real-model smoke tests (Ollama small model; Argo Claude when reachable) are
-  manual/optional, documented per phase, never required by CI.
-- CI: GitHub Actions — ruff + pytest on 3.11/3.13, macOS + Windows + Linux runners
-  once the GUI exists (Qt import smoke test only; no display tests).
-
----
-
-## 8. Dependency policy
-
-Match pyIrena's discipline: small core, extras for the rest, no additions without
-demonstrated need.
-
-| Component | Choice | Notes |
-|---|---|---|
-| LLM SDKs | `openai`, `anthropic` | both already in pyIrena's gui extra |
-| MCP | official `mcp` Python SDK | client side; version-range chosen for coexistence with `pyirena[mcp]` in one env |
-| GUI | `PySide6` (extra: `gui`) | via `_qt.py` shim |
-| Persistence | `sqlite3` stdlib | no ORM |
-| Config | `PyYAML` + std `json` | |
-| Secrets | `keyring` | env-var fallback |
-| Markdown render (GUI) | Qt rich text first; add a md lib only if needed | |
-| PDF read | `pymupdf` (extra: `docs`) | BeamlineAdvisor precedent |
-| DOCX/XLSX/PPTX | `python-docx`, `openpyxl`, `python-pptx` (extra: `docs`) | read + docx write |
-| RAG (Phase 8) | **Decided:** plain SQLite (own schema, own file per knowledge base) + pure-Python cosine similarity — no vector DB. Realistic corpora here (instrument docs, one Obsidian vault) are hundreds to low thousands of chunks; brute-force ranking is tens of milliseconds at that scale, so `sqlite-vec`/ChromaDB add a second persistence engine for no measured benefit. See `planning/phase08_rag.md`. | LlamaIndex only if the minimal path proves insufficient at real corpus sizes |
-| Code editor (Phase 9) | Qt plain-text editor + syntax highlighting; consider `QScintilla` only if needed | |
-
-pyIrena is **not** an import dependency — AIDA talks to it only through
-`pyirena-mcp` (stdio subprocess, which may live in its own conda env; the `command`
-path in `mcp.json` points at that env's executable, so environments need not be
-shared).
-
----
-
-## 9. Distribution
-
-- Now: git clone + `pip install -e .`, conda `environment.yml`.
-- Phase 1: claim a placeholder release (0.0.1) under the distribution name
-  `aida-workbench` on PyPI (bare `aida` was auto-blocked — see Section 2
-  changelog, 2026-08-18). Import name stays `aida`.
-- Phase 10: real PyPI releases (following pyIrena's publish workflow pattern:
-  version in `pyproject.toml` authoritative, tag-checked), conda-forge feedstock
-  considered after PyPI is stable.
-- Native app bundles (PyInstaller/Briefcase) are a Phase 10 *investigation*, not a
-  commitment — `pip install aida-workbench[gui]` + `aida-gui` entry point is
-  acceptable for the target audience (they already install pyIrena this way).
-
----
-
-## 10. Phase map
-
-Each phase has a checklist file in `planning/`. A phase is *done* when every box in
-its acceptance section is checked. Phases 2–4 are headless on purpose — the GUI
-(Phase 5) lands on a core that already demonstrably works.
-
-| Phase | File | Delivers | Testable outcome (short form) | UCs |
-|---|---|---|---|---|
-| 1 | `phase01_foundation.md` | Repo scaffold, config system, secrets, logging, CI, PyPI name claim | `aida doctor` validates a real config; tests green in CI | — |
-| 2 | `phase02_agent_core.md` | Provider layer (OpenAI-compat + Anthropic/Argo), streaming agent loop, profiles, CLI chat | CLI chat streams from a local model **and** Argo Claude; switch via `--profile` | UC1 (partial) |
-| 3 | `phase03_mcp.md` | MCP manager (stdio), typed artifacts, groups, skills linkage | **The keystone test:** model calls pyirena-mcp, PNG comes back decoded as `ImageArtifact`, saved to disk from CLI | UC3 (headless) |
-| 4 | `phase04_persistence_workspaces.md` | SQLite persistence, conversation resume/cleanup, workspace bundles, records folder | Resume yesterday's CLI conversation; `--workspace use-pyirena` loads the whole environment | — |
-| 5 | `phase05_gui.md` | PySide6 app v1: chat, streaming, inline images, profile/workspace switchers, conversation browser | Reproduce the Claude-Desktop-style pyIrena interaction fully in AIDA's own GUI | UC1, UC3 |
-| 6 | `phase06_documents.md` | Native workspace tools, allowed-folders safety, document readers, Obsidian-style MD output, drag & drop | UC2 end-to-end: drop a PDF, ask questions, get a new MD (+figures sidecar) in the target folder | UC2, UC3 |
-| 7 | `phase07_mcp_management.md` | MCP management UI: servers, groups, per-tool permissions, logs, raw result inspector | Add/enable/disable servers & groups entirely from GUI; diagnose a failing tool from the log panel | UC3, UC4 |
-| 8 | `phase08_rag.md` | RAG: ingestion, local/cloud embedding profiles, index management, retrieval into context | UC1 full: documentation folder indexed; answers cite retrieved passages; index rebuild from GUI | UC1 |
-| 9 | `phase09_coding_scripting.md` | Code editor widget, templates, script save/run (AIEvaluator), command allowlist, web search | UC5: check beamline status via AIEvaluator script + bait_mcp from an AIDA workspace | UC5 |
-| 10 | `phase10_automation_distribution.md` | `aida run` headless CLI, stored named workflows, simple scheduler, PyPI/conda packaging | A stored workflow runs from a shell script with no GUI; `pip install aida-workbench` works | UC6 |
-| — | `phase_future.md` | Parked: voice STT/TTS, beamline credentials, external triggers, HTTP MCP, web frontend | (idea log, not a commitment) | UC6+ |
-
-Dependencies are linear except: Phase 6 and 7 can proceed in parallel after 5;
-Phase 8 needs only 5 (+ embeddings config from 2); Phase 9 needs 6 (safety model).
-
----
-
-## 11. Working agreements
-
-- Update the phase checklist file in the same commit as the work it tracks.
-- New capability = new checkbox in a phase file (or a line in `phase_future.md`),
-  not silent scope growth.
-- Anything that changes a decision in Section 2's table gets a dated note appended
-  to that section — the reconciliation history stays in one place.
-- Scientific users are the audience: error messages must say *which* layer failed
-  (provider, MCP client, MCP server, tool, UI) — diagnostics are a feature.
+- **Qt timer/GC native crash in long GUI test runs** — mitigated (per-test GC
+  drain, explicit timer stop, CI split into two pytest invocations), not
+  mathematically closed; it is a known PySide/PyQt class of issue rather than
+  something application code can rule out. If it recurs as the suite grows,
+  the next escalation is one pytest process per `tests/ui/*.py` file. Full
+  writeup in `planning/improvement_plan_2026-08.md` §6.

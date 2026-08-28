@@ -20,12 +20,16 @@ exercises every case):
 - ``EmbeddedResource``       -> ``TextArtifact`` if the embedded resource is
                                  text, ``FileArtifact`` (decoded) if it's a blob
 - ``result.structuredContent`` (separate from ``content``, when present)
-                              -> an additional ``JsonArtifact``
+                              -> an additional ``JsonArtifact``, *unless* it
+                                 merely repeats a text block already in
+                                 ``content`` (see ``_duplicates_text_block``)
 """
 
 from __future__ import annotations
 
 import base64
+import json
+from typing import Any
 
 from mcp.types import CallToolResult, ContentBlock
 
@@ -68,11 +72,53 @@ def _convert_block(block: ContentBlock) -> Artifact:
     return TextArtifact(text=f"[unsupported MCP content block: {block_type!r}]")
 
 
+def _duplicates_text_block(structured: Any, artifacts: list[Artifact]) -> bool:
+    """Whether ``structured`` says nothing the already-converted ``content``
+    blocks don't.
+
+    FastMCP (what pyirena-mcp and most Python MCP servers are built on)
+    returns a structured tool result *twice*: once JSON-serialized into a
+    ``TextContent`` block, and again verbatim as ``structuredContent`` —
+    the spec's own backwards-compatibility rule, since older clients only
+    read ``content``. AIDA converted both, so every such tool result
+    reached the model as the same payload rendered twice in a row: double
+    the tool-result tokens on every single call, on the exact path
+    (pyIrena analysis, UC3/UC4) where tool results are largest and calls
+    are most frequent, plus a model left to wonder whether two adjacent
+    near-identical blobs are actually two different things.
+
+    Deliberately conservative — only an *exact* match is treated as a
+    duplicate, so a server that genuinely puts different information in
+    the two places still gets both through:
+
+    - exactly one text artifact, whose text parses as JSON equal to
+      ``structured``; or
+    - the same, against ``structured["result"]`` when ``result`` is
+      ``structured``'s only key — FastMCP's own wrapper for a tool that
+      returns a non-object (a list, a number), where ``content``'s text is
+      the bare value and ``structuredContent`` is the wrapped one.
+    """
+    texts = [a for a in artifacts if isinstance(a, TextArtifact)]
+    if len(texts) != 1 or len(artifacts) != 1:
+        return False
+    try:
+        parsed = json.loads(texts[0].text)
+    except ValueError:
+        return False
+    if parsed == structured:
+        return True
+    if isinstance(structured, dict) and set(structured) == {"result"}:
+        return parsed == structured["result"]
+    return False
+
+
 def convert_result(result: CallToolResult) -> list[Artifact]:
     """Convert every content block (and ``structuredContent``, if present)
     in an MCP tool result into AIDA artifacts, in order."""
     artifacts: list[Artifact] = [_convert_block(block) for block in result.content]
-    if result.structuredContent is not None:
+    if result.structuredContent is not None and not _duplicates_text_block(
+        result.structuredContent, artifacts
+    ):
         artifacts.append(JsonArtifact(data=result.structuredContent))
     return artifacts
 

@@ -39,6 +39,7 @@ from aida.core.session import _ensure_workspace_folders
 from aida.persistence.recorder import ConversationNotFoundError
 from aida.providers.mock import MockProvider, MockTurn
 from aida.providers.mock_embeddings import MockEmbeddings
+from aida.providers.profiles import UnknownProviderKindError
 
 
 class _FakeMcpManager:
@@ -822,3 +823,66 @@ async def test_start_session_leaves_already_existing_folders_alone(
         await session.aclose()
         if mcp_manager is not None:
             await mcp_manager.aclose()
+
+
+def test_ensure_workspace_folders_does_not_fabricate_an_unmounted_source_tree(tmp_path: Path, capsys):
+    """A source folder whose *parent* is also missing almost always means a
+    network share isn't mounted. Creating it with parents=True would leave
+    empty local directories shadowing the real mount point, so the agent
+    would report an empty data folder instead of "not mounted"."""
+    unmounted = tmp_path / "Volumes" / "usaxs_data" / "RUN_2026_08"
+    ws = _workspace(source_folders=[str(unmounted)], target_folder=None)
+
+    _ensure_workspace_folders(ws)
+
+    assert not unmounted.exists()
+    assert not unmounted.parent.exists()
+    assert "not creating it" in capsys.readouterr().out
+
+
+def test_ensure_workspace_folders_still_creates_a_source_folder_beside_existing_ones(tmp_path: Path):
+    """The original request ("can we create the folders if they do not
+    exist?") still holds where the parent is really there — that's a folder
+    the user just hasn't populated yet, not an absent mount."""
+    ws = _workspace(source_folders=[str(tmp_path / "incoming")], target_folder=None)
+
+    _ensure_workspace_folders(ws)
+
+    assert (tmp_path / "incoming").is_dir()
+
+
+def test_ensure_workspace_folders_creates_a_target_folder_with_parents(tmp_path: Path):
+    """A target folder is an output location the user named, not a mount —
+    creating the whole path is the intended convenience."""
+    target = tmp_path / "reports" / "2026" / "august"
+    ws = _workspace(source_folders=[], target_folder=str(target))
+
+    _ensure_workspace_folders(ws)
+
+    assert target.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_start_session_shuts_down_mcp_servers_when_the_session_fails_to_build(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """The cleanup block used to catch only UnknownProfileError, but
+    ChatSession's constructor can fail several other ways — a typo'd
+    ``kind:`` in providers.yaml (UnknownProviderKindError from
+    build_provider), an unreadable skills file. Any of those escaping left
+    every MCP server this call had just launched running as an orphaned
+    subprocess for the life of the process."""
+
+    def _boom(profile):
+        raise UnknownProviderKindError("profile 'ws-profile' has unknown kind 'openai'")
+
+    monkeypatch.setattr("aida.core.session.build_provider", _boom)
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
+
+    with pytest.raises(UnknownProviderKindError):
+        await start_session(settings, workspace_name="use-ws")
+
+    assert _FakeMcpManager.instances, "the fake manager should have been constructed"
+    assert all(instance.closed for instance in _FakeMcpManager.instances)

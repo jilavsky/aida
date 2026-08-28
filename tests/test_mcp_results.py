@@ -150,3 +150,61 @@ def test_error_result_content_still_converts_as_text():
     assert len(artifacts) == 1
     assert isinstance(artifacts[0], TextArtifact)
     assert "boom" in artifacts[0].text
+
+
+def test_structured_content_that_merely_repeats_the_text_block_is_not_duplicated():
+    """FastMCP (pyirena-mcp, and most Python MCP servers) returns a
+    structured result twice — JSON-serialized into a text block *and*
+    verbatim as structuredContent — so converting both sent the model the
+    same payload rendered twice on every tool call."""
+    result = _result(
+        types.TextContent(type="text", text='{"rg": 25.0, "name": "sample_a"}'),
+        structured={"rg": 25.0, "name": "sample_a"},
+    )
+
+    artifacts = convert_result(result)
+
+    assert len(artifacts) == 1
+    assert isinstance(artifacts[0], TextArtifact)
+
+
+def test_fastmcp_result_wrapper_around_a_non_object_is_also_recognized_as_duplicate():
+    """FastMCP wraps a tool returning a non-object as
+    ``{"result": <value>}`` in structuredContent while the text block holds
+    the bare value — still the same information, twice."""
+    result = _result(types.TextContent(type="text", text="[1, 2, 3]"), structured={"result": [1, 2, 3]})
+
+    artifacts = convert_result(result)
+
+    assert len(artifacts) == 1
+    assert isinstance(artifacts[0], TextArtifact)
+
+
+def test_structured_content_that_differs_from_the_text_block_is_still_kept():
+    """Only an exact duplicate is dropped — a server that puts genuinely
+    different information in the two places gets both through."""
+    result = _result(
+        types.TextContent(type="text", text="Fit converged in 12 iterations."),
+        structured={"rg": 25.0, "chi_squared": 1.03},
+    )
+
+    artifacts = convert_result(result)
+
+    assert len(artifacts) == 2
+    assert isinstance(artifacts[0], TextArtifact)
+    assert isinstance(artifacts[1], JsonArtifact)
+
+
+def test_structured_content_is_kept_when_content_has_more_than_one_block():
+    """An image plus a JSON text block is not the duplicate shape — the
+    text may be a caption, so nothing is dropped."""
+    encoded = base64.b64encode(RAW_IMAGE_BYTES).decode()
+    result = _result(
+        types.ImageContent(type="image", data=encoded, mimeType="image/png"),
+        types.TextContent(type="text", text='{"rg": 25.0}'),
+        structured={"rg": 25.0},
+    )
+
+    artifacts = convert_result(result)
+
+    assert [type(a) for a in artifacts] == [ImageArtifact, TextArtifact, JsonArtifact]

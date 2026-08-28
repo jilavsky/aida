@@ -1,7 +1,9 @@
 # GUI overview
 
-> **Status: pre-alpha.** Config formats and CLI commands may change without
-> notice until Phase 5. See [`PLAN.md`](../PLAN.md) for the full roadmap.
+> **Status: beta (0.1.0b1).** Phases 1–9 are implemented and in daily use.
+> Config formats and CLI commands are stable enough to build on; anything
+> that has to change before 1.0 will be called out in the release notes.
+> See [`PLAN.md`](../PLAN.md) for what is still planned.
 
 **Related:** [workspaces.md](workspaces.md) · [providers-and-secrets.md](providers-and-secrets.md) · [safety-and-permissions.md](safety-and-permissions.md) · [mcp-servers.md](mcp-servers.md) · [coding-and-scripting.md](coding-and-scripting.md) · [knowledge-bases.md](knowledge-bases.md)
 
@@ -48,6 +50,16 @@ The window splits into three columns:
     Workspace" button — see [workspaces.md](workspaces.md) and
     [coding-and-scripting.md](coding-and-scripting.md) (for the command
     allowlist and interpreter).
+  - **Quick Tasks** — a per-workspace list of short, reusable prompt
+    templates for routine jobs ("summarize today's scans in the source
+    folder", "fit every dataset with a Unified level and tabulate Rg").
+    Double-click one to drop its text into the input box — it is never sent
+    automatically, so you can fill in a sample name or scan number first
+    (if the input box already has unsent text, AIDA asks before replacing
+    it). Right-click for **Add… / Edit… / Delete…**; up to 10 per
+    workspace. They are saved into the active workspace immediately
+    (`quick_tasks:` in `workspaces.yaml`), so they follow the workspace,
+    not the conversation.
   - **McpQuickPanel** — labeled "MCP Servers" in the UI — shows the
     workspace's resolved MCP group and a checkbox per known server. Each
     checkbox is a live control: ticking/unticking it actually starts or
@@ -68,7 +80,14 @@ Resuming replays chat history and any still-present image/file artifacts.
 
 - **Settings dialog** (`settings_dialog.py`) — font size and log level take
   effect immediately, no restart needed; also sets the records folder and
-  max agent iterations, and shows the configured provider profiles.
+  max agent iterations, and shows the configured provider profiles. Two
+  fields there shape every conversation in every workspace:
+  - **Assistant name** — what the agent calls itself (default "Aida").
+  - **Personal context** — a few lines about you and your work ("I run the
+    USAXS instrument at APS 9-ID; data are HDF5 written by the beamline
+    pipeline"). It is prepended to the system prompt of every session, so
+    you don't have to repeat it in each workspace's own system prompt.
+    Empty by default — nothing about you is sent until you fill it in.
 - **MCP Servers dialog** (`mcp_management_dialog.py`) — add/edit/remove MCP
   servers, per-tool permissions, groups, skills, live start/stop/restart,
   connection tests, and a tool-call log. See [mcp-servers.md](mcp-servers.md).
@@ -83,6 +102,15 @@ Resuming replays chat history and any still-present image/file artifacts.
 - **Code Editor dialog** (`code_editor_dialog.py`) — write, save, and run
   Python scripts against the workspace's saved-scripts folder and
   interpreter. See [coding-and-scripting.md](coding-and-scripting.md).
+
+## First launch
+
+On a fresh install (no provider profiles configured), `aida-gui` opens an
+onboarding dialog that walks you through creating a first provider profile
+and workspace, so you don't have to hand-edit YAML to get started. Skipping
+it is fine — the same settings are reachable from **Providers…** and
+**Workspaces…** at any time. Afterwards the app reopens the workspace and
+profile you last used.
 
 ## Status bar
 

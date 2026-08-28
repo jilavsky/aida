@@ -473,15 +473,37 @@ def _ensure_workspace_folders(workspace: WorkspaceConfig) -> None:
     collides with an existing file, a not-yet-mounted network drive, ...)
     only warns — same "don't crash on a folder problem" policy as
     ``validate_workspace`` — since ``SafetyGuard``'s own reachability
-    checks still apply on top of this either way."""
-    for folder in [*workspace.source_folders, workspace.target_folder]:
+    checks still apply on top of this either way.
+
+    One asymmetry, deliberate: a **source** folder is only created when its
+    parent already exists, while a target folder is created with parents.
+    A source folder is where the user's data already lives, so a missing
+    one usually means a network share isn't mounted yet (PLAN.md §5:
+    "Source folders may be network mounts... treat slow/missing mounts
+    gracefully") — and `mkdir(parents=True)` on `/Volumes/data/RUN_2026_08`
+    with the share offline would fabricate the whole mount path as empty
+    local directories, which then shadows the real mount point and makes
+    the agent report an empty data folder instead of "not mounted". A
+    target folder has no such meaning: it's an output location the user
+    named, and creating it (parents included) is exactly the convenience
+    the original request asked for."""
+    creations = [(folder, False) for folder in workspace.source_folders]
+    creations.append((workspace.target_folder, True))
+    for folder, with_parents in creations:
         if not folder:
             continue
         path = Path(folder).expanduser()
         if path.exists():
             continue
+        if not with_parents and not path.parent.exists():
+            print(
+                f"[workspace] warning: source folder {path} does not exist and neither does its "
+                "parent — not creating it (an unmounted network share?)"
+            )
+            logger.warning("source folder %s missing along with its parent — not created", path)
+            continue
         try:
-            path.mkdir(parents=True, exist_ok=True)
+            path.mkdir(parents=with_parents, exist_ok=True)
             print(f"[workspace] created folder: {path}")
             logger.info("created workspace folder: %s", path)
         except OSError as exc:
@@ -767,7 +789,19 @@ async def start_session(
             active_knowledge_bases=active_knowledge_bases,
             identity_text=identity_text,
         )
-    except UnknownProfileError:
+    except Exception:
+        # Was `except UnknownProfileError` — but that is not the only thing
+        # this block can raise. `ChatSession.__init__` also calls
+        # `build_provider` (UnknownProviderKindError for a typo'd `kind:` in
+        # providers.yaml) and reads every configured skills file (OSError /
+        # UnicodeDecodeError), and the `ConversationRecorder` built just
+        # above can fail on a locked or corrupt DB. Any of those escaping
+        # here left every MCP server this call had just launched running as
+        # an orphaned subprocess for the rest of the process's life, with
+        # the SQLite connection and each knowledge base's HTTP client open
+        # too — from a session that then reported a clean startup error and
+        # looked like it had shut down. Cleanup is the same either way, so
+        # it belongs on every failure path, not one named one.
         if mcp_manager is not None:
             await mcp_manager.aclose()
         for kb in active_knowledge_bases:

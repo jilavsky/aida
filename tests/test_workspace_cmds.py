@@ -387,3 +387,31 @@ def test_cmd_show_includes_coding_fields(aida_home: Path, records_home: Path, ca
     cmd_show(_parse("show", "ws1"))
     out = capsys.readouterr().out
     assert "command_allowlist:  ls" in out
+
+
+def test_edit_preserves_fields_it_has_no_flag_for(aida_home: Path, records_home: Path):
+    """`edit` used to rebuild WorkspaceConfig from the flags alone, so any
+    field without a flag — `quick_tasks` (up to ten saved prompt
+    templates) and `script_timeout_seconds` — was silently reset to its
+    default by an unrelated one-flag edit."""
+    from aida.config.settings import QuickTask, WorkspaceConfig, load_settings
+    from aida.workspace.workspaces import get_workspace, save_workspace
+
+    settings = load_settings()
+    save_workspace(
+        settings,
+        WorkspaceConfig(
+            name="ws",
+            profile="p1",
+            script_timeout_seconds=300.0,
+            quick_tasks=[QuickTask(name="Daily summary", text="Summarize today's scans.")],
+        ),
+    )
+
+    assert cmd_edit(_parse("edit", "ws", "--profile", "p2")) == 0
+
+    reloaded = get_workspace(load_settings(), "ws")
+    assert reloaded is not None
+    assert reloaded.profile == "p2"
+    assert reloaded.script_timeout_seconds == 300.0
+    assert [t.name for t in reloaded.quick_tasks] == ["Daily summary"]

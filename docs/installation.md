@@ -1,24 +1,63 @@
 # Installation
 
-> **Status: pre-alpha.** Config formats and CLI commands may change without
-> notice until Phase 5. See [`PLAN.md`](../PLAN.md) for the full roadmap.
+> **Status: beta (0.1.0b1).** Phases 1–9 are implemented and in daily use.
+> Config formats and CLI commands are stable enough to build on; anything
+> that has to change before 1.0 will be called out in the release notes.
+> See [`PLAN.md`](../PLAN.md) for what is still planned.
 
 **Related:** [providers-and-secrets.md](providers-and-secrets.md) (next step after install) · [gui-overview.md](gui-overview.md)
 
-## Install
+## Install from PyPI
+
+```bash
+pip install "aida-workbench[gui,docs]"
+aida doctor
+aida-gui
+```
+
+The **PyPI distribution name is `aida-workbench`**, not `aida` — PyPI's
+automated name-confusion protection blocked the bare name (see PLAN.md §2).
+The import package and the console scripts are unchanged: `import aida`,
+`aida`, `aida-gui`.
+
+Extras:
+
+| Extra | Brings | Needed for |
+|---|---|---|
+| `gui` | PySide6 | the desktop app (`aida-gui`) — the CLI works without it |
+| `docs` | pymupdf, python-docx, openpyxl, python-pptx, Pillow | reading PDF/DOCX/XLSX/PPTX, writing DOCX, downscaling images for vision |
+
+Nothing else is optional: the LLM SDKs, the MCP client, YAML, and keyring are
+core dependencies.
+
+Python **>= 3.11** is required.
+
+## Install from a git checkout (development)
 
 ```bash
 git clone https://github.com/jilavsky/aida.git
 cd aida
-conda env create -f environment.yml   # or: pip install -e ".[dev]"
+conda env create -f environment.yml   # or: pip install -e ".[dev,gui,docs]"
 conda activate aida
 aida doctor
 ```
 
-The GUI needs the `gui` extra (PySide6), and reading/indexing PDF, DOCX,
-XLSX, or PPTX files needs the `docs` extra (pymupdf, python-docx, openpyxl,
-python-pptx, Pillow) — both are included by `environment.yml`; with plain
-pip, that's `pip install -e ".[dev,gui,docs]"` if you're not using conda.
+`environment.yml` already includes the `gui` and `docs` extras.
+
+## First run
+
+Once `aida doctor` is clean, you still need one provider profile and
+(usually) one workspace before a session will start:
+
+- **GUI:** launch `aida-gui`. On a fresh install it offers to set up a
+  provider profile and a first workspace; you can reopen either later from
+  the toolbar's **Providers…** and **Workspaces…** buttons.
+- **CLI:** see [providers-and-secrets.md](providers-and-secrets.md) for the
+  `providers.yaml` format and `aida config secret set` for API keys, then
+  `aida workspace new` for a workspace.
+
+The GUI reopens the workspace and profile you last used, so this is a
+one-time setup.
 
 ## `aida doctor`
 
