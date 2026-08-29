@@ -375,6 +375,28 @@ class AnthropicProvider(LLMProvider):
             )
 
     async def ping(self) -> bool:
+        """Reachability + auth check for ``aida doctor`` and the Providers…
+        dialog's "Test" button — PLAN.md §1.5: this used to send a real,
+        billed 1-token ``messages.create`` call just to check the endpoint
+        is up, on every doctor run and every click. ``models.list`` is a
+        free, authenticated metadata endpoint on the real Anthropic API —
+        same reachability/auth signal (a bad key still 401s), zero cost.
+
+        Falls back to the old paid ping on ``NotFoundError`` specifically:
+        a custom ``base_url`` proxy (the ANL Argo proxy this provider is
+        built to also speak to — see the module docstring) may implement
+        only the Messages API, not the newer Models API, and a working
+        proxy must not be reported unreachable just because it lacks an
+        endpoint AIDA never actually needs. Any other failure (auth,
+        connection, ...) is a real negative — no point spending a token on
+        a second call that would fail the same way."""
+        try:
+            await self._client.models.list(limit=1)
+            return True
+        except NotFoundError:
+            pass  # proxy doesn't implement /v1/models — fall back below
+        except Exception:  # noqa: BLE001 - ping must never raise
+            return False
         try:
             await self._client.messages.create(
                 model=self.model,

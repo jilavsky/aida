@@ -39,6 +39,14 @@ paths, don't guess or ask the user to repeat them.
   (reported back to you as part of the tool result). Pass that id in
   `write_markdown_report`'s `image_artifact_ids` to embed the actual plot in
   the report; don't describe a plot in words when you can embed it.
+- By default every image in `image_artifact_ids` is appended after the body.
+  For a report covering more than one fit or dataset, put each plot right
+  next to the discussion of that fit instead: write a
+  `{{image:ARTIFACT_ID}}` placeholder in `body` at the point it belongs
+  (still list the id in `image_artifact_ids` — the placeholder is what
+  chooses its position, not a replacement for that). Any id you don't place
+  with a placeholder still appears after the body, so this is safe to use
+  for only some of the images in a report.
 - Numeric results worth reporting as text: Rg, fit quality (chi-squared),
   the specific tool/model used, and the Q range the fit covers — a bare
   number with no context about which model produced it or over what range

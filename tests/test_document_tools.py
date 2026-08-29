@@ -110,6 +110,25 @@ async def test_write_markdown_report_custom_sidecar_dirname(tmp_path: Path):
     assert not (tmp_path / "figures").exists()
 
 
+@pytest.mark.asyncio
+async def test_write_markdown_report_image_placeholder_places_it_inline(tmp_path: Path):
+    store = ArtifactStore(base_dir=tmp_path / "artifacts")
+    image = store.save_image(ImageArtifact(data=TINY_PNG_BYTES, mime_type="image/png", filename="plot.png"))
+    tools = default_document_tools(_guard(tmp_path), store)
+
+    result = await _call(
+        tools,
+        "write_markdown_report",
+        path=str(tmp_path / "report.md"),
+        title="With Plot",
+        body=f"Before.\n\n{{{{image:{image.id}}}}}\n\nAfter.",
+        image_artifact_ids=[image.id],
+    )
+    assert not result.is_error
+    text = Path(result.artifacts[0].path).read_text(encoding="utf-8")
+    assert text.index("Before.") < text.index("figures/") < text.index("After.")
+
+
 # --- write_docx_report -------------------------------------------------------
 
 
@@ -143,6 +162,51 @@ async def test_write_docx_report_with_image(tmp_path: Path):
         "write_docx_report",
         path=str(tmp_path / "report.docx"),
         title="With Image",
+        image_artifact_ids=[image.id],
+    )
+    assert not result.is_error
+    document = docx.Document(result.artifacts[0].path)
+    assert len(document.inline_shapes) == 1
+
+@pytest.mark.asyncio
+async def test_write_docx_report_image_placeholder_places_it_between_paragraphs(tmp_path: Path):
+    docx = pytest.importorskip("docx")
+    store = ArtifactStore(base_dir=tmp_path / "artifacts")
+    image = store.save_image(ImageArtifact(data=TINY_PNG_BYTES, mime_type="image/png", filename="plot.png"))
+    tools = default_document_tools(_guard(tmp_path), store)
+
+    result = await _call(
+        tools,
+        "write_docx_report",
+        path=str(tmp_path / "report.docx"),
+        title="With Plot",
+        body=f"Before.\n\n{{{{image:{image.id}}}}}\n\nAfter.",
+        image_artifact_ids=[image.id],
+    )
+    assert not result.is_error
+    document = docx.Document(result.artifacts[0].path)
+    assert len(document.inline_shapes) == 1
+
+    texts = [p.text for p in document.paragraphs]
+    before_idx = next(i for i, t in enumerate(texts) if "Before." in t)
+    after_idx = next(i for i, t in enumerate(texts) if "After." in t)
+    picture_idx = next(i for i, p in enumerate(document.paragraphs) if "graphicData" in p._p.xml)
+    assert before_idx < picture_idx < after_idx
+
+
+@pytest.mark.asyncio
+async def test_write_docx_report_unreferenced_image_still_appended_after_body(tmp_path: Path):
+    docx = pytest.importorskip("docx")
+    store = ArtifactStore(base_dir=tmp_path / "artifacts")
+    image = store.save_image(ImageArtifact(data=TINY_PNG_BYTES, mime_type="image/png", filename="plot.png"))
+    tools = default_document_tools(_guard(tmp_path), store)
+
+    result = await _call(
+        tools,
+        "write_docx_report",
+        path=str(tmp_path / "report.docx"),
+        title="No Placeholder",
+        body="Just some text, no placeholder here.",
         image_artifact_ids=[image.id],
     )
     assert not result.is_error

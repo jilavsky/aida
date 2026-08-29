@@ -59,12 +59,15 @@ who will never edit `mcp.json` by hand.
       toolbar's quick group switcher from Phase 5 (`McpQuickPanel`) is unchanged
       and still works. `aida workspace edit --mcp-group` remains the way to
       change a workspace's default group.
-- [ ] Show estimated tool count per group (reminder why lean groups matter for
-      small local models) — **not done**. `GroupsDialog` shows each group's
-      member server names but not a tool-count sum (would need the dialog to
-      hold a live `McpManager` reference and only have real numbers for
-      already-started/tested servers). A small, isolated follow-up, same as
-      Phase 6 left its DOCX-table tool-parameter gap for later.
+- [x] Show estimated tool count per group (reminder why lean groups matter for
+      small local models) — done (2026-08-29, PLAN.md §1.5). `GroupsDialog`
+      now takes the same `bridge` `McpManagementDialog` already holds and
+      sums `McpManager.tool_names()` across each group's *running* member
+      servers, appended to the group's list entry. A server that isn't
+      running is called out as such (not folded into a "0 tools" count),
+      and with no bridge at all (an offline dialog preview) the suffix is
+      simply omitted — same graceful-no-bridge pattern already used
+      elsewhere in this dialog.
 
 ### Skills management
 
@@ -74,6 +77,14 @@ who will never edit `mcp.json` by hand.
       skill helper only ever looked up a *named* skill, none listed the
       directory). Preview via `QTextBrowser.setMarkdown`; external editor via
       the already-available `QDesktopServices.openUrl`.
+- [x] **Install Bundled Skills…** button — done (2026-08-29, PLAN.md §1.5).
+      Previously the only way to get AIDA's shipped sample skills
+      (`saxs-basics`, `pyirena-usage`, `review-checklist`) into
+      `~/.aida/skills/` was as a side effect of `add-pyirena`, so a user
+      with no interest in pyIrena never saw them. `SkillsBrowserDialog` now
+      calls the existing `install_bundled_skills()` directly; it already
+      never overwrites a file the user has edited, so the button is safe to
+      click more than once.
 - [x] Per-server skills linkage editable here and in the server dialog —
       `ServerFormDialog`'s skills checklist (same widget/pattern as groups).
 - [ ] Per-workspace extra skills selection (beyond server-linked ones) —

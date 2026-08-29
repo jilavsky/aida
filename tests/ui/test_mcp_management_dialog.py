@@ -27,6 +27,7 @@ from aida.ui.qt.mcp_management_dialog import (
     McpManagementDialog,
     RawResultDialog,
     ServerFormDialog,
+    SkillsBrowserDialog,
     _AddGroupDialog,
     _ToolPermissionRow,
 )
@@ -312,6 +313,70 @@ def test_groups_dialog_delete(qapp, aida_home: Path, monkeypatch):
     dialog._on_delete()
 
     assert settings.mcp.servers["pyirena"].groups == []
+
+
+# --- estimated tool count per group (PLAN.md §1.5) --------------------------
+
+
+class _StubMcpManager:
+    """Just enough of McpManager's public surface for _tool_count_for /
+    GroupsDialog._tool_count_suffix — no real session, no subprocess."""
+
+    def __init__(self, running: dict[str, list[str]]) -> None:
+        self._running = running
+
+    @property
+    def running_server_names(self) -> list[str]:
+        return list(self._running)
+
+    def tool_names(self, name: str) -> list[str]:
+        return self._running.get(name, [])
+
+
+class _StubBridge:
+    def __init__(self, mcp_manager) -> None:
+        self.mcp_manager = mcp_manager
+
+
+def test_groups_dialog_sums_tool_counts_across_running_members(qapp, aida_home: Path):
+    settings = load_settings()
+    settings.mcp = McpConfig(
+        servers={
+            "a": McpServerConfig(name="a", command="/x", groups=["g1"]),
+            "b": McpServerConfig(name="b", command="/y", groups=["g1"]),
+        }
+    )
+    bridge = _StubBridge(_StubMcpManager({"a": ["t1", "t2"], "b": ["t3"]}))
+    dialog = GroupsDialog(settings.mcp, on_changed=lambda: None, bridge=bridge)
+
+    text = dialog._list.item(0).text()
+    assert "3 tools" in text
+
+
+def test_groups_dialog_notes_partial_running_members(qapp, aida_home: Path):
+    settings = load_settings()
+    settings.mcp = McpConfig(
+        servers={
+            "a": McpServerConfig(name="a", command="/x", groups=["g1"]),
+            "b": McpServerConfig(name="b", command="/y", groups=["g1"]),
+        }
+    )
+    bridge = _StubBridge(_StubMcpManager({"a": ["t1"]}))  # b not running
+    dialog = GroupsDialog(settings.mcp, on_changed=lambda: None, bridge=bridge)
+
+    text = dialog._list.item(0).text()
+    assert "1 tool" in text
+    assert "1/2 running" in text
+
+
+def test_groups_dialog_notes_when_nothing_is_running(qapp, aida_home: Path):
+    settings = load_settings()
+    settings.mcp = McpConfig(servers={"a": McpServerConfig(name="a", command="/x", groups=["g1"])})
+
+    dialog = GroupsDialog(settings.mcp, on_changed=lambda: None)  # no bridge at all
+
+    text = dialog._list.item(0).text()
+    assert "not running" in text
 
 
 # --- live start/stop against a real mock-mcp subprocess ---------------------
@@ -616,3 +681,44 @@ def test_add_pyirena_writes_the_server_and_installs_its_skills(qapp, aida_home, 
     assert server.command == "/opt/pyirena-mcp"
     assert server.groups == ["pyirena-analysis"]
     assert "pyirena-usage" in server.skills
+
+
+# --- Skills browser: install bundled skills (PLAN.md §1.5) -----------------
+
+
+def test_skills_browser_install_bundled_copies_the_shipped_samples(qapp, aida_home: Path, monkeypatch):
+    infos = []
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.information",
+        lambda self, title, text: infos.append((title, text)),
+    )
+
+    skills_dir = aida_home / "skills"
+    dialog = SkillsBrowserDialog(skills_dir)
+    dialog._on_install_bundled()
+
+    assert (skills_dir / "saxs-basics.md").exists()
+    assert (skills_dir / "pyirena-usage.md").exists()
+    assert (skills_dir / "review-checklist.md").exists()
+    names = {dialog._list.item(i).text() for i in range(dialog._list.count())}
+    assert {"saxs-basics", "pyirena-usage", "review-checklist"} <= names
+    assert len(infos) == 1
+    assert infos[0][0] == "Skills Installed"
+
+
+def test_skills_browser_install_bundled_a_second_time_says_nothing_to_do(qapp, aida_home: Path, monkeypatch):
+    infos = []
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.information",
+        lambda self, title, text: infos.append((title, text)),
+    )
+
+    skills_dir = aida_home / "skills"
+    dialog = SkillsBrowserDialog(skills_dir)
+    dialog._on_install_bundled()
+    infos.clear()
+
+    dialog._on_install_bundled()
+
+    assert len(infos) == 1
+    assert infos[0][0] == "Nothing To Install"

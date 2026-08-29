@@ -145,27 +145,69 @@ believed complete.
 
 ### 1.5 Small, decided, not yet done
 
+Reviewed 2026-08-29: of the eight items below, four were quick, unambiguous,
+backward-compatible wins and are now done; four turned out to need either a
+real UX decision or missing domain knowledge only the user can supply, and
+are deferred with the reason noted inline.
+
+- [x] Show estimated tool count per group in the MCP dialog — done
+      (2026-08-29). `GroupsDialog` now sums `McpManager.tool_names()` across
+      each group's *running* member servers and appends it to the group's
+      list entry (e.g. "(3 tools)", or "(2 tools from 1/2 running)" when
+      some members aren't started); a server that isn't running is noted
+      as such rather than silently counted as zero, since "not running" and
+      "running with zero tools" are different facts. No bridge (offline
+      dialog preview) means no counts, same as other bridge-backed displays
+      elsewhere in this dialog.
+- [x] Let the model place images *within* a generated report rather than
+      always appended at the end — done (2026-08-29). Both
+      `write_markdown_report` and `write_docx_report` now accept a
+      `{{image:ARTIFACT_ID}}` placeholder inside `body`; it is substituted
+      in place with that image's link (Markdown) or becomes an inline
+      `DocxSection` at that point (DOCX). Any `image_artifact_ids` the model
+      doesn't place with a placeholder — including all of them, if it uses
+      none — still land after the body exactly as before, so this is purely
+      additive and every existing caller keeps working unchanged.
+- [x] A cheaper `AnthropicProvider.ping()` — done (2026-08-29). `ping()` now
+      calls `client.models.list(limit=1)`, a free authenticated reachability
+      check, instead of a real paid 1-token `messages.create(...)` call;
+      `doctor` and profile validation both run through `ping()`, so both
+      stop spending money just to confirm a key works. Auth/connection
+      failures still surface the same way (`NotFoundError` on a bad model id
+      is treated as "reachable, model name wrong" rather than "unreachable").
+- [x] Offer to install the bundled skills from the GUI generally, not only
+      as a side effect of `add-pyirena` — done (2026-08-29). The Skills
+      dialog (`SkillsBrowserDialog`) has an **Install Bundled Skills…**
+      button that calls the existing `install_bundled_skills()` directly;
+      it already never overwrites a file the user has edited, so this is
+      safe to click more than once and needed no new safety logic.
 - [ ] Diff-style view when the agent proposes changes to an existing script
-      (`phase09`, left open).
+      (`phase09`, left open) — **deferred**. This was already an explicit
+      "may slip"/dropped nice-to-have when Phase 9 shipped, not a plain
+      cleanup: it needs a real UX decision (a side-by-side pane? inline
+      +/- markup in the chat transcript? a separate review dialog before the
+      write happens?) that only the user can settle — there's no single
+      "obviously correct" shape to just build.
 - [ ] Per-workspace extra skills selection beyond server-linked ones
-      (`phase07`, left open).
-- [ ] Show estimated tool count per group in the MCP dialog — the reminder of
-      why lean groups matter for small local models (`phase07`).
+      (`phase07`, left open) — **deferred**. Already possible today via
+      `aida workspace edit --skills a,b,c` (CLI); what's missing is a GUI
+      path, and that's blocked on the same prerequisite as the next item —
+      no GUI workspace-creation/editing dialog exists yet
+      (`aida.ui.qt.main_window` already carries a comment to that effect).
+      Building that dialog is a real feature, not a small item, so it's
+      being left for its own piece of work rather than done as a "cleanup."
 - [ ] Set a workspace's default MCP group from the MCP dialog itself
-      (`phase07`).
-- [ ] Let the model place images *within* a generated report rather than
-      always appended at the end — `write_markdown_report` currently emits all
-      figures after the body.
-- [ ] A cheaper `AnthropicProvider.ping()`: today every doctor run and profile
-      validation sends a real 1-token paid message.
+      (`phase07`) — **deferred**, same reason as above: `planning/
+      phase07_mcp_management.md` already documents this as blocked on "no
+      GUI workspace editor exists yet." Adding it here would mean building
+      that editor now, which is a bigger, separately-planned feature.
 - [ ] Extend the one-click MCP setup pattern beyond pyIrena — `bait_mcp`
       first, then a small offer list of npx-based servers. The detection and
       config-building shape in `aida.mcp.pyirena_setup` generalizes; what
       does not is knowing *which* env vars and group each server wants,
-      which is exactly the per-server knowledge that makes it worth doing.
-- [ ] Offer to install the bundled skills from the GUI generally, not only
-      as a side effect of `add-pyirena` (`install_bundled_skills` already
-      does the work).
+      which is exactly the per-server knowledge that makes it worth doing
+      — **deferred**: this needs `bait_mcp`'s actual env-var names and
+      group conventions from the user; nothing to build against yet.
 
 ---
 

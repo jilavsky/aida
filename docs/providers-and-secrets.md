@@ -173,7 +173,10 @@ and Argo-proxied profiles for both `profiles:` and `embedding_profiles:`.
 
 `aida doctor` does a live reachability check against every configured
 provider profile (not just "is it present in the file") — run it after
-adding or editing a profile to confirm AIDA can actually reach it:
+adding or editing a profile to confirm AIDA can actually reach it. For an
+Anthropic profile this check is free: it calls the models-list endpoint
+rather than sending a real (paid) completion, so running `doctor` — or
+re-validating a profile in the Providers… dialog — doesn't cost anything.
 
 ```bash
 aida doctor

@@ -117,6 +117,65 @@ def test_write_markdown_document_multiple_images_all_linked(tmp_path: Path):
     assert len(list((target_dir / "figures").iterdir())) == 2
 
 
+# --- Inline image placeholders (PLAN.md §1.5) -------------------------------
+
+
+def test_write_markdown_document_image_placeholder_places_it_inline(tmp_path: Path):
+    target_dir = tmp_path / "records"
+    store = ArtifactStore(base_dir=tmp_path / "artifacts")
+    image = _saved_image_artifact(tmp_path, store, name="plot.png")
+
+    path = write_markdown_document(
+        target_dir=target_dir,
+        filename_stem="report",
+        title="Report",
+        body=f"Before the plot.\n\n{{{{image:{image.id}}}}}\n\nAfter the plot.",
+        artifact_store=store,
+        images=[ImageToEmbed(artifact=image, alt_text="the plot")],
+    )
+    text = path.read_text(encoding="utf-8")
+    before_idx = text.index("Before the plot.")
+    image_idx = text.index("![the plot]")
+    after_idx = text.index("After the plot.")
+    assert before_idx < image_idx < after_idx
+
+
+def test_write_markdown_document_unreferenced_image_still_appended_after_body(tmp_path: Path):
+    target_dir = tmp_path / "records"
+    store = ArtifactStore(base_dir=tmp_path / "artifacts")
+    placed = _saved_image_artifact(tmp_path, store, name="a.png")
+    leftover = store.save_image(ImageArtifact(data=TINY_PNG_BYTES, mime_type="image/png", filename="b.png"))
+
+    path = write_markdown_document(
+        target_dir=target_dir,
+        filename_stem="report",
+        title="Report",
+        body=f"See {{{{image:{placed.id}}}}} above.",
+        artifact_store=store,
+        images=[ImageToEmbed(artifact=placed), ImageToEmbed(artifact=leftover)],
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "figures/a.png" in text
+    assert "figures/b.png" in text
+    # placed.id's image lands inline in the sentence; leftover (no placeholder) follows after the body.
+    assert text.index("figures/a.png") < text.index("above.") < text.index("figures/b.png")
+
+
+def test_write_markdown_document_placeholder_for_unknown_id_left_as_is(tmp_path: Path):
+    target_dir = tmp_path / "records"
+    store = ArtifactStore(base_dir=tmp_path / "artifacts")
+
+    path = write_markdown_document(
+        target_dir=target_dir,
+        filename_stem="report",
+        title="Report",
+        body="See {{image:does-not-exist}} above.",
+        artifact_store=store,
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "{{image:does-not-exist}}" in text
+
+
 # --- DOCX writer -----------------------------------------------------------
 
 

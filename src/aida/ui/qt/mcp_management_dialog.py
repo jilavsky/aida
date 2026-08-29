@@ -117,6 +117,20 @@ def _status_for(name: str, bridge) -> str:
     return "stopped"
 
 
+def _tool_count_for(name: str, bridge) -> int | None:
+    """How many tools a *running* server currently exposes, or ``None`` if
+    it isn't running (no live ``McpManager``, or this server just isn't
+    started yet) — PLAN.md §1.5's "show estimated tool count per group":
+    real numbers only for servers actually running, per
+    ``planning/phase07_mcp_management.md``'s own note that a live
+    ``McpManager`` reference has no way to know a not-yet-started server's
+    tool count without starting it."""
+    manager = bridge.mcp_manager if bridge is not None else None
+    if manager is None or name not in manager.running_server_names:
+        return None
+    return len(manager.tool_names(name))
+
+
 # --- Add/Edit server sub-dialog ---------------------------------------------
 
 
@@ -414,13 +428,26 @@ class GroupsDialog(QDialog):
     derived from who references it, see ``aida.mcp.groups``'s docstring),
     so this dialog is a thin front end over ``add_group``/``rename_group``/
     ``delete_group``.
+
+    ``bridge`` (PLAN.md §1.5, optional — ``None`` for a caller with no live
+    session, same defensive shape ``_status_for`` already uses) lets each
+    group's row show a real tool-count sum for its *running* member
+    servers — the reminder of why lean groups matter for a small local
+    model once tool schemas are counted (see
+    ``docs/context-and-limits.md``). A server that isn't running
+    contributes no number (there's no way to know its tool count without
+    starting it), so the row says so explicitly rather than silently
+    under-counting.
     """
 
-    def __init__(self, mcp_config: McpConfig, *, on_changed, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, mcp_config: McpConfig, *, on_changed, bridge=None, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("MCP Groups")
         self._mcp_config = mcp_config
         self._on_changed = on_changed
+        self._bridge = bridge
 
         layout = QVBoxLayout(self)
         self._list = QListWidget(self)
@@ -448,7 +475,22 @@ class GroupsDialog(QDialog):
         self._list.clear()
         for name in known_group_names(self._mcp_config):
             members = sorted(s.name for s in resolve_group(self._mcp_config, name))
-            self._list.addItem(f"{name}  —  {', '.join(members)}")
+            self._list.addItem(f"{name}  —  {', '.join(members)}{self._tool_count_suffix(members)}")
+
+    def _tool_count_suffix(self, member_names: list[str]) -> str:
+        """Renders " (N tools)" summed over *running* members, or a note
+        that none of them are running yet — never a number that silently
+        excludes a not-yet-started server, since that would understate
+        exactly the thing this exists to warn about."""
+        counts = [_tool_count_for(name, self._bridge) for name in member_names]
+        running_counts = [c for c in counts if c is not None]
+        if not running_counts:
+            return "  (not running — tool count unknown)"
+        total = sum(running_counts)
+        tool_word = "tool" if total == 1 else "tools"
+        if len(running_counts) < len(member_names):
+            return f"  ({total} {tool_word} from {len(running_counts)}/{len(member_names)} running)"
+        return f"  ({total} {tool_word})"
 
     def _selected_group_name(self) -> str | None:
         item = self._list.currentItem()
@@ -529,6 +571,14 @@ class SkillsBrowserDialog(QDialog):
     workspace editor is a pre-existing Phase 5 gap
     (``aida.ui.qt.main_window``'s own comments already note "no GUI 'new
     workspace' form exists yet"), out of scope to fix here.
+
+    ``Install Bundled Skills…`` (PLAN.md §1.5) offers AIDA's shipped sample
+    skills (``saxs-basics``, ``pyirena-usage``, ``review-checklist``) from
+    here directly — previously the only way to get them into
+    ``~/.aida/skills/`` was as a side effect of ``add-pyirena`` (CLI or the
+    MCP dialog's own button), which meant a user with no interest in
+    pyIrena never saw them at all. ``install_bundled_skills`` already never
+    overwrites an existing file, so this is safe to click more than once.
     """
 
     def __init__(self, skills_dir: Path, parent: QWidget | None = None) -> None:
@@ -551,6 +601,9 @@ class SkillsBrowserDialog(QDialog):
         new_button = QPushButton("New From Template…", self)
         new_button.clicked.connect(self._on_new_from_template)
         buttons.addWidget(new_button)
+        install_button = QPushButton("Install Bundled Skills…", self)
+        install_button.clicked.connect(self._on_install_bundled)
+        buttons.addWidget(install_button)
         layout.addLayout(buttons)
 
         close_row = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
@@ -599,6 +652,22 @@ class SkillsBrowserDialog(QDialog):
         self._skills_dir.mkdir(parents=True, exist_ok=True)
         path.write_text(_SKILL_TEMPLATE.format(name=name), encoding="utf-8")
         self._refresh()
+
+    def _on_install_bundled(self) -> None:
+        installed = install_bundled_skills()
+        if installed:
+            self._refresh()
+            QMessageBox.information(
+                self,
+                "Skills Installed",
+                "Installed: " + ", ".join(sorted(installed)),
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Nothing To Install",
+                "No new bundled skills to install — everything is already present.",
+            )
 
 
 # --- Tools tab row -----------------------------------------------------------
@@ -1119,7 +1188,7 @@ class McpManagementDialog(QDialog):
         self._refresh_server_list()
 
     def _on_groups(self) -> None:
-        dialog = GroupsDialog(self._settings.mcp, on_changed=self._refresh_server_list, parent=self)
+        dialog = GroupsDialog(self._settings.mcp, on_changed=self._refresh_server_list, bridge=self._bridge, parent=self)
         dialog.exec()
 
     def _on_skills(self) -> None:

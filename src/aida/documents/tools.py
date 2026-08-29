@@ -20,6 +20,7 @@ lost one over one bad reference.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from aida.artifacts.base import FileArtifact, ImageArtifact
@@ -31,6 +32,46 @@ from aida.providers.base import ToolSchema
 from aida.workspace.safety import ConfirmationDenied, SafetyGuard
 
 _tool = wrap_tool_errors(ConfirmationDenied, OSError, ValueError)
+
+#: Mirrors ``md_obsidian._IMAGE_PLACEHOLDER_RE`` (PLAN.md §1.5: let the model
+#: place an image within the body instead of always after it) — the DOCX
+#: writer has no single "body string" to substitute into (``DocxSection``s
+#: are already an ordered list), so here the placeholder splits ``body``
+#: into the paragraph/image sections directly, in the order the model wrote
+#: them.
+_IMAGE_PLACEHOLDER_RE = re.compile(r"\{\{image:([^{}]+)\}\}")
+
+
+def _docx_sections_for_body(body: str, images: list[ImageArtifact]) -> list[DocxSection]:
+    """Splits ``body`` on ``{{image:ARTIFACT_ID}}`` placeholders into
+    ordered paragraph/image ``DocxSection``s, matching each placeholder to
+    one of ``images`` by id. A placeholder referencing an id not in
+    ``images`` is left as literal text — visible rather than silently
+    dropped. Any image in ``images`` no placeholder referenced is appended
+    at the end, in list order, exactly as when no placeholders are used."""
+    by_id = {image.id: image for image in images}
+    referenced: set[str] = set()
+    sections: list[DocxSection] = []
+
+    if body:
+        parts = _IMAGE_PLACEHOLDER_RE.split(body)
+        for index, part in enumerate(parts):
+            if index % 2 == 0:
+                if part.strip():
+                    sections.append(DocxSection(kind="paragraph", text=part))
+                continue
+            artifact_id = part.strip()
+            image = by_id.get(artifact_id)
+            if image is None:
+                sections.append(DocxSection(kind="paragraph", text="{{image:" + artifact_id + "}}"))
+                continue
+            sections.append(DocxSection(kind="image", image=image))
+            referenced.add(artifact_id)
+
+    for image in images:
+        if image.id not in referenced:
+            sections.append(DocxSection(kind="image", image=image))
+    return sections
 
 
 def _resolve_images(artifact_store: ArtifactStore, image_artifact_ids: list[str]) -> list[ImageArtifact]:
@@ -82,11 +123,7 @@ def default_document_tools(
         image_ids = arguments.get("image_artifact_ids") or []
 
         candidate = await guard.authorize_write(path)
-        sections: list[DocxSection] = []
-        if body:
-            sections.append(DocxSection(kind="paragraph", text=body))
-        for image in _resolve_images(artifact_store, image_ids):
-            sections.append(DocxSection(kind="image", image=image))
+        sections = _docx_sections_for_body(body, _resolve_images(artifact_store, image_ids))
 
         final_path = write_docx_document(
             target_dir=candidate.parent, filename_stem=candidate.stem, title=title, sections=sections
@@ -105,7 +142,11 @@ def default_document_tools(
                     "optionally embedded images. Images are referenced by the artifact id from an earlier "
                     "tool result's image (e.g. an ImageArtifactCreated event) — pass their ids in "
                     "image_artifact_ids and they'll be copied into a sidecar folder next to the report and "
-                    "linked in."
+                    "linked in. By default every image is appended after the body, in the order given; to "
+                    "place one at a specific point instead, put a {{image:ARTIFACT_ID}} placeholder in body "
+                    "where it should appear — any image_artifact_ids not referenced by a placeholder still "
+                    "appear after the body, so placeholders are optional and only change images you use them "
+                    "for."
                 ),
                 parameters={
                     "type": "object",
@@ -130,7 +171,9 @@ def default_document_tools(
                 description=(
                     "Write a basic Word (.docx) report with a title, body paragraph, and optionally embedded "
                     "images — for Office-centric workflows. See write_markdown_report for the default output "
-                    "format."
+                    "format. Images are appended after the body by default; to place one at a specific point "
+                    "in the body instead, put a {{image:ARTIFACT_ID}} placeholder where it should appear — "
+                    "any image_artifact_ids not referenced by a placeholder still appear after the body."
                 ),
                 parameters={
                     "type": "object",
