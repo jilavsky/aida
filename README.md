@@ -1,10 +1,10 @@
 # AIDA — AI Data Assistant
 
-> **Status: beta (0.1.0b1).** Everything described below works today and is
+> **Status: beta (0.1.0b2).** Everything described below works today and is
 > in daily use. Config formats and CLI commands are stable enough to build
-> on; breaking changes before 1.0 will be called out in the release notes.
-> Bug reports and rough edges are exactly what this beta is for —
-> [open an issue](https://github.com/jilavsky/aida/issues).
+> on; breaking changes before 1.0 will be called out in
+> [`CHANGELOG.md`](CHANGELOG.md). Bug reports and rough edges are exactly
+> what this beta is for — [open an issue](https://github.com/jilavsky/aida/issues).
 
 AIDA is a local scientific agent workbench: a simple, reliable desktop GUI
 (and CLI) for using AI agents in scientific work — conversation with local or
@@ -98,6 +98,9 @@ UI, RAG, and coding/scripting. Phase 10 (headless `aida run`, stored
 workflows, a scheduler) is the remaining planned work — `aida run` is
 currently a stub. Completed per-phase checklists live in
 [`planning/`](planning/); what is still open is at the top of `PLAN.md`.
+
+Released and unreleased changes, version by version, are in
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ## Requirements
 

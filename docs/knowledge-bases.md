@@ -1,9 +1,10 @@
 # Knowledge bases (RAG)
 
-> **Status: beta (0.1.0b1).** Phases 1–9 are implemented and in daily use.
+> **Status: beta (0.1.0b2).** Phases 1–9 are implemented and in daily use.
 > Config formats and CLI commands are stable enough to build on; anything
-> that has to change before 1.0 will be called out in the release notes.
-> See [`PLAN.md`](../PLAN.md) for what is still planned.
+> that has to change before 1.0 will be called out in
+> [`CHANGELOG.md`](../CHANGELOG.md). See [`PLAN.md`](../PLAN.md) for what is
+> still planned.
 
 **Related:** [providers-and-secrets.md](providers-and-secrets.md) · [workspaces.md](workspaces.md)
 

@@ -252,3 +252,78 @@ New docs: `docs/pyirena.md`, plus pointers from the README, `installation.md`,
 - **GUI workspace editor, including knowledge-base selection** — shipped as
   `workspace_management_dialog.py` (U1). Was the biggest item in the first
   round of real-use feedback.
+
+
+---
+
+## 6. Context-window management and compaction (2026-08-28)
+
+The failure this prevented: a long pyIrena analysis conversation dying
+halfway through, with no in-app recovery. Full design, steps, and measured
+numbers in
+[`planning/context_management.md`](context_management.md) (marked
+implemented); user-facing docs in
+[`docs/context-and-limits.md`](../docs/context-and-limits.md).
+
+- **Count what is actually sent.** MCP tool schemas, tool-call
+  arguments/results (dense-estimated), and vision images are now all
+  counted (`aida.core.context.estimate_tool_schema_tokens`/
+  `estimate_message_tokens`) — previously the budget summed only the plain
+  message list, missing pyirena-mcp's measured ~10,200 tokens of schema
+  JSON on every request.
+- **Per-profile `context_window`.** `ProviderProfile.context_window` (falls
+  back to `AppConfig.max_context_tokens`) plus
+  `aida.core.context.history_budget` (context window × 0.85 safety
+  fraction, minus reserved output tokens, minus tool-schema tokens, clamped
+  to an 8000-token floor). Editable in the Providers… dialog and
+  `providers.yaml`.
+- **Context-fullness visibility.** A `[context]` line after every CLI turn
+  and a **Context: Nk / Mk (P%)** GUI status-bar label, separate from the
+  cumulative **Session total:** label.
+- **Compaction.** `ChatSession._trim_context`/`_apply_trim_plan` summarize
+  dropped turns via the active provider instead of discarding them, with a
+  `/compact` CLI command and a **Compact Conversation** GUI action for a
+  manual trigger at a task boundary. Falls back to plain trimming if the
+  summarization call itself fails.
+- **Recovery from a full context.** Compaction (automatic and manual) is
+  the fix — a conversation now recovers headroom instead of every later
+  turn failing identically.
+
+Documented in `docs/context-and-limits.md`, cross-linked from
+`docs/providers-and-secrets.md`, `docs/mcp-servers.md`, and `docs/pyirena.md`.
+
+---
+
+## 7. Small decided items round (2026-08-29)
+
+`PLAN.md` §1.5 listed eight small, already-decided items. Four were
+ready to implement outright; the other four needed either a real UX
+decision or missing domain knowledge and stayed in §1.5, deferred with the
+reason noted there.
+
+- **Estimated tool count per MCP group.** `GroupsDialog` sums
+  `McpManager.tool_names()` across each group's *running* member servers
+  and shows it next to the group (e.g. "(3 tools)", or "(2 tools from 1/2
+  running)" when some members aren't started) — a server that isn't
+  running is called out as such rather than folded into a silent zero.
+  (`aida/ui/qt/mcp_management_dialog.py`)
+- **Images placed within a report, not just appended.**
+  `write_markdown_report` and `write_docx_report` now accept a
+  `{{image:ARTIFACT_ID}}` placeholder inside `body`; it's substituted
+  in place with that image's link (Markdown) or becomes an inline
+  `DocxSection` at that point (DOCX). Anything not placed with a
+  placeholder still lands after the body exactly as before, so this is
+  purely additive. The bundled `pyirena-usage` skill now teaches the model
+  to use it for reports covering more than one fit or dataset.
+  (`aida/documents/writers/md_obsidian.py`, `aida/documents/tools.py`,
+  `skills/pyirena-usage.md`)
+- **A free `AnthropicProvider.ping()`.** Now calls `models.list(limit=1)`
+  instead of a real paid 1-token `messages.create(...)` — `aida doctor`
+  and profile validation both stop spending money just to confirm a key
+  works. Falls back to the old paid ping only for a proxy (e.g. the ANL
+  Argo proxy) that doesn't implement the newer Models API.
+  (`aida/providers/anthropic_.py`)
+- **Install Bundled Skills… button.** The Skills dialog can install
+  AIDA's sample skills (`saxs-basics`, `pyirena-usage`, `review-checklist`)
+  directly, instead of only as a side effect of `add-pyirena`.
+  (`aida/ui/qt/mcp_management_dialog.py`)

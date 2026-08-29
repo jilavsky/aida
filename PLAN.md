@@ -3,7 +3,7 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 0.1.0b1 (beta), 2026-08-28.** Phases 1–9 are implemented, tested
+**Status: 0.1.0b2 (beta), 2026-08-29.** Phases 1–9 are implemented, tested
 (1319 tests, three OSes) and in daily use. This file now holds **only what is
 not done**.
 
@@ -37,7 +37,7 @@ gets a dated note appended there; error messages say *which* layer failed.
 
 Nothing here is speculative work; it is what a beta is for.
 
-- [ ] Publish `aida-workbench` 0.1.0b1 to PyPI and verify
+- [ ] Publish `aida-workbench` 0.1.0b2 to PyPI and verify
       `pip install "aida-workbench[gui,docs]"` → working `aida-gui` on a
       clean macOS, Windows, and Linux machine.
 - [ ] First outside users installing from PyPI, with issues triaged into this
@@ -80,38 +80,12 @@ implemented".
 ### 1.3 Context-window management and compaction — done (2026-08-28)
 
 The failure this prevented: a long pyIrena analysis conversation dying
-halfway through, with no in-app recovery. Full design, steps, and measured
-numbers in
-[`planning/context_management.md`](planning/context_management.md) (now
-marked implemented); user-facing docs in
+halfway through, with no in-app recovery. Shipped: per-message/tool-schema
+token counting, a per-profile `context_window` budget, CLI + GUI
+context-fullness display, and automatic + manual (`/compact`, **Compact
+Conversation**) summarizing compaction. Full detail in
+[`planning/COMPLETED.md`](planning/COMPLETED.md) §6; user-facing docs in
 [`docs/context-and-limits.md`](docs/context-and-limits.md).
-
-- [x] **Count what is actually sent.** MCP tool schemas, tool-call
-      arguments/results (dense-estimated), and vision images are now all
-      counted (`aida.core.context.estimate_tool_schema_tokens`/
-      `estimate_message_tokens`) — previously the budget summed only the
-      plain message list, missing pyirena-mcp's measured ~10,200 tokens of
-      schema JSON on every request.
-- [x] **Per-profile `context_window`.** `ProviderProfile.context_window`
-      (falls back to `AppConfig.max_context_tokens`) plus
-      `aida.core.context.history_budget` (context window × 0.85 safety
-      fraction, minus reserved output tokens, minus tool-schema tokens,
-      clamped to an 8000-token floor). Editable in the Providers… dialog
-      and `providers.yaml`.
-- [x] **Context-fullness visibility.** A `[context]` line after every CLI
-      turn and a **Context: Nk / Mk (P%)** GUI status-bar label, separate
-      from the cumulative **Session total:** label.
-- [x] **Compaction.** `ChatSession._trim_context`/`_apply_trim_plan`
-      summarize dropped turns via the active provider instead of discarding
-      them, with a `/compact` CLI command and a **Compact Conversation**
-      GUI action for a manual trigger at a task boundary. Falls back to
-      plain trimming if the summarization call itself fails.
-- [x] **Recovery from a full context.** Compaction (automatic and manual)
-      is the fix — a conversation now recovers headroom instead of every
-      later turn failing identically.
-- [x] Documented in `docs/context-and-limits.md`, cross-linked from
-      `docs/providers-and-secrets.md`, `docs/mcp-servers.md`, and
-      `docs/pyirena.md`.
 
 ### 1.4 Verification owed (cannot be done from a sandbox)
 
@@ -151,36 +125,15 @@ real UX decision or missing domain knowledge only the user can supply, and
 are deferred with the reason noted inline.
 
 - [x] Show estimated tool count per group in the MCP dialog — done
-      (2026-08-29). `GroupsDialog` now sums `McpManager.tool_names()` across
-      each group's *running* member servers and appends it to the group's
-      list entry (e.g. "(3 tools)", or "(2 tools from 1/2 running)" when
-      some members aren't started); a server that isn't running is noted
-      as such rather than silently counted as zero, since "not running" and
-      "running with zero tools" are different facts. No bridge (offline
-      dialog preview) means no counts, same as other bridge-backed displays
-      elsewhere in this dialog.
+      (2026-08-29).
 - [x] Let the model place images *within* a generated report rather than
-      always appended at the end — done (2026-08-29). Both
-      `write_markdown_report` and `write_docx_report` now accept a
-      `{{image:ARTIFACT_ID}}` placeholder inside `body`; it is substituted
-      in place with that image's link (Markdown) or becomes an inline
-      `DocxSection` at that point (DOCX). Any `image_artifact_ids` the model
-      doesn't place with a placeholder — including all of them, if it uses
-      none — still land after the body exactly as before, so this is purely
-      additive and every existing caller keeps working unchanged.
-- [x] A cheaper `AnthropicProvider.ping()` — done (2026-08-29). `ping()` now
-      calls `client.models.list(limit=1)`, a free authenticated reachability
-      check, instead of a real paid 1-token `messages.create(...)` call;
-      `doctor` and profile validation both run through `ping()`, so both
-      stop spending money just to confirm a key works. Auth/connection
-      failures still surface the same way (`NotFoundError` on a bad model id
-      is treated as "reachable, model name wrong" rather than "unreachable").
+      always appended at the end — done (2026-08-29).
+- [x] A cheaper `AnthropicProvider.ping()` — done (2026-08-29).
 - [x] Offer to install the bundled skills from the GUI generally, not only
-      as a side effect of `add-pyirena` — done (2026-08-29). The Skills
-      dialog (`SkillsBrowserDialog`) has an **Install Bundled Skills…**
-      button that calls the existing `install_bundled_skills()` directly;
-      it already never overwrites a file the user has edited, so this is
-      safe to click more than once and needed no new safety logic.
+      as a side effect of `add-pyirena` — done (2026-08-29).
+
+Full detail on all four in [`planning/COMPLETED.md`](planning/COMPLETED.md) §7.
+
 - [ ] Diff-style view when the agent proposes changes to an existing script
       (`phase09`, left open) — **deferred**. This was already an explicit
       "may slip"/dropped nice-to-have when Phase 9 shipped, not a plain
