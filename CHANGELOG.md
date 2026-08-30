@@ -28,6 +28,16 @@ decision revised), unrelated to what shipped when. Entries below link to
   window** fields explaining the difference, plus a callout with the exact
   log message in `docs/providers-and-secrets.md`.
 
+### Changed
+
+- The "Scratch folder" system-prompt paragraph (`build_workspace_context_block`)
+  now tells the model what to do when an MCP tool rejects its scratch-folder
+  path — some servers (browser-automation tools like Playwright MCP
+  especially) sandbox their own separate output directory and reject a
+  path built from AIDA's scratch folder outright. New
+  [mcp-servers.md](docs/mcp-servers.md) section on the failure mode and
+  the fix.
+
 ## [0.1.0b2] - 2026-08-29
 
 ### Added

@@ -225,6 +225,16 @@ def build_workspace_context_block(
     (every MCP server is launched with it as its own working directory, see
     ``aida.mcp.server``), so mentioning it here is purely to give the model
     a stable place to *choose* to put scratch work, not to grant access.
+
+    That paragraph also tells the model to prefer building an *absolute*
+    path from ``scratch_dir`` for MCP tool file arguments (a separate bug
+    report: the model lost track of a relative-path screenshot it couldn't
+    find afterward) — but a server that manages its own independent output
+    sandbox (Playwright MCP configured with its own ``--output-dir``, say)
+    rejects that absolute path outright, since its own allowed roots don't
+    include AIDA's scratch folder at all. The paragraph's last sentence
+    covers that: fall back to a bare filename or the folder the tool's own
+    error named, rather than retrying the same rejected path.
     """
     if not source_folders and not target_folder and not global_allowed_folders and not scratch_dir:
         return None
@@ -258,7 +268,15 @@ def build_workspace_context_block(
             f"download path) and you don't pass an absolute one, that's where it lands — e.g. a "
             f"relative filename of 'shot.png' resolves to {scratch_dir}/shot.png. Prefer passing the "
             "tool an absolute path built from the folder above in the first place; otherwise expect "
-            "its output there instead of guessing afterward or searching the filesystem for it."
+            "its output there instead of guessing afterward or searching the filesystem for it.\n"
+            "Exception: some MCP servers (browser/screenshot automation tools especially) enforce "
+            "their own separate output directory as a security sandbox, independent of this scratch "
+            "folder — if a tool call fails with an error naming *different* allowed folders (e.g. "
+            "\"File access denied ... outside allowed roots\"), that server manages its own location: "
+            "retry with a bare filename and no directory (most such tools resolve it against their own "
+            "configured output dir), or use the folder the error itself named. Don't keep retrying with "
+            "an absolute path built from the scratch folder above once a tool has already told you it "
+            "doesn't accept that."
         )
 
     lines.append("")

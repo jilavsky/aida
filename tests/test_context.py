@@ -196,6 +196,24 @@ def test_workspace_context_block_scratch_dir_explains_mcp_relative_paths():
     assert "/Users/me/.aida/tmp/shot.png" in block
 
 
+def test_workspace_context_block_scratch_dir_warns_about_servers_with_their_own_sandbox():
+    # Bug report: a user's Playwright MCP server was configured with its own
+    # separate --output-dir sandbox; the model followed this block's own
+    # "prefer an absolute path built from the scratch folder" advice,
+    # passed a scratch-dir path to a Playwright tool, and got "File access
+    # denied ... outside allowed roots" because Playwright's sandbox has
+    # nothing to do with AIDA's scratch folder. The block needs to tell the
+    # model what to do when a tool rejects that path instead of retrying it.
+    block = build_workspace_context_block(
+        source_folders=[], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
+        safety_mode="confirm", scratch_dir="/Users/me/.aida/tmp",
+    )
+    assert block is not None
+    assert "own separate output directory" in block
+    assert "bare filename" in block
+    assert "outside allowed roots" in block
+
+
 # --- build_coding_context_block (regression: the model resorted to a raw
 # `python3 -c "..."` probe via run_command, needing confirmation, just to
 # discover its interpreter/packages) ----------------------------------------

@@ -282,6 +282,40 @@ switch, since sending a URL out to the network is exactly the kind of
 action [safety-and-permissions.md](safety-and-permissions.md) always asks
 about.
 
+## Servers with their own file sandbox (e.g. Playwright)
+
+AIDA gives every MCP server a shared **scratch folder** (`~/.aida/tmp` by
+default) as its process working directory, and tells the model to prefer
+building absolute paths there for a tool's file arguments (screenshots,
+downloads, saved snapshots) — see
+[context-and-limits.md](context-and-limits.md). Most servers just write
+wherever they're told and this is enough.
+
+Browser-automation servers like Playwright MCP are the common exception:
+they're typically configured with their *own* `--output-dir` (or
+equivalent) as a security sandbox, independent of AIDA's scratch folder
+entirely. If the model passes an absolute scratch-folder path to one of
+these, you'll see the tool call fail with something like:
+
+```
+File access denied: /Users/you/.aida/tmp/whatever.yml is outside allowed
+roots. Allowed roots: /path/to/your/output-dir, /path/to/your/output-dir/.playwright-mcp
+```
+
+That error is coming from the server itself, not AIDA's own safety model —
+there's nothing to add to `allowed_folders` in `config.yaml` for it. Two
+ways to fix it:
+
+- **Tell the model where to save, in the conversation** — "save that to
+  `<your configured output-dir>`" (or a bare filename with no directory;
+  most such servers resolve a relative path against their own configured
+  output dir, not AIDA's scratch folder). One message is usually enough to
+  get past it.
+- **Point the server's own output-dir at your workspace's target/temp
+  folder** when you configure it, if you'd rather AIDA's scratch-folder
+  advice and the server's sandbox agree — check that server's own docs for
+  the exact flag/env var (Playwright MCP uses `--output-dir`).
+
 ## Full example
 
 See [`examples/config/mcp.json`](../examples/config/mcp.json) in the repo
