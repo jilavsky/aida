@@ -88,6 +88,29 @@ def test_provider_profile_form_seeds_fields_when_editing(qapp):
     assert dialog._context_window_row.value() == 200_000
 
 
+def test_max_tokens_and_context_window_tooltips_explain_the_difference(qapp):
+    """A user setting max_tokens to their model's full context size (the
+    exact real-world mix-up `aida doctor`'s max_tokens_vs_context_window
+    check exists for) is the failure this tooltip is meant to head off —
+    and it has to actually be visible: the row's checkbox + spin box fill
+    its whole paintable area, so the tooltip must reach both children, not
+    just sit unreachable on the row's own QWidget (see
+    `_OptionalNumberRow.setToolTip`)."""
+    dialog = ProviderProfileFormDialog()
+
+    max_tokens_tip = dialog._max_tokens_row.toolTip()
+    assert "output" in max_tokens_tip.lower()
+    assert max_tokens_tip == dialog._max_tokens_row._checkbox.toolTip()
+    assert max_tokens_tip == dialog._max_tokens_row._spin.toolTip()
+
+    context_window_tip = dialog._context_window_row.toolTip()
+    assert "total context window" in context_window_tip.lower()
+    assert context_window_tip == dialog._context_window_row._checkbox.toolTip()
+    assert context_window_tip == dialog._context_window_row._spin.toolTip()
+
+    assert max_tokens_tip != context_window_tip
+
+
 def test_provider_profile_form_optional_fields_default_unchecked_when_adding(qapp):
     dialog = ProviderProfileFormDialog()
     assert dialog._max_tokens_row.value() is None

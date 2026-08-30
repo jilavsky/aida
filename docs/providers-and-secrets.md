@@ -24,7 +24,7 @@ Each entry under `profiles:` in `providers.yaml` has:
 | `model` | Model name/id passed to the provider |
 | `secret_ref` | Name of a keychain entry (see [Secrets](#secrets)), or `null` if the endpoint needs no key |
 | `capability_notes` | Free-text note to yourself (e.g. "small local model — prefer lean MCP groups") |
-| `max_tokens` | Cap on the reply length, in tokens. Omit/`null` to use the provider default — **note that Anthropic's default is 4096**, which a long generated report will hit (you'll see a "reply hit the max-tokens limit" notice when it does) |
+| `max_tokens` | Cap on the reply length, in tokens. Omit/`null` to use the provider default — **note that Anthropic's default is 4096**, which a long generated report will hit (you'll see a "reply hit the max-tokens limit" notice when it does). **Do not set this to your model's total context size** — see the callout below the table |
 | `temperature` | Sampling temperature. Omit/`null` for AIDA's default of `0.7` |
 | `supports_vision` | `true` lets AIDA send images to this model — plot PNGs that MCP tools return, and image files you attach in the GUI. Defaults to `false`, because a model that can't accept images errors out the moment a tool returns one. Turn it on for any vision-capable model (Claude, GPT-4o-class, a local vision model) |
 | `usd_per_m_input` / `usd_per_m_output` | Your actual price per million tokens, used for the session cost estimate. Set both to `0` for a free local model so the estimate stops pretending it costs anything; omit them and a generic default rate is used |
@@ -33,6 +33,29 @@ Each entry under `profiles:` in `providers.yaml` has:
 All six are optional and can be set per profile — that's the point of
 having several profiles for the same endpoint (a cheap fast one and a
 careful long-output one, say).
+
+> **Common mistake: `max_tokens` set to the model's full context size.**
+> `max_tokens` is *only* how many tokens this reply is allowed to generate
+> — a good value is usually 4096-16000. It is easy to misread as "the
+> model's total window" and set it to that instead (e.g. `max_tokens:
+> 262000` on a 262k-context model). That single mistake breaks history
+> budgeting unconditionally: `aida.core.context.history_budget` computes
+> `context_window * 0.85 - max_tokens - tool_schema_tokens`, so once
+> `max_tokens` alone is close to or larger than the window, the result is
+> negative before any tool schema is even counted, and you'll see this in
+> the logs on every turn:
+>
+> ```
+> WARNING  aida.context: context budget clamped to the 8000-token floor:
+> context_window=250000, reserved_output_tokens=262000, tool_schema_tokens=7815
+> leaves only -57315 — consider a leaner MCP group or a larger context_window
+> ```
+>
+> If you see that warning, check `max_tokens` first — a "leaner MCP group
+> or larger context_window" rarely fixes it if `reserved_output_tokens`
+> (which comes straight from `max_tokens`) is the real problem.
+> `aida doctor`'s `max_tokens_vs_context_window` check catches this
+> configuration and fails specifically on it.
 
 ```yaml
 profiles:

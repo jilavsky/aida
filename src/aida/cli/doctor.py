@@ -27,6 +27,7 @@ from pathlib import Path
 from aida.config import paths
 from aida.config.secrets import keyring_available
 from aida.config.settings import Settings, load_settings
+from aida.core.context import CONTEXT_SAFETY_FRACTION
 from aida.mcp.pyirena_setup import find_pyirena_mcp, pyirena_version
 from aida.providers.profiles import ProfileValidation, validate_profile
 
@@ -234,6 +235,51 @@ def _check_context_windows(settings: Settings | None) -> CheckResult:
     return CheckResult("context_windows", True, "; ".join(notes))
 
 
+def _check_max_tokens_vs_context_window(settings: Settings | None) -> CheckResult:
+    """Catches a specific, easy-to-hit mix-up between ``max_tokens`` and
+    ``context_window`` (see ``ProviderProfile``'s docstring): someone reads
+    "max tokens" as the model's total window and sets it to that model's
+    full context size — e.g. a 262k-context Ollama model with
+    ``max_tokens: 262000`` — instead of leaving it unset (a safe 4096
+    default) or a modest reply budget like 4096-16000.
+
+    That single mistake breaks history budgeting unconditionally:
+    ``aida.core.context.history_budget`` computes
+    ``context_window * 0.85 - max_tokens - tool_schema_tokens``, and once
+    ``max_tokens`` alone is close to or larger than the safety-adjusted
+    window, the result is negative *before any tool schema is counted* —
+    every turn clamps to ``MIN_HISTORY_BUDGET`` (8000 tokens) regardless of
+    which MCP group is active, which looks like "my context budget is
+    tiny" even though the configured window is huge. Unlike
+    ``_check_context_windows``'s "no context_window set" (a sensible
+    default that's merely suboptimal), there's no legitimate reading of
+    this combination — nobody wants next to nothing reserved for history —
+    so this is the one context-window check that FAILs."""
+    if settings is None:
+        return CheckResult("max_tokens_vs_context_window", True, "skipped — config failed to load")
+    profiles = settings.providers.profiles
+    if not profiles:
+        return CheckResult("max_tokens_vs_context_window", True, "no provider profiles configured yet")
+
+    bad = []
+    for name, profile in profiles.items():
+        if profile.max_tokens is None or profile.context_window is None:
+            continue
+        usable = int(profile.context_window * CONTEXT_SAFETY_FRACTION)
+        if profile.max_tokens >= usable:
+            bad.append(
+                f"{name!r}: max_tokens ({profile.max_tokens:,}) leaves no room in context_window "
+                f"({profile.context_window:,}) for history — max_tokens caps only the reply's "
+                "OUTPUT length, it is not the model's total window; unset it (4096 default) or use "
+                "a modest reply budget like 4096-16000, not the context_window value"
+            )
+    if not bad:
+        return CheckResult(
+            "max_tokens_vs_context_window", True, "no profile's max_tokens crowds out its context_window"
+        )
+    return CheckResult("max_tokens_vs_context_window", False, "; ".join(bad))
+
+
 def run_checks() -> list[CheckResult]:
     results: list[CheckResult] = [_check_python_version()]
     settings, config_result = _load_settings_safely()
@@ -245,6 +291,7 @@ def run_checks() -> list[CheckResult]:
     results.append(_check_keyring())
     results.append(_check_pyirena_mcp(settings))
     results.append(_check_context_windows(settings))
+    results.append(_check_max_tokens_vs_context_window(settings))
     results.extend(_check_provider_endpoints(settings))
     return results
 

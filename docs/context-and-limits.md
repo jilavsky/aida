@@ -71,7 +71,12 @@ default is larger than a profile's known real window.
 [providers-and-secrets.md](providers-and-secrets.md#provider-profile-fields)):
 `max_tokens` caps the *output* a single reply generates; `context_window` is
 the model's *total* window that the output, the history, and the tool
-schemas all have to fit inside together.
+schemas all have to fit inside together. Setting `max_tokens` to your
+model's full context size — a natural-sounding but wrong reading of "max
+tokens" — leaves no room for history at all and clamps every turn's budget
+to a bare 8000-token floor regardless of `context_window`; see the callout
+in providers-and-secrets.md for exactly what that looks like in the logs
+and how to fix it. `aida doctor` catches this specific mistake.
 
 ## Compaction
 

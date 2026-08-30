@@ -246,3 +246,68 @@ def test_context_windows_check_flags_a_global_default_larger_than_a_configured_w
 def test_run_checks_includes_context_windows(aida_home: Path, records_home: Path):
     results = run_checks()
     assert any(r.name == "context_windows" for r in results)
+
+
+# --- max_tokens_vs_context_window -------------------------------------------
+
+
+def test_max_tokens_vs_context_window_ok_with_no_profiles(aida_home, records_home):
+    from aida.cli import doctor
+
+    result = doctor._check_max_tokens_vs_context_window(None)
+    assert result.ok
+    assert "skipped" in result.detail
+
+
+def test_max_tokens_vs_context_window_silent_when_max_tokens_is_a_modest_reply_budget(aida_home, records_home):
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["local-qwen"] = ProviderProfile(
+        name="local-qwen", kind="openai_compat", model="qwen", context_window=128_000, max_tokens=8_000
+    )
+
+    result = doctor._check_max_tokens_vs_context_window(settings)
+
+    assert result.ok
+    assert result.detail == "no profile's max_tokens crowds out its context_window"
+
+
+def test_max_tokens_vs_context_window_fails_when_max_tokens_set_to_the_full_window(aida_home, records_home):
+    """The exact real-world mistake this check exists for: max_tokens read
+    as "the model's total window" and set to that model's full context
+    size instead of a modest reply budget."""
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["ollama-big"] = ProviderProfile(
+        name="ollama-big", kind="openai_compat", model="big-model", context_window=250_000, max_tokens=262_000
+    )
+
+    result = doctor._check_max_tokens_vs_context_window(settings)
+
+    assert not result.ok
+    assert "ollama-big" in result.detail
+    assert "262,000" in result.detail
+    assert "250,000" in result.detail
+
+
+def test_max_tokens_vs_context_window_silent_when_either_field_is_unset(aida_home, records_home):
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["no-window"] = ProviderProfile(
+        name="no-window", kind="openai_compat", model="m", max_tokens=262_000
+    )
+
+    result = doctor._check_max_tokens_vs_context_window(settings)
+
+    assert result.ok
+
+
+def test_run_checks_includes_max_tokens_vs_context_window(aida_home: Path, records_home: Path):
+    results = run_checks()
+    assert any(r.name == "max_tokens_vs_context_window" for r in results)

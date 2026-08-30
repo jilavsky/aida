@@ -16,7 +16,17 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `aida doctor`'s new `max_tokens_vs_context_window` check, which fails
+  specifically when a profile's `max_tokens` crowds out its own
+  `context_window` — the easy-to-hit mistake of reading `max_tokens` as
+  "the model's total window" and setting it to that model's full context
+  size, which silently clamps every turn's history budget to the 8000-token
+  floor regardless of how large `context_window` actually is.
+- Tooltips on the Providers… dialog's **Max tokens** and **Context
+  window** fields explaining the difference, plus a callout with the exact
+  log message in `docs/providers-and-secrets.md`.
 
 ## [0.1.0b2] - 2026-08-29
 

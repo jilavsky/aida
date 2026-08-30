@@ -101,6 +101,15 @@ class _OptionalNumberRow(QWidget):
     def value(self) -> float | None:
         return self._spin.value() if self._checkbox.isChecked() else None
 
+    def setToolTip(self, text: str) -> None:  # noqa: N802 - overriding Qt's own camelCase API
+        """Overrides ``QWidget.setToolTip`` — the checkbox and spin box
+        fill this row's entire paintable area (zero margins, stretch=1), so
+        a tooltip set only on ``self`` would never actually show; apply it
+        to both children too so hovering anywhere in the row works."""
+        super().setToolTip(text)
+        self._checkbox.setToolTip(text)
+        self._spin.setToolTip(text)
+
 
 # --- Add/Edit provider profile sub-dialog ------------------------------------
 
@@ -153,6 +162,13 @@ class ProviderProfileFormDialog(QDialog):
         self._max_tokens_row = _OptionalNumberRow(
             initial=profile.max_tokens if profile else None, minimum=1, maximum=1_000_000, decimals=0, step=256
         )
+        self._max_tokens_row.setToolTip(
+            "Caps only the length of THIS REPLY (the model's output) — not the model's total "
+            "context window. Leave blank for a safe 4096-token default; a good explicit value is "
+            "usually 4096-16000. Do NOT set this to your model's full context size — that leaves "
+            "no room for conversation history and every turn gets clamped to a bare minimum. Set "
+            "the model's real total window in 'Context window' below instead."
+        )
         form.addRow("Max tokens:", self._max_tokens_row)
 
         self._temperature_row = _OptionalNumberRow(
@@ -192,6 +208,11 @@ class ProviderProfileFormDialog(QDialog):
             decimals=0,
             step=1000,
             suffix=" tok",
+        )
+        self._context_window_row.setToolTip(
+            "This model's TOTAL context window (the manufacturer/provider's stated number, e.g. "
+            "128000 or 262000) — history, tool schemas, and the reply above all have to fit inside "
+            "this together. Leave blank to use the global default in Settings…."
         )
         form.addRow("Context window:", self._context_window_row)
 
