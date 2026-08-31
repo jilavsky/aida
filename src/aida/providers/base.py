@@ -8,12 +8,82 @@ format and translates to/from its own SDK's dialect internally — callers
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
 from aida.core.events import AgentEvent
+
+#: Sampling parameters a provider is allowed to *drop and retry* when an
+#: endpoint rejects them (see ``unsupported_request_param``). Deliberately
+#: short: only knobs whose absence changes sampling, never anything whose
+#: absence would change what the model is asked to do (``tools``,
+#: ``system``, ``messages``, ``max_tokens``).
+DROPPABLE_REQUEST_PARAMS = ("temperature", "top_p", "top_k")
+
+#: Phrases a 400 uses to say "I know this parameter, but not for this
+#: model". Newer models reject ``temperature`` outright ("`temperature` is
+#: deprecated for this model"); OpenAI's reasoning models say
+#: "Unsupported value"/"unsupported parameter"; various local servers say
+#: "unknown"/"not allowed". Matching on the phrase *plus* the parameter
+#: name (rather than the name alone) keeps an unrelated 400 that merely
+#: mentions temperature in prose from silently changing the request.
+_REJECTION_PHRASES = (
+    "deprecated",
+    "unsupported",
+    "not supported",
+    "does not support",
+    "no longer supported",
+    "unrecognized",
+    "unknown parameter",
+    "unknown argument",
+    "not allowed",
+    "not permitted",
+    "cannot be specified",
+    "must not be specified",
+    "unexpected keyword",
+    "extra fields not permitted",
+)
+
+
+#: HTTP statuses that can never mean "this request parameter is wrong":
+#: auth/permission/not-found/timeout/rate-limit, plus anything 5xx. Every
+#: other status is eligible, deliberately including 200 — a proxy in front
+#: of a model (the ANL Argo endpoint) answers 200 with an error envelope
+#: quoting the upstream 400, which the SDK surfaces as an APIStatusError
+#: whose status_code is that 200.
+_NON_PARAM_STATUSES = frozenset({401, 403, 404, 408, 429})
+
+
+def is_param_rejection_status(status_code: int) -> bool:
+    """Whether a status code could plausibly carry a "bad parameter"
+    complaint — see ``_NON_PARAM_STATUSES``."""
+    return status_code not in _NON_PARAM_STATUSES and status_code < 500
+
+
+def unsupported_request_param(error_text: str, params: Iterable[str]) -> str | None:
+    """Name of the request parameter an endpoint's 400 is complaining
+    about, or ``None`` when the error is about something else.
+
+    Providers use this to recover from the one failure mode that is purely
+    a wire-format mismatch rather than a real problem with the request: a
+    model that refuses a sampling knob AIDA sent by default. ``params`` is
+    the set of keys actually in the outgoing request, so a parameter AIDA
+    never sent is never "the problem", and only keys in
+    ``DROPPABLE_REQUEST_PARAMS`` are ever returned — a 400 about
+    ``messages`` or ``tools`` must surface to the user, not get silently
+    retried with the field removed.
+    """
+    text = error_text.lower()
+    if not any(phrase in text for phrase in _REJECTION_PHRASES):
+        return None
+    candidates = [name for name in params if name in DROPPABLE_REQUEST_PARAMS]
+    for name in DROPPABLE_REQUEST_PARAMS:
+        if name in candidates and re.search(rf"\b{re.escape(name)}\b", text):
+            return name
+    return None
 
 
 @dataclass

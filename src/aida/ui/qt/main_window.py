@@ -39,6 +39,7 @@ from aida.ui.qt._qt import (
     QMessageBox,
     QSplitter,
     Qt,
+    QTimer,
     QToolBar,
     QUrl,
     QVBoxLayout,
@@ -67,6 +68,22 @@ from aida.workspace.workspaces import (
     save_workspace,
 )
 
+#: How often the status-bar "Session total" / "Context" labels refresh
+#: *while a turn is running* (user request: "while we are running a long
+#: session, the costs do not get updated... every 2-5 minutes when a long
+#: session is running"). Both labels used to repaint only on
+#: ``turn_finished``, so a turn that spends twenty minutes in a tool loop
+#: showed the totals from before it started — even though ``ChatSession``
+#: accumulates usage per model round trip as the turn progresses, so the
+#: numbers were already there to read.
+#:
+#: 30s rather than the requested minutes because a tick costs nothing that
+#: scales with session length: two attribute reads plus one pass over the
+#: in-memory message list for the fullness estimate (no I/O, no network, no
+#: provider call). Cheap enough to be a poll, frequent enough that the
+#: number is never meaningfully behind.
+USAGE_REFRESH_INTERVAL_MS = 30_000
+
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -87,6 +104,13 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._wire_ui_signals()
+
+        # Only runs between turn_started and turn_finished — see
+        # USAGE_REFRESH_INTERVAL_MS and _on_usage_refresh_tick. Idle totals
+        # cannot change, so there is nothing to poll for outside a turn.
+        self._usage_refresh_timer = QTimer(self)
+        self._usage_refresh_timer.setInterval(USAGE_REFRESH_INTERVAL_MS)
+        self._usage_refresh_timer.timeout.connect(self._on_usage_refresh_tick)
 
         self.bridge = ChatBridge(loop_thread, self)
         self._wire_bridge_signals()
@@ -154,6 +178,12 @@ class MainWindow(QMainWindow):
         self.folder_display = FolderDisplay(self)
         self.mcp_panel = McpQuickPanel(self)
         self.quick_tasks_panel = QuickTasksPanel(self)
+        # Disabled until _refresh_quick_tasks_panel says otherwise:
+        # quick tasks are workspace-scoped, and until the first session
+        # is ready there is no workspace to save them to. Left enabled,
+        # the panel accepted an Add during startup that
+        # _on_quick_tasks_changed then dropped on the floor.
+        self.quick_tasks_panel.setEnabled(False)
 
         chat_column = QWidget(self)
         chat_layout = QVBoxLayout(chat_column)
@@ -353,9 +383,29 @@ class MainWindow(QMainWindow):
 
     def _on_turn_started(self) -> None:
         self.input_box.set_busy(True)
+        self._usage_refresh_timer.start()
 
     def _on_turn_finished(self) -> None:
         self.input_box.set_busy(False)
+        self._usage_refresh_timer.stop()
+
+    def _on_usage_refresh_tick(self) -> None:
+        """Repaint the two status-bar totals mid-turn.
+
+        Reads exactly what ``turn_finished`` reads, just sooner: the
+        session's running token counters (updated on the loop thread as
+        each ``UsageInfo`` arrives — ``ChatSession.send``) and its context
+        estimate. Both are plain in-memory reads of data the loop thread
+        only ever *appends* to, so a tick can at worst render a count that
+        is one round trip stale, and the next tick corrects it. Nothing
+        here touches the session's state, the provider, or the DB.
+        """
+        session = self.bridge.session
+        if session is None:
+            self._usage_refresh_timer.stop()
+            return
+        self._update_usage_label()
+        self._update_context_label()
 
     def _unwire_bridge_signals(self, bridge: ChatBridge) -> None:
         """Undo ``_wire_bridge_signals`` for a bridge being retired, in both
@@ -384,6 +434,10 @@ class MainWindow(QMainWindow):
             # because a crash in a Qt slot is silent to the user.
             self._logger.debug("session_ready with no active session — ignoring")
             return
+        # A bridge retired mid-turn never emits turn_finished (ChatBridge
+        # gates every emit on _closing), so stop the poll here too — a
+        # session that has just become ready is idle by definition.
+        self._usage_refresh_timer.stop()
         self.statusBar().showMessage(f"Ready — {session.profile_name}", 5000)
         if session.recorder is not None:
             self._load_resumed_history(session.recorder.conversation_id)
@@ -1099,9 +1153,21 @@ class MainWindow(QMainWindow):
         which require an explicit "Save to Workspace" click since those are
         free-typed, easy to fat-finger)."""
         if self._current_workspace_config is None:
+            # Reachable if the panel is somehow live without a workspace
+            # (no session yet, or a session with no workspace): say so
+            # rather than dropping the user's edit in silence.
+            self.statusBar().showMessage(
+                "Quick tasks are saved per workspace — start a session with a workspace first", 8000
+            )
+            self._logger.warning("quick task edit discarded: no active workspace")
             return
         self._current_workspace_config.quick_tasks = [QuickTask(name=t.name, text=t.text) for t in tasks]
         save_workspace(self.settings, self._current_workspace_config)
+        self._logger.info(
+            "saved %d quick task(s) to workspace %s",
+            len(tasks),
+            self._current_workspace_config.name,
+        )
 
     # --- MCP management (Phase 7) -------------------------------------------
 

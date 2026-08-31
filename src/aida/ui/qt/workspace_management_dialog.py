@@ -84,6 +84,9 @@ class WorkspaceFormDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._is_edit = workspace is not None
+        # Kept so result_config() can carry forward the fields this form
+        # does not show — see its docstring.
+        self._original = workspace
         self._previous_safety = workspace.safety if workspace else None
         self.setWindowTitle("Edit Workspace" if self._is_edit else "Add Workspace")
         self.resize(520, 640)
@@ -248,6 +251,24 @@ class WorkspaceFormDialog(QDialog):
         self.accept()
 
     def result_config(self) -> WorkspaceConfig:
+        """The edited workspace.
+
+        Bug report: "I can add Quick tasks into workspace, but these seem to
+        disappear." Root cause was here — this built a *fresh*
+        ``WorkspaceConfig`` from the form's own widgets, so every field the
+        form doesn't show reverted to its dataclass default the moment the
+        user pressed OK in the Workspaces… dialog. ``quick_tasks`` (edited
+        in the main window's own panel, never in this form) was silently
+        emptied; ``templates_dir`` and ``saved_scripts_dir`` (settable by
+        hand in ``workspaces.yaml``) were reset to ``None`` the same way.
+
+        Carrying them over from ``self._original`` is deliberately explicit
+        rather than a ``replace()`` over the whole dataclass: a new field
+        added to ``WorkspaceConfig`` that this form *should* edit will show
+        up as a missing widget here, not as a value that quietly survives
+        editing.
+        """
+        original = self._original
         profile = self._profile_combo.currentText()
         mcp_group = self._mcp_group_combo.currentText()
         return WorkspaceConfig(
@@ -267,6 +288,10 @@ class WorkspaceFormDialog(QDialog):
             python_interpreter=self._interpreter_edit.text().strip() or None,
             scripting_enabled=self._scripting_checkbox.isChecked(),
             script_timeout_seconds=float(self._script_timeout_spin.value()),
+            # Not editable in this form — preserved, not reset:
+            quick_tasks=list(original.quick_tasks) if original else [],
+            templates_dir=original.templates_dir if original else None,
+            saved_scripts_dir=original.saved_scripts_dir if original else None,
         )
 
 
@@ -285,6 +310,7 @@ def _workspace_detail_lines(workspace: WorkspaceConfig, validation: WorkspaceVal
         f"python_interpreter: {workspace.python_interpreter or '(default)'}",
         f"command_allowlist: {', '.join(workspace.command_allowlist) or '(none)'}",
         f"script_timeout_seconds: {workspace.script_timeout_seconds:g}",
+        f"quick_tasks: {', '.join(t.name for t in workspace.quick_tasks) or '(none)'}",
         f"system_prompt: {'(set)' if workspace.system_prompt else '(none)'}",
     ]
     if validation.warnings:

@@ -24,6 +24,7 @@ something this widget can decide on its own.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 from aida.ui.qt._qt import (
@@ -34,10 +35,36 @@ from aida.ui.qt._qt import (
     QPlainTextEdit,
     QPushButton,
     Qt,
+    QTimer,
     QVBoxLayout,
     QWidget,
     Signal,
 )
+
+#: Bug report: "when model is working I can only not write new message and
+#: the Stop button is visible" — the *absence* of the Send button was the
+#: only signal that a turn was in flight, which is a thing you have to
+#: notice rather than a thing you see. While busy the button is recolored
+#: (red = "this stops something", the one place in the window with a
+#: colored button) and a live "Working… 12s" label appears beside it, so
+#: both the state and how long it has been going are readable at a glance.
+_BUSY_BUTTON_STYLE = """
+QPushButton {
+    background-color: #c0392b;
+    color: white;
+    font-weight: bold;
+    border: 1px solid #96281b;
+    border-radius: 4px;
+    padding: 4px 10px;
+}
+QPushButton:hover { background-color: #d64535; }
+QPushButton:pressed { background-color: #96281b; }
+"""
+
+#: How often the "Working…" label repaints. Sub-second so the animated
+#: dots read as motion (the point: motion is what says "not frozen"),
+#: while the elapsed seconds it also shows only change every other tick.
+_BUSY_TICK_MS = 500
 
 
 class _AttachmentChip(QWidget):
@@ -101,11 +128,26 @@ class InputBox(QWidget):
         self._send_button = QPushButton("Send", self)
         self._send_button.setShortcut(QKeySequence("Ctrl+Return"))
         self._send_button.clicked.connect(self._on_button_clicked)
+        self._idle_button_style = self._send_button.styleSheet()
         button_column.addWidget(self._send_button)
         self._attach_button = QPushButton("Attach…", self)
         self._attach_button.clicked.connect(self._on_attach_clicked)
         button_column.addWidget(self._attach_button)
         layout.addLayout(button_column)
+
+        # Sits at the right end of the attachments row (above the text box,
+        # next to the button column) so it appears where the user is
+        # already looking when they wonder whether anything is happening.
+        self._busy_label = QLabel("", self)
+        self._busy_label.setStyleSheet("color: #c0392b;")
+        self._busy_label.setVisible(False)
+        self._attachments_row.addWidget(self._busy_label)
+
+        self._busy_started_at = 0.0
+        self._busy_ticks = 0
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setInterval(_BUSY_TICK_MS)
+        self._busy_timer.timeout.connect(self._tick_busy_label)
 
     # --- state -----------------------------------------------------------
 
@@ -117,10 +159,41 @@ class InputBox(QWidget):
         """Called by whatever owns this widget (MainWindow) on
         ``ChatBridge.turn_started``/``turn_finished`` — while busy, the
         text box is disabled (a new turn can't start until this one ends
-        or is cancelled) and the button becomes Stop."""
+        or is cancelled), the button becomes a red Stop, and the
+        "Working… Ns" label ticks beside it (see ``_BUSY_BUTTON_STYLE``).
+
+        Idempotent: a repeated ``set_busy(True)`` does not restart the
+        elapsed clock, so a turn's timer keeps counting the turn rather
+        than the last signal.
+        """
+        if busy == self._busy:
+            return
         self._busy = busy
         self._text_edit.setEnabled(not busy)
         self._send_button.setText("Stop" if busy else "Send")
+        self._send_button.setStyleSheet(_BUSY_BUTTON_STYLE if busy else self._idle_button_style)
+        self._send_button.setToolTip("Stop the turn in progress" if busy else "")
+        if busy:
+            self._busy_started_at = time.monotonic()
+            self._busy_ticks = 0
+            self._busy_label.setVisible(True)
+            self._tick_busy_label()
+            self._busy_timer.start()
+        else:
+            self._busy_timer.stop()
+            self._busy_label.setVisible(False)
+            self._busy_label.setText("")
+
+    def busy_status_text(self) -> str:
+        """Current "Working…" text (empty when idle) — the readable form of
+        this widget's busy state, and what the tests assert on."""
+        return self._busy_label.text()
+
+    def _tick_busy_label(self) -> None:
+        elapsed = int(time.monotonic() - self._busy_started_at)
+        dots = "." * (1 + self._busy_ticks % 3)
+        self._busy_ticks += 1
+        self._busy_label.setText(f"Working{dots} {elapsed}s — press Stop to cancel")
 
     # --- text ----------------------------------------------------------------
 
@@ -162,15 +235,20 @@ class InputBox(QWidget):
             self._refresh_attachment_chips()
 
     def _refresh_attachment_chips(self) -> None:
-        while self._attachments_row.count() > 1:  # leave the trailing stretch alone
-            item = self._attachments_row.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
+        # Removes chips *by type* rather than "everything but the last
+        # item": this row is [chips…, stretch, busy label], so the two
+        # non-chip items at the end must both survive a refresh — an
+        # index-based sweep silently ate the stretch once the busy label
+        # was added, which left the chips pinned to the right edge.
+        for index in reversed(range(self._attachments_row.count())):
+            widget = self._attachments_row.itemAt(index).widget()
+            if isinstance(widget, _AttachmentChip):
+                self._attachments_row.takeAt(index)
                 widget.deleteLater()
-        for path in self._attachments:
+        for index, path in enumerate(self._attachments):
             chip = _AttachmentChip(path, self)
             chip.remove_requested.connect(self._remove_attachment)
-            self._attachments_row.insertWidget(self._attachments_row.count() - 1, chip)
+            self._attachments_row.insertWidget(index, chip)
         self.attachments_changed.emit(list(self._attachments))
 
     def _on_attach_clicked(self) -> None:

@@ -1917,3 +1917,107 @@ def test_send_with_non_image_attachment_records_no_image_ref(
         assert last_user_message.images == []
     finally:
         window.close()
+
+
+def test_quick_tasks_panel_starts_disabled_before_a_session_is_ready(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report follow-up: the panel was constructed enabled, so an Add
+    during startup was accepted by the panel and then silently dropped by
+    _on_quick_tasks_changed (no workspace resolved yet). It now starts
+    disabled and is enabled only by _refresh_quick_tasks_panel."""
+    from aida.ui.qt.quick_tasks_panel import QuickTasksPanel
+
+    panel = QuickTasksPanel()
+    assert panel.isEnabled()  # the widget itself has no opinion...
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        # ...the window is what gates it on having a workspace to save to.
+        assert not window.quick_tasks_panel.isEnabled()
+    finally:
+        window.close()
+
+
+def test_quick_task_edit_without_a_workspace_says_so_instead_of_dropping_it(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    from aida.ui.qt.quick_tasks_panel import QuickTaskData
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window._current_workspace_config = None
+
+        window._on_quick_tasks_changed([QuickTaskData(name="Reduce", text="Reduce runs.")])
+
+        assert "workspace" in window.statusBar().currentMessage()
+    finally:
+        window.close()
+
+
+# --- mid-turn usage refresh ----------------------------------------------
+
+
+def test_usage_labels_refresh_while_a_turn_is_running(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """User request: "while we are running a long session, the costs do not
+    get updated... can the counter get updated every 2-5 minutes". The
+    totals were only repainted on turn_finished, so a long tool-loop turn
+    showed pre-turn numbers the whole way through — even though
+    ChatSession accumulates them per model round trip."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        session = window.bridge.session
+        assert session is not None
+        window._update_usage_label()
+        before = window._usage_label.text()
+
+        # What the loop thread does as a turn progresses.
+        session.total_input_tokens += 12_345
+        session.total_output_tokens += 678
+        window._on_usage_refresh_tick()
+
+        assert window._usage_label.text() != before
+        assert "12,345" in window._usage_label.text()
+    finally:
+        window.close()
+
+
+def test_usage_refresh_polls_only_while_a_turn_is_in_flight(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Idle totals cannot change, so the poll must not outlive the turn."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        assert not window._usage_refresh_timer.isActive()
+
+        window._on_turn_started()
+        assert window._usage_refresh_timer.isActive()
+
+        window._on_turn_finished()
+        assert not window._usage_refresh_timer.isActive()
+    finally:
+        window.close()
+
+
+def test_usage_refresh_stops_itself_when_the_session_is_gone(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A bridge retired mid-turn never emits turn_finished, so the tick has
+    to be able to stand itself down."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window._on_turn_started()
+        window.bridge.session = None
+
+        window._on_usage_refresh_tick()
+
+        assert not window._usage_refresh_timer.isActive()
+    finally:
+        window.close()

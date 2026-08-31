@@ -25,6 +25,7 @@ from openai import (
     NotFoundError,
 )
 
+from aida.config.logging_setup import get_logger
 from aida.core.events import (
     AgentError,
     AgentEvent,
@@ -35,8 +36,17 @@ from aida.core.events import (
     ToolCallStarted,
     UsageInfo,
 )
-from aida.providers.base import CompletionSettings, LLMProvider, Message, ToolSchema
+from aida.providers.base import (
+    CompletionSettings,
+    LLMProvider,
+    Message,
+    ToolSchema,
+    is_param_rejection_status,
+    unsupported_request_param,
+)
 from aida.providers.vision import images_within_cap, read_image_b64
+
+_logger = get_logger("provider")
 
 # Provider-normalized stop reasons (aida.core.events.MessageFinished.stop_reason).
 _FINISH_REASON_MAP = {
@@ -279,6 +289,34 @@ class OpenAICompatProvider(LLMProvider):
         # The SDK requires a non-empty api_key even for endpoints (Ollama,
         # LM Studio) that ignore it entirely.
         self._client = AsyncOpenAI(base_url=base_url, api_key=api_key or "not-needed")
+        # model -> sampling params this endpoint has already rejected once
+        # (see _param_to_drop).
+        self._dropped_params: dict[str, set[str]] = {}
+
+    def _param_to_drop(self, exc: APIStatusError, kwargs: dict[str, Any]) -> str | None:
+        """Name of the sampling parameter this endpoint just refused, or
+        ``None`` when the error is about anything else — see
+        ``AnthropicProvider._param_to_drop`` for the full rationale. Same
+        problem here: OpenAI's reasoning models reject ``temperature``
+        ("Unsupported value"), and small local servers reject assorted
+        sampling knobs they never implemented."""
+        if not is_param_rejection_status(exc.status_code):
+            return None
+        name = unsupported_request_param(str(exc), kwargs)
+        if name is None:
+            return None
+        model = str(kwargs.get("model", ""))
+        self._dropped_params.setdefault(model, set()).add(name)
+        _logger.info(
+            "model %s rejected %r; sending without it for the rest of this session", model, name
+        )
+        return name
+
+    def _without_known_bad_params(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Strip params this endpoint already rejected for this model."""
+        for name in self._dropped_params.get(str(kwargs.get("model", "")), ()):
+            kwargs.pop(name, None)
+        return kwargs
 
     async def complete(
         self,
@@ -287,7 +325,6 @@ class OpenAICompatProvider(LLMProvider):
         settings: CompletionSettings,
     ) -> AsyncIterator[AgentEvent]:
         message_id = f"oai-{id(messages)}-{len(messages)}"
-        state = _StreamState(message_id=message_id)
         kwargs: dict[str, Any] = {
             "model": settings.model or self.model,
             "messages": to_openai_messages(messages, supports_vision=settings.supports_vision),
@@ -302,28 +339,50 @@ class OpenAICompatProvider(LLMProvider):
         if oai_tools is not None:
             kwargs["tools"] = oai_tools
 
-        try:
-            stream = await self._client.chat.completions.create(**kwargs)
-            async for chunk in stream:
-                for event in process_openai_chunk(chunk, state):
+        self._without_known_bad_params(kwargs)
+
+        # Retry loop, not a plain try — see AnthropicProvider.complete:
+        # a request refused only because of a sampling parameter is retried
+        # once per offending parameter with that parameter removed, and
+        # only while nothing of this turn has been yielded yet.
+        while True:
+            state = _StreamState(message_id=message_id)
+            emitted = False
+            error: AgentError | None = None
+            retry_param: str | None = None
+            try:
+                stream = await self._client.chat.completions.create(**kwargs)
+                async for chunk in stream:
+                    for event in process_openai_chunk(chunk, state):
+                        emitted = True
+                        yield event
+                # A compatible server that ended the stream without a
+                # finish_reason would otherwise leave the turn unterminated —
+                # see finalize_stream.
+                for event in finalize_stream(state):
                     yield event
-            # A compatible server that ended the stream without a
-            # finish_reason would otherwise leave the turn unterminated —
-            # see finalize_stream.
-            for event in finalize_stream(state):
-                yield event
-        except AuthenticationError as exc:
-            yield AgentError(layer=self.layer_name, message="authentication failed", detail=str(exc))
-        except NotFoundError as exc:
-            yield AgentError(layer=self.layer_name, message="model not found", detail=str(exc))
-        except APIConnectionError as exc:
-            yield AgentError(layer=self.layer_name, message="connection failed", detail=str(exc))
-        except APIStatusError as exc:
-            yield AgentError(
-                layer=self.layer_name, message=f"API error ({exc.status_code})", detail=str(exc)
-            )
-        except Exception as exc:  # noqa: BLE001 - any unexpected SDK error still surfaces as AgentError
-            yield AgentError(layer=self.layer_name, message="unexpected provider error", detail=str(exc))
+            except AuthenticationError as exc:
+                error = AgentError(layer=self.layer_name, message="authentication failed", detail=str(exc))
+            except NotFoundError as exc:
+                error = AgentError(layer=self.layer_name, message="model not found", detail=str(exc))
+            except APIConnectionError as exc:
+                error = AgentError(layer=self.layer_name, message="connection failed", detail=str(exc))
+            except APIStatusError as exc:
+                retry_param = None if emitted else self._param_to_drop(exc, kwargs)
+                error = AgentError(
+                    layer=self.layer_name, message=f"API error ({exc.status_code})", detail=str(exc)
+                )
+            except Exception as exc:  # noqa: BLE001 - any unexpected SDK error still surfaces as AgentError
+                error = AgentError(
+                    layer=self.layer_name, message="unexpected provider error", detail=str(exc)
+                )
+
+            if retry_param is not None:
+                kwargs.pop(retry_param, None)
+                continue
+            if error is not None:
+                yield error
+            return
 
     async def ping(self) -> bool:
         try:

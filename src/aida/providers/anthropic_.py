@@ -27,6 +27,7 @@ from anthropic import (
     NotFoundError,
 )
 
+from aida.config.logging_setup import get_logger
 from aida.core.events import (
     AgentError,
     AgentEvent,
@@ -37,8 +38,17 @@ from aida.core.events import (
     ToolCallStarted,
     UsageInfo,
 )
-from aida.providers.base import CompletionSettings, LLMProvider, Message, ToolSchema
+from aida.providers.base import (
+    CompletionSettings,
+    LLMProvider,
+    Message,
+    ToolSchema,
+    is_param_rejection_status,
+    unsupported_request_param,
+)
 from aida.providers.vision import images_within_cap, read_image_b64
+
+_logger = get_logger("provider")
 
 DEFAULT_MAX_TOKENS = 4096
 
@@ -316,6 +326,47 @@ class AnthropicProvider(LLMProvider):
     def __init__(self, *, model: str, base_url: str | None = None, api_key: str | None = None) -> None:
         self.model = model
         self._client = AsyncAnthropic(base_url=base_url, api_key=api_key or "not-needed")
+        # model -> sampling params this endpoint has already rejected once
+        # (see _param_to_drop). Remembered per provider instance so the
+        # doomed request is made at most once per model per session, not
+        # once per turn.
+        self._dropped_params: dict[str, set[str]] = {}
+
+    def _param_to_drop(self, exc: APIStatusError, kwargs: dict[str, Any]) -> str | None:
+        """Name of the sampling parameter this endpoint just refused, or
+        ``None`` when the error is about anything else.
+
+        Newer models reject ``temperature`` outright ("`temperature` is
+        deprecated for this model"), and a proxy sitting in front of several
+        model versions (the ANL Argo endpoint) can accept it for one model
+        and refuse it for the next — so a profile cannot know statically
+        whether to send it.
+
+        Rather than making the user configure that per model, the first
+        failure that names a droppable sampling knob is taken as the
+        endpoint telling us to leave it out: the caller drops that one key
+        and retries, and it is remembered here so the doomed request is
+        made at most once per model per session. An error about anything
+        else — or about ``messages``/``tools``/``max_tokens`` — is never
+        retried and reaches the user as an ``AgentError``.
+        """
+        if not is_param_rejection_status(exc.status_code):
+            return None
+        name = unsupported_request_param(str(exc), kwargs)
+        if name is None:
+            return None
+        model = str(kwargs.get("model", ""))
+        self._dropped_params.setdefault(model, set()).add(name)
+        _logger.info(
+            "model %s rejected %r; sending without it for the rest of this session", model, name
+        )
+        return name
+
+    def _without_known_bad_params(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Strip params this endpoint already rejected for this model."""
+        for name in self._dropped_params.get(str(kwargs.get("model", "")), ()):
+            kwargs.pop(name, None)
+        return kwargs
 
     async def complete(
         self,
@@ -324,7 +375,6 @@ class AnthropicProvider(LLMProvider):
         settings: CompletionSettings,
     ) -> AsyncIterator[AgentEvent]:
         message_id = f"anthropic-{id(messages)}-{len(messages)}"
-        state = _StreamState(message_id=message_id)
         system, anthropic_messages = to_anthropic_params(messages, supports_vision=settings.supports_vision)
 
         kwargs: dict[str, Any] = {
@@ -342,37 +392,63 @@ class AnthropicProvider(LLMProvider):
         if tools:
             kwargs["tools"] = to_cached_tools_param(to_anthropic_tools(tools))
 
-        try:
-            stream = await self._client.messages.create(**kwargs)
-            async for event in stream:
-                for out_event in process_anthropic_event(event, state):
-                    yield out_event
-        except AuthenticationError as exc:
-            yield AgentError(layer=self.layer_name, message="authentication failed", detail=str(exc))
-        except NotFoundError as exc:
-            yield AgentError(layer=self.layer_name, message="model not found", detail=str(exc))
-        except APIConnectionError as exc:
-            yield AgentError(layer=self.layer_name, message="connection failed", detail=str(exc))
-        except APIStatusError as exc:
-            yield AgentError(
-                layer=self.layer_name, message=f"API error ({exc.status_code})", detail=str(exc)
-            )
-        except AnthropicError as exc:
-            yield AgentError(layer=self.layer_name, message="unexpected provider error", detail=str(exc))
-        except Exception as exc:  # noqa: BLE001 - see LLMProvider.complete's contract
-            # LLMProvider.complete promises callers "yields a single
-            # AgentError ... rather than raising" — AgentLoop relies on
-            # that, treating an AgentError as the turn's terminator. Only
-            # AnthropicError subclasses were caught here, so anything else
-            # the SDK or the network stack raised (a TypeError from a
-            # malformed kwargs override, an httpx-level error not wrapped
-            # by the SDK, a JSON decode failure mid-stream) escaped the
-            # async generator and broke that contract at the call site.
-            # OpenAICompatProvider already ends with the same blanket
-            # catch; this makes the two behave alike.
-            yield AgentError(
-                layer=self.layer_name, message="unexpected error", detail=f"{type(exc).__name__}: {exc}"
-            )
+        self._without_known_bad_params(kwargs)
+
+        # Retry loop, not a plain try: a request the endpoint refuses only
+        # because of a sampling parameter is retried once per offending
+        # parameter with that parameter removed (see _param_to_drop).
+        # ``emitted`` is the guard that keeps this honest — a failure after
+        # the first event of the turn reached the caller can't be replayed
+        # without duplicating text, so it is reported as-is.
+        while True:
+            state = _StreamState(message_id=message_id)
+            emitted = False
+            error: AgentError | None = None
+            retry_param: str | None = None
+            try:
+                stream = await self._client.messages.create(**kwargs)
+                async for event in stream:
+                    for out_event in process_anthropic_event(event, state):
+                        emitted = True
+                        yield out_event
+            except AuthenticationError as exc:
+                error = AgentError(layer=self.layer_name, message="authentication failed", detail=str(exc))
+            except NotFoundError as exc:
+                error = AgentError(layer=self.layer_name, message="model not found", detail=str(exc))
+            except APIConnectionError as exc:
+                error = AgentError(layer=self.layer_name, message="connection failed", detail=str(exc))
+            except APIStatusError as exc:
+                retry_param = None if emitted else self._param_to_drop(exc, kwargs)
+                error = AgentError(
+                    layer=self.layer_name, message=f"API error ({exc.status_code})", detail=str(exc)
+                )
+            except AnthropicError as exc:
+                error = AgentError(
+                    layer=self.layer_name, message="unexpected provider error", detail=str(exc)
+                )
+            except Exception as exc:  # noqa: BLE001 - see LLMProvider.complete's contract
+                # LLMProvider.complete promises callers "yields a single
+                # AgentError ... rather than raising" — AgentLoop relies on
+                # that, treating an AgentError as the turn's terminator. Only
+                # AnthropicError subclasses were caught here, so anything else
+                # the SDK or the network stack raised (a TypeError from a
+                # malformed kwargs override, an httpx-level error not wrapped
+                # by the SDK, a JSON decode failure mid-stream) escaped the
+                # async generator and broke that contract at the call site.
+                # OpenAICompatProvider already ends with the same blanket
+                # catch; this makes the two behave alike.
+                error = AgentError(
+                    layer=self.layer_name,
+                    message="unexpected error",
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
+
+            if retry_param is not None:
+                kwargs.pop(retry_param, None)
+                continue
+            if error is not None:
+                yield error
+            return
 
     async def ping(self) -> bool:
         """Reachability + auth check for ``aida doctor`` and the Providers…

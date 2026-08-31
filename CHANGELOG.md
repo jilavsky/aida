@@ -27,6 +27,35 @@ decision revised), unrelated to what shipped when. Entries below link to
 - Tooltips on the Providers… dialog's **Max tokens** and **Context
   window** fields explaining the difference, plus a callout with the exact
   log message in `docs/providers-and-secrets.md`.
+- The status bar's **Session total** (tokens + estimated cost) and
+  **Context** labels now refresh every 30 seconds while a turn is running,
+  not only when it finishes — a long tool-loop turn used to show the
+  numbers from before it started. `ChatSession` already accumulated usage
+  per model round trip; only the repaint was missing. The poll runs
+  strictly between `turn_started` and `turn_finished`.
+- A visible "working" state in the GUI while a turn is in flight: the
+  Send button becomes a red **Stop** button and a live `Working… 12s`
+  indicator ticks beside it. Previously the only cues were the disabled
+  text box and the button's changed label, which was easy to miss.
+
+### Fixed
+
+- Quick tasks no longer disappear from a workspace. Editing a workspace
+  in the **Workspaces…** dialog rebuilt its config from that form's own
+  fields, so every field the form doesn't show was reset on OK —
+  `quick_tasks` (edited in the main window's own panel) silently emptied,
+  and `templates_dir`/`saved_scripts_dir` reset to unset. Those fields are
+  now carried through an edit, the workspace detail panel lists the saved
+  quick tasks, and a quick-task edit with no active workspace says so in
+  the status bar instead of being dropped in silence.
+- A model that rejects `temperature` no longer fails the turn. Newer
+  Claude models answer the parameter with a 400 ("`temperature` is
+  deprecated for this model") — and the ANL Argo proxy relays that inside
+  its own 200 — which surfaced as a provider error with no way to fix it
+  from a profile, since the profile could only override `temperature`,
+  never omit it. Both providers now drop the offending sampling parameter,
+  retry the request once, and remember the rejection for the rest of the
+  session; an error about anything else still surfaces unchanged.
 
 ### Changed
 

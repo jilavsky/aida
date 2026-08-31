@@ -186,7 +186,7 @@ def test_clear_attachments_empties_list_and_chips(qapp, tmp_path):
     box.clear_attachments()
 
     assert box.attached_paths() == []
-    assert box._attachments_row.count() == 1  # just the trailing stretch
+    assert box._attachments_row.count() == 2  # just the stretch + busy label
 
 
 def test_drop_files_adds_attachments(qapp, tmp_path):
@@ -258,3 +258,68 @@ def test_send_does_not_automatically_clear_attachments(qapp, tmp_path):
     box._send_button.click()
 
     assert box.attached_paths() == [str(file_a)]
+
+
+def test_busy_state_is_visible_not_just_implied(qapp):
+    """Bug report: while a turn ran, the only cues were a disabled text box
+    and the button's label — easy to miss. Busy now also recolors the
+    button and shows a live "Working…" line."""
+    box = InputBox()
+
+    assert box.busy_status_text() == ""
+    assert box._send_button.styleSheet() == box._idle_button_style
+
+    box.set_busy(True)
+
+    assert box._send_button.text() == "Stop"
+    assert box._send_button.styleSheet() != box._idle_button_style
+    assert box._busy_label.isVisible() or box._busy_label.isVisibleTo(box)
+    assert box.busy_status_text().startswith("Working")
+    assert "Stop" in box.busy_status_text()
+
+    box.set_busy(False)
+
+    assert box._send_button.text() == "Send"
+    assert box._send_button.styleSheet() == box._idle_button_style
+    assert box.busy_status_text() == ""
+    assert not box._busy_label.isVisibleTo(box)
+
+
+def test_busy_label_animates_and_counts_elapsed_time(qapp):
+    box = InputBox()
+    box.set_busy(True)
+    first = box.busy_status_text()
+
+    box._tick_busy_label()
+
+    assert box.busy_status_text() != first  # the dots moved: not frozen
+
+
+def test_repeated_set_busy_does_not_restart_the_clock(qapp):
+    """turn_started can fire again for the same in-flight turn (a tool
+    round trip); the elapsed counter must keep counting the turn."""
+    box = InputBox()
+    box.set_busy(True)
+    box._busy_started_at -= 30  # pretend the turn began 30s ago
+    box._tick_busy_label()
+
+    box.set_busy(True)
+
+    assert "30s" in box.busy_status_text()
+
+
+def test_attachment_chips_survive_the_busy_indicator(qapp, tmp_path):
+    """Regression guard for the attachments row now holding a trailing
+    busy label as well as the stretch — refreshing chips must not eat
+    either one."""
+    file_a = tmp_path / "a.txt"
+    file_a.write_text("hi", encoding="utf-8")
+    box = InputBox()
+
+    box.add_attachment(str(file_a))
+    box.clear_attachments()
+    box.add_attachment(str(file_a))
+
+    assert box._attachments_row.count() == 3  # chip + stretch + busy label
+    assert box._attachments_row.itemAt(0).widget().path == str(file_a)
+    assert box._attachments_row.itemAt(2).widget() is box._busy_label

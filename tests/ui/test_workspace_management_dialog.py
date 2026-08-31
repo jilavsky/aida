@@ -11,6 +11,7 @@ from aida.config.settings import (
     McpConfig,
     McpServerConfig,
     ProviderProfile,
+    QuickTask,
     load_settings,
     load_workspaces_config,
 )
@@ -271,3 +272,66 @@ def test_detail_panel_shows_validation_warnings(qapp, aida_home: Path):
     dialog = WorkspaceManagementDialog(settings, aida_home / "skills")
     dialog._workspace_list.setCurrentRow(0)
     assert "source folder not currently reachable" in dialog._details_label.text()
+
+
+def test_editing_a_workspace_keeps_fields_the_form_does_not_show(qapp, aida_home: Path, monkeypatch):
+    """Bug report: "I can add Quick tasks into workspace, but these seem to
+    disappear." The form rebuilt the whole WorkspaceConfig from its own
+    widgets, so pressing OK in the Workspaces… dialog reset every field it
+    doesn't display — quick_tasks above all, which are edited in the main
+    window's panel and never here."""
+    settings = _settings_with_a_profile(aida_home)
+    settings.workspaces.workspaces["pyirena"] = WorkspaceConfig(
+        name="pyirena",
+        target_folder="/data/out",
+        quick_tasks=[QuickTask(name="Reduce data", text="Reduce today's USAXS runs.")],
+        templates_dir="/data/templates",
+        saved_scripts_dir="/data/scripts",
+    )
+    dialog = WorkspaceManagementDialog(settings, aida_home / "skills")
+    dialog._workspace_list.setCurrentRow(0)
+
+    form = WorkspaceFormDialog(
+        settings=settings,
+        skills_dir=aida_home / "skills",
+        workspace=settings.workspaces.workspaces["pyirena"],
+    )
+    form._target_folder_edit.setText("/data/elsewhere")  # the edit the user actually made
+    monkeypatch.setattr("aida.ui.qt.workspace_management_dialog.WorkspaceFormDialog", lambda **kw: form)
+    monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
+
+    dialog._on_edit()
+
+    saved = load_workspaces_config(aida_home).workspaces["pyirena"]
+    assert saved.target_folder == "/data/elsewhere"
+    assert [t.name for t in saved.quick_tasks] == ["Reduce data"]
+    assert saved.templates_dir == "/data/templates"
+    assert saved.saved_scripts_dir == "/data/scripts"
+
+
+def test_adding_a_workspace_starts_with_no_quick_tasks(qapp, aida_home: Path, monkeypatch):
+    """The carry-over must not leak across dialogs — a brand-new workspace
+    has nothing to carry over from."""
+    settings = _settings_with_a_profile(aida_home)
+    dialog = WorkspaceManagementDialog(settings, aida_home / "skills")
+
+    form = WorkspaceFormDialog(settings=settings, skills_dir=aida_home / "skills")
+    form._name_edit.setText("fresh")
+    monkeypatch.setattr("aida.ui.qt.workspace_management_dialog.WorkspaceFormDialog", lambda **kw: form)
+    monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
+
+    dialog._on_add()
+
+    assert load_workspaces_config(aida_home).workspaces["fresh"].quick_tasks == []
+
+
+def test_workspace_details_list_the_quick_tasks(qapp, aida_home: Path):
+    """So "are my quick tasks actually stored?" is answerable from the GUI."""
+    settings = _settings_with_a_profile(aida_home)
+    settings.workspaces.workspaces["pyirena"] = WorkspaceConfig(
+        name="pyirena", quick_tasks=[QuickTask(name="Reduce data", text="Reduce today's USAXS runs.")]
+    )
+    dialog = WorkspaceManagementDialog(settings, aida_home / "skills")
+    dialog._workspace_list.setCurrentRow(0)
+
+    assert "quick_tasks: Reduce data" in dialog._details_label.text()
