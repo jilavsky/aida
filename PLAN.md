@@ -3,7 +3,7 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 0.1.0b2 (beta), 2026-08-29.** Phases 1–9 are implemented, tested
+**Status: 0.1.0b3 (beta), 2026-09-01.** Phases 1–9 are implemented, tested
 (1,400+ tests, three OSes) and in daily use. This file now holds **only what is
 not done**.
 
@@ -37,7 +37,7 @@ gets a dated note appended there; error messages say *which* layer failed.
 
 Nothing here is speculative work; it is what a beta is for.
 
-- [ ] Publish `aida-workbench` 0.1.0b2 to PyPI and verify
+- [ ] Publish `aida-workbench` 0.1.0b3 to PyPI and verify
       `pip install "aida-workbench[gui,docs]"` → working `aida-gui` on a
       clean macOS, Windows, and Linux machine.
 - [ ] First outside users installing from PyPI, with issues triaged into this

@@ -1,6 +1,6 @@
 # Phase 10 — CLI automation, stored workflows & distribution
 
-> **Still the one open phase as of 0.1.0b2.** Tracked from `PLAN.md` §1.2;
+> **Still the one open phase as of 0.1.0b3.** Tracked from `PLAN.md` §1.2;
 > this file stays the detailed checklist.
 
 **Goal:** AIDA is scriptable from data pipelines (`aida run`), users can record and

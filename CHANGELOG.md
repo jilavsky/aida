@@ -16,6 +16,8 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+## [0.1.0b3] - 2026-09-01
+
 ### Added
 
 - `aida doctor`'s new `max_tokens_vs_context_window` check, which fails
@@ -158,7 +160,8 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0b2...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0b3...HEAD
+[0.1.0b3]: https://github.com/jilavsky/aida/compare/v0.1.0b2...v0.1.0b3
 [0.1.0b2]: https://github.com/jilavsky/aida/compare/v0.1.0b1...v0.1.0b2
 [0.1.0b1]: https://github.com/jilavsky/aida/compare/v0.0.1...v0.1.0b1
 [0.0.1]: https://github.com/jilavsky/aida/releases/tag/v0.0.1
