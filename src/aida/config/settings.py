@@ -54,7 +54,7 @@ def _coerce(kind: str, value: Any) -> Any:
             raise ValueError("expected a number, got a boolean")
         return int(value)
     if base == "bool":
-        return bool(value)
+        return _strict_bool(value)
     if base == "list[str]":
         if isinstance(value, str) or not isinstance(value, (list, tuple)):
             raise ValueError("expected a list")
@@ -64,6 +64,119 @@ def _coerce(kind: str, value: Any) -> Any:
             raise ValueError("expected a string")
         return str(value)
     raise ValueError(f"unsupported field kind {kind!r}")
+
+
+#: Spellings a hand-edited YAML file may plausibly use for a boolean, on
+#: top of the real ``True``/``False`` PyYAML already produces. These matter
+#: because *quoting* is the common accident: YAML ``scripting_enabled:
+#: "false"`` is the string ``"false"``, not the boolean, and PyYAML is right
+#: to hand it over as one.
+_TRUE_STRINGS = frozenset({"true", "yes", "on", "1"})
+_FALSE_STRINGS = frozenset({"false", "no", "off", "0"})
+
+
+def _strict_bool(value: Any) -> bool:
+    """Parse a config value that must be a boolean, rejecting anything
+    ambiguous.
+
+    ``bool(value)`` is the wrong tool here and was actively dangerous: every
+    non-empty string is truthy, so a quoted ``"false"`` — the single most
+    likely way a user writes a boolean wrong in YAML — evaluated to
+    ``True``. For ``scripting_enabled`` that turned an attempt to *disable*
+    script execution into leaving it on; for ``supports_vision`` it made a
+    profile claim a capability its model does not have.
+
+    Accepts real booleans, the usual textual spellings (case-insensitive,
+    whitespace-trimmed), and the integers ``0``/``1``. Everything else
+    raises, so the caller warns with the file and field name and falls back
+    to the field's own default rather than guessing.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):  # after the bool check: bool is an int subclass
+        if value in (0, 1):
+            return bool(value)
+        raise ValueError(f"expected a boolean, got {value!r}")
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _TRUE_STRINGS:
+            return True
+        if text in _FALSE_STRINGS:
+            return False
+    raise ValueError(f"expected a boolean, got {value!r}")
+
+
+def _coerce_bool(source: str, field_name: str, value: Any, *, default: bool) -> bool:
+    """``_strict_bool`` with the standard "warn, name the field, fall back to
+    the default" handling every other coercer in this module uses — for
+    call sites that read a single field out of a ``dict`` rather than going
+    through ``_coerced_fields``' kind table."""
+    if value is None:
+        return default
+    try:
+        return _strict_bool(value)
+    except (TypeError, ValueError) as exc:
+        _logger.warning("%s: %s=%r ignored (%s); using %r instead", source, field_name, value, exc, default)
+        return default
+
+
+def _coerce_positive_number(
+    source: str, field_name: str, value: Any, *, default: float, kind: type = float
+) -> Any:
+    """Coerce a numeric config field that must be strictly positive.
+
+    Two failures used to be possible here at once. A quoted
+    ``script_timeout_seconds: "30"`` stayed a *string* all the way to
+    ``aida.coding.tools._effective_timeout``, where comparing it against a
+    number raised a ``TypeError`` mid tool call — far from the config file
+    that caused it. And a zero or negative value coerced cleanly but means
+    "kill the process before it starts", which is never what someone
+    editing a timeout intends.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):  # bool is an int subclass; never a timeout
+        _logger.warning("%s: %s=%r is not a number; using %r instead", source, field_name, value, default)
+        return default
+    try:
+        coerced = kind(value)
+    except (TypeError, ValueError):
+        _logger.warning("%s: %s=%r is not a number; using %r instead", source, field_name, value, default)
+        return default
+    if coerced <= 0:
+        _logger.warning(
+            "%s: %s=%r must be greater than 0; using %r instead", source, field_name, value, default
+        )
+        return default
+    return coerced
+
+
+def _coerce_safety_mode(source: str, value: Any) -> str:
+    """Coerce a ``safety:`` field, failing closed on anything unrecognized.
+
+    An unknown value used to be stored verbatim and handed to
+    ``SafetyGuard``, where it matched neither the ``"relaxed"`` nor the
+    ``"confirm"`` branch and therefore skipped confirmation entirely — so a
+    typo produced the *weakest* setting rather than the safest one. Fixing
+    it here (as well as in the guard itself) is what lets the warning name
+    the file and the workspace.
+    """
+    # Imported inside the function, not at module scope: importing anything
+    # from `aida.workspace` runs that package's __init__, which imports
+    # `aida.workspace.workspaces`, which imports this module — a real cycle.
+    from aida.workspace.safety import SAFETY_MODES
+
+    if value is None:
+        return "confirm"
+    if isinstance(value, str) and value.strip().lower() in SAFETY_MODES:
+        return value.strip().lower()
+    _logger.warning(
+        "%s: unknown safety=%r (expected %s); using 'confirm' instead",
+        source,
+        value,
+        " or ".join(repr(m) for m in SAFETY_MODES),
+    )
+    return "confirm"
 
 
 def _coerce_str_list(
@@ -262,6 +375,27 @@ class AppConfig:
         if "assistant_name" in filtered and not filtered["assistant_name"].strip():
             _logger.warning("config.yaml: assistant_name must not be blank; using the default instead")
             filtered.pop("assistant_name")
+        # Fail closed, and say so. An unrecognized safety mode used to reach
+        # SafetyGuard unchanged, where it matched neither the "relaxed" nor
+        # the "confirm" branch and therefore skipped confirmation entirely —
+        # a typo silently produced the *weakest* setting. The guard
+        # normalizes defensively too now; catching it here is what lets the
+        # message name the file and the field.
+        # Imported inside the function, not at module scope: importing
+        # anything from `aida.workspace` runs that package's __init__, which
+        # imports `aida.workspace.workspaces`, which imports this module —
+        # a real cycle. The guard that *enforces* the policy still owns the
+        # vocabulary; this just borrows it instead of duplicating literals
+        # that would then be free to drift apart.
+        from aida.workspace.safety import SAFETY_MODES
+
+        if "default_safety_mode" in filtered and filtered["default_safety_mode"] not in SAFETY_MODES:
+            _logger.warning(
+                "config.yaml: unknown default_safety_mode %r (expected %s); using 'confirm' instead",
+                filtered["default_safety_mode"],
+                " or ".join(repr(m) for m in SAFETY_MODES),
+            )
+            filtered["default_safety_mode"] = "confirm"
         return cls(**filtered)
 
     def to_dict(self) -> dict[str, Any]:
@@ -393,7 +527,7 @@ class ProviderProfile:
             usd_per_m_output=_coerce_optional_number(
                 source, "usd_per_m_output", data.get("usd_per_m_output"), kind=float
             ),
-            supports_vision=bool(data.get("supports_vision", False)),
+            supports_vision=_coerce_bool(source, "supports_vision", data.get("supports_vision"), default=False),
             context_window=_coerce_optional_number(
                 source, "context_window", data.get("context_window"), kind=int
             ),
@@ -610,14 +744,18 @@ class WorkspaceConfig:
             mcp_group=data.get("mcp_group", "none"),
             skills=_coerce_str_list(source, "skills", data.get("skills")),
             system_prompt=data.get("system_prompt"),
-            safety=data.get("safety", "confirm"),
+            safety=_coerce_safety_mode(source, data.get("safety")),
             knowledge_bases=_coerce_str_list(source, "knowledge_bases", data.get("knowledge_bases")),
             command_allowlist=_coerce_str_list(source, "command_allowlist", data.get("command_allowlist")),
             python_interpreter=data.get("python_interpreter"),
-            scripting_enabled=data.get("scripting_enabled", True),
+            scripting_enabled=_coerce_bool(
+                source, "scripting_enabled", data.get("scripting_enabled"), default=True
+            ),
             templates_dir=data.get("templates_dir"),
             saved_scripts_dir=data.get("saved_scripts_dir"),
-            script_timeout_seconds=data.get("script_timeout_seconds", 30.0),
+            script_timeout_seconds=_coerce_positive_number(
+                source, "script_timeout_seconds", data.get("script_timeout_seconds"), default=30.0
+            ),
             quick_tasks=_coerce_quick_tasks(source, data.get("quick_tasks")),
             notes=str(data.get("notes") or ""),
         )

@@ -14,13 +14,28 @@ typed ``TableArtifact``s (PLAN.md: "Tool results are typed... not prose"),
 capped at a bounded number of rows so a huge directory can't context-bomb
 the model.
 
-Bulk filesystem scans (``list_directory`` recursive, ``find_files``,
-``search_text``) run under a timeout via ``asyncio.wait_for`` +
-``asyncio.to_thread`` — PLAN.md: "Graceful handling of slow/missing network
-mounts (timeout + clear error)". Narrower point calls (a single
-``stat()``/``exists()`` inside ``SafetyGuard``'s own path resolution) aren't
-separately timeout-wrapped; wrapping every individual blocking call would
-be its own project and isn't attempted here.
+Blocking work runs on a worker thread under a deadline — PLAN.md: "Graceful
+handling of slow/missing network mounts (timeout + clear error)" — but
+*reads and writes are treated differently*, because ``asyncio.wait_for``
+cancels an await and never the thread underneath it:
+
+- ``_run_scan`` (``list_directory`` recursive, ``find_files``,
+  ``search_text``) hands the worker a ``threading.Event`` it checks between
+  directory entries, so giving up on the wait actually ends the walk. Those
+  walks are also lazy and bounded — see ``_walk_files``: they stop
+  traversing once the result cap is reached, rather than enumerating and
+  sorting the whole tree first.
+- ``_run_blocking`` covers the remaining read-only calls, which are safe to
+  simply abandon.
+- ``_run_mutation`` (``write_file``, ``create_directory``, ``copy_file``,
+  ``move_file``) does *not* claim the work stopped, because it did not: it
+  reports ``FilesystemOperationPending`` and refuses further operations on
+  the same path until the worker settles.
+
+Narrower point calls (a single ``stat()``/``exists()`` inside
+``SafetyGuard``'s own path resolution) aren't separately timeout-wrapped;
+wrapping every individual blocking call would be its own project and isn't
+attempted here.
 
 Every tool function is wrapped with ``@_tool`` (``aida.core.tools.
 wrap_tool_errors``), which catches the *expected*, named failure modes — a
@@ -42,7 +57,9 @@ import asyncio
 import mimetypes
 import os
 import shutil
+import threading
 from datetime import UTC, datetime
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -57,19 +74,138 @@ DEFAULT_MAX_LIST_ENTRIES = 500
 DEFAULT_MAX_SEARCH_MATCHES = 100
 DEFAULT_SEARCH_FILE_SIZE_CAP = 2_000_000  # skip scanning files bigger than this for search_text
 
-_tool = wrap_tool_errors(ConfirmationDenied, OSError, TimeoutError, UnsupportedDocumentFormatError, ValueError)
 FS_TIMEOUT_SECONDS = 15.0
+
+#: How long a *mutating* operation is given before the caller stops waiting.
+#: Longer than the read-only budget on purpose: a large copy across a slow
+#: share is legitimately slow, and — unlike a scan — giving up on the wait
+#: does not stop the work, so a short deadline here buys nothing but a
+#: misleading message. See ``_run_mutation``.
+FS_MUTATION_TIMEOUT_SECONDS = 120.0
 
 _TRASH_DIRNAME = "_trash"
 
 
+class ScanCancelled(Exception):
+    """Raised inside a scan worker thread once its caller has stopped
+    waiting. Never reaches the caller — by the time it is raised, the
+    future the worker was running under has already been abandoned — it
+    exists purely to unwind the traversal promptly instead of letting a
+    thread keep walking a directory tree nobody will read the result of."""
+
+
+class FilesystemOperationPending(Exception):
+    """A mutating filesystem operation outlived its deadline and, crucially,
+    is *still running*.
+
+    This is deliberately not a ``TimeoutError``. A timeout normally means
+    "it didn't happen"; here the underlying ``shutil.copy2`` /
+    ``Path.write_text`` / ``shutil.move`` is executing on a worker thread
+    that nothing can interrupt — ``asyncio.wait_for`` cancels the *await*,
+    not the thread. Reporting that as a plain timeout told the model a
+    mutation had failed while it was in fact still writing to the target,
+    which invites a retry that races the operation still in progress. The
+    message says so explicitly, and ``_run_mutation`` refuses a second
+    operation on the same path until the first settles."""
+
+
+_tool = wrap_tool_errors(
+    ConfirmationDenied,
+    FilesystemOperationPending,
+    OSError,
+    TimeoutError,
+    UnsupportedDocumentFormatError,
+    ValueError,
+)
+
+
+#: Resolved target paths with a mutation currently running on a worker
+#: thread that outlived its deadline. Module-level rather than per-guard
+#: because the thread outlives the tool call, the session's guard, and any
+#: retry: what matters is the path on disk, not who asked.
+_PENDING_MUTATIONS: dict[Path, str] = {}
+
+
 async def _run_blocking(func, *args, timeout: float = FS_TIMEOUT_SECONDS, **kwargs):
+    """Run a *read-only* blocking filesystem call with a deadline.
+
+    Safe to abandon: everything routed through here only reads, so a worker
+    that outlives the wait leaves nothing half-written. Scans that support
+    it also get cooperative cancellation — see ``_run_scan``. Mutations use
+    ``_run_mutation`` instead, which does not pretend the work stopped.
+    """
     try:
         return await asyncio.wait_for(asyncio.to_thread(func, *args, **kwargs), timeout=timeout)
     except TimeoutError as exc:
         raise TimeoutError(
             f"Timed out after {timeout}s waiting on the filesystem — the path may be on a slow "
             "or unresponsive network mount."
+        ) from exc
+
+
+async def _run_scan(func, *args, timeout: float = FS_TIMEOUT_SECONDS, **kwargs):
+    """``_run_blocking`` for a tree walk, with cooperative cancellation.
+
+    ``asyncio.wait_for`` abandons the await but cannot stop the worker
+    thread, so a recursive scan of an unresponsive mount used to keep
+    walking — burning a thread-pool slot and the mount's patience — for as
+    long as the filesystem took, long after its result had been discarded.
+    The scan worker is handed a ``threading.Event`` it checks between
+    directory entries; setting it on timeout is what actually ends the walk.
+    """
+    cancel = threading.Event()
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(func, *args, cancel=cancel, **kwargs), timeout=timeout
+        )
+    except TimeoutError as exc:
+        cancel.set()
+        raise TimeoutError(
+            f"Timed out after {timeout}s scanning the filesystem — the path may be on a slow "
+            "or unresponsive network mount. Try a narrower path, or a non-recursive scan."
+        ) from exc
+
+
+async def _run_mutation(
+    func, *args, target: Path, description: str, timeout: float = FS_MUTATION_TIMEOUT_SECONDS, **kwargs
+):
+    """Run a blocking filesystem *mutation* with an honest deadline.
+
+    The distinction from ``_run_blocking`` is the whole point. Cancelling an
+    ``asyncio.to_thread`` await does not stop the thread: on a hung network
+    share, a copy or move reported "timed out" to the model while it was
+    still writing the destination. The model would then reasonably retry —
+    a second write racing the first, against the same target, with the
+    original still able to land afterwards and overwrite the retry's result.
+
+    So: a generous deadline (a large copy over a slow share is not an
+    error), and if it passes, a ``FilesystemOperationPending`` that says the
+    operation is still running rather than that it failed. The path is
+    recorded as pending until the worker actually finishes, and a second
+    mutation on the same target is refused for as long as it is — which is
+    the part that actually prevents the race, rather than trusting the model
+    to read the message and behave.
+    """
+    if target in _PENDING_MUTATIONS:
+        raise FilesystemOperationPending(
+            f"An earlier {_PENDING_MUTATIONS[target]} on {target} has not finished yet and cannot be "
+            "cancelled. Do not retry it — wait, then check the file, before touching this path again."
+        )
+
+    task = asyncio.ensure_future(asyncio.to_thread(func, *args, **kwargs))
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+    except TimeoutError as exc:
+        # shield() above means the task itself keeps running — which is
+        # simply the truth about a thread that cannot be interrupted. Mark
+        # the path pending and clear it whenever the worker does finish, so
+        # the block lifts on its own without anything having to poll.
+        _PENDING_MUTATIONS[target] = description
+        task.add_done_callback(lambda _t, p=target: _PENDING_MUTATIONS.pop(p, None))
+        raise FilesystemOperationPending(
+            f"{description.capitalize()} on {target} has taken longer than {timeout}s and is STILL "
+            "RUNNING — it could not be cancelled, and may still complete. The file may be "
+            "partially or fully written. Do not retry; wait and check the file instead."
         ) from exc
 
 
@@ -82,12 +218,56 @@ def _entry_row(path: Path, *, base: Path) -> list[Any]:
     return [str(path.relative_to(base)), "dir" if is_dir else "file", size]
 
 
-def _list_directory_sync(root: Path, *, recursive: bool, max_entries: int) -> list[list[Any]]:
+def _walk_files(root: Path, *, recursive: bool, cancel: threading.Event | None = None):
+    """Yield files under ``root`` lazily, in a deterministic order, checking
+    ``cancel`` as it goes.
+
+    Laziness is the point. ``find_files`` and ``search_text`` used to build
+    their candidate list with ``sorted(root.rglob(...))``, and ``sorted``
+    consumes its whole input before returning even one element — so the
+    entry cap, applied afterwards, bounded the *response size* while the
+    traversal itself remained unbounded in both time and memory. A search
+    for the first match in a directory of a million files walked all million
+    of them first; on a slow mount it hit the timeout having produced
+    nothing at all, when a handful of directories would have answered the
+    question.
+
+    Ordering is kept deterministic (sorted within each directory, directories
+    visited in sorted order) so the same call twice returns the same page,
+    which a global ``sorted`` gave for free and a bare ``rglob`` — whose
+    order is whatever ``os.scandir`` reports — would not.
+    """
+    if not recursive:
+        with os.scandir(root) as entries:
+            for entry in sorted(entries, key=lambda e: e.name):
+                if cancel is not None and cancel.is_set():
+                    raise ScanCancelled
+                if entry.name == _TRASH_DIRNAME:
+                    continue
+                yield Path(entry.path)
+        return
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        if cancel is not None and cancel.is_set():
+            raise ScanCancelled
+        dirnames[:] = sorted(d for d in dirnames if d != _TRASH_DIRNAME)
+        current = Path(dirpath)
+        for name in sorted(filenames):
+            if cancel is not None and cancel.is_set():
+                raise ScanCancelled
+            yield current / name
+
+
+def _list_directory_sync(
+    root: Path, *, recursive: bool, max_entries: int, cancel: threading.Event | None = None
+) -> list[list[Any]]:
     rows: list[list[Any]] = []
     truncated = False
 
     if not recursive:
         for entry in sorted(root.iterdir(), key=lambda p: p.name):
+            if cancel is not None and cancel.is_set():
+                raise ScanCancelled
             if entry.name == _TRASH_DIRNAME:
                 continue
             if len(rows) >= max_entries:
@@ -95,28 +275,38 @@ def _list_directory_sync(root: Path, *, recursive: bool, max_entries: int) -> li
                 break
             rows.append(_entry_row(entry, base=root))
     else:
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = sorted(d for d in dirnames if d != _TRASH_DIRNAME)
-            current = Path(dirpath)
-            for name in sorted(filenames):
-                if len(rows) >= max_entries:
-                    truncated = True
-                    break
-                rows.append(_entry_row(current / name, base=root))
-            if truncated:
+        for path in _walk_files(root, recursive=True, cancel=cancel):
+            if len(rows) >= max_entries:
+                truncated = True
                 break
+            rows.append(_entry_row(path, base=root))
 
     if truncated:
         rows.append([f"... [more entries truncated at {max_entries}]", "", None])
     return rows
 
 
-def _find_files_sync(root: Path, pattern: str, *, recursive: bool, max_entries: int) -> list[list[Any]]:
-    matches = root.rglob(pattern) if recursive else root.glob(pattern)
+def _matches_pattern(path: Path, root: Path, pattern: str) -> bool:
+    """``glob``/``rglob`` semantics for the patterns that actually reach
+    this tool. A pattern with no separator matches the file *name* at any
+    depth (``*.csv``), exactly as ``rglob`` does; one containing a separator
+    is matched against the path relative to ``root``."""
+    relative = path.relative_to(root)
+    if "/" in pattern or os.sep in pattern:
+        return fnmatch(str(relative), pattern)
+    return fnmatch(path.name, pattern)
+
+
+def _find_files_sync(
+    root: Path, pattern: str, *, recursive: bool, max_entries: int, cancel: threading.Event | None = None
+) -> list[list[Any]]:
     rows: list[list[Any]] = []
     truncated = False
-    for path in sorted(matches):
-        if _TRASH_DIRNAME in path.relative_to(root).parts:
+    # Bounded: the walk stops the moment the cap is reached, instead of
+    # materializing and sorting every match in the tree first. See
+    # _walk_files.
+    for path in _walk_files(root, recursive=recursive, cancel=cancel):
+        if not _matches_pattern(path, root, pattern):
             continue
         if len(rows) >= max_entries:
             truncated = True
@@ -128,19 +318,24 @@ def _find_files_sync(root: Path, pattern: str, *, recursive: bool, max_entries: 
 
 
 def _search_text_sync(
-    root: Path, query: str, *, recursive: bool, case_sensitive: bool, max_matches: int
+    root: Path,
+    query: str,
+    *,
+    recursive: bool,
+    case_sensitive: bool,
+    max_matches: int,
+    cancel: threading.Event | None = None,
 ) -> list[list[Any]]:
     needle = query if case_sensitive else query.lower()
     rows: list[list[Any]] = []
     truncated = False
-    candidates = root.rglob("*") if recursive else root.glob("*")
 
-    for path in sorted(candidates):
+    # Bounded and lazy, for the same reason as _find_files_sync: the search
+    # stops walking as soon as it has enough matches.
+    for path in _walk_files(root, recursive=recursive, cancel=cancel):
         if len(rows) >= max_matches:
             truncated = True
             break
-        if _TRASH_DIRNAME in path.relative_to(root).parts:
-            continue
         if not path.is_file():
             continue
         try:
@@ -212,7 +407,9 @@ def default_file_tools(
         candidate = await guard.authorize_read(path)
         if not candidate.is_dir():
             return ToolResult(content=f"Not a directory: {candidate}", is_error=True)
-        rows = await _run_blocking(_list_directory_sync, candidate, recursive=recursive, max_entries=max_list_entries)
+        rows = await _run_scan(
+            _list_directory_sync, candidate, recursive=recursive, max_entries=max_list_entries
+        )
         table = TableArtifact(columns=["path", "type", "size_bytes"], rows=rows)
         return ToolResult(content=describe_for_model(table), artifacts=[table])
 
@@ -224,7 +421,7 @@ def default_file_tools(
         candidate = await guard.authorize_read(path)
         if not candidate.is_dir():
             return ToolResult(content=f"Not a directory: {candidate}", is_error=True)
-        rows = await _run_blocking(
+        rows = await _run_scan(
             _find_files_sync, candidate, pattern, recursive=recursive, max_entries=max_list_entries
         )
         table = TableArtifact(columns=["path", "type", "size_bytes"], rows=rows)
@@ -239,7 +436,7 @@ def default_file_tools(
         candidate = await guard.authorize_read(path)
         if not candidate.is_dir():
             return ToolResult(content=f"Not a directory: {candidate}", is_error=True)
-        rows = await _run_blocking(
+        rows = await _run_scan(
             _search_text_sync,
             candidate,
             query,
@@ -275,7 +472,7 @@ def default_file_tools(
             candidate.parent.mkdir(parents=True, exist_ok=True)
             candidate.write_text(content, encoding="utf-8")
 
-        await _run_blocking(_write)
+        await _run_mutation(_write, target=candidate, description="write")
         mime_type = mimetypes.guess_type(str(candidate))[0]
         artifact = FileArtifact(path=str(candidate), mime_type=mime_type)
         return ToolResult(content=f"Wrote {len(content)} character(s) to {candidate}", artifacts=[artifact])
@@ -284,7 +481,11 @@ def default_file_tools(
     async def create_directory(arguments: dict[str, Any]) -> ToolResult:
         path = arguments["path"]
         candidate = await guard.authorize_write(path)
-        await _run_blocking(lambda: candidate.mkdir(parents=True, exist_ok=True))
+        await _run_mutation(
+            lambda: candidate.mkdir(parents=True, exist_ok=True),
+            target=candidate,
+            description="directory creation",
+        )
         return ToolResult(content=f"Created directory {candidate}")
 
     @_tool
@@ -303,7 +504,7 @@ def default_file_tools(
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
 
-        await _run_blocking(_copy)
+        await _run_mutation(_copy, target=target, description="copy")
         mime_type = mimetypes.guess_type(str(target))[0]
         artifact = FileArtifact(path=str(target), mime_type=mime_type)
         return ToolResult(content=f"Copied {source} -> {target}", artifacts=[artifact])
@@ -336,7 +537,7 @@ def default_file_tools(
                     target.unlink()
             shutil.move(str(source), str(target))
 
-        await _run_blocking(_move)
+        await _run_mutation(_move, target=target, description="move")
         mime_type = mimetypes.guess_type(str(target))[0]
         artifact = FileArtifact(path=str(target), mime_type=mime_type)
         return ToolResult(content=f"Moved {source} -> {target}", artifacts=[artifact])

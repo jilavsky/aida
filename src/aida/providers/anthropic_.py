@@ -46,7 +46,7 @@ from aida.providers.base import (
     is_param_rejection_status,
     unsupported_request_param,
 )
-from aida.providers.vision import images_within_cap, read_image_b64
+from aida.providers.vision import read_image_b64, select_images_within_cap
 
 _logger = get_logger("provider")
 
@@ -118,7 +118,10 @@ def to_anthropic_params(
     system_parts: list[str] = []
     out: list[dict[str, Any]] = []
     pending_tool_results: list[dict[str, Any]] = []
-    image_indices = images_within_cap(messages) if supports_vision else set()
+    # index -> the specific images to attach for that message; the cap
+    # counts images, not messages, so one result carrying many of them
+    # contributes only its most recent few. See select_images_within_cap.
+    selected_images = select_images_within_cap(messages) if supports_vision else {}
 
     def flush_tool_results() -> None:
         if pending_tool_results:
@@ -145,7 +148,7 @@ def to_anthropic_params(
             # An empty tool_result content block is rejected by the API; a
             # tool that legitimately returned nothing still needs to say so.
             text = m.content or "(no output)"
-            image_blocks = _anthropic_image_blocks(m.images) if idx in image_indices and m.images else []
+            image_blocks = _anthropic_image_blocks(selected_images.get(idx, []))
             pending_tool_results.append(
                 {
                     "type": "tool_result",
@@ -153,8 +156,8 @@ def to_anthropic_params(
                     "content": [*image_blocks, {"type": "text", "text": text}] if image_blocks else text,
                 }
             )
-        elif m.content or (idx in image_indices and m.images):
-            image_blocks = _anthropic_image_blocks(m.images) if idx in image_indices and m.images else []
+        elif m.content or selected_images.get(idx):
+            image_blocks = _anthropic_image_blocks(selected_images.get(idx, []))
             if image_blocks:
                 out.append(
                     {

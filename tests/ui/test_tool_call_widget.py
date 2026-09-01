@@ -54,7 +54,9 @@ def test_mark_historic_row_still_expands_to_show_details(qapp):
 def test_toggle_expanded_shows_and_hides_detail(qapp):
     row = ToolCallRow(call_id="c1", tool_name="get_time", arguments={"tz": "utc"})
     row.mark_finished(result="the time is now", is_error=False)
-    assert not row._detail_text.isVisible() or True  # visibility semantics are unreliable offscreen; use toggle state
+    # `isVisible()` is unreliable offscreen and `not X or True` could never
+    # fail; assert the toggle state the widget actually drives instead.
+    assert not row.is_expanded
 
     row.toggle_expanded()
     assert row.is_expanded

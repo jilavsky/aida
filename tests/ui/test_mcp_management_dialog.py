@@ -386,7 +386,9 @@ def _make_bridge(qapp, loop_thread, settings, monkeypatch, script) -> ChatBridge
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider(script))
     bridge = ChatBridge(loop_thread)
     bridge.start(settings, profile_name="mock-profile")
-    assert pump_until(qapp, lambda: bridge.session is not None or bridge.mcp_manager is not None or True, timeout=10.0)
+    # One real wait. The line that used to precede this ended in `or True`,
+    # so it returned immediately and pumped nothing — the wait below was
+    # always doing the work by itself.
     assert pump_until(qapp, lambda: bridge.session is not None, timeout=10.0)
     return bridge
 

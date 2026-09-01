@@ -374,6 +374,23 @@ class KnowledgeManagementDialog(QDialog):
             f"removed {len(result.removed_files)}, skipped {len(result.skipped_files)} "
             f"({result.chunk_count} chunk(s) written this pass)"
         )
+        if result.unverified_files:
+            # These files are still indexed and still queryable — their
+            # source folder just could not be enumerated this pass, so
+            # nothing could confirm whether they still exist. Ingest
+            # deliberately keeps them rather than pruning (an unplugged
+            # drive or a dropped share used to erase a whole source's
+            # cache); saying so here is what stops a later stale answer
+            # from being a mystery.
+            QMessageBox.information(
+                self,
+                "Some Indexed Files Could Not Be Re-checked",
+                f"{name}: {len(result.unverified_files)} indexed file(s) were kept without being "
+                "re-checked because their source folder was unavailable during this pass. They "
+                "are still searchable, but may be out of date:\n\n"
+                + "\n".join(result.unverified_files[:20])
+                + ("\n…" if len(result.unverified_files) > 20 else ""),
+            )
         if result.missing_folders:
             # Real-use bug: a source folder that doesn't resolve to a real
             # directory (typo, deleted folder, or a `file://` URI pasted

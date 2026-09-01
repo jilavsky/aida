@@ -603,8 +603,8 @@ def test_to_openai_messages_omits_image_parts_when_vision_disabled(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_images_within_cap_returns_indices_of_the_most_recent_bearing_messages():
-    from aida.providers.vision import images_within_cap
+def test_select_images_within_cap_takes_the_most_recent_images():
+    from aida.providers.vision import select_images_within_cap
 
     messages = [
         Message(role="user", content="a", images=[ImageRef(path="a.png")]),
@@ -613,9 +613,44 @@ def test_images_within_cap_returns_indices_of_the_most_recent_bearing_messages()
         Message(role="user", content="d", images=[ImageRef(path="d.png")]),
     ]
 
-    assert images_within_cap(messages, max_images=1) == {3}
-    assert images_within_cap(messages, max_images=2) == {2, 3}
-    assert images_within_cap(messages, max_images=0) == set()
+    assert select_images_within_cap(messages, max_images=1) == {3: [ImageRef(path="d.png")]}
+    assert select_images_within_cap(messages, max_images=2) == {
+        3: [ImageRef(path="d.png")],
+        2: [ImageRef(path="c.png")],
+    }
+    assert select_images_within_cap(messages, max_images=0) == {}
+
+
+def test_select_images_within_cap_counts_images_not_messages():
+    """The regression this cap exists to prevent. One message carrying many
+    images — an MCP tool result returning a dozen plots, or a user dropping
+    a folder of figures in — used to pass the cap entirely, because the cap
+    selected the most recent four *messages* and the translators then
+    attached every image in each."""
+    from aida.providers.vision import select_images_within_cap
+
+    messages = [
+        Message(role="user", content="many", images=[ImageRef(path=f"{i}.png") for i in range(10)]),
+    ]
+
+    selected = select_images_within_cap(messages, max_images=4)
+
+    assert sum(len(v) for v in selected.values()) == 4
+    # The most recent four, and contiguous — not an arbitrary subset.
+    assert selected[0] == [ImageRef(path=f"{i}.png") for i in (6, 7, 8, 9)]
+
+
+def test_select_images_within_cap_splits_a_partially_included_message():
+    from aida.providers.vision import select_images_within_cap
+
+    messages = [
+        Message(role="user", content="old", images=[ImageRef(path="a.png"), ImageRef(path="b.png")]),
+        Message(role="user", content="new", images=[ImageRef(path="c.png")]),
+    ]
+
+    selected = select_images_within_cap(messages, max_images=2)
+
+    assert selected == {1: [ImageRef(path="c.png")], 0: [ImageRef(path="b.png")]}
 
 
 def test_read_image_b64_returns_none_for_a_path_that_does_not_exist():

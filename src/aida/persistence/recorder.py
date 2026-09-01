@@ -24,9 +24,12 @@ from pathlib import Path
 
 from aida.artifacts.base import Artifact
 from aida.artifacts.store import ArtifactStore
+from aida.config.logging_setup import get_logger
 from aida.persistence.records import record_file_path, write_transcript
 from aida.persistence.store import ConversationStore
-from aida.providers.base import Message
+from aida.providers.base import ImageRef, Message
+
+logger = get_logger("persistence.recorder")
 
 _TITLE_MAX_CHARS = 60
 
@@ -128,6 +131,18 @@ class ConversationRecorder:
             self.store.set_title(self.conversation_id, self.title, timestamp=timestamp)
 
         seq = self.store.append_message(self.conversation_id, message, timestamp=timestamp)
+        # User attachments only. A *tool* message's images are already
+        # persisted as ImageArtifact rows by the artifact path (the agent
+        # loop attaches them to the tool message from artifacts the store
+        # has already saved), so recording them again here would duplicate
+        # every plot in the artifacts table.
+        if message.role == "user" and message.images:
+            self.store.append_attached_images(
+                self.conversation_id,
+                message_seq=seq,
+                images=self._own_attached_images(message.images),
+                timestamp=timestamp,
+            )
         self._transcript_dirty = True
         elapsed_enough = (
             self._last_transcript_export is None
@@ -136,6 +151,32 @@ class ConversationRecorder:
         if elapsed_enough:
             self.export_transcript()
         return seq
+
+    def _own_attached_images(self, images: list[ImageRef]) -> list[ImageRef]:
+        """Copy each attachment into the artifact store and return refs to
+        *those* copies.
+
+        An attachment arrives pointing at wherever the user picked it from —
+        a Desktop screenshot, a mounted share, a browser download folder. On
+        resume, weeks later, that path may name a different file or nothing
+        at all, so persisting the original path alone would preserve the
+        reference while quietly losing the pixels. The conversation keeps
+        its own copy instead.
+
+        An unreadable source is kept as its original path rather than
+        dropped: the attachment's text placeholder is already in the
+        message, and a possibly-stale path is strictly more than none.
+        """
+        owned: list[ImageRef] = []
+        for ref in images:
+            try:
+                artifact = self.artifact_store.adopt_image_file(Path(ref.path), mime_type=ref.mime_type)
+            except OSError as exc:
+                logger.warning("could not copy attached image %s into the conversation: %s", ref.path, exc)
+                owned.append(ref)
+                continue
+            owned.append(ImageRef(path=artifact.path or ref.path, mime_type=artifact.mime_type))
+        return owned
 
     def flush_transcript(self) -> Path | None:
         """Write out any transcript update ``record_message`` deferred.

@@ -4,7 +4,7 @@
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
 **Status: 0.1.0b2 (beta), 2026-08-29.** Phases 1–9 are implemented, tested
-(1319 tests, three OSes) and in daily use. This file now holds **only what is
+(1,400+ tests, three OSes) and in daily use. This file now holds **only what is
 not done**.
 
 - What AIDA is, and every design decision behind it → [`planning/DESIGN.md`](planning/DESIGN.md)
@@ -141,19 +141,19 @@ Full detail on all four in [`planning/COMPLETED.md`](planning/COMPLETED.md) §7.
       +/- markup in the chat transcript? a separate review dialog before the
       write happens?) that only the user can settle — there's no single
       "obviously correct" shape to just build.
-- [ ] Per-workspace extra skills selection beyond server-linked ones
-      (`phase07`, left open) — **deferred**. Already possible today via
-      `aida workspace edit --skills a,b,c` (CLI); what's missing is a GUI
-      path, and that's blocked on the same prerequisite as the next item —
-      no GUI workspace-creation/editing dialog exists yet
-      (`aida.ui.qt.main_window` already carries a comment to that effect).
-      Building that dialog is a real feature, not a small item, so it's
-      being left for its own piece of work rather than done as a "cleanup."
+- [x] Per-workspace extra skills selection beyond server-linked ones
+      (`phase07`) — done: `WorkspaceManagementDialog`'s Add/Edit form
+      covers `skills` along with `profile`, `mcp_group`, `knowledge_bases`,
+      `system_prompt`, `safety`, `scripting_enabled` and the script-timeout
+      spinner. The blocker these two entries cited — "no GUI workspace
+      editor exists yet" — no longer holds; the dialog is reachable from
+      the toolbar. See [`docs/workspaces.md`](docs/workspaces.md) for the
+      two fields (`templates_dir`, `saved_scripts_dir`) that remain
+      config-file only.
 - [ ] Set a workspace's default MCP group from the MCP dialog itself
-      (`phase07`) — **deferred**, same reason as above: `planning/
-      phase07_mcp_management.md` already documents this as blocked on "no
-      GUI workspace editor exists yet." Adding it here would mean building
-      that editor now, which is a bigger, separately-planned feature.
+      (`phase07`) — still open, but no longer blocked: the workspace editor
+      it was waiting on now exists, so this is a matter of adding the
+      control to the MCP dialog and writing through to `workspaces.yaml`.
 - [ ] Extend the one-click MCP setup pattern beyond pyIrena — `bait_mcp`
       first, then a small offer list of npx-based servers. The detection and
       config-building shape in `aida.mcp.pyirena_setup` generalizes; what

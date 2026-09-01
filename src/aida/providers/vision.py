@@ -30,26 +30,50 @@ from aida.providers.base import ImageRef, Message
 #: turn beats a silently-skipped image.
 MAX_IMAGE_EDGE_PX = 1024
 
-#: How many of the most recent image-bearing messages actually get their
-#: pixels sent to the model per turn. A long analysis session can
-#: accumulate dozens of plots; unconditionally resending every one, every
-#: turn, would make token cost (and latency) grow with conversation length
-#: rather than with what's actually relevant right now. Every image stays
-#: described in its originating message's text (aida.artifacts.policy) —
-#: this only bounds how many also get their real pixels resent.
+#: How many individual images actually get their pixels sent to the model
+#: per turn. A long analysis session can accumulate dozens of plots;
+#: unconditionally resending every one, every turn, would make token cost
+#: (and latency) grow with conversation length rather than with what's
+#: actually relevant right now. Every image stays described in its
+#: originating message's text (aida.artifacts.policy) — this only bounds how
+#: many also get their real pixels resent.
 MAX_ATTACHED_IMAGES = 4
 
 
-def images_within_cap(messages: list[Message], *, max_images: int = MAX_ATTACHED_IMAGES) -> set[int]:
-    """Indices (into ``messages``) of the most recent ``max_images``
-    messages that carry at least one image — the set a translation
-    function should actually attach pixels for. Every other image-bearing
-    message further back keeps its text description only, same as before
-    B1 existed."""
+def select_images_within_cap(
+    messages: list[Message], *, max_images: int = MAX_ATTACHED_IMAGES
+) -> dict[int, list[ImageRef]]:
+    """``{message index: the images from that message to attach pixels
+    for}``, walking backwards from the most recent message and stopping at
+    ``max_images`` **images**.
+
+    The cap counts images, which is what its name and its purpose have
+    always claimed — but not what it used to do. The previous version
+    selected the most recent four *messages* that carried at least one
+    image, and the translators then attached every image in each of them.
+    One MCP tool result returning a dozen plots, or one user message with a
+    folder of figures dropped into it, therefore sent all of them: the exact
+    request-size, latency, and vision-token blowup the cap exists to
+    prevent, reached by the single most likely route.
+
+    Within a message the *earlier* images are the ones dropped when only
+    part of it fits, so a partially-included message keeps a contiguous
+    most-recent run rather than an arbitrary subset.
+    """
     if max_images <= 0:
-        return set()
-    bearing = [i for i, m in enumerate(messages) if m.images]
-    return set(bearing[-max_images:])
+        return {}
+    selected: dict[int, list[ImageRef]] = {}
+    remaining = max_images
+    for index in range(len(messages) - 1, -1, -1):
+        images = messages[index].images
+        if not images:
+            continue
+        take = images[-remaining:] if remaining < len(images) else list(images)
+        selected[index] = list(take)
+        remaining -= len(take)
+        if remaining <= 0:
+            break
+    return selected
 
 
 def read_image_b64(ref: ImageRef) -> tuple[str, str] | None:
@@ -89,4 +113,9 @@ def read_image_b64(ref: ImageRef) -> tuple[str, str] | None:
     return mime_type, b64encode(raw).decode("ascii")
 
 
-__all__ = ["MAX_ATTACHED_IMAGES", "MAX_IMAGE_EDGE_PX", "images_within_cap", "read_image_b64"]
+__all__ = [
+    "MAX_ATTACHED_IMAGES",
+    "MAX_IMAGE_EDGE_PX",
+    "read_image_b64",
+    "select_images_within_cap",
+]

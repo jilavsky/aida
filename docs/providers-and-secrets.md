@@ -177,14 +177,19 @@ aida config secret delete argo-claude
 Pasting a real API key or username directly into `providers.yaml` defeats
 the whole point of this design — don't do it.
 
-## GUI: current limitation
+## GUI: editing profiles
 
-The Qt Settings dialog currently shows a **read-only list** of configured
-provider profiles (name, kind, model) — there is no way yet to create or
-edit a provider or embedding profile from the GUI. Until that lands, editing
-`~/.aida/providers.yaml` by hand (or scripting the edit) is the only way to
-add, change, or remove a profile. `aida config secret set/get/delete`
-(above) does work from the CLI today regardless.
+The **Providers** dialog (Settings → Providers) has two tabs — Provider
+Profiles and Embedding Profiles — and each supports **Add**, **Edit**,
+**Remove**, and **Test** against the corresponding half of
+`providers.yaml`. "Test" performs the same live reachability check `aida
+doctor` does, for the one profile you are editing.
+
+Hand-editing `~/.aida/providers.yaml` still works and is still the
+documented source of truth for anything the dialog does not cover. Secrets
+never appear in either place: the dialog stores a `secret_ref` exactly as
+the file format does, and the values themselves are set with `aida config
+secret set/get/delete` (above) or through the OS keychain.
 
 ## Full example
 

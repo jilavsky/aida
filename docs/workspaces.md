@@ -116,7 +116,7 @@ control for at all: `profile`, `mcp_group`, `skills`, `knowledge_bases`,
 `system_prompt`, `safety`, `scripting_enabled`, and the **Script/command
 timeout** spinner (1-3600s) for `script_timeout_seconds`.
 
-## Current gap: no GUI editor yet
+## Current gap: two fields are config-file only
 
 Two fields are CLI/config-file only for now — neither the Folders panel nor
 the Workspace Management dialog has a control for either:

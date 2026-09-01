@@ -53,7 +53,18 @@ def _convert_block(block: ContentBlock) -> Artifact:
         )
 
     if block_type == "resource_link":
-        return FileArtifact(path=None, mime_type=block.mimeType, filename=block.name)
+        # The uri is the point of a resource link. A server sends one
+        # instead of the bytes precisely so the model can ask for that
+        # resource by address; dropping it (this used to keep only `name`
+        # and `mimeType`) reduced the block to "some file exists somewhere"
+        # — strictly less than the tool actually returned. `path` stays
+        # None: AIDA holds no local copy, and the uri carries the location.
+        return FileArtifact(
+            path=None,
+            mime_type=block.mimeType,
+            filename=block.name,
+            uri=str(block.uri) if getattr(block, "uri", None) else None,
+        )
 
     if block_type == "resource":
         resource = block.resource

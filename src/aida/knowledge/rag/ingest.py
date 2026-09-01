@@ -18,11 +18,14 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from aida.artifacts.base import JsonArtifact, TableArtifact, TextArtifact
+from aida.config.logging_setup import get_logger
 from aida.config.settings import KnowledgeBaseConfig
 from aida.documents.readers import read_document
 from aida.knowledge.rag import index as kb_index
 from aida.knowledge.rag.chunking import Chunk, chunk_markdown, chunk_plain_text
 from aida.providers.embeddings_base import EmbeddingsProvider
+
+logger = get_logger("knowledge.ingest")
 
 _MD_SUFFIXES = {".md", ".markdown"}
 
@@ -75,6 +78,12 @@ class IngestResult:
     #: "added 0, updated 0" with no indication why. Recorded here so the
     #: CLI/GUI can print an actionable warning instead.
     missing_folders: list[str] = field(default_factory=list)
+    #: Files still in the index whose source root could not be enumerated
+    #: this pass, so nothing could confirm whether they still exist. They
+    #: are deliberately *kept* — see ``_run_ingest``'s pruning step — and
+    #: reported here so the CLI/GUI can say "N cached files could not be
+    #: re-checked" instead of either lying about them or deleting them.
+    unverified_files: list[str] = field(default_factory=list)
     chunk_count: int = 0
 
 
@@ -166,13 +175,34 @@ def _missing_source_folders(source_folders: list[str]) -> list[str]:
     return [folder for folder in source_folders if not _folder_is_usable(_resolved_folder(folder))]
 
 
-def _discover_files(source_folders: list[str]) -> list[Path]:
+def _discover_files(source_folders: list[str]) -> tuple[list[Path], list[Path]]:
+    """``(discovered files, roots that were fully enumerated)``.
+
+    The second element is what makes safe pruning possible. Reconciliation
+    used to delete every indexed path that discovery did not rediscover,
+    with no way to distinguish "this file was deleted" from "the volume it
+    lives on isn't mounted right now" — so unplugging an external drive, a
+    dropped network share, a cloud-sync placeholder folder, or a transient
+    permissions error would erase that source's chunks from the index. The
+    warning was already there; the useful offline cache was already gone.
+    Only roots that appear here were actually walked end to end, and only
+    entries beneath them may be pruned.
+
+    A root is reported as enumerated only if its *whole* walk finished:
+    an ``OSError`` partway through (a subfolder that lost access mid-walk)
+    yields whatever was found so far but withholds the root, because a
+    partial listing is exactly the input that makes pruning destructive.
+    """
     files: list[Path] = []
+    enumerated_roots: list[Path] = []
     for folder in source_folders:
         root = _resolved_folder(folder)
         if root.is_file():
             if root.suffix.lower() in INGESTIBLE_SUFFIXES:
                 files.append(root)
+            # A single configured *file* is its own root: reaching here
+            # means it was resolvable, so its index entry is verifiable.
+            enumerated_roots.append(root)
             continue
         if not _folder_is_usable(root):
             continue
@@ -183,7 +213,16 @@ def _discover_files(source_folders: list[str]) -> list[Path]:
         files.extend(
             path for path in candidates if path.is_file() and path.suffix.lower() in INGESTIBLE_SUFFIXES
         )
-    return files
+        enumerated_roots.append(root)
+    return files, enumerated_roots
+
+
+def _is_under(path: Path, root: Path) -> bool:
+    """Whether ``path`` is ``root`` itself or lives beneath it. Plain
+    ``Path`` comparison, no filesystem access — the indexed path may well
+    be on a volume that is not currently mounted, which is precisely the
+    case this is used to reason about."""
+    return path == root or root in path.parents
 
 
 def _chunk_file(path: Path, text: str, *, chunk_size: int, overlap: int) -> list[Chunk]:
@@ -242,7 +281,8 @@ async def _run_ingest(
     indexed_mtimes = kb_index.indexed_source_mtimes(conn)
     seen_paths: set[str] = set()
 
-    for path in _discover_files(kb.source_folders):
+    discovered, enumerated_roots = _discover_files(kb.source_folders)
+    for path in discovered:
         key = str(path)
         already_indexed = key in indexed_mtimes
         # This stat() sat outside the try below, so a file deleted (or a
@@ -279,9 +319,37 @@ async def _run_ingest(
         (result.updated_files if already_indexed else result.added_files).append(key)
         result.chunk_count += count
 
-    for stale_path in set(indexed_mtimes) - seen_paths:
-        kb_index.delete_source(conn, stale_path)
-        result.removed_files.append(stale_path)
+    # Prune only what this pass could actually *confirm* is gone.
+    #
+    # This used to be `set(indexed_mtimes) - seen_paths`, deleting every
+    # indexed path discovery had not rediscovered. That treats "not found"
+    # and "could not look" as the same answer, and they are not: an
+    # unplugged external drive, a dropped network share, a cloud-sync
+    # placeholder folder, or a momentary permissions error all produce an
+    # empty listing for a root whose files are perfectly intact. The result
+    # was that a temporary outage silently destroyed the cached chunks for
+    # that whole source — the one thing an offline index is *for*. A
+    # warning was returned, but only after the deletion.
+    #
+    # A path is therefore only prunable if it lies under a root that was
+    # walked end to end this pass. Anything else is kept and reported as
+    # unverified, so the answer to "is this file still there?" stays
+    # "unknown" rather than being resolved as "no".
+    for indexed_path in set(indexed_mtimes) - seen_paths:
+        candidate = Path(indexed_path)
+        if any(_is_under(candidate, root) for root in enumerated_roots):
+            kb_index.delete_source(conn, indexed_path)
+            result.removed_files.append(indexed_path)
+        else:
+            result.unverified_files.append(indexed_path)
+
+    if result.unverified_files:
+        result.unverified_files.sort()
+        logger.warning(
+            "%d indexed file(s) could not be re-checked because their source folder was "
+            "unavailable this pass — keeping their chunks rather than pruning them",
+            len(result.unverified_files),
+        )
 
     return result
 

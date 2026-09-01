@@ -32,7 +32,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from aida.coding.runner import run_python_script
+from aida.coding.runner import run_python_script, terminate_run
+from aida.config.logging_setup import get_logger
 from aida.config.paths import ensure_scratch_dir, knowledge_db_path
 from aida.config.settings import (
     EmbeddingProfile,
@@ -64,6 +65,8 @@ from aida.providers.profiles import (
     validate_profile,
 )
 from aida.ui.qt._qt import QObject, QThread, Signal
+
+logger = get_logger("ui.bridge")
 
 _STARTUP_ERRORS = (UnknownProfileError, UnknownWorkspaceError, UnknownMcpServerError, ConversationNotFoundError)
 
@@ -362,14 +365,37 @@ class ChatBridge(QObject):
     # --- profile switching -----------------------------------------------
 
     def switch_profile(self, name: str) -> None:
+        """Refused outright while a turn is in flight: the switch closes the
+        provider the running ``AgentLoop`` is streaming from. ``MainWindow``
+        also disables the selector for the duration of a turn, so this is
+        the second line of defense — and the one that covers a switch
+        reaching the bridge by any other route."""
         if self.session is None:
+            return
+        if self.is_busy:
+            self.profile_switch_failed.emit(
+                "Can't switch profile while a turn is running — stop it or wait for it to finish."
+            )
             return
         asyncio.run_coroutine_threadsafe(self._switch_profile(name), self._loop_thread.loop)
 
     async def _switch_profile(self, name: str) -> None:
         try:
             await self.session.switch_profile(name)
-        except UnknownProfileError as exc:
+        except Exception as exc:  # noqa: BLE001 - see below
+            # Deliberately broad, and it used to be `except UnknownProfileError`
+            # alone. A switch has several other ways to fail —
+            # UnknownProviderKindError for a typo'd `kind:`, a missing or
+            # unreadable secret, an SDK client constructor rejecting a
+            # base_url, SessionBusyError if a turn started between the check
+            # above and this coroutine actually running — and each of those
+            # used to escape into the background future with nothing
+            # awaiting it: the UI simply never heard back, leaving the
+            # selector showing a profile the session had not adopted.
+            # ChatSession.switch_profile is atomic now, so on *any* of these
+            # the session really is untouched — which is exactly what this
+            # signal's handler tells the user.
+            logger.exception("switching to profile %r failed", name)
             self.profile_switch_failed.emit(str(exc))
             return
         self.profile_switched.emit(name)
@@ -585,7 +611,13 @@ class ChatBridge(QObject):
 
     async def _cancel_running_script(self) -> None:
         if self._running_script_proc is not None:
-            self._running_script_proc.kill()
+            # terminate_run, not proc.kill(): kill() signals only the
+            # process AIDA launched, so a script that had spawned anything
+            # of its own (a multiprocessing pool, a plotting backend, its
+            # own subprocess) left those running with Stop already spent and
+            # nothing in the UI able to reach them. terminate_run signals
+            # the whole process group.
+            await terminate_run(self._running_script_proc)
 
     async def _run_script(
         self, path: str, args: list[str], *, interpreter: str | None, cwd: str, timeout: float

@@ -43,14 +43,26 @@ class ImageArtifact:
 
 @dataclass
 class FileArtifact:
-    """A non-image file artifact — either already on disk (``path`` set,
-    ``data`` None) or in-memory bytes not yet persisted."""
+    """A non-image file artifact — already on disk (``path`` set, ``data``
+    None), in-memory bytes not yet persisted, or referenced by ``uri``
+    without either."""
 
     id: str = field(default_factory=new_artifact_id)
     path: str | None = None
     mime_type: str | None = None
     data: bytes | None = None
     filename: str | None = None
+    #: Where the file lives according to whoever produced it, when that is
+    #: not a local path AIDA holds — an MCP ``resource_link``'s ``uri``
+    #: (``file:///tmp/data.csv``, ``s3://...``, a server-specific scheme).
+    #:
+    #: MCP's whole point in sending a resource link rather than the bytes is
+    #: that the URI is the useful part: it is how the model asks for that
+    #: resource next. The conversion in ``aida.mcp.results`` kept only the
+    #: name and MIME type, so the model was handed "a file exists, it is
+    #: called data.csv, it is not saved anywhere" — a description of
+    #: something it had just been given the address of, minus the address.
+    uri: str | None = None
 
 
 @dataclass

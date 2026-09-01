@@ -221,6 +221,18 @@ def _print_ingest_result(result) -> None:
         print(f"  skipped ({len(result.skipped_files)}):")
         for entry in result.skipped_files:
             print(f"    {entry}")
+    if result.unverified_files:
+        # Not "removed" and not "skipped": these are files already in the
+        # index whose source folder could not be enumerated this pass, so
+        # nothing could tell whether they still exist. Their chunks are kept
+        # and stay queryable — reported so a stale answer later has a
+        # visible explanation.
+        print(
+            f"  kept but not re-checked ({len(result.unverified_files)}) — "
+            "their source folder was unavailable this pass:"
+        )
+        for entry in result.unverified_files:
+            print(f"    {entry}")
     print(f"  total chunks written this pass: {result.chunk_count}")
 
 

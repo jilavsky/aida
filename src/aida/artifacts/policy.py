@@ -42,9 +42,17 @@ def describe_for_model(artifact: Artifact, *, max_chars: int = DEFAULT_MAX_CHARS
         return f"[image artifact {artifact.id}: {artifact.mime_type}, {size} bytes{location}]"
 
     if isinstance(artifact, FileArtifact):
-        location = f" at {artifact.path}" if artifact.path else " (not yet saved)"
         mime = f", {artifact.mime_type}" if artifact.mime_type else ""
-        return f"[file artifact {artifact.id}{mime}, saved{location}]"
+        if artifact.path:
+            return f"[file artifact {artifact.id}{mime}, saved at {artifact.path}]"
+        if artifact.uri:
+            # The URI is the whole value of a resource link — without it the
+            # model was told a file existed but not where, which is strictly
+            # less than the tool result contained. Named, too, when the
+            # server bothered to send a name.
+            name = f" {artifact.filename}" if artifact.filename else ""
+            return f"[file resource{name} {artifact.id}{mime} at {artifact.uri} (not downloaded)]"
+        return f"[file artifact {artifact.id}{mime}, saved (not yet saved)]"
 
     if isinstance(artifact, JsonArtifact):
         try:

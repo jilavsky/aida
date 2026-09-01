@@ -15,7 +15,14 @@ from pathlib import Path
 
 from aida.artifacts.base import Artifact, FileArtifact, ImageArtifact
 from aida.persistence.db import connect
-from aida.providers.base import Message, ToolCall
+from aida.providers.base import ImageRef, Message, ToolCall
+
+#: The ``artifacts.kind`` value used for an image the *user* attached to a
+#: message, as opposed to one a tool produced. Distinct so the resume path
+#: can rebuild ``Message.images`` from these rows alone, and so the GUI's
+#: artifact rendering does not show a user's own attachment a second time as
+#: though a tool had returned it.
+USER_IMAGE_KIND = "UserImage"
 
 
 def new_conversation_id() -> str:
@@ -183,7 +190,8 @@ class ConversationStore:
         rows = self._conn.execute(
             "SELECT * FROM messages WHERE conversation_id = ? ORDER BY seq ASC", (conversation_id,)
         ).fetchall()
-        return [self._row_to_message(row) for row in rows]
+        images = self._attached_images(conversation_id)
+        return [self._row_to_message(row, images.get(row["seq"], [])) for row in rows]
 
     def load_messages_with_seq(self, conversation_id: str) -> list[tuple[int, Message]]:
         """Same as ``load_messages`` but paired with each message's ``seq``
@@ -192,10 +200,59 @@ class ConversationStore:
         rows = self._conn.execute(
             "SELECT * FROM messages WHERE conversation_id = ? ORDER BY seq ASC", (conversation_id,)
         ).fetchall()
-        return [(row["seq"], self._row_to_message(row)) for row in rows]
+        images = self._attached_images(conversation_id)
+        return [(row["seq"], self._row_to_message(row, images.get(row["seq"], []))) for row in rows]
+
+    def append_attached_images(
+        self, conversation_id: str, *, message_seq: int, images: list[ImageRef], timestamp: str
+    ) -> None:
+        """Persist the images attached to one user message, anchored to its
+        ``seq``.
+
+        Stored as ``artifacts`` rows of kind ``USER_IMAGE_KIND`` rather than
+        in a second table: the shape needed (id, path, mime type, and a
+        message anchor) is exactly what that table already holds, and the
+        existing artifact-deletion path then cleans these up with everything
+        else in the conversation for free.
+
+        Nothing persisted ``Message.images`` at all before this. The text
+        placeholder for an attachment survived a resume while its pixels did
+        not, so a resumed conversation showed the model a reference to an
+        image it could no longer see — and the only pointer to those pixels
+        had been a path in whatever folder the user picked the file from.
+        """
+        for position, ref in enumerate(images):
+            self.append_artifact(
+                conversation_id,
+                artifact_id=f"{conversation_id}:{message_seq}:{position}",
+                kind=USER_IMAGE_KIND,
+                path=ref.path,
+                mime_type=ref.mime_type,
+                call_id=None,
+                timestamp=timestamp,
+                seq=message_seq,
+            )
+
+    def _attached_images(self, conversation_id: str) -> dict[int, list[ImageRef]]:
+        """``{message seq: its attached images}``, in the order they were
+        attached — ``id`` ends in the attachment's position, so ordering by
+        it restores the original sequence."""
+        rows = self._conn.execute(
+            "SELECT * FROM artifacts WHERE conversation_id = ? AND kind = ? AND seq IS NOT NULL "
+            "ORDER BY seq ASC, id ASC",
+            (conversation_id, USER_IMAGE_KIND),
+        ).fetchall()
+        by_seq: dict[int, list[ImageRef]] = {}
+        for row in rows:
+            if not row["path"]:
+                continue
+            by_seq.setdefault(row["seq"], []).append(
+                ImageRef(path=row["path"], mime_type=row["mime_type"])
+            )
+        return by_seq
 
     @staticmethod
-    def _row_to_message(row: sqlite3.Row) -> Message:
+    def _row_to_message(row: sqlite3.Row, images: list[ImageRef] | None = None) -> Message:
         tool_calls = (
             [ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"]) for tc in json.loads(row["tool_calls_json"])]
             if row["tool_calls_json"]
@@ -207,6 +264,7 @@ class ConversationStore:
             tool_calls=tool_calls,
             tool_call_id=row["tool_call_id"],
             name=row["name"],
+            images=list(images or []),
         )
 
     def _next_seq(self, conversation_id: str) -> int:

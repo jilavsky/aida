@@ -77,6 +77,35 @@ def normalize_path(path: str | Path) -> Path:
 # without an import cycle; see its docstring there.
 
 
+#: The only two modes that mean anything to ``SafetyGuard``. Kept here (not
+#: in ``aida.config.settings``) so the guard itself — the thing that
+#: actually enforces the policy — owns the vocabulary, and config-layer
+#: validation imports it rather than repeating the literals.
+SAFETY_MODES = ("relaxed", "confirm")
+
+
+def normalize_safety_mode(mode: object) -> str:
+    """Any value that isn't the explicit ``"relaxed"`` opt-out becomes
+    ``"confirm"``.
+
+    This exists because every gate in ``SafetyGuard`` is written as
+    ``self.mode == "confirm"``. A value that is neither literal therefore
+    used to match *neither* branch, which is not a neutral outcome: it
+    skipped the confirmation prompt entirely and behaved exactly like the
+    weakest mode. A typo in ``workspaces.yaml`` (``confrim``), a
+    capitalization (``Confirm``), or a ``None`` from a half-written config
+    could silently disable confirmation for in-bounds writes, deletes, and
+    allowlisted commands, with nothing worse than a validation *warning*
+    somewhere else to hint at it.
+
+    Case and surrounding whitespace are forgiving because those are typing
+    slips with an unambiguous intent; anything else fails closed.
+    """
+    if isinstance(mode, str) and mode.strip().lower() == "relaxed":
+        return "relaxed"
+    return "confirm"
+
+
 @dataclass
 class SafetyGuard:
     """Owns one session's allowed-folders set + confirmation policy. Native
@@ -98,6 +127,18 @@ class SafetyGuard:
 
     def __post_init__(self) -> None:
         self.allowed_roots = [normalize_path(p) for p in self.allowed_roots]
+        # Second line of defense behind config-load validation: whatever
+        # reaches the guard is coerced to a mode it actually understands,
+        # so no code path can reach an authorize_* call with a value that
+        # matches neither branch. See ``normalize_safety_mode``.
+        raw_mode = self.mode
+        self.mode = normalize_safety_mode(raw_mode)
+        if self.mode != raw_mode:
+            logger.warning(
+                "unknown safety mode %r — falling back to 'confirm' (expected one of %s)",
+                raw_mode,
+                ", ".join(repr(m) for m in SAFETY_MODES),
+            )
 
     @classmethod
     def for_workspace(

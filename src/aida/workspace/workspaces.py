@@ -18,6 +18,7 @@ from aida.config.paths import config_dir, skills_dir
 from aida.config.settings import McpServerConfig, Settings, WorkspaceConfig, save_workspaces_config
 from aida.core.context import skill_exists
 from aida.mcp.groups import known_group_names, resolve_group
+from aida.workspace.safety import SAFETY_MODES
 
 
 @dataclass
@@ -114,8 +115,18 @@ def validate_workspace(settings: Settings, workspace: WorkspaceConfig) -> Worksp
     if workspace.target_folder and not Path(workspace.target_folder).expanduser().exists():
         warnings.append(f"target folder doesn't exist yet (created on first write): {workspace.target_folder}")
 
-    if workspace.safety not in ("relaxed", "confirm"):
-        warnings.append(f"unknown safety mode {workspace.safety!r} (expected 'relaxed' or 'confirm')")
+    if workspace.safety not in SAFETY_MODES:
+        # Says what will actually happen, not just that the value is odd.
+        # This used to read as a cosmetic complaint while the unknown value
+        # was passed straight to SafetyGuard, where it matched neither the
+        # "relaxed" nor the "confirm" branch and so skipped confirmation
+        # altogether — the warning described a typo and the runtime quietly
+        # applied the weakest setting. SafetyGuard now fails closed, so the
+        # honest wording is "treated as 'confirm'".
+        warnings.append(
+            f"unknown safety mode {workspace.safety!r} (expected "
+            f"{' or '.join(repr(m) for m in SAFETY_MODES)}) — treated as 'confirm'"
+        )
 
     if workspace.system_prompt and _looks_like_system_prompt_file_reference(workspace.system_prompt):
         prompt_path = _system_prompt_file_path(workspace.system_prompt)

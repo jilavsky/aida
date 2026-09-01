@@ -67,3 +67,51 @@ jobs:
 
       - name: Pytest (GUI)
         run: pytest -v tests/ui
+
+  # Validates the artifact users actually install, which the test job above
+  # does not: it runs against an editable install of the source tree, so a
+  # packaging mistake — a subpackage missing from the wheel, a bundled
+  # skills file not included, a dependency declared but unresolvable —
+  # passes every test and still breaks `pip install aida-workbench`. One
+  # cheap job, one OS: packaging errors of this kind are not
+  # platform-specific.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build the wheel and sdist
+        run: |
+          pip install build
+          python -m build
+
+      - name: Install the built wheel into a clean environment
+        run: |
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/pip install dist/*.whl
+
+      - name: Verify the installed package imports and its console script runs
+        run: |
+          /tmp/wheel-check/bin/python -c "import aida; print(aida.__version__ if hasattr(aida, '__version__') else 'ok')"
+          /tmp/wheel-check/bin/aida --help > /dev/null
+
+      - name: Verify the bundled skills travelled inside the wheel
+        # `pip install aida-workbench` users have no repo to copy these
+        # from — see the hatch build config's note on why they are packaged.
+        run: |
+          /tmp/wheel-check/bin/python -c "
+          from aida.config.paths import bundled_skills_dir
+          source = bundled_skills_dir()
+          assert source is not None, 'bundled skills are missing from the wheel'
+          entries = list(source.iterdir())
+          assert entries, f'{source} is present but empty'
+          print(f'{len(entries)} bundled skill entr(ies) present')
+          "
+
+      - name: pip check (declared dependencies actually resolve)
+        run: /tmp/wheel-check/bin/pip check

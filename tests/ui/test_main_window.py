@@ -2165,3 +2165,68 @@ def test_a_queued_message_the_turn_never_reached_comes_back(
         assert "what about run 43" in window.input_box.text()
     finally:
         window.close()
+
+
+# --- REVIEW.md P1: state-mutating controls are disabled during a turn -------
+
+
+def test_profile_selector_and_compaction_are_disabled_while_a_turn_runs(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Only the input box used to be disabled during a turn, leaving two live
+    controls that rewrite the state the turn is using: switching profile
+    closes the provider the running ``AgentLoop`` is streaming from, and
+    Compact Conversation replaces the whole message list from a plan computed
+    before an awaited summarization call.
+    """
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="done")], profile_name="mock-profile"
+    )
+    try:
+        assert window.profile_selector.isEnabled()
+        assert window.compact_action.isEnabled()
+
+        window._on_turn_started()
+        assert not window.profile_selector.isEnabled()
+        assert not window.compact_action.isEnabled()
+
+        window._on_turn_finished()
+        assert window.profile_selector.isEnabled()
+        assert window.compact_action.isEnabled()
+    finally:
+        window.close()
+
+
+def test_bridge_refuses_a_profile_switch_while_busy(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Enforced in the bridge as well as the window: the selector is only one
+    of the routes into ``switch_profile``."""
+    settings = _settings_with_profile()
+    settings.providers.profiles["other"] = ProviderProfile(
+        name="other", kind="openai_compat", model="mock-model"
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="done")], profile_name="mock-profile"
+    )
+    # MainWindow is connected to profile_switch_failed and answers it with a
+    # modal QMessageBox — which blocks forever under the offscreen platform.
+    warned: list[tuple] = []
+    monkeypatch.setattr(
+        "aida.ui.qt.main_window.QMessageBox.warning",
+        lambda *args, **kwargs: warned.append(args) or QMessageBox.StandardButton.Ok,
+    )
+    failures: list[str] = []
+    window.bridge.profile_switch_failed.connect(failures.append)
+    try:
+        window.bridge._turn_future = object()  # pretend a turn is in flight
+        window.bridge.switch_profile("other")
+        qapp.processEvents()
+
+        assert failures, "a switch during a turn was accepted"
+        assert "turn is running" in failures[0]
+        assert window.bridge.session.profile_name == "mock-profile"
+    finally:
+        window.bridge._turn_future = None
+        window.close()

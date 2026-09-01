@@ -13,6 +13,8 @@ is the piece that actually plugs the MCP layer into ``aida.core.agent``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,8 +50,61 @@ logger = get_logger("mcp")
 NAMESPACE_SEPARATOR = "__"
 
 
+#: The exact pattern both Anthropic and OpenAI-compatible tool-calling APIs
+#: require of a tool name, and the length they cap it at.
+VALID_TOOL_NAME_CHARS = re.compile(r"[^a-zA-Z0-9_-]")
+MAX_TOOL_NAME_LENGTH = 128
+
+#: How much of the 128-character budget each half may use before the name is
+#: shortened. Deliberately uneven: the *tool* name is what a model reasons
+#: about ("plot_saxs", "find_and_plot_2"), while the server name is mostly a
+#: disambiguator, so the tool half keeps more room.
+_MAX_SERVER_PART = 40
+_MAX_TOOL_PART = MAX_TOOL_NAME_LENGTH - len(NAMESPACE_SEPARATOR) - _MAX_SERVER_PART
+
+
+def _sanitize_part(part: str, *, limit: int) -> str:
+    """One half of a namespaced name, reduced to characters the providers
+    accept and shortened to ``limit``.
+
+    A shortened part keeps its readable prefix and gains a short hash of the
+    *original* text, so two names that differ only past the cut point do not
+    collapse into the same alias. Empty input (a name made entirely of
+    characters the providers reject) still has to produce something valid,
+    hence the "x" fallback."""
+    cleaned = VALID_TOOL_NAME_CHARS.sub("_", part)
+    if not cleaned:
+        cleaned = "x"
+    if len(cleaned) <= limit:
+        return cleaned
+    digest = hashlib.sha1(part.encode("utf-8")).hexdigest()[:6]
+    return f"{cleaned[: limit - 7]}_{digest}"
+
+
 def namespaced_tool_name(server_name: str, tool_name: str) -> str:
-    return f"{server_name}{NAMESPACE_SEPARATOR}{tool_name}"
+    """The name the *provider* sees for one MCP tool.
+
+    Both halves are sanitized and length-limited rather than concatenated
+    verbatim. The rule the separator comment above documents —
+    ``^[a-zA-Z0-9_-]{1,128}$``, enforced by both APIs — applies to the
+    finished name, and nothing previously enforced it on the inputs: a
+    server the user named ``paper.search`` (a dot is the very character that
+    forced ``NAMESPACE_SEPARATOR`` away from ``.``), a non-ASCII name, or a
+    long server/tool pair produced an invalid name that failed the entire
+    request, not just that one tool — and the error named a pattern rather
+    than the server responsible. Importing another client's ``mcp.json``,
+    where AIDA never got to vet the names, is the likeliest way to hit this.
+
+    The result is a stable, purely derived alias: the same inputs always
+    give the same name, so it survives restarts and can be compared across
+    sessions. The server's real name is kept for display everywhere the user
+    sees it — this is only what goes on the wire.
+    """
+    return (
+        f"{_sanitize_part(server_name, limit=_MAX_SERVER_PART)}"
+        f"{NAMESPACE_SEPARATOR}"
+        f"{_sanitize_part(tool_name, limit=_MAX_TOOL_PART)}"
+    )
 
 
 @dataclass
@@ -197,11 +252,29 @@ class McpManager:
         never sent to the model, not merely refused if called (Phase 7:
         "Per-tool disable respected in tool schemas sent to provider")."""
         disabled = set(config.disabled_tools)
-        return {
-            namespaced_tool_name(server_name, tool.name): self._build_native_tool(server_name, tool)
-            for tool in discovered_tools
-            if tool.name not in disabled
-        }
+        tools: dict[str, NativeTool] = {}
+        for tool in discovered_tools:
+            if tool.name in disabled:
+                continue
+            alias = namespaced_tool_name(server_name, tool.name)
+            if alias in tools:
+                # Sanitizing and length-limiting means two distinct tool
+                # names can in principle map to the same provider-facing
+                # alias. The hash suffix makes it very unlikely, but a dict
+                # comprehension would have resolved it by silently keeping
+                # the last one — a tool vanishing with no explanation. Skip
+                # the duplicate and say which tool is unreachable.
+                logger.error(
+                    "mcp server %r: tool %r maps to the same provider-facing name %r as an "
+                    "earlier tool and will not be offered to the model — rename one of them "
+                    "on the server, or disable it in mcp.json",
+                    server_name,
+                    tool.name,
+                    alias,
+                )
+                continue
+            tools[alias] = self._build_native_tool(server_name, tool)
+        return tools
 
     # --- live per-server control (Phase 7: start/stop/restart from the GUI
     # without restarting the whole chat session) -------------------------
@@ -380,4 +453,9 @@ class McpManager:
         self._handles = {}
 
 
-__all__ = ["ConnectionTestResult", "McpManager", "namespaced_tool_name"]
+__all__ = [
+    "MAX_TOOL_NAME_LENGTH",
+    "ConnectionTestResult",
+    "McpManager",
+    "namespaced_tool_name",
+]

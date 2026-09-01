@@ -90,6 +90,30 @@ class ArtifactStore:
         self._record(artifact.id, "FileArtifact", artifact.path, artifact.mime_type)
         return artifact
 
+    def adopt_image_file(self, source: Path, *, mime_type: str | None = None) -> ImageArtifact:
+        """Take a copy of an image that already exists somewhere else on
+        disk, and record it as this store's own.
+
+        For user *attachments*. A GUI attachment used to be carried as an
+        ``ImageRef`` pointing straight at whatever path the file picker
+        returned — a Desktop screenshot, a file inside a mounted share, a
+        temp file — so the conversation's only reference to those pixels was
+        a path the user was free to move, rename, or delete, and which might
+        not resolve at all on another machine. Owning a copy is what makes
+        an attachment survive being resumed later; the store's existing
+        collision-safe naming means two files called ``Screenshot.png`` do
+        not overwrite each other.
+
+        Bytes are read here rather than deferred: this is the moment the
+        original is known to exist.
+        """
+        resolved = Path(source).expanduser()
+        guessed = mime_type or mimetypes.guess_type(str(resolved))[0] or "image/png"
+        artifact = ImageArtifact(
+            data=resolved.read_bytes(), mime_type=guessed, filename=resolved.name
+        )
+        return self.save_image(artifact)
+
     def copy_to_target(self, artifact: ImageArtifact | FileArtifact, target_dir: Path) -> Path:
         """Copy an already-saved artifact into a workspace's target folder
         (PLAN.md §6: generated files should land where the user asked).

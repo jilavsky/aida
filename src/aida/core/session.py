@@ -124,6 +124,29 @@ class UnknownWorkspaceError(Exception):
     ``workspaces.yaml``."""
 
 
+class SessionBusyError(Exception):
+    """Raised when a second mutation of a session's state is attempted while
+    one is already in flight.
+
+    ``ChatSession`` owns three operations that rewrite the same state — a
+    turn (``send``, which appends to ``self.messages`` and streams from
+    ``self.provider``), manual compaction (``compact_now``, which *replaces*
+    ``self.messages`` wholesale after awaiting a summarization call), and a
+    profile switch (``switch_profile``, which swaps out the very provider
+    the running turn is streaming from). Any two of them overlapping
+    corrupts something: compaction computes its plan, awaits a summary, and
+    then applies a slice assignment based on a message list the turn has
+    since appended to — silently discarding those messages; a switch closes
+    a provider mid-stream.
+
+    The GUI disables the controls that reach these while a turn runs, but
+    the invariant is enforced here rather than only there, because the CLI
+    and any future caller bypass the GUI entirely. Refusing is deliberately
+    preferred over queueing: a compaction or profile switch that silently
+    took effect several minutes later, after the turn the user was watching
+    finished, would be a worse surprise than being told "not right now"."""
+
+
 def resolve_mcp_servers(
     mcp_config: McpConfig, *, group: str | None, names: list[str] | None
 ) -> list[McpServerConfig]:
@@ -226,6 +249,20 @@ class ChatSession:
         # user's own running total shouldn't). See aida.core.cost.
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        # Serializes the three operations that mutate this session's state —
+        # see SessionBusyError. Held for the whole of send()/compact_now()/
+        # switch_profile(); the internal helpers they call (_trim_context,
+        # _apply_trim_plan, ...) deliberately do *not* take it, since they
+        # only ever run underneath one of those three.
+        self._mutation_lock = asyncio.Lock()
+        # Bumped every time self.messages is structurally rewritten or
+        # appended to on behalf of a turn. _apply_trim_plan captures it
+        # before awaiting summarization and re-checks it before the slice
+        # assignment: a belt-and-braces assertion that the plan it is about
+        # to apply still describes the list it was computed from. The lock
+        # above is what actually prevents the race; this is what would catch
+        # a future refactor that reintroduces it.
+        self._history_generation = 0
 
         skill_texts = load_skill_texts(skills_dir(), skill_names or [])
         system_message = build_system_message(
@@ -240,21 +277,74 @@ class ChatSession:
         history = repair_tool_call_pairing(list(initial_messages)) if initial_messages else []
         self.messages: list[Message] = ([system_message] if system_message.content else []) + history
 
+    @property
+    def is_mutating(self) -> bool:
+        """Whether a turn, a compaction, or a profile switch is in flight.
+
+        Exposed so a frontend can disable the controls that would raise
+        ``SessionBusyError`` instead of letting the user press them and get
+        an error back."""
+        return self._mutation_lock.locked()
+
     async def switch_profile(self, name: str) -> None:
-        new_profile = resolve_profile(self.settings, name)  # validate before tearing anything down
-        old_provider = self.provider
-        # Carry over the iteration cap already in effect (e.g. set moments
-        # earlier via /max-iterations) rather than resetting it to
-        # settings.app.max_agent_iterations — a /profile switch shouldn't
-        # silently discard a value the user just set in the same session.
-        max_iterations = self.loop.max_iterations
-        self.profile = new_profile
-        self.profile_name = name
-        self.provider = build_provider(self.profile)
-        self.completion_settings = _completion_settings_for_profile(self.profile)
-        self.loop = AgentLoop(self.provider, self.completion_settings, self.tools, max_iterations=max_iterations)
-        # self.messages is intentionally left untouched: history carries over.
-        await old_provider.aclose()
+        """Swap provider + loop to another configured profile, keeping the
+        conversation history.
+
+        Two things about the ordering here are load-bearing, and both were
+        wrong before:
+
+        *Nothing* is assigned to ``self`` until every fallible step has
+        already succeeded. The old version set ``self.profile`` and
+        ``self.profile_name`` and *then* called ``build_provider``, so a
+        profile with a typo'd ``kind:`` (``UnknownProviderKindError``), a
+        missing secret, or any other client-construction failure left the
+        session advertising the new profile's name while still holding the
+        old provider and loop — a half-switched state the failure handlers
+        explicitly assumed could not exist.
+
+        And the switch is refused outright while a turn is running. The old
+        version closed ``old_provider`` unconditionally, which on a switch
+        made mid-stream closed the very client the live ``AgentLoop`` was
+        reading from.
+        """
+        if self._mutation_lock.locked():
+            raise SessionBusyError(
+                "Can't switch profile while a turn is running — stop it or wait for it to finish."
+            )
+        async with self._mutation_lock:
+            # Every fallible step first, into locals. resolve_profile raises
+            # UnknownProfileError for an unknown name; build_provider raises
+            # UnknownProviderKindError (and whatever the underlying client
+            # constructor raises) for a configured-but-unbuildable one.
+            new_profile = resolve_profile(self.settings, name)
+            new_completion_settings = _completion_settings_for_profile(new_profile)
+            new_provider = build_provider(new_profile)
+            # Carry over the iteration cap already in effect (e.g. set
+            # moments earlier via /max-iterations) rather than resetting it
+            # to settings.app.max_agent_iterations — a /profile switch
+            # shouldn't silently discard a value the user just set in the
+            # same session.
+            new_loop = AgentLoop(
+                new_provider, new_completion_settings, self.tools, max_iterations=self.loop.max_iterations
+            )
+
+            # Nothing below here can fail, so the swap is all-or-nothing.
+            old_provider = self.provider
+            self.profile = new_profile
+            self.profile_name = name
+            self.provider = new_provider
+            self.completion_settings = new_completion_settings
+            self.loop = new_loop
+            # self.messages is intentionally left untouched: history carries over.
+
+            # Last, and only now that nothing else refers to it. A provider
+            # whose aclose() fails must not roll the switch back — the new
+            # provider is already live and correct at this point — so the
+            # failure is logged rather than raised.
+            try:
+                await old_provider.aclose()
+            except Exception as exc:  # noqa: BLE001 - see above
+                logger.warning("closing the previous provider after a profile switch failed: %s", exc)
 
     def cancel(self) -> None:
         self.loop.cancel()
@@ -340,14 +430,30 @@ class ChatSession:
             logger.warning("context compaction failed, falling back to plain trim: %s", exc)
             return None
 
-    async def _apply_trim_plan(self, plan: TrimPlan) -> ContextTrimmed:
+    async def _apply_trim_plan(self, plan: TrimPlan) -> ContextTrimmed | None:
         """Shared by the automatic (``_trim_context``) and manual
         (``compact_now``) paths: try to summarize ``plan.dropped_turns``
         (PLAN.md §1.3 compaction) and fall back to plain-discarding them if
         summarization fails, then mutate ``self.messages`` in place (because
         ``AgentLoop.run`` appends to that same list object) and report what
         actually happened."""
+        # Captured *before* the await below. `plan` describes exact slices
+        # of self.messages; if anything appended to or rewrote that list
+        # while summarization was in flight, the slice assignment at the end
+        # of this method would throw those messages away. ChatSession's
+        # mutation lock is what prevents that from happening at all — this
+        # check is the assertion that says so out loud, and would catch a
+        # future caller that reaches _apply_trim_plan without holding it.
+        generation = self._history_generation
         summary_message = await self._compact_context(plan.dropped_turns)
+        if generation != self._history_generation:
+            logger.warning(
+                "conversation history changed while compaction was summarizing "
+                "(generation %d -> %d); discarding the stale plan rather than applying it",
+                generation,
+                self._history_generation,
+            )
+            return None
         if summary_message is not None:
             new_messages = [*plan.system_messages, summary_message, *plan.kept_turn_messages]
             summarized = True
@@ -369,6 +475,7 @@ class ChatSession:
             "summarized" if summarized else "dropped",
         )
         self.messages[:] = new_messages
+        self._history_generation += 1
         return ContextTrimmed(
             dropped_turns=dropped_turns,
             estimated_tokens=estimated_tokens,
@@ -409,11 +516,24 @@ class ChatSession:
         fall-back-to-drop behavior, just with the trim threshold forced to
         ``0`` so ``plan_trim`` always finds something to drop, short of the
         ``min_recent_turns`` floor. Returns ``None`` if there's nothing to
-        compact (fewer turns than the floor)."""
-        plan = plan_trim(self.messages, 0, min_recent_turns=min_recent_turns)
-        if not plan.was_trimmed:
-            return None
-        return await self._apply_trim_plan(plan)
+        compact (fewer turns than the floor).
+
+        Raises ``SessionBusyError`` if a turn or a profile switch is in
+        flight. Compaction computes a plan from ``self.messages``, awaits a
+        summarization round trip, and then *replaces the whole list*; run
+        concurrently with a turn, that final assignment is made from a plan
+        that predates every assistant and tool message the turn appended in
+        the meantime, silently discarding them. It would also put a second
+        concurrent request through the one provider instance."""
+        if self._mutation_lock.locked():
+            raise SessionBusyError(
+                "Can't compact while a turn is running — stop it or wait for it to finish."
+            )
+        async with self._mutation_lock:
+            plan = plan_trim(self.messages, 0, min_recent_turns=min_recent_turns)
+            if not plan.was_trimmed:
+                return None
+            return await self._apply_trim_plan(plan)
 
     async def _retrieve_context(self, user_text: str) -> dict[str, list[RetrievedPassage]]:
         """Query every active knowledge base for this turn's question.
@@ -451,6 +571,30 @@ class ChatSession:
         return persisted
 
     async def send(self, user_text: str, *, images: list[ImageRef] | None = None):
+        """Run one turn, holding the session's mutation lock for its whole
+        duration.
+
+        A thin wrapper around ``_run_turn``, which carries the actual logic.
+        Splitting them keeps the lock acquisition readable as one line
+        instead of re-indenting the entire turn body, and — because this is
+        an async *generator* — guarantees the lock is released whether the
+        turn drains naturally, raises, or is abandoned by a consumer that
+        stops iterating (``aclose()`` throws ``GeneratorExit`` in at the
+        ``yield``, which unwinds the ``async with`` exactly like any other
+        exception).
+
+        Raises ``SessionBusyError`` if another turn, a compaction, or a
+        profile switch is already in flight — see ``SessionBusyError``. Note
+        that a *queued interjection* into a running turn is a different
+        thing entirely and still works: it goes through the synchronous
+        ``queue_user_message``, which never touches this lock."""
+        if self._mutation_lock.locked():
+            raise SessionBusyError("A turn is already running in this session.")
+        async with self._mutation_lock:
+            async for event in self._run_turn(user_text, images=images):
+                yield event
+
+    async def _run_turn(self, user_text: str, *, images: list[ImageRef] | None = None):
         """Run one turn. Phase 8 (RAG): if any knowledge bases are active,
         retrieves passages for ``user_text`` and injects them as a
         *strictly ephemeral* extra message — appended to ``self.messages``
@@ -468,6 +612,7 @@ class ChatSession:
         and the recency cap — see ``aida.providers.vision``."""
         user_message = Message(role="user", content=user_text, images=list(images or []))
         self.messages.append(user_message)
+        self._history_generation += 1  # see __init__ / _apply_trim_plan
         if self.recorder is not None:
             self.recorder.record_message(user_message)
         # Keep the *sent* history under budget (the recorded history in the
@@ -652,6 +797,56 @@ async def start_session(
     resume_conversation_id: str | None = None,
     confirm_callback: ConfirmCallback | None = None,
 ) -> tuple[ChatSession, McpManager | None]:
+    """Start a session, releasing everything it acquired if any step fails.
+
+    All the work is in ``_start_session``; this wrapper exists for the
+    ``AsyncExitStack``. Startup acquires four kinds of resource that must be
+    released if they are not handed to a ``ChatSession``: the SQLite store,
+    each knowledge base's connection *and* its embeddings HTTP client, and
+    the MCP servers, which are real subprocesses. Cleanup used to be a
+    single ``try`` placed around ``ChatSession(...)`` alone, several hundred
+    lines after the first of those was opened — so a failure in between (a
+    locked database, a corrupt history, an ``McpManager.start_all`` error
+    that was not the per-server ``McpServerError`` it isolates) left MCP
+    subprocesses running for the life of the process and connections open,
+    from a session that reported a clean startup error and looked shut down.
+
+    Registering each release with the stack immediately after the matching
+    acquisition means the ordering can no longer drift as this function
+    grows. ``pop_all()`` on success is what transfers ownership: nothing is
+    closed once a ``ChatSession`` exists to own it.
+    """
+    async with contextlib.AsyncExitStack() as stack:
+        session, mcp_manager = await _start_session(
+            stack,
+            settings,
+            profile_name=profile_name,
+            workspace_name=workspace_name,
+            skill_names=skill_names,
+            mcp_group=mcp_group,
+            mcp_names=mcp_names,
+            resume_conversation_id=resume_conversation_id,
+            confirm_callback=confirm_callback,
+        )
+        # Construction succeeded: the session owns these now, so unregister
+        # every cleanup rather than running it on the way out of the `async
+        # with`.
+        stack.pop_all()
+        return session, mcp_manager
+
+
+async def _start_session(
+    stack: contextlib.AsyncExitStack,
+    settings: Settings,
+    *,
+    profile_name: str | None = None,
+    workspace_name: str | None = None,
+    skill_names: list[str] | None = None,
+    mcp_group: str = "",
+    mcp_names: list[str] | None = None,
+    resume_conversation_id: str | None = None,
+    confirm_callback: ConfirmCallback | None = None,
+) -> tuple[ChatSession, McpManager | None]:
     """Shared session-startup logic for ``aida chat`` and
     ``aida conversations resume`` — resolves the workspace (if any), starts
     only the MCP servers that end up enabled, builds the
@@ -678,6 +873,10 @@ async def start_session(
     )
     confirm_callback = confirm_callback or cli_confirm
     store = ConversationStore()
+    # Registered here, not at each `raise` below: every early exit from this
+    # point on releases it, including ones added later that would otherwise
+    # forget to.
+    stack.callback(store.close)
     artifact_store = ArtifactStore()
     records_dir = ensure_records_dir(Path(settings.app.records_dir) if settings.app.records_dir else None)
 
@@ -685,7 +884,6 @@ async def start_session(
     if resume_conversation_id:
         resumed_summary = store.get_conversation(resume_conversation_id)
         if resumed_summary is None:
-            store.close()
             raise ConversationNotFoundError(f"no conversation with id {resume_conversation_id!r}")
 
     effective_workspace_name = workspace_name or (resumed_summary.workspace_name if resumed_summary else None)
@@ -709,7 +907,6 @@ async def start_session(
     if effective_workspace_name:
         workspace = get_workspace(settings, effective_workspace_name)
         if workspace is None:
-            store.close()
             raise UnknownWorkspaceError(
                 f"Unknown workspace {effective_workspace_name!r}. "
                 f"Configured workspaces: {', '.join(sorted(settings.workspaces.workspaces)) or '(none)'}"
@@ -719,7 +916,6 @@ async def start_session(
             print(f"[workspace] warning: {warning}")
             logger.warning("workspace %r: %s", workspace.name, warning)
         if not validation.ok:
-            store.close()
             raise UnknownProfileError(f"workspace {effective_workspace_name!r}: {validation.detail}")
 
         env = resolve_workspace_environment(settings, workspace)
@@ -736,11 +932,9 @@ async def start_session(
         try:
             mcp_servers = resolve_mcp_servers(settings.mcp, group=mcp_group, names=mcp_names)
         except UnknownMcpServerError:
-            store.close()
             raise
 
     if effective_profile_name is None:
-        store.close()
         raise UnknownProfileError(
             "No profile given: pass --profile NAME, or --workspace NAME with a profile configured."
         )
@@ -838,6 +1032,11 @@ async def start_session(
             print(f"[knowledge] warning: knowledge base {kb_name!r}: {exc} — skipping")
             continue
         conn = kb_index.connect(knowledge_db_path(kb_name))
+        # Registered the moment each is opened, so a failure anywhere later
+        # in startup releases them — including the embeddings provider's
+        # HTTP client, which is easy to forget because it looks like plain
+        # configuration rather than an open connection.
+        stack.push_async_callback(_close_knowledge_base, conn, embeddings_provider)
         active_knowledge_bases.append(
             ActiveKnowledgeBase(
                 name=kb_name,
@@ -868,6 +1067,12 @@ async def start_session(
         mcp_manager = McpManager(
             mcp_servers, artifact_store=artifact_store, confirm_callback=confirm_callback, scratch_dir=scratch
         )
+        # Registered *before* start_all, not after: these are real
+        # subprocesses, and start_all isolates a per-server McpServerError
+        # but not every other failure — one escaping partway through would
+        # otherwise leave the servers it had already launched running with
+        # nothing holding a reference to them.
+        stack.push_async_callback(mcp_manager.aclose)
         mcp_tools = await mcp_manager.start_all()
         tools.update(mcp_tools)
         for skill in mcp_manager.skills():
@@ -906,43 +1111,39 @@ async def start_session(
         )
         initial_messages = None
 
-    try:
-        session = ChatSession(
-            settings,
-            effective_profile_name,
-            tools=tools,
-            skill_names=all_skill_names,
-            system_prompt=system_prompt,
-            recorder=recorder,
-            initial_messages=initial_messages,
-            extra_context_texts=extra_context_texts,
-            active_knowledge_bases=active_knowledge_bases,
-            identity_text=identity_text,
-        )
-    except Exception:
-        # Was `except UnknownProfileError` — but that is not the only thing
-        # this block can raise. `ChatSession.__init__` also calls
-        # `build_provider` (UnknownProviderKindError for a typo'd `kind:` in
-        # providers.yaml) and reads every configured skills file (OSError /
-        # UnicodeDecodeError), and the `ConversationRecorder` built just
-        # above can fail on a locked or corrupt DB. Any of those escaping
-        # here left every MCP server this call had just launched running as
-        # an orphaned subprocess for the rest of the process's life, with
-        # the SQLite connection and each knowledge base's HTTP client open
-        # too — from a session that then reported a clean startup error and
-        # looked like it had shut down. Cleanup is the same either way, so
-        # it belongs on every failure path, not one named one.
-        if mcp_manager is not None:
-            await mcp_manager.aclose()
-        for kb in active_knowledge_bases:
-            with contextlib.suppress(Exception):
-                await kb.embeddings_provider.aclose()
-            with contextlib.suppress(Exception):
-                kb.connection.close()
-        store.close()
-        raise
-
+    # No try/except here any more. `ChatSession.__init__` can fail in
+    # several ways — `build_provider` (UnknownProviderKindError for a typo'd
+    # `kind:` in providers.yaml), reading each configured skills file
+    # (OSError / UnicodeDecodeError) — and so can the `ConversationRecorder`
+    # and `load_history()` above, on a locked or corrupt database. All of
+    # them are covered by the exit stack the caller opened, along with every
+    # earlier step, rather than by a hand-written cleanup block that only
+    # ever guarded this one call.
+    session = ChatSession(
+        settings,
+        effective_profile_name,
+        tools=tools,
+        skill_names=all_skill_names,
+        system_prompt=system_prompt,
+        recorder=recorder,
+        initial_messages=initial_messages,
+        extra_context_texts=extra_context_texts,
+        active_knowledge_bases=active_knowledge_bases,
+        identity_text=identity_text,
+    )
     return session, mcp_manager
+
+
+async def _close_knowledge_base(conn, embeddings_provider) -> None:
+    """Release one knowledge base's two resources, each independently.
+
+    Suppressed individually so a provider whose ``aclose`` throws cannot
+    leave the SQLite connection open behind it — during cleanup, a failure
+    to release one thing must never become a failure to release the rest."""
+    with contextlib.suppress(Exception):
+        await embeddings_provider.aclose()
+    with contextlib.suppress(Exception):
+        conn.close()
 
 
 __all__ = [

@@ -278,9 +278,16 @@ class MainWindow(QMainWindow):
         # PLAN.md §1.3 / planning/context_management.md §3.4: GUI parity
         # with the CLI's /compact — summarize older turns at a natural task
         # boundary rather than only ever compacting automatically mid-turn.
-        compact_action = QAction("Compact Conversation", self)
-        compact_action.triggered.connect(self._on_compact_requested)
-        file_menu.addAction(compact_action)
+        # Retained on self (it used to be a bare local) so _on_turn_started/
+        # _on_turn_finished can disable it: compaction replaces the whole
+        # message list after awaiting a summarization round trip, which run
+        # against a live turn discards whatever that turn appended in the
+        # meantime. ChatSession refuses it outright now, but a menu item
+        # that is simply greyed out is a better answer than one that can be
+        # clicked only to report an error.
+        self.compact_action = QAction("Compact Conversation", self)
+        self.compact_action.triggered.connect(self._on_compact_requested)
+        file_menu.addAction(self.compact_action)
 
         help_menu = self.menuBar().addMenu("&Help")
         docs_action = QAction("Documentation", self)
@@ -411,12 +418,30 @@ class MainWindow(QMainWindow):
 
     def _on_turn_started(self) -> None:
         self.input_box.set_busy(True)
+        self._set_session_mutating(True)
         self._usage_refresh_timer.start()
 
     def _on_turn_finished(self) -> None:
         self.input_box.set_busy(False)
+        self._set_session_mutating(False)
         self._usage_refresh_timer.stop()
         self._restore_undelivered_messages()
+
+    def _set_session_mutating(self, busy: bool) -> None:
+        """Enable/disable the controls that mutate session state from
+        outside a turn.
+
+        Only the input box used to be disabled while a turn ran, which left
+        two live controls that rewrite the very state the turn is using: the
+        profile selector (a switch closes the provider the running
+        ``AgentLoop`` is streaming from) and Compact Conversation (its final
+        slice assignment is computed before an awaited summarization call
+        and would drop everything the turn appended during it).
+        ``ChatSession`` enforces this itself as well — the CLI and any
+        future caller never come through here — but disabling them is what
+        stops a user reaching an error they cannot act on."""
+        self.profile_selector.setEnabled(not busy)
+        self.compact_action.setEnabled(not busy)
 
     def _restore_undelivered_messages(self) -> None:
         """Put queued text the turn never reached back in the input box.
@@ -902,11 +927,18 @@ class MainWindow(QMainWindow):
         use, with no indication anything went wrong
         (``ChatBridge.profile_switch_failed`` was emitted but nothing ever
         connected to it). Tell the user the switch didn't happen, and reset
-        the dropdown back to the profile that's actually active — the
-        session's provider/loop are untouched by a failed
-        ``ChatSession.switch_profile`` (see its docstring), so
-        ``_refresh_profile_selector`` reading ``bridge.session.profile_name``
-        is exactly the still-active profile."""
+        the dropdown back to the profile that's actually active.
+
+        Reading ``bridge.session.profile_name`` is correct here because
+        ``ChatSession.switch_profile`` is atomic: it builds the new profile,
+        provider, settings and loop into locals and only then assigns any of
+        them, so a failure really does leave the session on its previous
+        profile. That was not true when this handler was written — the old
+        order assigned ``profile``/``profile_name`` *before* calling
+        ``build_provider``, so a provider that failed to construct left the
+        session advertising a profile it had not adopted, and this reset put
+        the dropdown back to a name that was itself wrong. See
+        ``ChatSession.switch_profile``'s docstring."""
         QMessageBox.warning(self, "Profile Switch Failed", message)
         self._refresh_profile_selector()
 

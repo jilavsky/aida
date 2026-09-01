@@ -44,7 +44,7 @@ from aida.providers.base import (
     is_param_rejection_status,
     unsupported_request_param,
 )
-from aida.providers.vision import images_within_cap, read_image_b64
+from aida.providers.vision import read_image_b64, select_images_within_cap
 
 _logger = get_logger("provider")
 
@@ -86,7 +86,10 @@ def to_openai_messages(messages: list[Message], *, supports_vision: bool = False
     restriction and does attach both.
     """
     out: list[dict[str, Any]] = []
-    image_indices = images_within_cap(messages) if supports_vision else set()
+    # index -> the specific images to attach for that message; the cap
+    # counts images, not messages, so one result carrying many of them
+    # contributes only its most recent few. See select_images_within_cap.
+    selected_images = select_images_within_cap(messages) if supports_vision else {}
     for idx, m in enumerate(messages):
         if m.role == "assistant" and m.tool_calls:
             out.append(
@@ -115,7 +118,7 @@ def to_openai_messages(messages: list[Message], *, supports_vision: bool = False
                 }
             )
         else:
-            image_parts = _openai_image_parts(m.images) if idx in image_indices and m.images else []
+            image_parts = _openai_image_parts(selected_images.get(idx, []))
             if image_parts:
                 content: Any = [*image_parts, {"type": "text", "text": m.content}] if m.content else image_parts
                 out.append({"role": m.role, "content": content})

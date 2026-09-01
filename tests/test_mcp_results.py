@@ -60,7 +60,12 @@ def test_audio_content_becomes_file_artifact_with_decoded_bytes():
     assert art.filename == "audio.wav"
 
 
-def test_resource_link_becomes_file_artifact_without_local_bytes():
+def test_resource_link_preserves_its_uri():
+    """A resource link's whole purpose is the address it carries: the server
+    sent a pointer instead of the bytes so the model can ask for that
+    resource next. Conversion used to keep only `name` and `mimeType`, so
+    the model was told a file existed but not where — the assertion that
+    matters here is the uri, not the (correctly) absent local path."""
     result = _result(
         types.ResourceLink(
             type="resource_link", name="data.csv", uri="file:///tmp/data.csv", mimeType="text/csv"
@@ -72,9 +77,26 @@ def test_resource_link_becomes_file_artifact_without_local_bytes():
     assert len(artifacts) == 1
     art = artifacts[0]
     assert isinstance(art, FileArtifact)
-    assert art.path is None
+    assert art.uri == "file:///tmp/data.csv"
+    assert art.path is None  # no local copy was downloaded
     assert art.mime_type == "text/csv"
     assert art.filename == "data.csv"
+
+
+def test_resource_link_uri_reaches_the_model_description():
+    """The uri has to survive all the way into the text the model actually
+    reads, not just sit on the dataclass."""
+    from aida.artifacts.policy import describe_for_model
+
+    result = _result(
+        types.ResourceLink(
+            type="resource_link", name="data.csv", uri="file:///tmp/data.csv", mimeType="text/csv"
+        )
+    )
+
+    description = describe_for_model(convert_result(result)[0])
+
+    assert "file:///tmp/data.csv" in description
 
 
 def test_embedded_resource_with_text_becomes_text_artifact():
