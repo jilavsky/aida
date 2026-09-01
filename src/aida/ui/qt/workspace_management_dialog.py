@@ -290,6 +290,7 @@ class WorkspaceFormDialog(QDialog):
             script_timeout_seconds=float(self._script_timeout_spin.value()),
             # Not editable in this form — preserved, not reset:
             quick_tasks=list(original.quick_tasks) if original else [],
+            notes=original.notes if original else "",
             templates_dir=original.templates_dir if original else None,
             saved_scripts_dir=original.saved_scripts_dir if original else None,
         )
@@ -311,6 +312,7 @@ def _workspace_detail_lines(workspace: WorkspaceConfig, validation: WorkspaceVal
         f"command_allowlist: {', '.join(workspace.command_allowlist) or '(none)'}",
         f"script_timeout_seconds: {workspace.script_timeout_seconds:g}",
         f"quick_tasks: {', '.join(t.name for t in workspace.quick_tasks) or '(none)'}",
+        f"notes: {'(set)' if workspace.notes.strip() else '(none)'}",
         f"system_prompt: {'(set)' if workspace.system_prompt else '(none)'}",
     ]
     if validation.warnings:

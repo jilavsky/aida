@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import dataclasses
 import time
+from collections import deque
 from collections.abc import AsyncIterator
 
 from aida.artifacts.base import Artifact, FileArtifact, ImageArtifact
@@ -25,6 +26,7 @@ from aida.core.events import (
     FileArtifactCreated,
     ImageArtifactCreated,
     MessageFinished,
+    SteeringMessageDelivered,
     TextFinished,
     ToolCallFinished,
     ToolCallStarted,
@@ -88,6 +90,12 @@ class AgentLoop:
         self.tools = tools or {}
         self.max_iterations = max_iterations
         self._cancelled = False
+        # Text the user typed while a turn was already running, waiting to
+        # be handed to the model at the next round trip — see
+        # queue_user_message. A deque because the only operations are
+        # append-one and popleft-one, both atomic, so the Qt thread can
+        # queue while the loop thread drains without a lock.
+        self._queued_user_messages: deque[str] = deque()
 
     def _tool_schemas(self) -> list[ToolSchema]:
         return [t.schema for t in self.tools.values()]
@@ -97,6 +105,59 @@ class AgentLoop:
         the next provider call or before the next tool execution) — an
         in-flight provider stream is drained, not killed mid-token."""
         self._cancelled = True
+
+    def queue_user_message(self, text: str) -> None:
+        """Hand the running turn a message to deliver at its next round trip
+        (user request: "when agent is working, user has no chance for input
+        to the process ... so I can tell agent what I forgot").
+
+        Safe to call from another thread — the GUI calls it straight from
+        the Qt thread the way it already calls ``cancel()``. Delivery is
+        deliberately *between* round trips, never mid-stream and never
+        between a tool call and its result: the conversation must stay
+        well-formed (every ``tool_use`` answered by its ``tool_result``
+        before anything else is appended), which is the same invariant the
+        cancellation path goes out of its way to preserve.
+
+        Queuing with no turn running is not an error, but nothing here will
+        deliver it — the caller checks ``take_undelivered_messages`` and
+        sends it as a normal turn instead.
+        """
+        text = text.strip()
+        if text:
+            self._queued_user_messages.append(text)
+
+    def take_undelivered_messages(self) -> list[str]:
+        """Remove and return anything queued that was never delivered (the
+        turn ended, was cancelled, or errored first).
+
+        Exists so a frontend can put the user's words back in front of them
+        rather than silently eating them — text typed during a turn that
+        stops half a second later must not simply vanish.
+        """
+        drained: list[str] = []
+        while self._queued_user_messages:
+            drained.append(self._queued_user_messages.popleft())
+        return drained
+
+    def _deliver_queued_messages(self, messages: list[Message]) -> list[AgentEvent]:
+        """Append every queued interjection to ``messages`` as an ordinary
+        user turn, oldest first.
+
+        Plain ``role="user"`` messages rather than a new wire concept: both
+        providers accept consecutive user messages (the Anthropic API
+        combines same-role messages, see ``to_anthropic_params``), so a
+        message landing right after a batch of tool results needs no special
+        handling anywhere downstream — persistence, resume and trimming all
+        treat it as what it is, something the user said.
+        """
+        events: list[AgentEvent] = []
+        while self._queued_user_messages:
+            text = self._queued_user_messages.popleft()
+            messages.append(Message(role="user", content=text))
+            events.append(SteeringMessageDelivered(text=text))
+            logger.info("delivered queued user message mid-turn (%d chars)", len(text))
+        return events
 
     async def run(self, messages: list[Message]) -> AsyncIterator[AgentEvent]:
         """Run turns (provider call, then any requested tool calls, repeat)
@@ -125,6 +186,13 @@ class AgentLoop:
             if self._cancelled:
                 yield AgentError(layer="core", message="cancelled")
                 return
+
+            # Anything the user typed while this turn was running goes in
+            # here — after the previous round trip's tool results are all
+            # appended, before the next request is built. See
+            # queue_user_message.
+            for event in self._deliver_queued_messages(messages):
+                yield event
 
             iterations += 1
             if iterations > self.max_iterations:

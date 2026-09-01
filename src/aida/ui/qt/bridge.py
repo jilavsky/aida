@@ -277,6 +277,18 @@ class ChatBridge(QObject):
 
     # --- turns ---------------------------------------------------------------
 
+    @property
+    def is_busy(self) -> bool:
+        """Whether a turn is in flight right now.
+
+        ``_turn_future`` is set on the Qt thread by ``send`` and cleared in
+        ``_drain``'s ``finally`` — reading it is how a caller distinguishes
+        "start a new turn" from "hand this to the turn already running"
+        (see ``queue_user_message``) without having to track the
+        turn_started/turn_finished signal pair itself.
+        """
+        return self._turn_future is not None
+
     def send(self, user_text: str, *, images: list[ImageRef] | None = None) -> None:
         """Start a new turn. No-op if the session hasn't finished starting
         yet — callers (the input box) should be disabled until
@@ -323,6 +335,29 @@ class ChatBridge(QObject):
         directly from the Qt thread, no scheduling onto the loop needed."""
         if self.session is not None:
             self.session.cancel()
+
+    def queue_user_message(self, text: str) -> bool:
+        """Hand the in-flight turn something the user typed while it was
+        running; ``True`` if it was queued.
+
+        Same "plain synchronous call from the Qt thread" shape as
+        ``cancel()`` — ``AgentLoop``'s queue is a deque touched only by
+        append/popleft, so there is nothing to schedule onto the loop
+        thread. ``False`` means there was no session or no turn in flight,
+        and the caller should send the text as an ordinary turn instead.
+        """
+        if self.session is None or not self.is_busy:
+            return False
+        self.session.queue_user_message(text)
+        return True
+
+    def take_undelivered_messages(self) -> list[str]:
+        """Queued text the finished turn never got to — see
+        ``AgentLoop.take_undelivered_messages``. Empty when there is no
+        session."""
+        if self.session is None:
+            return []
+        return self.session.take_undelivered_messages()
 
     # --- profile switching -----------------------------------------------
 

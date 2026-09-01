@@ -20,6 +20,10 @@ If the caller's tools produced results, the *agent loop* (not the provider)
 emits `ToolCallFinished` / `ImageArtifactCreated` / `FileArtifactCreated` for
 each executed call before looping back for another turn.
 
+Between two round trips the agent loop may also emit `SteeringMessageDelivered`
+— text the user typed while the turn was running, now appended to the
+conversation.
+
 `AgentError` can appear at any point and always ends the stream for that
 `complete()`/`run()` call — it is not just informational.
 """
@@ -222,6 +226,27 @@ class ContextTrimmed:
 
 
 @dataclass(frozen=True)
+class SteeringMessageDelivered:
+    """A message the user typed *while a turn was already running* has just
+    been handed to the model.
+
+    User request: "when agent is working, user has no chance for input to
+    the process... in Claude app user can type content in and it gets
+    included in message in next turn, so I can tell agent what I forgot."
+    ``AgentLoop`` drains its queue between round trips (never mid-tool-call,
+    never mid-stream), appends the text as an ordinary ``role="user"``
+    message, and emits this so a frontend can show *when* the interjection
+    actually landed rather than pretending it was sent instantly. Queued
+    text that the turn ends before reaching is never delivered and never
+    emits this — see ``AgentLoop.take_undelivered_messages``.
+    """
+
+    text: str
+
+    to_dict = _base_dict
+
+
+@dataclass(frozen=True)
 class AgentError:
     """A terminal error for the current ``complete()``/``run()`` call.
 
@@ -250,6 +275,7 @@ AgentEvent = (
     | UsageInfo
     | RetrievalPerformed
     | ContextTrimmed
+    | SteeringMessageDelivered
     | AgentError
 )
 
@@ -261,6 +287,7 @@ __all__ = [
     "ImageArtifactCreated",
     "MessageFinished",
     "RetrievalPerformed",
+    "SteeringMessageDelivered",
     "TextDelta",
     "TextFinished",
     "TextStarted",

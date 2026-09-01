@@ -31,6 +31,7 @@ from aida.core.events import (
     FileArtifactCreated,
     ImageArtifactCreated,
     MessageFinished,
+    SteeringMessageDelivered,
     TextDelta,
     TextFinished,
     TextStarted,
@@ -123,6 +124,11 @@ def print_event(event: AgentEvent) -> None:
             )
         else:
             print(f"[context] trimmed {event.dropped_turns} old {turn_word} to fit budget (~{event.estimated_tokens} tokens now)")
+    elif isinstance(event, SteeringMessageDelivered):
+        # The CLI REPL reads one line at a time and cannot queue anything
+        # mid-turn, so this only appears when something else drives the
+        # loop — but it must still be visible rather than swallowed.
+        print(f"\n[you, mid-turn] {event.text}")
     elif isinstance(event, AgentError):
         detail = f" ({event.detail})" if event.detail else ""
         print(f"\n[error:{event.layer}] {event.message}{detail}")

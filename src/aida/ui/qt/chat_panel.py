@@ -552,6 +552,15 @@ class ChatPanel(QWidget):
                 if event.cache_read_input_tokens:
                     meta += f" · {event.cache_read_input_tokens} cached"
                 self._last_assistant_bubble.append_meta(meta)
+        elif name == "SteeringMessageDelivered":
+            # Rendered here, not when the user pressed Enter: the text sat
+            # in a queue until the agent loop reached its next round trip,
+            # and the transcript should show where it actually landed —
+            # after the tool calls it did not influence, before the ones it
+            # did. A plain user bubble, because that is exactly what it
+            # became in the conversation.
+            bubble = self.add_user_message(event.text)
+            bubble.append_meta("sent while the agent was working")
         elif name == "AgentError":
             banner = ErrorBanner(layer=event.layer, message=event.message, detail=event.detail, parent=self._content)
             self._append_widget(banner)

@@ -2021,3 +2021,147 @@ def test_usage_refresh_stops_itself_when_the_session_is_gone(
         assert not window._usage_refresh_timer.isActive()
     finally:
         window.close()
+
+
+# --- workspace notes ------------------------------------------------------
+
+
+def test_notes_panel_shows_workspace_notes_and_edits_persist(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """User request: "users really need a workspace notepad... it needs to
+    be saved with workspace." Same show-on-start + edit + auto-persist round
+    trip the quick tasks panel gets."""
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "use-pyirena": WorkspaceConfig(
+                name="use-pyirena", profile="mock-profile", mcp_group="none", notes="check run 42"
+            )
+        }
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+    )
+    try:
+        assert window.notes_panel.notes() == "check run 42"
+        assert window.notes_panel.isEnabled()
+
+        window.notes_panel.notes_changed.emit("check run 42\nand re-fit run 43")
+
+        assert get_workspace(window.settings, "use-pyirena").notes == "check run 42\nand re-fit run 43"
+        reloaded = get_workspace(load_settings(), "use-pyirena")
+        assert reloaded.notes == "check run 42\nand re-fit run 43"
+    finally:
+        window.close()
+
+
+def test_notes_panel_empty_and_disabled_with_no_active_workspace(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        assert window.notes_panel.notes() == ""
+        assert not window.notes_panel.isEnabled()
+    finally:
+        window.close()
+
+
+def test_closing_the_window_saves_a_note_typed_a_moment_earlier(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Saving is debounced, so quitting right after the last keystroke must
+    flush rather than drop it."""
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={"use-pyirena": WorkspaceConfig(name="use-pyirena", profile="mock-profile", mcp_group="none")}
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+    )
+    window.notes_panel._edit.setPlainText("do not lose this")
+    assert window.notes_panel.has_unsaved_edit
+
+    window.close()
+
+    assert get_workspace(load_settings(), "use-pyirena").notes == "do not lose this"
+
+
+# --- collapsible session panels -------------------------------------------
+
+
+def test_session_panels_collapse_and_the_state_is_remembered(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """User request: "we could make the different subwindows in the right
+    panel collapsible... open only if user wants to change the content"."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        section = window._sections["Quick Tasks"]
+        assert not section.is_collapsed
+
+        section._header.click()
+
+        assert section.is_collapsed
+        assert not window.quick_tasks_panel.isVisibleTo(section)
+        assert "Quick Tasks" in load_settings().app.collapsed_panels
+    finally:
+        window.close()
+
+
+def test_collapsed_panels_reopen_collapsed(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    settings.app.collapsed_panels = ["MCP Servers", "Workspace Notes"]
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        assert window._sections["MCP Servers"].is_collapsed
+        assert window._sections["Workspace Notes"].is_collapsed
+        assert not window._sections["Folders"].is_collapsed
+    finally:
+        window.close()
+
+
+# --- typing while the agent works -----------------------------------------
+
+
+def test_send_while_a_turn_is_running_queues_instead_of_starting_a_turn(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """User request: "when agent is working, user has no chance for input to
+    the process... so I can tell agent what I forgot"."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        queued: list[str] = []
+        monkeypatch.setattr(window.bridge, "queue_user_message", lambda text: queued.append(text) or True)
+        monkeypatch.setattr(type(window.bridge), "is_busy", property(lambda self: True))
+        sent: list[str] = []
+        monkeypatch.setattr(window.bridge, "send", lambda text, **kw: sent.append(text))
+
+        window._on_send_requested("also check the background")
+
+        assert queued == ["also check the background"]
+        assert sent == []  # no second turn started
+    finally:
+        window.close()
+
+
+def test_a_queued_message_the_turn_never_reached_comes_back(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Text accepted by the queue but never delivered must reappear in the
+    input box, not vanish."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        monkeypatch.setattr(window.bridge, "take_undelivered_messages", lambda: ["what about run 43"])
+
+        window._on_turn_finished()
+
+        assert "what about run 43" in window.input_box.text()
+    finally:
+        window.close()

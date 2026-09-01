@@ -27,6 +27,23 @@ decision revised), unrelated to what shipped when. Entries below link to
 - Tooltips on the Providers… dialog's **Max tokens** and **Context
   window** fields explaining the difference, plus a callout with the exact
   log message in `docs/providers-and-secrets.md`.
+- **Workspace Notes**: a free-text notepad in the right-hand panel,
+  saved with the workspace (`notes` in `workspaces.yaml`, written on the
+  next save for workspaces that predate the field) and auto-saved a beat
+  after you stop typing. Deliberately private — never added to the
+  system prompt, not readable by any tool — so a running commentary costs
+  no tokens and can't steer the model.
+- The right-hand session panels (Folders, MCP Servers, Quick Tasks,
+  Workspace Notes) are now collapsible, and the whole column scrolls.
+  Which panels you keep collapsed is remembered between launches
+  (`collapsed_panels` in `config.yaml`).
+- You can type while the agent is working. Text sent mid-turn is handed to
+  the running turn and delivered at its next round trip — never mid-stream
+  and never between a tool call and its result — then shown in the
+  transcript where it actually landed. **Stop** is now its own button
+  rather than a relabelled **Send**, so both are available at once; a
+  queued message the turn ends before reaching comes back to the input box
+  instead of vanishing.
 - The status bar's **Session total** (tokens + estimated cost) and
   **Context** labels now refresh every 30 seconds while a turn is running,
   not only when it finishes — a long tool-loop turn used to show the

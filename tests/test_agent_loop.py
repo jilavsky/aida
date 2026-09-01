@@ -9,6 +9,7 @@ from aida.core.events import (
     FileArtifactCreated,
     ImageArtifactCreated,
     MessageFinished,
+    SteeringMessageDelivered,
     TextDelta,
     TextFinished,
     TextStarted,
@@ -564,3 +565,87 @@ async def test_history_after_cancelled_turn_still_translates_for_anthropic():
     }
     assert tool_use_ids  # the cancelled turn really did announce calls
     assert tool_use_ids == tool_result_ids
+
+
+# --- mid-turn steering ----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_queued_message_is_delivered_at_the_next_round_trip():
+    """User request: "when agent is working, user has no chance for input
+    to the process... in Claude app user can type content in and it gets
+    included in message in next turn, so I can tell agent what I forgot."
+    """
+    provider = MockProvider(
+        [MockTurn(tool_calls=[MockToolCall(name="get_current_time")]), MockTurn(text="done")]
+    )
+    loop = AgentLoop(provider, _settings(), {"get_current_time": TIME_TOOL})
+    messages = [Message(role="user", content="what time is it")]
+
+    events = []
+    async for event in loop.run(messages):
+        events.append(event)
+        if isinstance(event, ToolCallFinished):
+            # Typed while the tool was running — the realistic moment.
+            loop.queue_user_message("  also tell me the date  ")
+
+    delivered = [e for e in events if isinstance(e, SteeringMessageDelivered)]
+    assert [e.text for e in delivered] == ["also tell me the date"]  # stripped
+
+    # Landed in the conversation as an ordinary user message, after the tool
+    # result it could not have influenced and before the next request.
+    roles = [(m.role, m.content) for m in messages]
+    assert ("user", "also tell me the date") in roles
+    assert roles.index(("user", "also tell me the date")) > next(
+        i for i, m in enumerate(messages) if m.role == "tool"
+    )
+
+
+@pytest.mark.asyncio
+async def test_queued_message_is_not_delivered_mid_tool_call():
+    """Delivery has to wait for the round-trip boundary: appending a user
+    message between a tool_use and its tool_result would leave a
+    conversation both providers reject."""
+    provider = MockProvider(
+        [
+            MockTurn(tool_calls=[MockToolCall(name="get_current_time", id="c1"), MockToolCall(name="get_current_time", id="c2")]),
+            MockTurn(text="done"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), {"get_current_time": TIME_TOOL})
+    messages = [Message(role="user", content="hi")]
+
+    seen_first_result = False
+    order: list[str] = []
+    async for event in loop.run(messages):
+        if isinstance(event, ToolCallFinished) and not seen_first_result:
+            seen_first_result = True
+            loop.queue_user_message("interjection")
+        if isinstance(event, (ToolCallFinished, SteeringMessageDelivered)):
+            order.append(type(event).__name__)
+
+    # Both tool results, then the interjection — never interleaved.
+    assert order == ["ToolCallFinished", "ToolCallFinished", "SteeringMessageDelivered"]
+
+
+@pytest.mark.asyncio
+async def test_undelivered_queued_message_is_handed_back_not_eaten():
+    """A turn that ends before reaching the queue must not swallow what the
+    user typed — the GUI puts it back in the input box."""
+    provider = MockProvider([MockTurn(text="done")])
+    loop = AgentLoop(provider, _settings())
+    messages = [Message(role="user", content="hi")]
+
+    async for _event in loop.run(messages):
+        pass
+    loop.queue_user_message("too late")
+
+    assert loop.take_undelivered_messages() == ["too late"]
+    assert loop.take_undelivered_messages() == []  # drained, not duplicated
+
+
+@pytest.mark.asyncio
+async def test_blank_queued_message_is_ignored():
+    loop = AgentLoop(MockProvider([MockTurn(text="ok")]), _settings())
+    loop.queue_user_message("   \n  ")
+    assert loop.take_undelivered_messages() == []

@@ -259,6 +259,17 @@ class ChatSession:
     def cancel(self) -> None:
         self.loop.cancel()
 
+    def queue_user_message(self, text: str) -> None:
+        """Deliver ``text`` to the *running* turn at its next round trip —
+        see ``AgentLoop.queue_user_message``. A plain synchronous call, like
+        ``cancel()``: safe from any thread, no scheduling onto the loop."""
+        self.loop.queue_user_message(text)
+
+    def take_undelivered_messages(self) -> list[str]:
+        """Queued interjections the turn ended before reaching — see
+        ``AgentLoop.take_undelivered_messages``."""
+        return self.loop.take_undelivered_messages()
+
     def _history_budget(self) -> int | None:
         """The token budget for *sent* history right now — per-profile
         ``context_window`` (PLAN.md §1.3) falling back to the global

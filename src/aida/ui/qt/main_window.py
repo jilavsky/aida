@@ -37,6 +37,7 @@ from aida.ui.qt._qt import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QScrollArea,
     QSplitter,
     Qt,
     QTimer,
@@ -48,11 +49,13 @@ from aida.ui.qt._qt import (
 from aida.ui.qt.bridge import AsyncLoopThread, ChatBridge
 from aida.ui.qt.chat_panel import ChatPanel
 from aida.ui.qt.code_editor_dialog import CodeEditorDialog
+from aida.ui.qt.collapsible import CollapsibleSection
 from aida.ui.qt.conversations_sidebar import ConversationsSidebar
 from aida.ui.qt.icon import app_icon
 from aida.ui.qt.input_box import InputBox
 from aida.ui.qt.knowledge_management_dialog import KnowledgeManagementDialog
 from aida.ui.qt.mcp_management_dialog import McpManagementDialog
+from aida.ui.qt.notes_panel import NotesPanel
 from aida.ui.qt.onboarding_dialog import OnboardingDialog
 from aida.ui.qt.profiles_dialog import ProfilesDialog
 from aida.ui.qt.quick_tasks_panel import QuickTaskData, QuickTasksPanel
@@ -184,6 +187,9 @@ class MainWindow(QMainWindow):
         # the panel accepted an Add during startup that
         # _on_quick_tasks_changed then dropped on the floor.
         self.quick_tasks_panel.setEnabled(False)
+        # Same workspace-scoped rule, same reason (see NotesPanel).
+        self.notes_panel = NotesPanel(self)
+        self.notes_panel.setEnabled(False)
 
         chat_column = QWidget(self)
         chat_layout = QVBoxLayout(chat_column)
@@ -194,15 +200,36 @@ class MainWindow(QMainWindow):
         session_column = QWidget(self)
         session_layout = QVBoxLayout(session_column)
         session_layout.setContentsMargins(0, 0, 0, 0)
-        session_layout.addWidget(self.folder_display)
-        session_layout.addWidget(self.mcp_panel)
-        session_layout.addWidget(self.quick_tasks_panel)
+        # User request: "we need to make the right tab vertically
+        # scrollable, so user can actually get to the content. Maybe
+        # better, we could make the different subwindows in the right panel
+        # collapsible." Both — collapsing is what makes four stacked panels
+        # usable, the scroll area is what guarantees the content is always
+        # reachable even with everything expanded. Collapsed state is
+        # restored from AppConfig and saved on every toggle.
+        self._sections: dict[str, CollapsibleSection] = {}
+        for title, panel in (
+            ("Folders", self.folder_display),
+            ("MCP Servers", self.mcp_panel),
+            ("Quick Tasks", self.quick_tasks_panel),
+            ("Workspace Notes", self.notes_panel),
+        ):
+            section = CollapsibleSection(title, panel, session_column)
+            section.set_collapsed(title in self.settings.app.collapsed_panels)
+            section.toggled.connect(self._on_section_toggled)
+            self._sections[title] = section
+            session_layout.addWidget(section)
         session_layout.addStretch(1)
+
+        session_scroll = QScrollArea(self)
+        session_scroll.setWidget(session_column)
+        session_scroll.setWidgetResizable(True)
+        session_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self.sidebar)
         splitter.addWidget(chat_column)
-        splitter.addWidget(session_column)
+        splitter.addWidget(session_scroll)
         splitter.setStretchFactor(1, 1)  # chat column gets the extra space
         self.setCentralWidget(splitter)
 
@@ -319,6 +346,7 @@ class MainWindow(QMainWindow):
         self.mcp_panel.server_stop_requested.connect(self._on_mcp_server_stop_requested)
         self.quick_tasks_panel.task_selected.connect(self._on_quick_task_selected)
         self.quick_tasks_panel.tasks_changed.connect(self._on_quick_tasks_changed)
+        self.notes_panel.notes_changed.connect(self._on_notes_changed)
 
     def _wire_bridge_signals(self) -> None:
         # Every connection here must have *this window* as the receiver, so
@@ -388,6 +416,27 @@ class MainWindow(QMainWindow):
     def _on_turn_finished(self) -> None:
         self.input_box.set_busy(False)
         self._usage_refresh_timer.stop()
+        self._restore_undelivered_messages()
+
+    def _restore_undelivered_messages(self) -> None:
+        """Put queued text the turn never reached back in the input box.
+
+        A turn that ends (or is stopped) a moment after the user hits Enter
+        would otherwise swallow what they typed — it was accepted by the
+        queue, never delivered, and nothing in the transcript would show it
+        ever existed. Prepended to whatever is already in the box rather
+        than replacing it, so a second interjection typed in the meantime
+        survives too.
+        """
+        pending = self.bridge.take_undelivered_messages()
+        if not pending:
+            return
+        existing = self.input_box.text().strip()
+        restored = "\n\n".join([*pending, existing] if existing else pending)
+        self.input_box.set_text(restored)
+        self.statusBar().showMessage(
+            "The turn ended before your queued message was sent — it's back in the input box", 8000
+        )
 
     def _on_usage_refresh_tick(self) -> None:
         """Repaint the two status-bar totals mid-turn.
@@ -444,6 +493,7 @@ class MainWindow(QMainWindow):
         self._refresh_mcp_panel()
         self._refresh_folder_display()
         self._refresh_quick_tasks_panel()
+        self._refresh_notes_panel()
         self._refresh_conversations_sidebar()
         # Bug report: "I restored prior session and have selected local AI
         # ... I suspect it must be using cloud (Argo)." Root cause:
@@ -626,6 +676,9 @@ class MainWindow(QMainWindow):
         future.set_result(answer == QMessageBox.StandardButton.Yes)
 
     def _on_send_requested(self, text: str) -> None:
+        if self.bridge.is_busy:
+            self._queue_message_for_running_turn(text)
+            return
         attachments = self.input_box.attached_paths()
         self.input_box.clear_attachments()
         self.chat_panel.add_user_message(text)
@@ -641,6 +694,37 @@ class MainWindow(QMainWindow):
             names = ", ".join(Path(p).name for p in failures)
             self.statusBar().showMessage(f"Could not read attachment(s): {names} — see chat for details", 8000)
         self.bridge.send(outgoing, images=images)
+
+    def _queue_message_for_running_turn(self, text: str) -> None:
+        """Send pressed while a turn is running: hand the text to that turn
+        instead of starting a new one.
+
+        User request: "when agent is working, user has no chance for input
+        to the process ... so I can tell agent what I forgot." The agent
+        loop delivers it at its next round trip and emits
+        ``SteeringMessageDelivered``, which is what puts it in the
+        transcript — so nothing is rendered here beyond a status-bar
+        acknowledgement. Showing it as sent immediately would be a lie: the
+        model has not seen it yet, and a turn that ends first never will
+        (``_on_turn_finished`` hands anything undelivered back to the input
+        box).
+
+        Attachments are deliberately not part of an interjection: reading
+        files and attaching image pixels belongs to ``_augment_with_
+        attachments`` on a real send, and half-attaching them here would be
+        worse than saying so plainly.
+        """
+        if not self.bridge.queue_user_message(text):
+            # Lost the race with turn_finished — send it as a normal turn.
+            self.input_box.set_text(text)
+            self._on_send_requested(text)
+            return
+        if self.input_box.attached_paths():
+            self.statusBar().showMessage(
+                "Queued for the running turn — attachments stay pending until the turn ends", 8000
+            )
+        else:
+            self.statusBar().showMessage("Queued — the agent sees this at its next step", 5000)
 
     def _augment_with_attachments(
         self, text: str, attachments: list[str]
@@ -1169,6 +1253,52 @@ class MainWindow(QMainWindow):
             self._current_workspace_config.name,
         )
 
+    # --- workspace notes -----------------------------------------------------
+
+    def _refresh_notes_panel(self) -> None:
+        """Load the active workspace's notes — same "populate from
+        ``_current_workspace_config``, empty and disabled without one"
+        shape as ``_refresh_quick_tasks_panel``. ``NotesPanel.set_notes``
+        flushes any pending save for the *outgoing* workspace first, so
+        switching workspaces mid-sentence can't write one workspace's notes
+        into another."""
+        if self._current_workspace_config is not None:
+            self.notes_panel.set_notes(self._current_workspace_config.notes)
+        else:
+            self.notes_panel.set_notes("")
+        self.notes_panel.setEnabled(self._current_workspace_config is not None)
+
+    def _on_notes_changed(self, text: str) -> None:
+        """Persist the notepad. Debounced by ``NotesPanel`` (this fires a
+        beat after typing stops, not per keystroke), then saved the same
+        auto-save way quick tasks are."""
+        if self._current_workspace_config is None:
+            self.statusBar().showMessage(
+                "Notes are saved per workspace — start a session with a workspace first", 8000
+            )
+            self._logger.warning("workspace notes edit discarded: no active workspace")
+            return
+        self._current_workspace_config.notes = text
+        save_workspace(self.settings, self._current_workspace_config)
+        self._logger.info(
+            "saved %d chars of notes to workspace %s", len(text), self._current_workspace_config.name
+        )
+
+    # --- collapsible session panels ------------------------------------------
+
+    def _on_section_toggled(self, title: str, collapsed: bool) -> None:
+        """Remember which right-hand panels the user keeps collapsed.
+
+        Saved immediately rather than on close, for the same reason
+        ``_save_last_session_selection`` is: a setting the user changed by
+        hand should survive a crash or a force-quit, not only a clean exit.
+        """
+        collapsed_panels = [t for t in self.settings.app.collapsed_panels if t != title]
+        if collapsed:
+            collapsed_panels.append(title)
+        self.settings.app.collapsed_panels = collapsed_panels
+        save_app_config(self.settings.app)
+
     # --- MCP management (Phase 7) -------------------------------------------
 
     def open_mcp_management_dialog(self) -> None:
@@ -1273,6 +1403,10 @@ class MainWindow(QMainWindow):
     # --- shutdown ----------------------------------------------------------
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        # Notes are saved a beat after typing stops (NotesPanel debounces),
+        # so quitting immediately after the last keystroke would otherwise
+        # drop that keystroke on the floor.
+        self.notes_panel.flush()
         capture_window_state(self, self.settings.app)
         save_app_config(self.settings.app)
         conversation_id = self._active_conversation_id(self.bridge)

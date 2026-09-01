@@ -82,23 +82,30 @@ def test_shift_enter_inserts_newline_instead_of_sending(qapp):
     assert box.text().startswith("line1")
 
 
-def test_set_busy_disables_input_and_relabels_button(qapp):
+def test_set_busy_shows_stop_and_keeps_the_box_usable(qapp):
+    """Busy no longer means "locked out": Stop is its own button and the
+    text box stays live, because text typed during a turn is now handed to
+    that turn (user request: "so I can tell agent what I forgot")."""
     box = InputBox()
     assert not box.is_busy
     assert box._send_button.text() == "Send"
+    assert not box._stop_button.isVisibleTo(box)
 
     box.set_busy(True)
     assert box.is_busy
-    assert box._send_button.text() == "Stop"
-    assert not box._text_edit.isEnabled()
+    assert box._stop_button.isVisibleTo(box)
+    assert box._send_button.text() == "Queue"
+    assert box._text_edit.isEnabled()
 
     box.set_busy(False)
     assert not box.is_busy
+    assert not box._stop_button.isVisibleTo(box)
     assert box._send_button.text() == "Send"
-    assert box._text_edit.isEnabled()
 
 
-def test_button_click_while_busy_cancels_instead_of_sending(qapp):
+def test_stop_button_cancels_and_send_button_never_does(qapp):
+    """The two used to be one button; conflating them is exactly what made
+    typing-while-busy impossible."""
     box = InputBox()
     box.set_text("hello")
     box.set_busy(True)
@@ -108,24 +115,29 @@ def test_button_click_while_busy_cancels_instead_of_sending(qapp):
     box.cancel_requested.connect(lambda: cancelled.append(True))
     box.send_requested.connect(sent.append)
 
-    box._send_button.click()
-
+    box._stop_button.click()
     assert cancelled == [True]
     assert sent == []
 
+    box._send_button.click()
+    assert cancelled == [True]  # unchanged: Send is only ever Send
+    assert sent == ["hello"]
 
-def test_enter_while_busy_does_not_send(qapp):
+
+def test_enter_while_busy_sends_for_the_owner_to_queue(qapp):
+    """InputBox doesn't know what "sending during a turn" means — it emits
+    the same signal either way and MainWindow routes it to the running turn
+    (ChatBridge.queue_user_message)."""
     box = InputBox()
     box.set_busy(True)
-    # Text edit is disabled while busy, but exercise _on_submit's own guard
-    # directly (the busy check), independent of whether the disabled widget
-    # would even deliver the key event in a real UI.
     sent = []
     box.send_requested.connect(sent.append)
-    box._text_edit.setEnabled(True)  # bypass the disabled-widget short-circuit for this check
-    box._text_edit.setPlainText("hello")
+
+    box._text_edit.setPlainText("also check the background")
     box._on_submit()
-    assert sent == []
+
+    assert sent == ["also check the background"]
+    assert box.text() == ""  # cleared, like any other send
 
 
 # --- Phase 6: attachments (Attach button + drag-and-drop) --------------------
@@ -267,12 +279,12 @@ def test_busy_state_is_visible_not_just_implied(qapp):
     box = InputBox()
 
     assert box.busy_status_text() == ""
-    assert box._send_button.styleSheet() == box._idle_button_style
+    assert not box._stop_button.isVisibleTo(box)
 
     box.set_busy(True)
 
-    assert box._send_button.text() == "Stop"
-    assert box._send_button.styleSheet() != box._idle_button_style
+    assert box._stop_button.isVisibleTo(box)
+    assert box._stop_button.styleSheet()  # recolored, not a default button
     assert box._busy_label.isVisible() or box._busy_label.isVisibleTo(box)
     assert box.busy_status_text().startswith("Working")
     assert "Stop" in box.busy_status_text()
@@ -280,7 +292,7 @@ def test_busy_state_is_visible_not_just_implied(qapp):
     box.set_busy(False)
 
     assert box._send_button.text() == "Send"
-    assert box._send_button.styleSheet() == box._idle_button_style
+    assert not box._stop_button.isVisibleTo(box)
     assert box.busy_status_text() == ""
     assert not box._busy_label.isVisibleTo(box)
 

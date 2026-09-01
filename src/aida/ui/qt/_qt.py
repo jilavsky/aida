@@ -77,6 +77,7 @@ from PySide6.QtWidgets import (
     QTextBrowser,
     QTextEdit,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -134,6 +135,7 @@ __all__ = [
     "QThread",
     "QTimer",
     "QToolBar",
+    "QToolButton",
     "QUrl",
     "QVBoxLayout",
     "QWidget",

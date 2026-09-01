@@ -235,6 +235,13 @@ class AppConfig:
     # a fresh install says nothing about the user until they fill it in.
     assistant_name: str = "Aida"
     user_context: str = ""
+    # Titles of the right-hand session panels (Folders / MCP Servers /
+    # Quick Tasks / Workspace Notes) the user has collapsed. Persisted so
+    # the column reopens the way they left it — with four panels stacked
+    # there, which ones are worth the vertical space is a per-user habit,
+    # not something to re-decide on every launch. Unknown titles are
+    # ignored on load, so renaming or removing a panel can't break startup.
+    collapsed_panels: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -277,6 +284,7 @@ class AppConfig:
             "command_allowlist": self.command_allowlist,
             "assistant_name": self.assistant_name,
             "user_context": self.user_context,
+            "collapsed_panels": self.collapsed_panels,
         }
 
 
@@ -304,6 +312,7 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "command_allowlist": "list[str]",
     "assistant_name": "str",
     "user_context": "str",
+    "collapsed_panels": "list[str]",
 }
 
 
@@ -581,6 +590,13 @@ class WorkspaceConfig:
     #: GUI's Quick Tasks panel. Empty by default (no quick tasks until the
     #: user adds one via the panel, or hand-edits workspaces.yaml).
     quick_tasks: list[QuickTask] = field(default_factory=list)
+    #: Free-form scratch notes for this workspace, edited in the GUI's Notes
+    #: panel (user request: "users really need a workspace notepad ... space
+    #: for notes to make while they are working, so they can note what to do
+    #: next or what they observed and needs fixing"). Deliberately
+    #: *private*: never added to the system prompt and not readable by any
+    #: tool, so nothing typed here costs tokens or steers the model.
+    notes: str = ""
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> WorkspaceConfig:
@@ -603,6 +619,7 @@ class WorkspaceConfig:
             saved_scripts_dir=data.get("saved_scripts_dir"),
             script_timeout_seconds=data.get("script_timeout_seconds", 30.0),
             quick_tasks=_coerce_quick_tasks(source, data.get("quick_tasks")),
+            notes=str(data.get("notes") or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -623,6 +640,7 @@ class WorkspaceConfig:
             "saved_scripts_dir": self.saved_scripts_dir,
             "script_timeout_seconds": self.script_timeout_seconds,
             "quick_tasks": [task.to_dict() for task in self.quick_tasks],
+            "notes": self.notes,
         }
 
     def resolved_saved_scripts_dir(self) -> str | None:

@@ -41,14 +41,20 @@ from aida.ui.qt._qt import (
     Signal,
 )
 
+_IDLE_PLACEHOLDER = "Message AIDA… (Enter to send, Shift+Enter for a new line)"
+#: While a turn runs, Enter queues rather than starts — say so, since the
+#: same key now does two different things depending on state.
+_BUSY_PLACEHOLDER = "Agent is working — type to add a note for its next step (Enter to queue)"
+
 #: Bug report: "when model is working I can only not write new message and
 #: the Stop button is visible" — the *absence* of the Send button was the
 #: only signal that a turn was in flight, which is a thing you have to
-#: notice rather than a thing you see. While busy the button is recolored
-#: (red = "this stops something", the one place in the window with a
-#: colored button) and a live "Working… 12s" label appears beside it, so
-#: both the state and how long it has been going are readable at a glance.
-_BUSY_BUTTON_STYLE = """
+#: notice rather than a thing you see. Stop is now its own button, red
+#: (the one colored button in the window: red = "this stops something"),
+#: visible only while a turn is running, with a live "Working… 12s" label
+#: beside it — so both the state and how long it has been going are
+#: readable at a glance.
+_STOP_BUTTON_STYLE = """
 QPushButton {
     background-color: #c0392b;
     color: white;
@@ -120,16 +126,25 @@ class InputBox(QWidget):
         layout = QHBoxLayout()
         outer.addLayout(layout)
         self._text_edit = _InputTextEdit(self)
-        self._text_edit.setPlaceholderText("Message AIDA… (Enter to send, Shift+Enter for a new line)")
+        self._text_edit.setPlaceholderText(_IDLE_PLACEHOLDER)
         self._text_edit.submit_requested.connect(self._on_submit)
         layout.addWidget(self._text_edit)
 
         button_column = QVBoxLayout()
         self._send_button = QPushButton("Send", self)
         self._send_button.setShortcut(QKeySequence("Ctrl+Return"))
-        self._send_button.clicked.connect(self._on_button_clicked)
-        self._idle_button_style = self._send_button.styleSheet()
+        self._send_button.clicked.connect(self._on_submit)
         button_column.addWidget(self._send_button)
+        # Its own button, not a relabelled Send: now that typing during a
+        # turn is allowed (see _on_submit), one button cannot mean both
+        # "send this text" and "stop the turn" — the user needs Send to
+        # stay Send while the agent works.
+        self._stop_button = QPushButton("Stop", self)
+        self._stop_button.setStyleSheet(_STOP_BUTTON_STYLE)
+        self._stop_button.setToolTip("Stop the turn in progress")
+        self._stop_button.clicked.connect(self.cancel_requested.emit)
+        self._stop_button.setVisible(False)
+        button_column.addWidget(self._stop_button)
         self._attach_button = QPushButton("Attach…", self)
         self._attach_button.clicked.connect(self._on_attach_clicked)
         button_column.addWidget(self._attach_button)
@@ -158,9 +173,13 @@ class InputBox(QWidget):
     def set_busy(self, busy: bool) -> None:
         """Called by whatever owns this widget (MainWindow) on
         ``ChatBridge.turn_started``/``turn_finished`` — while busy, the
-        text box is disabled (a new turn can't start until this one ends
-        or is cancelled), the button becomes a red Stop, and the
-        "Working… Ns" label ticks beside it (see ``_BUSY_BUTTON_STYLE``).
+        red **Stop** button appears, Send becomes **Queue**, and the
+        "Working… Ns" label ticks beside them (see ``_STOP_BUTTON_STYLE``).
+
+        The text box deliberately stays *enabled* while busy: text typed
+        during a turn is handed to that turn rather than rejected (see
+        ``_on_submit``), which is the whole point of Stop being its own
+        button now.
 
         Idempotent: a repeated ``set_busy(True)`` does not restart the
         elapsed clock, so a turn's timer keeps counting the turn rather
@@ -169,10 +188,12 @@ class InputBox(QWidget):
         if busy == self._busy:
             return
         self._busy = busy
-        self._text_edit.setEnabled(not busy)
-        self._send_button.setText("Stop" if busy else "Send")
-        self._send_button.setStyleSheet(_BUSY_BUTTON_STYLE if busy else self._idle_button_style)
-        self._send_button.setToolTip("Stop the turn in progress" if busy else "")
+        self._stop_button.setVisible(busy)
+        self._send_button.setText("Queue" if busy else "Send")
+        self._send_button.setToolTip(
+            "Hand this to the running turn — the agent sees it at its next step" if busy else ""
+        )
+        self._text_edit.setPlaceholderText(_BUSY_PLACEHOLDER if busy else _IDLE_PLACEHOLDER)
         if busy:
             self._busy_started_at = time.monotonic()
             self._busy_ticks = 0
@@ -283,19 +304,20 @@ class InputBox(QWidget):
     # --- actions -------------------------------------------------------------
 
     def _on_submit(self) -> None:
-        if self._busy:
-            return  # Enter while a turn is in flight does nothing — use Stop
+        """Enter, or the Send/Queue button.
+
+        Emits ``send_requested`` whether or not a turn is running — this
+        widget does not decide what "sending during a turn" means, the
+        owner does (``MainWindow`` hands it to the running turn via
+        ``ChatBridge.queue_user_message``). Enter used to be a no-op while
+        busy; it now works, which is the user-visible half of "let me tell
+        the agent what I forgot".
+        """
         text = self.text().strip()
         if not text and not self._attachments:
             return  # nothing to send: no typed text and nothing attached
         self.clear()
         self.send_requested.emit(text)
-
-    def _on_button_clicked(self) -> None:
-        if self._busy:
-            self.cancel_requested.emit()
-        else:
-            self._on_submit()
 
 
 __all__ = ["InputBox"]
