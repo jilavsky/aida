@@ -65,6 +65,17 @@ decision revised), unrelated to what shipped when. Entries below link to
   now carried through an edit, the workspace detail panel lists the saved
   quick tasks, and a quick-task edit with no active workspace says so in
   the status bar instead of being dropped in silence.
+- A model that rejects a `temperature` *value* rather than the parameter
+  itself is now recovered from too ("Unsupported value: 'temperature' does
+  not support 0.7 with this model. Only the default (1) value is
+  supported.", from OpenAI-family models via the ANL Argo proxy). The
+  recovery existed but was gated on `except APIStatusError`, and an error
+  delivered *inside* an SSE stream — HTTP 200, then an error event, which
+  is how that proxy reports an upstream 400 — reaches the SDK's
+  status-less base error class instead. It fell through to "unexpected
+  provider error" with no retry, even though the message said exactly
+  which parameter to drop. Every error branch now asks, and eligibility
+  depends on what the message says rather than on how the SDK wrapped it.
 - A model that rejects `temperature` no longer fails the turn. Newer
   Claude models answer the parameter with a 400 ("`temperature` is
   deprecated for this model") — and the ANL Argo proxy relays that inside
@@ -76,6 +87,15 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Changed
 
+- AIDA no longer invents a `temperature`. A provider profile that doesn't
+  set one now sends **no** temperature and lets the endpoint apply its own
+  default; previously an unset field silently became 0.7 on every request.
+  That invented value is the root of the whole "unsupported temperature"
+  class of failure — models that fix temperature at their own default
+  reject 0.7 outright, and no client can know statically which models
+  those are. Profiles that *do* set a temperature are unaffected, and the
+  drop-and-retry recovery still covers a value a model won't take. Set
+  `temperature: 0.7` explicitly on a profile to keep the old behavior.
 - The "Scratch folder" system-prompt paragraph (`build_workspace_context_block`)
   now tells the model what to do when an MCP tool rejects its scratch-folder
   path — some servers (browser-automation tools like Playwright MCP

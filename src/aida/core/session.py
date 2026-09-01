@@ -176,13 +176,19 @@ def resolve_profile(settings: Settings, name: str):
 
 def _completion_settings_for_profile(profile) -> CompletionSettings:
     """Build the ``CompletionSettings`` for one provider request from a
-    profile (B2) — ``None`` on ``max_tokens``/``temperature`` falls back to
-    ``CompletionSettings``'s own defaults, exactly matching pre-B2 behavior
-    for a profile that never set them. Shared by ``ChatSession.__init__``
-    and ``switch_profile`` so the two construction sites can't drift."""
-    kwargs: dict[str, object] = {"model": profile.model, "supports_vision": profile.supports_vision}
-    if profile.temperature is not None:
-        kwargs["temperature"] = profile.temperature
+    profile (B2). Shared by ``ChatSession.__init__`` and ``switch_profile``
+    so the two construction sites can't drift.
+
+    A profile with no ``temperature`` set now sends *no* temperature rather
+    than falling back to a made-up 0.7 — see ``CompletionSettings``. A
+    profile that wants a specific one still says so and gets it.
+    ``max_tokens`` keeps its fallback: unlike temperature, a request with
+    no token cap is not something every endpoint accepts."""
+    kwargs: dict[str, object] = {
+        "model": profile.model,
+        "supports_vision": profile.supports_vision,
+        "temperature": profile.temperature,
+    }
     if profile.max_tokens is not None:
         kwargs["max_tokens"] = profile.max_tokens
     return CompletionSettings(**kwargs)
@@ -409,7 +415,13 @@ class ChatSession:
         # call a tool. Reuses the active profile/model rather than a
         # separate "utility profile" — see context_management.md §6.
         summary_settings = CompletionSettings(
-            model=self.completion_settings.model, temperature=0.0, supports_vision=False
+            model=self.completion_settings.model,
+            # Only pin a low temperature if the active profile shows this
+            # endpoint takes one at all — a model that fixes temperature at
+            # its own default rejects 0.0 exactly as it rejects 0.7, and a
+            # failed compaction silently costs the user their history.
+            temperature=0.0 if self.completion_settings.temperature is not None else None,
+            supports_vision=False,
         )
         try:
             summary_text = ""

@@ -371,7 +371,7 @@ def test_process_anthropic_event_tool_use_accumulates_partial_json():
 
 def test_completion_settings_defaults():
     settings = CompletionSettings(model="gpt-x")
-    assert settings.temperature == 0.7
+    assert settings.temperature is None  # "send no temperature", not "send 0.7"
     assert settings.max_tokens is None
     assert settings.extra == {}
 

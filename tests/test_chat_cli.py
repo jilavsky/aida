@@ -236,7 +236,10 @@ def test_print_event_usage_info_with_duration_shows_cache_note_too(capsys):
 # --- _completion_settings_for_profile (B2) -----------------------------------
 
 
-def test_completion_settings_for_profile_falls_back_to_defaults_when_unset(aida_home: Path, records_home: Path):
+def test_completion_settings_for_profile_sends_no_temperature_when_unset(aida_home: Path, records_home: Path):
+    """A profile that never set a temperature must not have one invented
+    for it — AIDA used to substitute 0.7, which models that fix temperature
+    at their own default then reject outright."""
     from aida.core.session import _completion_settings_for_profile
 
     settings = _settings_with_profile()
@@ -245,7 +248,7 @@ def test_completion_settings_for_profile_falls_back_to_defaults_when_unset(aida_
     completion_settings = _completion_settings_for_profile(profile)
 
     assert completion_settings.model == "mock-model"
-    assert completion_settings.temperature == 0.7  # CompletionSettings' own default
+    assert completion_settings.temperature is None  # omitted from the request entirely
     assert completion_settings.max_tokens is None
     assert completion_settings.supports_vision is False
 

@@ -57,9 +57,19 @@ _REJECTION_PHRASES = (
 _NON_PARAM_STATUSES = frozenset({401, 403, 404, 408, 429})
 
 
-def is_param_rejection_status(status_code: int) -> bool:
+def is_param_rejection_status(status_code: int | None) -> bool:
     """Whether a status code could plausibly carry a "bad parameter"
-    complaint — see ``_NON_PARAM_STATUSES``."""
+    complaint — see ``_NON_PARAM_STATUSES``.
+
+    ``None`` (the exception carries no status at all) is *eligible*, not
+    excluded: an SSE stream that starts 200 and then delivers an error
+    event surfaces as a bare ``APIError``/``AnthropicError`` with no
+    status_code, and that is exactly how the ANL Argo proxy reports an
+    upstream 400. Excluding it is what let a rejected ``temperature`` fall
+    through to "unexpected provider error" with no retry.
+    """
+    if status_code is None:
+        return True
     return status_code not in _NON_PARAM_STATUSES and status_code < 500
 
 
@@ -159,10 +169,19 @@ class CompletionSettings:
 
     Per-conversation looping concerns (max iterations, etc.) live in
     ``aida.core.agent.AgentLoop``, not here — this is just what goes into
-    one provider request. ``temperature``/``max_tokens`` are normally
-    filled in from the active ``ProviderProfile`` (B2) rather than left at
-    these defaults; the defaults here just preserve prior behavior for a
-    profile that doesn't set them.
+    one provider request. ``temperature``/``max_tokens`` are filled in from
+    the active ``ProviderProfile`` (B2).
+
+    ``temperature=None`` means **send no temperature at all** and let the
+    endpoint apply its own default, and that is what an unset profile field
+    now produces. AIDA used to substitute 0.7 here — a value the user never
+    asked for, sent to every model — which is the root of a whole class of
+    failure: models that fix temperature at 1 reject 0.7 outright
+    ("Unsupported value: 'temperature' does not support 0.7 with this
+    model"), and no client can know statically which models those are. Not
+    inventing a value removes the problem instead of recovering from it;
+    the drop-and-retry path (see ``unsupported_request_param``) still
+    covers the case where the user *did* set one the model won't take.
 
     ``supports_vision`` (B1) gates whether a translation function
     (``to_anthropic_params``/``to_openai_messages``) attaches any image
@@ -173,7 +192,7 @@ class CompletionSettings:
     """
 
     model: str
-    temperature: float = 0.7
+    temperature: float | None = None
     max_tokens: int | None = None
     supports_vision: bool = False
     extra: dict[str, Any] = field(default_factory=dict)

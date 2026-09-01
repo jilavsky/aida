@@ -296,14 +296,37 @@ class OpenAICompatProvider(LLMProvider):
         # (see _param_to_drop).
         self._dropped_params: dict[str, set[str]] = {}
 
-    def _param_to_drop(self, exc: APIStatusError, kwargs: dict[str, Any]) -> str | None:
+    def _param_to_drop(self, exc: Exception, kwargs: dict[str, Any]) -> str | None:
         """Name of the sampling parameter this endpoint just refused, or
-        ``None`` when the error is about anything else — see
-        ``AnthropicProvider._param_to_drop`` for the full rationale. Same
-        problem here: OpenAI's reasoning models reject ``temperature``
-        ("Unsupported value"), and small local servers reject assorted
-        sampling knobs they never implemented."""
-        if not is_param_rejection_status(exc.status_code):
+        ``None`` when the error is about anything else.
+
+        See ``AnthropicProvider._param_to_drop`` for the full rationale. Same
+        problem here, and this is where the user actually hit it: OpenAI-
+        family models reject a temperature *value* ("Unsupported value:
+        'temperature' does not support 0.7 with this model. Only the
+        default (1) value is supported."), and small local servers reject
+        assorted sampling knobs they never implemented.
+
+        Deliberately typed on plain ``Exception`` and reading the status
+        code with ``getattr``: the error does not always arrive as an
+        ``APIStatusError``. A proxy that answers 200 and then puts the
+        upstream 400 in the event stream (the ANL Argo pattern) makes the
+        SDK raise its status-less base error instead, which is how "Only
+        the default (1) value is supported" reached the user as an
+        unrecoverable "unexpected provider error" — the text said exactly
+        what to drop, but the retry was gated on the wrong exception class.
+        So every error branch asks this, and the answer depends on what the
+        message says, not on how the SDK chose to wrap it.
+
+        Rather than making the user configure per-model quirks, a rejection
+        naming a droppable sampling knob is taken as the endpoint telling
+        us to leave it out: the caller drops that one key and retries, and
+        it is remembered here so the doomed request is made at most once
+        per model per session. An error about anything else — or about
+        ``messages``/``tools``/``max_tokens`` — is never retried and
+        reaches the user as an ``AgentError``.
+        """
+        if not is_param_rejection_status(getattr(exc, "status_code", None)):
             return None
         name = unsupported_request_param(str(exc), kwargs)
         if name is None:
@@ -314,7 +337,6 @@ class OpenAICompatProvider(LLMProvider):
             "model %s rejected %r; sending without it for the rest of this session", model, name
         )
         return name
-
     def _without_known_bad_params(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Strip params this endpoint already rejected for this model."""
         for name in self._dropped_params.get(str(kwargs.get("model", "")), ()):
@@ -331,11 +353,12 @@ class OpenAICompatProvider(LLMProvider):
         kwargs: dict[str, Any] = {
             "model": settings.model or self.model,
             "messages": to_openai_messages(messages, supports_vision=settings.supports_vision),
-            "temperature": settings.temperature,
             "stream": True,
             "stream_options": {"include_usage": True},
             **settings.extra,
         }
+        if settings.temperature is not None:
+            kwargs["temperature"] = settings.temperature
         if settings.max_tokens is not None:
             kwargs["max_tokens"] = settings.max_tokens
         oai_tools = to_openai_tools(tools)
@@ -376,6 +399,12 @@ class OpenAICompatProvider(LLMProvider):
                     layer=self.layer_name, message=f"API error ({exc.status_code})", detail=str(exc)
                 )
             except Exception as exc:  # noqa: BLE001 - any unexpected SDK error still surfaces as AgentError
+                # Not just belt-and-braces: an error delivered *inside* an
+                # SSE stream (HTTP 200, then an error event — the Argo
+                # proxy's shape) reaches us as the SDK's status-less base
+                # APIError, which lands right here rather than in the
+                # APIStatusError branch above.
+                retry_param = None if emitted else self._param_to_drop(exc, kwargs)
                 error = AgentError(
                     layer=self.layer_name, message="unexpected provider error", detail=str(exc)
                 )

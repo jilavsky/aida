@@ -335,25 +335,37 @@ class AnthropicProvider(LLMProvider):
         # once per turn.
         self._dropped_params: dict[str, set[str]] = {}
 
-    def _param_to_drop(self, exc: APIStatusError, kwargs: dict[str, Any]) -> str | None:
+    def _param_to_drop(self, exc: Exception, kwargs: dict[str, Any]) -> str | None:
         """Name of the sampling parameter this endpoint just refused, or
         ``None`` when the error is about anything else.
 
         Newer models reject ``temperature`` outright ("`temperature` is
-        deprecated for this model"), and a proxy sitting in front of several
-        model versions (the ANL Argo endpoint) can accept it for one model
-        and refuse it for the next — so a profile cannot know statically
+        deprecated for this model"), OpenAI-family models behind the same
+        proxy reject a *value* ("Only the default (1) value is supported"),
+        and a proxy fronting several models can accept it for one and
+        refuse it for the next — so a profile cannot know statically
         whether to send it.
 
-        Rather than making the user configure that per model, the first
-        failure that names a droppable sampling knob is taken as the
-        endpoint telling us to leave it out: the caller drops that one key
-        and retries, and it is remembered here so the doomed request is
-        made at most once per model per session. An error about anything
-        else — or about ``messages``/``tools``/``max_tokens`` — is never
-        retried and reaches the user as an ``AgentError``.
+        Deliberately typed on plain ``Exception`` and reading the status
+        code with ``getattr``: the error does not always arrive as an
+        ``APIStatusError``. A proxy that answers 200 and then puts the
+        upstream 400 in the event stream (the ANL Argo pattern) makes the
+        SDK raise its status-less base error instead, which is how "Only
+        the default (1) value is supported" reached the user as an
+        unrecoverable "unexpected provider error" — the text said exactly
+        what to drop, but the retry was gated on the wrong exception class.
+        So every error branch asks this, and the answer depends on what the
+        message says, not on how the SDK chose to wrap it.
+
+        Rather than making the user configure per-model quirks, a rejection
+        naming a droppable sampling knob is taken as the endpoint telling
+        us to leave it out: the caller drops that one key and retries, and
+        it is remembered here so the doomed request is made at most once
+        per model per session. An error about anything else — or about
+        ``messages``/``tools``/``max_tokens`` — is never retried and
+        reaches the user as an ``AgentError``.
         """
-        if not is_param_rejection_status(exc.status_code):
+        if not is_param_rejection_status(getattr(exc, "status_code", None)):
             return None
         name = unsupported_request_param(str(exc), kwargs)
         if name is None:
@@ -364,7 +376,6 @@ class AnthropicProvider(LLMProvider):
             "model %s rejected %r; sending without it for the rest of this session", model, name
         )
         return name
-
     def _without_known_bad_params(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Strip params this endpoint already rejected for this model."""
         for name in self._dropped_params.get(str(kwargs.get("model", "")), ()):
@@ -384,10 +395,11 @@ class AnthropicProvider(LLMProvider):
             "model": settings.model or self.model,
             "messages": anthropic_messages,
             "max_tokens": settings.max_tokens or DEFAULT_MAX_TOKENS,
-            "temperature": settings.temperature,
             "stream": True,
             **settings.extra,
         }
+        if settings.temperature is not None:
+            kwargs["temperature"] = settings.temperature
         if system is not None:
             # B3: cached as a single ephemeral block — see
             # to_cached_system_param's docstring.
@@ -426,6 +438,7 @@ class AnthropicProvider(LLMProvider):
                     layer=self.layer_name, message=f"API error ({exc.status_code})", detail=str(exc)
                 )
             except AnthropicError as exc:
+                retry_param = None if emitted else self._param_to_drop(exc, kwargs)
                 error = AgentError(
                     layer=self.layer_name, message="unexpected provider error", detail=str(exc)
                 )
@@ -440,6 +453,7 @@ class AnthropicProvider(LLMProvider):
                 # async generator and broke that contract at the call site.
                 # OpenAICompatProvider already ends with the same blanket
                 # catch; this makes the two behave alike.
+                retry_param = None if emitted else self._param_to_drop(exc, kwargs)
                 error = AgentError(
                     layer=self.layer_name,
                     message="unexpected error",

@@ -172,8 +172,9 @@ def test_provider_profile_sampling_and_cost_fields_roundtrip(aida_home: Path):
 
 
 def test_provider_profile_sampling_fields_default_to_none():
-    """A profile that never set these must behave exactly as before B2 —
-    None means "use CompletionSettings' own defaults", not zero."""
+    """A profile that never set these leaves them None — which for
+    temperature means "send none at all" (never 0.0, and no longer a
+    made-up 0.7), and for max_tokens means the provider's own fallback."""
     from aida.config.settings import ProviderProfile
 
     profile = ProviderProfile.from_dict("local-ollama", {"kind": "openai_compat", "model": "qwen"})

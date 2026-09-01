@@ -9,6 +9,12 @@ the rest of the session — see ``AnthropicProvider._param_to_drop``.
 Same approach as test_anthropic_provider_ping.py: a real provider with a
 fake ``_client``, so what's under test is the provider's own retry logic,
 not the SDK's wire format.
+
+The retry tests set ``temperature`` explicitly because that is now the only
+way to send one: an unset profile field omits it from the request entirely
+(see ``test_temperature_is_sent_only_when_the_profile_asks_for_one``), so
+the recovery path exists for the user who *did* choose a value the model
+will not take.
 """
 
 from __future__ import annotations
@@ -17,11 +23,17 @@ from typing import Any
 
 import pytest
 from anthropic import APIStatusError as AnthropicAPIStatusError
+from openai import APIError as OpenAIAPIError
 from openai import APIStatusError as OpenAIAPIStatusError
 
 from aida.core.events import AgentError
 from aida.providers.anthropic_ import AnthropicProvider
-from aida.providers.base import CompletionSettings, Message, unsupported_request_param
+from aida.providers.base import (
+    CompletionSettings,
+    Message,
+    is_param_rejection_status,
+    unsupported_request_param,
+)
 from aida.providers.openai_compat import OpenAICompatProvider
 
 _DEPRECATED = (
@@ -116,7 +128,7 @@ async def test_anthropic_retries_without_temperature(status_code: int):
     events = [
         event
         async for event in provider.complete(
-            [Message(role="user", content="hi")], [], CompletionSettings(model="claude-opus-5")
+            [Message(role="user", content="hi")], [], CompletionSettings(model="claude-opus-5", temperature=0.7)
         )
     ]
 
@@ -131,7 +143,7 @@ async def test_anthropic_remembers_the_rejection_for_later_turns():
     provider = AnthropicProvider(model="claude-opus-5", api_key="k")
     create = _FakeCreate(_status_error(AnthropicAPIStatusError, 400, _DEPRECATED))
     provider._client.messages.create = create
-    settings = CompletionSettings(model="claude-opus-5")
+    settings = CompletionSettings(model="claude-opus-5", temperature=0.7)
 
     for _ in range(2):
         async for _event in provider.complete([Message(role="user", content="hi")], [], settings):
@@ -154,7 +166,7 @@ async def test_anthropic_surfaces_an_unrelated_400_without_retrying():
 
     events = [
         event
-        async for event in provider.complete([], [], CompletionSettings(model="claude-opus-5"))
+        async for event in provider.complete([], [], CompletionSettings(model="claude-opus-5", temperature=0.7))
     ]
 
     assert [e.message for e in events if isinstance(e, AgentError)] == ["API error (400)"]
@@ -171,10 +183,131 @@ async def test_openai_compat_retries_without_temperature():
     events = [
         event
         async for event in provider.complete(
-            [Message(role="user", content="hi")], [], CompletionSettings(model="gpt-x")
+            [Message(role="user", content="hi")], [], CompletionSettings(model="gpt-x", temperature=0.7)
         )
     ]
 
     assert not [e for e in events if isinstance(e, AgentError)]
     assert len(create.calls) == 2
     assert "temperature" not in create.calls[1]
+
+
+_UNSUPPORTED_VALUE = (
+    "Error code: 400 - {'error': {'message': \"Unsupported value: 'temperature' does not support "
+    "0.7 with this model. Only the default (1) value is supported.\", 'type': 'invalid_request_error', "
+    "'param': 'temperature', 'code': 'unsupported_value'}}"
+)
+
+
+def _streamed_api_error(message: str) -> Exception:
+    """The openai SDK's *status-less* base error.
+
+    This is what an error delivered inside an SSE stream raises — the
+    response was HTTP 200 and the failure arrived as an event, so there is
+    no ``status_code`` anywhere on the exception. The ANL Argo proxy
+    reports upstream 400s exactly this way.
+    """
+    exc = OpenAIAPIError.__new__(OpenAIAPIError)
+    Exception.__init__(exc, message)
+    return exc
+
+
+def test_recognizes_a_rejected_temperature_value_not_just_the_parameter():
+    """Bug report: Luna 5.6 via Argo — "temperature 0.7 (default we have) is
+    not supported, only default 1 is supported". A rejected *value* is the
+    same fix as a rejected parameter: omit it, take the endpoint's default."""
+    assert unsupported_request_param(_UNSUPPORTED_VALUE, {"model": "m", "temperature": 0.7}) == "temperature"
+
+
+def test_status_less_errors_are_eligible_for_the_retry():
+    """A 200-then-error-event stream leaves no status code to check."""
+    assert is_param_rejection_status(None)
+    assert not is_param_rejection_status(401)
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_retries_an_error_raised_inside_the_stream():
+    """The regression this whole round is about: the retry used to be gated
+    on ``except APIStatusError``, so a status-less APIError from the stream
+    fell through to "unexpected provider error" — unrecoverable, even
+    though its text said exactly which parameter to drop."""
+    provider = OpenAICompatProvider(model="gpt56luna", base_url="https://argo/v1", api_key="k")
+    create = _FakeCreate(_streamed_api_error(_UNSUPPORTED_VALUE))
+    provider._client.chat.completions.create = create
+
+    events = [
+        event
+        async for event in provider.complete(
+            [Message(role="user", content="hi")], [], CompletionSettings(model="gpt56luna", temperature=0.7)
+        )
+    ]
+
+    assert not [e for e in events if isinstance(e, AgentError)]
+    assert len(create.calls) == 2
+    assert "temperature" not in create.calls[1]
+
+
+@pytest.mark.asyncio
+async def test_a_status_less_error_about_something_else_still_surfaces():
+    """The relaxed gate must not turn every unexpected error into a retry."""
+    provider = OpenAICompatProvider(model="gpt56luna", base_url="https://argo/v1", api_key="k")
+
+    async def always_fails(**kwargs: Any):
+        raise _streamed_api_error("Error code: 400 - {'error': {'message': 'context length exceeded'}}")
+
+    provider._client.chat.completions.create = always_fails
+
+    events = [
+        event
+        async for event in provider.complete(
+            [Message(role="user", content="hi")], [], CompletionSettings(model="gpt56luna", temperature=0.7)
+        )
+    ]
+
+    assert [e.message for e in events if isinstance(e, AgentError)] == ["unexpected provider error"]
+
+
+# --- not inventing a temperature in the first place -----------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("temperature,expected", [(None, False), (0.2, True)])
+async def test_temperature_is_sent_only_when_the_profile_asks_for_one(temperature, expected):
+    """The root fix behind all of the above: a request carries a
+    temperature only when someone actually chose one. Most models that
+    reject 0.7 accept a request that simply doesn't mention temperature."""
+    provider = OpenAICompatProvider(model="gpt-x", base_url="https://x/v1", api_key="k")
+    calls: list[dict[str, Any]] = []
+
+    async def capture(**kwargs: Any) -> _FakeStream:
+        calls.append(kwargs)
+        return _FakeStream()
+
+    provider._client.chat.completions.create = capture
+
+    async for _event in provider.complete(
+        [Message(role="user", content="hi")], [], CompletionSettings(model="gpt-x", temperature=temperature)
+    ):
+        pass
+
+    assert ("temperature" in calls[0]) is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("temperature,expected", [(None, False), (0.2, True)])
+async def test_anthropic_sends_temperature_only_when_asked(temperature, expected):
+    provider = AnthropicProvider(model="claude-x", api_key="k")
+    calls: list[dict[str, Any]] = []
+
+    async def capture(**kwargs: Any) -> _FakeStream:
+        calls.append(kwargs)
+        return _FakeStream()
+
+    provider._client.messages.create = capture
+
+    async for _event in provider.complete(
+        [Message(role="user", content="hi")], [], CompletionSettings(model="claude-x", temperature=temperature)
+    ):
+        pass
+
+    assert ("temperature" in calls[0]) is expected
