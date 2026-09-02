@@ -37,6 +37,7 @@ from aida.ui.qt._qt import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QScrollArea,
     QSplitter,
     Qt,
@@ -59,6 +60,8 @@ from aida.ui.qt.notes_panel import NotesPanel
 from aida.ui.qt.onboarding_dialog import OnboardingDialog
 from aida.ui.qt.profiles_dialog import ProfilesDialog
 from aida.ui.qt.quick_tasks_panel import QuickTaskData, QuickTasksPanel
+from aida.ui.qt.schedule_management_dialog import ScheduleManagementDialog
+from aida.ui.qt.scheduler_bridge import SchedulerBridge
 from aida.ui.qt.selectors import FolderDisplay, McpQuickPanel, ProfileSelector, WorkspaceSelector
 from aida.ui.qt.settings_dialog import SettingsDialog
 from aida.ui.qt.window_state import apply_font_size, apply_window_state, capture_window_state
@@ -119,6 +122,16 @@ class MainWindow(QMainWindow):
         self._wire_bridge_signals()
         self.bridge.start(settings, **(start_kwargs or {}))
 
+        # Phase 10: one SchedulerBridge for the whole app run, deliberately
+        # wired here rather than in _wire_bridge_signals/_restart_session —
+        # it must keep running across every "New Chat"/workspace switch
+        # (see its own docstring), unlike self.bridge, which is replaced on
+        # exactly those. Connected once, never reconnected.
+        self._schedule_failure_count = 0
+        self.scheduler_bridge = SchedulerBridge(loop_thread, parent=self)
+        self.scheduler_bridge.run_finished.connect(self._on_schedule_run_finished)
+        self.scheduler_bridge.start()
+
         apply_window_state(self, settings.app)
         self._refresh_conversations_sidebar()
         self._refresh_workspace_selector()
@@ -170,6 +183,15 @@ class MainWindow(QMainWindow):
         workspaces_action = QAction("Workspaces…", self)
         workspaces_action.triggered.connect(self.open_workspace_management_dialog)
         toolbar.addAction(workspaces_action)
+
+        # Phase 10: schedules run against whichever workspace their
+        # workflow names, independent of the interactive session — same
+        # "nothing to start/stop in the active session" reasoning
+        # WorkspaceManagementDialog's own docstring gives for why it needs
+        # no bridge.
+        schedules_action = QAction("Schedules…", self)
+        schedules_action.triggered.connect(self.open_schedule_management_dialog)
+        toolbar.addAction(schedules_action)
 
         settings_action = QAction("Settings…", self)
         settings_action.triggered.connect(self.open_settings_dialog)
@@ -247,6 +269,19 @@ class MainWindow(QMainWindow):
         # each other, see _update_context_label.
         self._context_label = QLabel("", self)
         self.statusBar().addPermanentWidget(self._context_label)
+        # Phase 10 (planning/phase10_scheduling_design.md §7: "a failed run
+        # should be loud the next time the GUI opens — a persistent banner,
+        # not a log line"). A flat QPushButton rather than a QLabel: it
+        # needs to be clickable (opens the Schedules dialog, which already
+        # shows each schedule's last-run status/error — reusing that
+        # instead of building a second "recent failures" list dialog) and
+        # hidden entirely when there is nothing to report, unlike the two
+        # always-visible labels above.
+        self._schedule_failures_button = QPushButton("", self)
+        self._schedule_failures_button.setFlat(True)
+        self._schedule_failures_button.clicked.connect(self._on_schedule_failures_clicked)
+        self._schedule_failures_button.hide()
+        self.statusBar().addPermanentWidget(self._schedule_failures_button)
 
     def _build_menu_bar(self) -> None:
         """U7 paper cut: "A menu bar (File/Help) with 'Open config folder',
@@ -995,6 +1030,47 @@ class MainWindow(QMainWindow):
             kwargs["resume_conversation_id"] = resume_conversation_id
         self.bridge.start(self.settings, **kwargs)
 
+    # --- scheduler (Phase 10) ---------------------------------------------
+
+    def open_schedule_management_dialog(self) -> None:
+        dialog = ScheduleManagementDialog(self.settings, self.scheduler_bridge, self)
+        dialog.exec()
+
+    def _on_schedule_run_finished(
+        self, name: str, ok: bool, conversation_id: str, error: str
+    ) -> None:
+        """A scheduled (or "Run Now"-forced) workflow just finished — from
+        the scheduler's own ``ChatSession``, never ``self.bridge``'s.
+
+        Always refreshes the sidebar: the run created a new conversation
+        row (tagged ``origin="schedule"`` — see ``aida.core.workflows.
+        run_workflow``) via the normal recorder path, so it already exists
+        in the DB and just needs the sidebar told to re-read it — no new
+        persistence plumbing, per the design doc's §6 reasoning. A failure
+        also lights up the status-bar indicator so it stays visible past
+        whatever transient message is showing when it happens, until the
+        user actually opens the Schedules dialog."""
+        self._refresh_conversations_sidebar()
+        if ok:
+            self.statusBar().showMessage(f"Schedule {name!r} finished", 8000)
+            return
+        self._schedule_failure_count += 1
+        self._schedule_failures_button.setText(
+            f"⚠ {self._schedule_failure_count} schedule failure"
+            f"{'s' if self._schedule_failure_count != 1 else ''}"
+        )
+        self._schedule_failures_button.show()
+        self.statusBar().showMessage(f"Schedule {name!r} failed: {error}", 8000)
+
+    def _on_schedule_failures_clicked(self) -> None:
+        """Opening the Schedules dialog is treated as "acknowledged" —
+        same "the badge clears when you look at it" convention as any
+        other notification count, rather than requiring a separate
+        "dismiss" action nobody would reliably use."""
+        self._schedule_failure_count = 0
+        self._schedule_failures_button.hide()
+        self.open_schedule_management_dialog()
+
     # --- conversations sidebar ---------------------------------------------
 
     def _refresh_conversations_sidebar(self) -> None:
@@ -1443,6 +1519,10 @@ class MainWindow(QMainWindow):
         save_app_config(self.settings.app)
         conversation_id = self._active_conversation_id(self.bridge)
         self.bridge.shutdown()
+        # Phase 10: the scheduler outlives every bridge replacement, so it
+        # gets its own explicit stop here rather than living inside
+        # bridge.shutdown() above — nothing else ever tears it down.
+        self.scheduler_bridge.stop()
         # Same cleanup as _restart_session — quitting on a conversation
         # nothing was ever typed into shouldn't leave it behind either.
         self._delete_conversation_if_empty(conversation_id)

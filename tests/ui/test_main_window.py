@@ -2230,3 +2230,120 @@ def test_bridge_refuses_a_profile_switch_while_busy(
     finally:
         window.bridge._turn_future = None
         window.close()
+
+
+# --- Phase 10: scheduler wiring -------------------------------------------
+
+
+def test_main_window_starts_a_scheduler_bridge(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        assert window.scheduler_bridge is not None
+        assert window.scheduler_bridge._future is not None  # start() was called
+    finally:
+        window.close()
+
+
+def test_schedule_run_finished_ok_refreshes_sidebar_without_a_failure_badge(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    from aida.persistence.store import ConversationStore
+    from aida.providers.base import Message
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        store = ConversationStore()
+        conv_id = store.create_conversation(timestamp="2026-09-02T00:00:00", origin="schedule")
+        # A real scheduled run's conversation always has at least one
+        # message (the workflow's own prompt) — set_conversations filters
+        # out message-less rows (see its own docstring), so an empty one
+        # would never show up in the sidebar regardless of this handler.
+        store.append_message(conv_id, Message(role="user", content="go"), timestamp="2026-09-02T00:00:01")
+        store.close()
+
+        window._on_schedule_run_finished("nightly", True, conv_id, "")
+
+        assert conv_id in window.sidebar._ids_by_row
+        assert not window._schedule_failures_button.isVisibleTo(window)
+        assert window._schedule_failure_count == 0
+    finally:
+        window.close()
+
+
+def test_schedule_run_finished_failure_shows_the_failure_badge(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window._on_schedule_run_finished("nightly", False, "", "boom")
+
+        assert window._schedule_failure_count == 1
+        assert window._schedule_failures_button.isVisibleTo(window)
+        assert "1" in window._schedule_failures_button.text()
+
+        window._on_schedule_run_finished("often", False, "", "boom again")
+        assert window._schedule_failure_count == 2
+        assert "2" in window._schedule_failures_button.text()
+    finally:
+        window.close()
+
+
+def test_clicking_the_failure_badge_opens_schedules_and_clears_the_count(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window._on_schedule_run_finished("nightly", False, "", "boom")
+        assert window._schedule_failures_button.isVisibleTo(window)
+
+        opened = {}
+
+        def _fake_exec(self):
+            opened["dialog"] = self
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr(
+            "aida.ui.qt.schedule_management_dialog.ScheduleManagementDialog.exec", _fake_exec
+        )
+
+        window._on_schedule_failures_clicked()
+
+        assert "dialog" in opened
+        assert window._schedule_failure_count == 0
+        assert not window._schedule_failures_button.isVisibleTo(window)
+    finally:
+        window.close()
+
+
+def test_open_schedule_management_dialog_passes_the_scheduler_bridge(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        opened = {}
+
+        def _fake_exec(self):
+            opened["bridge"] = self._scheduler_bridge
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr(
+            "aida.ui.qt.schedule_management_dialog.ScheduleManagementDialog.exec", _fake_exec
+        )
+
+        window.open_schedule_management_dialog()
+
+        assert opened["bridge"] is window.scheduler_bridge
+    finally:
+        window.close()
+
+
+def test_close_event_stops_the_scheduler_bridge(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window.close()
+    assert window.scheduler_bridge._future is None
