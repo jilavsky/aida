@@ -808,6 +808,7 @@ async def start_session(
     mcp_names: list[str] | None = None,
     resume_conversation_id: str | None = None,
     confirm_callback: ConfirmCallback | None = None,
+    origin: str | None = None,
 ) -> tuple[ChatSession, McpManager | None]:
     """Start a session, releasing everything it acquired if any step fails.
 
@@ -839,6 +840,7 @@ async def start_session(
             mcp_names=mcp_names,
             resume_conversation_id=resume_conversation_id,
             confirm_callback=confirm_callback,
+            origin=origin,
         )
         # Construction succeeded: the session owns these now, so unregister
         # every cleanup rather than running it on the way out of the `async
@@ -858,6 +860,7 @@ async def _start_session(
     mcp_names: list[str] | None = None,
     resume_conversation_id: str | None = None,
     confirm_callback: ConfirmCallback | None = None,
+    origin: str | None = None,
 ) -> tuple[ChatSession, McpManager | None]:
     """Shared session-startup logic for ``aida chat`` and
     ``aida conversations resume`` — resolves the workspace (if any), starts
@@ -872,6 +875,13 @@ async def _start_session(
     means ``cli_confirm`` — a real blocking terminal prompt. The GUI
     (``aida.ui.qt.bridge.ChatBridge``) always passes its own callback that
     shows a modal dialog instead.
+
+    ``origin`` (Phase 10) tags a brand-new conversation's row so the GUI
+    sidebar and ``aida conversations list`` can tell an interactive chat
+    apart from one ``aida.core.workflows.run_workflow`` created —
+    ``None`` (every existing caller) means an ordinary interactive
+    conversation, unchanged. Ignored on the resume path: an existing
+    conversation's origin was already decided at creation time.
     """
     logger.debug(
         "start_session(profile_name=%r, workspace_name=%r, skill_names=%r, mcp_group=%r, "
@@ -1120,6 +1130,7 @@ async def _start_session(
             workspace_name=effective_workspace_name,
             profile_name=effective_profile_name,
             sidecar_dirname=sidecar_dirname,
+            origin=origin,
         )
         initial_messages = None
 

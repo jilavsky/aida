@@ -28,7 +28,7 @@ from pathlib import Path
 
 from aida.config.paths import db_path
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 # The Phase 5 GUI opens the first-ever connection to a fresh DB file from
 # two threads at once (MainWindow.__init__ starts a session on the
@@ -101,6 +101,29 @@ _MIGRATIONS: dict[int, str] = {
     2: """
     ALTER TABLE artifacts ADD COLUMN seq INTEGER;
     CREATE INDEX IF NOT EXISTS idx_artifacts_conversation_seq ON artifacts(conversation_id, seq);
+    """,
+    # Phase 10: workflow/schedule runs (planning/phase10_scheduling_design.md
+    # §4). `conversations.origin` is NULL for every interactive chat
+    # conversation ever created (unchanged behavior) and "workflow" /
+    # "schedule" for one created by aida.core.workflows.run_workflow — lets
+    # the GUI sidebar and `aida conversations list` distinguish them without
+    # a join. `schedule_runs` is last-fired/status bookkeeping for the
+    # scheduler (deliberately NOT part of schedules.yaml — see the design
+    # doc's §5 rationale: user-edited config and machine-written run history
+    # should not be the same file).
+    3: """
+    ALTER TABLE conversations ADD COLUMN origin TEXT;
+
+    CREATE TABLE IF NOT EXISTS schedule_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        schedule_name TEXT NOT NULL,
+        fired_at TEXT NOT NULL,
+        status TEXT NOT NULL,
+        conversation_id TEXT REFERENCES conversations(id),
+        error TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_schedule_runs_name ON schedule_runs(schedule_name, fired_at);
     """,
 }
 

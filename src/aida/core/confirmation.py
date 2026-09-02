@@ -53,11 +53,25 @@ class ConfirmationRequest:
     shape is generic enough for a second caller: an MCP per-tool confirm
     uses ``action="tool_call"`` and ``path="server__tool"`` (the namespaced
     tool name) rather than inventing a parallel request type.
+
+    ``in_allowed_roots`` (Phase 10, headless automation): ``True`` exactly
+    when this confirmation exists *only* because the workspace's safety
+    mode is ``"confirm"`` — i.e. it is the kind of request that would have
+    sailed through without asking in ``"relaxed"`` mode. ``False`` for the
+    "always confirm no matter what" categories: a path outside every
+    allowed root, or a shell command that isn't on the command allowlist.
+    An MCP ``"tool_call"`` confirmation (a per-tool "confirm before run"
+    flag, unrelated to allowed roots) leaves this at its default and a
+    headless caller should not consult it for that action — it identifies
+    those by ``action == "tool_call"`` instead. Defaults to ``True`` so
+    every pre-existing ``ConfirmationRequest(...)`` construction (tests
+    included) keeps working unchanged.
     """
 
     action: str
     path: str
     detail: str
+    in_allowed_roots: bool = True
 
 
 ConfirmCallback = Callable[[ConfirmationRequest], Awaitable[bool]]

@@ -95,7 +95,7 @@ def default_web_tools(guard: SafetyGuard) -> dict[str, NativeTool]:
             return ToolResult(content=f"Not an http(s) URL: {url}", is_error=True)
 
         approved = await guard.confirm_callback(
-            ConfirmationRequest(action="fetch_url", path=url, detail=f"Fetch {url}?")
+            ConfirmationRequest(action="fetch_url", path=url, detail=f"Fetch {url}?", in_allowed_roots=False)
         )
         if not approved:
             raise ConfirmationDenied(f"fetch_url declined: {url}")

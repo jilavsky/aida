@@ -200,6 +200,7 @@ class SafetyGuard:
                     action=action,
                     path=str(candidate),
                     detail=f"{action} outside the allowed folders: {candidate}",
+                    in_allowed_roots=False,
                 )
             )
             logger.info("%s outside allowed folders %s: %s", action, "approved" if approved else "denied", candidate)
@@ -209,7 +210,12 @@ class SafetyGuard:
 
         if always_confirm_in_bounds or self.mode == "confirm":
             approved = await self.confirm_callback(
-                ConfirmationRequest(action=action, path=str(candidate), detail=f"{action.capitalize()} {candidate}?")
+                ConfirmationRequest(
+                    action=action,
+                    path=str(candidate),
+                    detail=f"{action.capitalize()} {candidate}?",
+                    in_allowed_roots=True,
+                )
             )
             logger.debug("%s inside allowed folders %s: %s", action, "approved" if approved else "denied", candidate)
             if not approved:
@@ -275,6 +281,7 @@ class SafetyGuard:
                     action="execute",
                     path=command,
                     detail=f"Run {reason}: {command!r} (cwd={candidate})",
+                    in_allowed_roots=False,
                 )
             )
             if not approved:
@@ -283,7 +290,12 @@ class SafetyGuard:
 
         if self.mode == "confirm":
             approved = await self.confirm_callback(
-                ConfirmationRequest(action="execute", path=command, detail=f"Run {command!r} (cwd={candidate})?")
+                ConfirmationRequest(
+                    action="execute",
+                    path=command,
+                    detail=f"Run {command!r} (cwd={candidate})?",
+                    in_allowed_roots=True,
+                )
             )
             if not approved:
                 raise ConfirmationDenied(f"execute declined: {command!r} (cwd={candidate})")

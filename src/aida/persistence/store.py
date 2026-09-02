@@ -43,6 +43,12 @@ class ConversationSummary:
     updated_at: str
     record_path: str | None
     message_count: int
+    #: Phase 10: ``None`` for every interactive chat conversation (the
+    #: overwhelming majority, and everything created before this field
+    #: existed); ``"workflow"`` or ``"schedule"`` for one created by
+    #: ``aida.core.workflows.run_workflow`` — see ``aida.persistence.db``
+    #: migration 3.
+    origin: str | None = None
 
 
 @dataclass
@@ -96,13 +102,14 @@ class ConversationStore:
         workspace_name: str | None = None,
         profile_name: str | None = None,
         sidecar_dirname: str = "figures",
+        origin: str | None = None,
     ) -> str:
         conv_id = conversation_id or new_conversation_id()
         self._conn.execute(
             "INSERT INTO conversations "
-            "(id, title, workspace_name, profile_name, sidecar_dirname, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (conv_id, title, workspace_name, profile_name, sidecar_dirname, timestamp, timestamp),
+            "(id, title, workspace_name, profile_name, sidecar_dirname, created_at, updated_at, origin) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (conv_id, title, workspace_name, profile_name, sidecar_dirname, timestamp, timestamp, origin),
         )
         self._conn.commit()
         return conv_id
@@ -152,6 +159,7 @@ class ConversationStore:
             updated_at=row["updated_at"],
             record_path=row["record_path"],
             message_count=message_count,
+            origin=row["origin"],
         )
 
     # --- messages --------------------------------------------------------
@@ -377,4 +385,91 @@ class ConversationStore:
         self._conn.close()
 
 
-__all__ = ["ArtifactRecord", "ConversationStore", "ConversationSummary", "new_conversation_id"]
+@dataclass
+class ScheduleRun:
+    """One row of ``schedule_runs`` — the scheduler's own last-fired/status
+    bookkeeping (planning/phase10_scheduling_design.md §5: kept separate
+    from the user-edited ``schedules.yaml`` on purpose, same reasoning as
+    keeping conversations in SQLite rather than in workspace config)."""
+
+    id: int
+    schedule_name: str
+    fired_at: str
+    status: str
+    conversation_id: str | None
+    error: str | None
+
+
+class ScheduleRunStore:
+    """CRUD over the ``schedule_runs`` table. A separate small class rather
+    than more methods on ``ConversationStore``: it has nothing to do with
+    conversation content, just scheduler run history, but it shares the same
+    DB file/connection helper (``aida.persistence.db.connect``) since a
+    dedicated second SQLite file for a handful of rows would be
+    disproportionate."""
+
+    def __init__(self, db_path: Path | None = None) -> None:
+        self._conn = connect(db_path)
+
+    def record_run(
+        self,
+        *,
+        schedule_name: str,
+        fired_at: str,
+        status: str,
+        conversation_id: str | None = None,
+        error: str | None = None,
+    ) -> int:
+        cursor = self._conn.execute(
+            "INSERT INTO schedule_runs (schedule_name, fired_at, status, conversation_id, error) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (schedule_name, fired_at, status, conversation_id, error),
+        )
+        self._conn.commit()
+        return cursor.lastrowid
+
+    def last_run(self, schedule_name: str) -> ScheduleRun | None:
+        row = self._conn.execute(
+            "SELECT * FROM schedule_runs WHERE schedule_name = ? ORDER BY fired_at DESC, id DESC LIMIT 1",
+            (schedule_name,),
+        ).fetchone()
+        return self._row_to_run(row) if row is not None else None
+
+    def recent_runs(self, schedule_name: str, *, limit: int = 20) -> list[ScheduleRun]:
+        rows = self._conn.execute(
+            "SELECT * FROM schedule_runs WHERE schedule_name = ? ORDER BY fired_at DESC, id DESC LIMIT ?",
+            (schedule_name, limit),
+        ).fetchall()
+        return [self._row_to_run(row) for row in rows]
+
+    def recent_failures(self, *, limit: int = 20) -> list[ScheduleRun]:
+        """Across every schedule — what the GUI's failure indicator shows."""
+        rows = self._conn.execute(
+            "SELECT * FROM schedule_runs WHERE status != 'ok' ORDER BY fired_at DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._row_to_run(row) for row in rows]
+
+    @staticmethod
+    def _row_to_run(row: sqlite3.Row) -> ScheduleRun:
+        return ScheduleRun(
+            id=row["id"],
+            schedule_name=row["schedule_name"],
+            fired_at=row["fired_at"],
+            status=row["status"],
+            conversation_id=row["conversation_id"],
+            error=row["error"],
+        )
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+__all__ = [
+    "ArtifactRecord",
+    "ConversationStore",
+    "ConversationSummary",
+    "ScheduleRun",
+    "ScheduleRunStore",
+    "new_conversation_id",
+]

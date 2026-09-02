@@ -78,6 +78,7 @@ class ConversationRecorder:
         sidecar_dirname: str = "figures",
         resume: bool = False,
         transcript_min_interval_seconds: float = DEFAULT_TRANSCRIPT_MIN_INTERVAL_SECONDS,
+        origin: str | None = None,
     ) -> None:
         self.store = store
         self.artifact_store = artifact_store
@@ -101,18 +102,21 @@ class ConversationRecorder:
             self.workspace_name = existing.workspace_name
             self.profile_name = existing.profile_name
             self.sidecar_dirname = existing.sidecar_dirname
+            self.origin = existing.origin
             self._record_path = Path(existing.record_path) if existing.record_path else None
         else:
             self.title = None
             self.workspace_name = workspace_name
             self.profile_name = profile_name
             self.sidecar_dirname = sidecar_dirname
+            self.origin = origin
             self.conversation_id = store.create_conversation(
                 timestamp=_now_iso(),
                 conversation_id=conversation_id,
                 workspace_name=workspace_name,
                 profile_name=profile_name,
                 sidecar_dirname=sidecar_dirname,
+                origin=origin,
             )
             self._record_path = None
 

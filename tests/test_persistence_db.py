@@ -21,7 +21,7 @@ def test_connect_creates_expected_tables(tmp_path: Path):
         row["name"]
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
-    assert {"conversations", "messages", "artifacts"} <= tables
+    assert {"conversations", "messages", "artifacts", "schedule_runs"} <= tables
     conn.close()
 
 
@@ -126,10 +126,59 @@ def test_migrating_from_v1_adds_artifacts_seq_column_without_data_loss(tmp_path:
     raw.close()
 
     conn = connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
     row = conn.execute("SELECT * FROM artifacts WHERE id = 'a1'").fetchone()
     assert row["id"] == "a1"  # pre-migration row survived
     assert row["seq"] is None  # new column, no data for a pre-existing row
+    conn.close()
+
+
+def test_conversations_table_has_an_origin_column(tmp_path: Path):
+    """Phase 10: distinguishes an interactive chat conversation (``origin``
+    NULL) from one ``aida.core.workflows.run_workflow`` created
+    (``"workflow"``/``"schedule"``) — schema v3."""
+    conn = connect(tmp_path / "aida.db")
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(conversations)")}
+    assert "origin" in columns
+    conn.close()
+
+
+def test_connect_creates_schedule_runs_table(tmp_path: Path):
+    conn = connect(tmp_path / "aida.db")
+    tables = {
+        row["name"]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    assert "schedule_runs" in tables
+    conn.close()
+
+
+def test_migrating_from_v2_adds_origin_column_and_schedule_runs_table(tmp_path: Path):
+    """Same "build a genuine old-version DB by hand" pattern as the v1->v2
+    test above, proving the v2->v3 step itself is additive: an existing
+    conversation row survives with ``origin`` defaulting to NULL."""
+    path = tmp_path / "aida.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(_MIGRATIONS[1])
+    raw.executescript(_MIGRATIONS[2])
+    raw.execute("PRAGMA user_version = 2")
+    raw.execute(
+        "INSERT INTO conversations (id, created_at, updated_at) VALUES (?, ?, ?)",
+        ("c1", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+    )
+    raw.commit()
+    raw.close()
+
+    conn = connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+    row = conn.execute("SELECT * FROM conversations WHERE id = 'c1'").fetchone()
+    assert row["id"] == "c1"  # pre-migration row survived
+    assert row["origin"] is None  # new column, no data for a pre-existing row
+    conn.execute(
+        "INSERT INTO schedule_runs (schedule_name, fired_at, status) VALUES (?, ?, ?)",
+        ("nightly-report", "2026-01-01T00:00:00", "ok"),
+    )
+    conn.commit()
     conn.close()
 
 

@@ -25,6 +25,31 @@ def test_new_recorder_creates_a_conversation(tmp_path: Path):
     assert summary.profile_name == "argo-claude"
 
 
+def test_new_recorder_defaults_origin_to_none(tmp_path: Path):
+    rec = _recorder(tmp_path)
+    assert rec.origin is None
+    assert rec.store.get_conversation(rec.conversation_id).origin is None
+
+
+def test_new_recorder_records_origin(tmp_path: Path):
+    rec = _recorder(tmp_path, origin="workflow")
+    assert rec.origin == "workflow"
+    assert rec.store.get_conversation(rec.conversation_id).origin == "workflow"
+
+
+def test_resume_reads_back_origin_from_existing_row(tmp_path: Path):
+    db_path = tmp_path / "aida.db"
+    artifact_store = ArtifactStore(base_dir=tmp_path / "artifacts")
+    store1 = ConversationStore(db_path)
+    rec1 = ConversationRecorder(store1, artifact_store, tmp_path / "records", origin="schedule")
+    conv_id = rec1.conversation_id
+
+    store2 = ConversationStore(db_path)
+    rec2 = ConversationRecorder(store2, artifact_store, tmp_path / "records", conversation_id=conv_id, resume=True)
+
+    assert rec2.origin == "schedule"
+
+
 def test_record_message_derives_title_from_first_user_message(tmp_path: Path):
     rec = _recorder(tmp_path)
     rec.record_message(Message(role="user", content="Plot the SAXS data for sample S001"))

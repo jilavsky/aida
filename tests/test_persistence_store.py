@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from aida.artifacts.base import ImageArtifact, TextArtifact
-from aida.persistence.store import ConversationStore
+from aida.persistence.store import ConversationStore, ScheduleRunStore
 from aida.providers.base import Message, ToolCall
 
 T0 = "2026-08-19T00:00:00"
@@ -24,6 +24,24 @@ def test_create_conversation_returns_id_and_is_retrievable(tmp_path: Path):
     assert summary.workspace_name == "use-pyirena"
     assert summary.profile_name == "argo-claude"
     assert summary.message_count == 0
+
+
+def test_create_conversation_defaults_origin_to_none(tmp_path: Path):
+    """Every existing interactive-chat caller omits ``origin`` — must keep
+    behaving exactly as before migration 3 added the column."""
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    assert store.get_conversation(conv_id).origin is None
+
+
+def test_create_conversation_records_origin(tmp_path: Path):
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0, origin="workflow")
+    summary = store.get_conversation(conv_id)
+    assert summary.origin == "workflow"
+    # list_conversations goes through a different query (a join for
+    # message_count) — must not silently drop the column either.
+    assert store.list_conversations()[0].origin == "workflow"
 
 
 def test_get_conversation_missing_returns_none(tmp_path: Path):
@@ -232,3 +250,54 @@ def test_delete_conversation_does_not_touch_other_conversations(tmp_path: Path):
     assert store.get_conversation(conv_a) is None
     assert store.get_conversation(conv_b) is not None
     assert [m.content for m in store.load_messages(conv_b)] == ["b"]
+
+
+def _schedule_store(tmp_path: Path) -> ScheduleRunStore:
+    return ScheduleRunStore(tmp_path / "aida.db")
+
+
+def test_schedule_run_store_last_run_reflects_most_recent(tmp_path: Path):
+    store = _schedule_store(tmp_path)
+    store.record_run(schedule_name="nightly", fired_at=T0, status="ok")
+    store.record_run(schedule_name="nightly", fired_at=T1, status="failed", error="boom")
+
+    last = store.last_run("nightly")
+    assert last is not None
+    assert last.fired_at == T1
+    assert last.status == "failed"
+    assert last.error == "boom"
+
+
+def test_schedule_run_store_last_run_missing_schedule_returns_none(tmp_path: Path):
+    store = _schedule_store(tmp_path)
+    assert store.last_run("does-not-exist") is None
+
+
+def test_schedule_run_store_recent_runs_only_this_schedule(tmp_path: Path):
+    store = _schedule_store(tmp_path)
+    store.record_run(schedule_name="nightly", fired_at=T0, status="ok")
+    store.record_run(schedule_name="other", fired_at=T0, status="ok")
+
+    runs = store.recent_runs("nightly")
+    assert [r.schedule_name for r in runs] == ["nightly"]
+
+
+def test_schedule_run_store_recent_failures_excludes_ok(tmp_path: Path):
+    store = _schedule_store(tmp_path)
+    store.record_run(schedule_name="nightly", fired_at=T0, status="ok")
+    store.record_run(schedule_name="nightly", fired_at=T1, status="failed", error="boom")
+
+    failures = store.recent_failures()
+    assert [f.status for f in failures] == ["failed"]
+
+
+def test_schedule_run_store_conversation_id_round_trips(tmp_path: Path):
+    """``schedule_runs.conversation_id`` has a real foreign key into
+    ``conversations`` (both tables live in the same DB file), so the
+    referenced conversation must actually exist first."""
+    conv_store = _store(tmp_path)
+    conv_id = conv_store.create_conversation(timestamp=T0, origin="schedule")
+
+    store = _schedule_store(tmp_path)
+    store.record_run(schedule_name="nightly", fired_at=T0, status="ok", conversation_id=conv_id)
+    assert store.last_run("nightly").conversation_id == conv_id
