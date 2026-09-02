@@ -2,6 +2,14 @@
 
 > **Still the one open phase as of 0.1.0b3.** Tracked from `PLAN.md` §1.2;
 > this file stays the detailed checklist.
+>
+> **2026-09-02:** the automation half of this phase now has a decision
+> document — [`phase10_scheduling_design.md`](phase10_scheduling_design.md).
+> It settles the questions this checklist leaves open (in-app scheduler vs
+> the three OS schedulers, workflow file format, headless confirmation and
+> secrets, catch-up and overlap semantics) and re-orders the work: workflows
+> complete first, in-app scheduler second, native OS registration last and
+> only on demand. Where the two disagree, the design document is current.
 
 **Goal:** AIDA is scriptable from data pipelines (`aida run`), users can record and
 replay **named workflows**, a simple scheduler covers timed reports, and the package
