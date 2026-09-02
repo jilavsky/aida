@@ -763,3 +763,170 @@ def test_workspace_quick_tasks_non_list_value_ignored():
 def test_app_config_round_trips_max_context_tokens(tmp_path: Path, aida_home: Path):
     save_app_config(AppConfig(max_context_tokens=4321))
     assert load_app_config().max_context_tokens == 4321
+
+
+# --- Phase 10: workflows/NAME.yaml and schedules.yaml ---------------------
+
+
+def test_schedules_config_roundtrip(aida_home: Path):
+    from aida.config.settings import (
+        ScheduleEntry,
+        SchedulesConfig,
+        load_schedules_config,
+        save_schedules_config,
+    )
+
+    cfg = SchedulesConfig(
+        schedules={
+            "nightly-report": ScheduleEntry(
+                name="nightly-report",
+                workflow="daily-usaxs-report",
+                at="07:00",
+                vars={"folder": "/data/usaxs/today"},
+                preapproved_tools=["pyirena__reduce_scan"],
+                yes_in_allowed=True,
+                enabled=True,
+            )
+        }
+    )
+    save_schedules_config(cfg, aida_home)
+    loaded = load_schedules_config(aida_home)
+
+    entry = loaded.schedules["nightly-report"]
+    assert entry.workflow == "daily-usaxs-report"
+    assert entry.at == "07:00"
+    assert entry.every is None
+    assert entry.trigger == "in-app"
+    assert entry.vars == {"folder": "/data/usaxs/today"}
+    assert entry.preapproved_tools == ["pyirena__reduce_scan"]
+    assert entry.yes_in_allowed is True
+    assert entry.enabled is True
+
+
+def test_schedules_config_defaults_when_file_missing(aida_home: Path):
+    from aida.config.settings import load_schedules_config
+
+    loaded = load_schedules_config(aida_home)
+    assert loaded.schedules == {}
+
+
+def test_schedule_entry_every_field_roundtrip(aida_home: Path):
+    from aida.config.settings import (
+        ScheduleEntry,
+        SchedulesConfig,
+        load_schedules_config,
+        save_schedules_config,
+    )
+
+    cfg = SchedulesConfig(schedules={"often": ScheduleEntry(name="often", workflow="w", every="4h")})
+    save_schedules_config(cfg, aida_home)
+    loaded = load_schedules_config(aida_home)
+    assert loaded.schedules["often"].every == "4h"
+    assert loaded.schedules["often"].at is None
+
+
+def test_schedule_entry_disabled_defaults_to_enabled_true():
+    from aida.config.settings import ScheduleEntry
+
+    entry = ScheduleEntry.from_dict("nightly", {"workflow": "w", "at": "07:00"})
+    assert entry.enabled is True
+
+
+def test_schedule_entry_bad_yes_in_allowed_falls_back_to_false():
+    """Same quoted-boolean footgun the review found in scripting_enabled —
+    covered here too since ScheduleEntry.yes_in_allowed governs unattended
+    confirmation policy."""
+    from aida.config.settings import ScheduleEntry
+
+    entry = ScheduleEntry.from_dict("nightly", {"workflow": "w", "yes_in_allowed": "not-a-bool"})
+    assert entry.yes_in_allowed is False
+
+
+def test_settings_bundle_includes_schedules(aida_home: Path):
+    settings = load_settings()
+    assert settings.schedules is not None
+    assert (aida_home / "schedules.yaml").exists()
+
+
+def test_workflow_config_roundtrip(aida_home: Path):
+    from aida.config.settings import (
+        WorkflowConfig,
+        WorkflowStep,
+        list_workflow_names,
+        load_workflow,
+        save_workflow,
+    )
+
+    cfg = WorkflowConfig(
+        name="daily-usaxs-report",
+        description="Reduce yesterday's USAXS scans and write the summary.",
+        workspace="use-pyirena",
+        profile="argo-claude",
+        mcp_group="pyirena",
+        vars={"folder": "/data/usaxs/today"},
+        preapproved_tools=["pyirena__reduce_scan"],
+        steps=[
+            WorkflowStep(prompt="Reduce every unreduced scan in {folder}."),
+            WorkflowStep(prompt="Plot the reduced curves.", expect_files=["*.png"]),
+        ],
+    )
+    save_workflow(cfg, aida_home / "workflows")
+    loaded = load_workflow("daily-usaxs-report", aida_home / "workflows")
+
+    assert loaded.name == "daily-usaxs-report"
+    assert loaded.workspace == "use-pyirena"
+    assert loaded.profile == "argo-claude"
+    assert loaded.mcp_group == "pyirena"
+    assert loaded.vars == {"folder": "/data/usaxs/today"}
+    assert loaded.preapproved_tools == ["pyirena__reduce_scan"]
+    assert [s.prompt for s in loaded.steps] == [
+        "Reduce every unreduced scan in {folder}.",
+        "Plot the reduced curves.",
+    ]
+    assert loaded.steps[1].expect_files == ["*.png"]
+    assert list_workflow_names(aida_home / "workflows") == ["daily-usaxs-report"]
+
+
+def test_load_workflow_missing_raises_file_not_found_with_available_names(aida_home: Path):
+    from aida.config.settings import WorkflowConfig, load_workflow, save_workflow
+
+    save_workflow(WorkflowConfig(name="exists"), aida_home / "workflows")
+
+    try:
+        load_workflow("does-not-exist", aida_home / "workflows")
+        raised = False
+    except FileNotFoundError as exc:
+        raised = True
+        assert "exists" in str(exc)
+    assert raised
+
+
+def test_delete_workflow_removes_the_file(aida_home: Path):
+    from aida.config.settings import (
+        WorkflowConfig,
+        delete_workflow,
+        list_workflow_names,
+        save_workflow,
+    )
+
+    save_workflow(WorkflowConfig(name="temp"), aida_home / "workflows")
+    assert list_workflow_names(aida_home / "workflows") == ["temp"]
+
+    delete_workflow("temp", aida_home / "workflows")
+    assert list_workflow_names(aida_home / "workflows") == []
+
+
+def test_workflow_step_skips_malformed_entries():
+    from aida.config.settings import WorkflowConfig
+
+    loaded = WorkflowConfig.from_dict(
+        "w",
+        {
+            "steps": [
+                {"prompt": "do the thing"},
+                {"expect_files": ["*.png"]},  # missing prompt
+                "not even a dict",
+            ]
+        },
+    )
+    assert [s.prompt for s in loaded.steps] == ["do the thing"]

@@ -24,6 +24,7 @@ from typing import Any
 import yaml
 
 from aida.config.paths import config_dir
+from aida.config.paths import workflows_dir as _workflows_dir
 
 CURRENT_CONFIG_VERSION = 1
 
@@ -991,6 +992,199 @@ class KnowledgeConfig:
 
 
 # --------------------------------------------------------------------------
+# workflows/NAME.yaml (Phase 10 — planning/phase10_scheduling_design.md §4)
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class WorkflowStep:
+    """One prompt in a workflow. ``prompt`` may reference ``{placeholder}``
+    names resolved from the workflow's own ``vars`` plus any ``--var``
+    override at run time (``aida.core.workflows.run_workflow``).
+    ``expect_files`` is the only assertion a step can make — a list of glob
+    patterns checked against the workspace's target folder after the step
+    completes; an empty list means "no assertion, whatever the agent did is
+    accepted." Deliberately not a richer expression language — see the
+    design doc's §10 "out of scope, deliberately"."""
+
+    prompt: str
+    expect_files: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, source: str, data: dict[str, Any]) -> WorkflowStep:
+        return cls(
+            prompt=str(data.get("prompt", "")),
+            expect_files=_coerce_str_list(source, "expect_files", data.get("expect_files")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"prompt": self.prompt, "expect_files": self.expect_files}
+
+
+def _coerce_workflow_steps(source: str, value: Any) -> list[WorkflowStep]:
+    """Same "warn and skip a malformed entry rather than abort the whole
+    load" rule as ``_coerce_quick_tasks`` — a workflow YAML is hand-edited
+    at least as often as ``workspaces.yaml``."""
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        _logger.warning("%s: steps must be a list — ignoring", source)
+        return []
+    steps: list[WorkflowStep] = []
+    for item in value:
+        if not isinstance(item, dict) or not item.get("prompt"):
+            _logger.warning("%s: skipping malformed step %r (need a 'prompt')", source, item)
+            continue
+        steps.append(WorkflowStep.from_dict(source, item))
+    return steps
+
+
+@dataclass
+class WorkflowConfig:
+    """A stored named workflow: a workspace plus an ordered list of prompt
+    steps, run as turns of one shared ``ChatSession`` — one file per
+    workflow under ``~/.aida/workflows/NAME.yaml``, unlike every other
+    config section here, because a workflow is an editable document a user
+    hand-writes or the GUI's "save conversation as workflow" produces, not
+    a row in a shared list (design doc §4)."""
+
+    name: str
+    description: str = ""
+    workspace: str = ""
+    profile: str | None = None
+    mcp_group: str | None = None
+    #: Default values for ``{placeholder}`` names in step prompts;
+    #: ``aida workflow run NAME --var key=value`` overrides these per run.
+    vars: dict[str, str] = field(default_factory=dict)
+    #: MCP tool names (namespaced ``server__tool``) this workflow accepts
+    #: responsibility for running unattended despite a per-tool
+    #: "confirm before run" flag — see
+    #: ``aida.core.headless.build_headless_confirm_callback``.
+    preapproved_tools: list[str] = field(default_factory=list)
+    steps: list[WorkflowStep] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict[str, Any]) -> WorkflowConfig:
+        source = f"workflows/{name}.yaml"
+        raw_vars = data.get("vars") or {}
+        vars_ = {str(k): str(v) for k, v in raw_vars.items()} if isinstance(raw_vars, dict) else {}
+        if raw_vars and not isinstance(raw_vars, dict):
+            _logger.warning("%s: vars must be a mapping — ignoring", source)
+        return cls(
+            name=name,
+            description=str(data.get("description") or ""),
+            workspace=str(data.get("workspace") or ""),
+            profile=data.get("profile"),
+            mcp_group=data.get("mcp_group"),
+            vars=vars_,
+            preapproved_tools=_coerce_str_list(source, "preapproved_tools", data.get("preapproved_tools")),
+            steps=_coerce_workflow_steps(source, data.get("steps")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "description": self.description,
+            "workspace": self.workspace,
+            "profile": self.profile,
+            "mcp_group": self.mcp_group,
+            "vars": self.vars,
+            "preapproved_tools": self.preapproved_tools,
+            "steps": [step.to_dict() for step in self.steps],
+        }
+
+
+# --------------------------------------------------------------------------
+# schedules.yaml (Phase 10)
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class ScheduleEntry:
+    """One entry in ``schedules.yaml``: which workflow, when, and under what
+    unattended-confirmation policy. Exactly one of ``at``/``every`` is
+    expected to be set — enforced by ``aida.core.scheduling`` at the point
+    a schedule is actually used, not here (this module's job is loading the
+    file safely, never rejecting it outright). Last-fired/status is
+    deliberately NOT a field here — that is machine-written run history,
+    kept in SQLite (``aida.persistence.store.ScheduleRunStore``) so this
+    user-edited file is never rewritten by the scheduler itself."""
+
+    name: str
+    workflow: str = ""
+    #: "HH:MM" local time, once a day.
+    at: str | None = None
+    #: A duration like "30m", "4h", "24h".
+    every: str | None = None
+    #: Only "in-app" exists today (design doc §6: OS-scheduler installers
+    #: are deliberately not built yet); kept as a field rather than a
+    #: hardcoded assumption so a future "system" trigger is a config change,
+    #: not a schema change.
+    trigger: str = "in-app"
+    vars: dict[str, str] = field(default_factory=dict)
+    preapproved_tools: list[str] = field(default_factory=list)
+    #: Mirrors ``aida run --yes-in-allowed`` — narrows the workflow's own
+    #: workspace safety mode for this schedule's unattended runs; never
+    #: widens it. See ``aida.core.headless``.
+    yes_in_allowed: bool = False
+    enabled: bool = True
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict[str, Any]) -> ScheduleEntry:
+        source = f"schedules.yaml (schedule {name!r})"
+        raw_vars = data.get("vars") or {}
+        vars_ = {str(k): str(v) for k, v in raw_vars.items()} if isinstance(raw_vars, dict) else {}
+        if raw_vars and not isinstance(raw_vars, dict):
+            _logger.warning("%s: vars must be a mapping — ignoring", source)
+        return cls(
+            name=name,
+            workflow=str(data.get("workflow") or ""),
+            at=data.get("at"),
+            every=data.get("every"),
+            trigger=str(data.get("trigger") or "in-app"),
+            vars=vars_,
+            preapproved_tools=_coerce_str_list(source, "preapproved_tools", data.get("preapproved_tools")),
+            yes_in_allowed=_coerce_bool(source, "yes_in_allowed", data.get("yes_in_allowed"), default=False),
+            enabled=_coerce_bool(source, "enabled", data.get("enabled"), default=True),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "workflow": self.workflow,
+            "at": self.at,
+            "every": self.every,
+            "trigger": self.trigger,
+            "vars": self.vars,
+            "preapproved_tools": self.preapproved_tools,
+            "yes_in_allowed": self.yes_in_allowed,
+            "enabled": self.enabled,
+        }
+
+
+@dataclass
+class SchedulesConfig:
+    config_version: int = CURRENT_CONFIG_VERSION
+    schedules: dict[str, ScheduleEntry] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SchedulesConfig:
+        data = data or {}
+        schedules = {
+            name: ScheduleEntry.from_dict(name, sdata)
+            for name, sdata in (data.get("schedules") or {}).items()
+        }
+        return cls(
+            config_version=data.get("config_version", CURRENT_CONFIG_VERSION),
+            schedules=schedules,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "config_version": self.config_version,
+            "schedules": {name: s.to_dict() for name, s in self.schedules.items()},
+        }
+
+
+# --------------------------------------------------------------------------
 # Loading / saving
 # --------------------------------------------------------------------------
 
@@ -1097,19 +1291,68 @@ def save_knowledge_config(cfg: KnowledgeConfig, base_dir: Path | None = None) ->
     return path
 
 
+def load_schedules_config(base_dir: Path | None = None) -> SchedulesConfig:
+    path = (base_dir or config_dir()) / "schedules.yaml"
+    return SchedulesConfig.from_dict(_read_yaml(path))
+
+
+def save_schedules_config(cfg: SchedulesConfig, base_dir: Path | None = None) -> Path:
+    path = (base_dir or config_dir()) / "schedules.yaml"
+    _write_yaml(path, cfg.to_dict())
+    return path
+
+
+def list_workflow_names(directory: Path | None = None) -> list[str]:
+    """Every stored workflow's name — one per ``NAME.yaml`` file under
+    ``directory`` (default: ``aida.config.paths.workflows_dir()``)."""
+    d = directory or _workflows_dir()
+    return sorted(p.stem for p in d.glob("*.yaml"))
+
+
+def load_workflow(name: str, directory: Path | None = None) -> WorkflowConfig:
+    """Raises ``FileNotFoundError`` (naming what *is* available) rather than
+    silently defaulting — unlike the shared config files above, a missing
+    workflow is a genuine "no such workflow" error a caller (the CLI, the
+    scheduler) needs to surface, not a first-run default to paper over."""
+    d = directory or _workflows_dir()
+    path = d / f"{name}.yaml"
+    if not path.exists():
+        available = ", ".join(list_workflow_names(d)) or "(none)"
+        raise FileNotFoundError(f"no workflow named {name!r} in {d}. Available: {available}")
+    return WorkflowConfig.from_dict(name, _read_yaml(path))
+
+
+def save_workflow(cfg: WorkflowConfig, directory: Path | None = None) -> Path:
+    d = directory or _workflows_dir()
+    path = d / f"{cfg.name}.yaml"
+    _write_yaml(path, cfg.to_dict())
+    return path
+
+
+def delete_workflow(name: str, directory: Path | None = None) -> None:
+    d = directory or _workflows_dir()
+    (d / f"{name}.yaml").unlink(missing_ok=True)
+
+
 @dataclass
 class Settings:
-    """Bundle of everything loaded from ``~/.aida`` for one process."""
+    """Bundle of everything loaded from ``~/.aida`` for one process.
+
+    Stored named workflows (``~/.aida/workflows/NAME.yaml``) are
+    deliberately not part of this bundle — they're loaded on demand by name
+    (``load_workflow``), like a workspace lookup, rather than all scanned
+    and parsed on every ``load_settings()`` call."""
 
     app: AppConfig
     providers: ProvidersConfig
     workspaces: WorkspacesConfig
     mcp: McpConfig
     knowledge: KnowledgeConfig
+    schedules: SchedulesConfig
 
 
 def load_settings(base_dir: Path | None = None) -> Settings:
-    """Load all five config files, defaulting anything missing.
+    """Load all six config files, defaulting anything missing.
 
     Also ensures the files exist on disk on first run (writing out the
     defaults), per the Phase 1 acceptance criterion "first run creates
@@ -1121,6 +1364,7 @@ def load_settings(base_dir: Path | None = None) -> Settings:
     workspaces = load_workspaces_config(base)
     mcp = load_mcp_config(base)
     knowledge = load_knowledge_config(base)
+    schedules = load_schedules_config(base)
 
     if not (base / "config.yaml").exists():
         save_app_config(app, base)
@@ -1132,5 +1376,9 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         save_mcp_config(mcp, base)
     if not (base / "knowledge.yaml").exists():
         save_knowledge_config(knowledge, base)
+    if not (base / "schedules.yaml").exists():
+        save_schedules_config(schedules, base)
 
-    return Settings(app=app, providers=providers, workspaces=workspaces, mcp=mcp, knowledge=knowledge)
+    return Settings(
+        app=app, providers=providers, workspaces=workspaces, mcp=mcp, knowledge=knowledge, schedules=schedules
+    )

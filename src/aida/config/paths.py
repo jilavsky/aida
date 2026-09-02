@@ -130,6 +130,22 @@ def db_path() -> Path:
     return app_dir() / "aida.db"
 
 
+def schedules_path() -> Path:
+    """Path to the schedule store (``~/.aida/schedules.yaml``, Phase 10) —
+    one shared YAML file, unlike ``workflows_dir()``'s one-file-per-workflow
+    layout, since a schedule is a short config row rather than an editable
+    document (planning/phase10_scheduling_design.md §5)."""
+    return app_dir() / "schedules.yaml"
+
+
+def scheduler_lock_path() -> Path:
+    """Path to the scheduler's cross-process advisory lock file (Phase 10)
+    — see ``aida.core.proc_lock``. Not the DB and not a config file: purely
+    a lock, so it lives at the top level of ``~/.aida/`` next to ``aida.db``
+    rather than under any of the directories above."""
+    return app_dir() / "scheduler.lock"
+
+
 def knowledge_dir() -> Path:
     """Directory holding one SQLite file per RAG knowledge base
     (``<kb_name>.db``, created lazily by ``aida.knowledge.rag.index``) —

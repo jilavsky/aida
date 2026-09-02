@@ -30,6 +30,14 @@ def test_db_path_under_app_dir(aida_home: Path):
     assert paths.db_path().name == "aida.db"
 
 
+def test_schedules_path_under_app_dir(aida_home: Path):
+    assert paths.schedules_path() == aida_home / "schedules.yaml"
+
+
+def test_scheduler_lock_path_under_app_dir(aida_home: Path):
+    assert paths.scheduler_lock_path() == aida_home / "scheduler.lock"
+
+
 def test_default_records_dir(records_home: Path):
     expected = records_home / "Documents" / "Aida"
     assert paths.default_records_dir() == expected
