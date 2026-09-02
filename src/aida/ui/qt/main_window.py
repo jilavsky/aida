@@ -24,7 +24,15 @@ from aida import __version__ as AIDA_VERSION
 from aida.coding.runner import DEFAULT_RUN_TIMEOUT_SECONDS
 from aida.config.logging_setup import configure_logging, get_logger
 from aida.config.paths import config_dir, ensure_records_dir, ensure_scratch_dir, skills_dir
-from aida.config.settings import QuickTask, Settings, save_app_config
+from aida.config.settings import (
+    QuickTask,
+    Settings,
+    WorkflowConfig,
+    WorkflowStep,
+    list_workflow_names,
+    save_app_config,
+    save_workflow,
+)
 from aida.core.cost import estimate_cost_usd
 from aida.core.events import ContextTrimmed
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
@@ -34,6 +42,7 @@ from aida.ui.qt._qt import (
     QAction,
     QApplication,
     QDesktopServices,
+    QDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -65,6 +74,7 @@ from aida.ui.qt.scheduler_bridge import SchedulerBridge
 from aida.ui.qt.selectors import FolderDisplay, McpQuickPanel, ProfileSelector, WorkspaceSelector
 from aida.ui.qt.settings_dialog import SettingsDialog
 from aida.ui.qt.window_state import apply_font_size, apply_window_state, capture_window_state
+from aida.ui.qt.workflow_management_dialog import WorkflowFormDialog, WorkflowManagementDialog
 from aida.ui.qt.workspace_management_dialog import WorkspaceManagementDialog
 from aida.workspace.safety import relaxed_mode_warning_if_newly_enabled
 from aida.workspace.workspaces import (
@@ -184,11 +194,16 @@ class MainWindow(QMainWindow):
         workspaces_action.triggered.connect(self.open_workspace_management_dialog)
         toolbar.addAction(workspaces_action)
 
-        # Phase 10: schedules run against whichever workspace their
-        # workflow names, independent of the interactive session — same
-        # "nothing to start/stop in the active session" reasoning
-        # WorkspaceManagementDialog's own docstring gives for why it needs
-        # no bridge.
+        # Phase 10: same "nothing to start/stop in the active session"
+        # reasoning WorkspaceManagementDialog's own docstring gives for why
+        # it needs no bridge — a workflow is a stored document, not
+        # something running in this session either.
+        workflows_action = QAction("Workflows…", self)
+        workflows_action.triggered.connect(self.open_workflow_management_dialog)
+        toolbar.addAction(workflows_action)
+
+        # Schedules run against whichever workspace their workflow names,
+        # independent of the interactive session too.
         schedules_action = QAction("Schedules…", self)
         schedules_action.triggered.connect(self.open_schedule_management_dialog)
         toolbar.addAction(schedules_action)
@@ -323,6 +338,14 @@ class MainWindow(QMainWindow):
         self.compact_action = QAction("Compact Conversation", self)
         self.compact_action.triggered.connect(self._on_compact_requested)
         file_menu.addAction(self.compact_action)
+
+        # Phase 10: the other way a WorkflowConfig gets built, alongside
+        # the Workflows… toolbar dialog's from-scratch Add — derives one
+        # step per user message already in this conversation rather than
+        # asking the user to retype prompts they already sent once.
+        save_as_workflow_action = QAction("Save Conversation as Workflow…", self)
+        save_as_workflow_action.triggered.connect(self._on_save_conversation_as_workflow)
+        file_menu.addAction(save_as_workflow_action)
 
         help_menu = self.menuBar().addMenu("&Help")
         docs_action = QAction("Documentation", self)
@@ -1444,6 +1467,43 @@ class MainWindow(QMainWindow):
         dialog = WorkspaceManagementDialog(self.settings, skills_dir(), self)
         dialog.exec()
         self._refresh_workspace_selector()
+
+    # --- workflows (Phase 10) --------------------------------------------------
+
+    def open_workflow_management_dialog(self) -> None:
+        dialog = WorkflowManagementDialog(self.settings, self)
+        dialog.exec()
+
+    def _on_save_conversation_as_workflow(self) -> None:
+        """Derives one step per user message already in the live
+        conversation and opens the same Add-workflow form the Workflows…
+        dialog uses, pre-filled — a plain read of ``session.messages``, so
+        (unlike Compact Conversation) this needs no busy-guard: it cannot
+        corrupt anything a running turn depends on, at worst it just
+        snapshots a conversation that is still mid-turn."""
+        session = self.bridge.session
+        if session is None:
+            QMessageBox.information(self, "No Active Session", "Start a conversation first.")
+            return
+        prompts = [m.content for m in session.messages if m.role == "user" and m.content.strip()]
+        if not prompts:
+            QMessageBox.information(self, "Nothing to Save", "This conversation has no user messages yet.")
+            return
+        workspace_name = session.recorder.workspace_name if session.recorder else None
+        draft = WorkflowConfig(
+            name="",
+            workspace=workspace_name or "",
+            steps=[WorkflowStep(prompt=text) for text in prompts],
+        )
+        dialog = WorkflowFormDialog(settings=self.settings, workflow=draft, is_edit=False, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        config = dialog.result_config()
+        if config.name in list_workflow_names():
+            QMessageBox.warning(self, "Already Exists", f"A workflow named {config.name!r} already exists.")
+            return
+        save_workflow(config)
+        self.statusBar().showMessage(f"Saved workflow {config.name!r}", 8000)
 
     # --- code editor (Phase 9) -------------------------------------------------
 

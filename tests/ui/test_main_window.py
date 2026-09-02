@@ -2347,3 +2347,106 @@ def test_close_event_stops_the_scheduler_bridge(qapp, loop_thread, aida_home: Pa
     window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
     window.close()
     assert window.scheduler_bridge._future is None
+
+
+# --- Phase 10: workflow authoring wiring ----------------------------------
+
+
+def test_open_workflow_management_dialog_opens(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        opened = {}
+
+        def _fake_exec(self):
+            opened["dialog"] = self
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr("aida.ui.qt.workflow_management_dialog.WorkflowManagementDialog.exec", _fake_exec)
+        window.open_workflow_management_dialog()
+
+        assert "dialog" in opened
+    finally:
+        window.close()
+
+
+def test_save_conversation_as_workflow_with_no_session_shows_info(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    window = MainWindow(load_settings(), loop_thread)  # no start_kwargs => bridge.session stays None
+    try:
+        informed = []
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.information",
+            lambda *a, **k: informed.append(True),
+        )
+        window._on_save_conversation_as_workflow()
+        assert informed == [True]
+    finally:
+        window.close()
+
+
+def test_save_conversation_as_workflow_with_no_user_messages_shows_info(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        assert pump_until(qapp, lambda: window.bridge.session is not None)
+        informed = []
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.information",
+            lambda *a, **k: informed.append(True),
+        )
+        window._on_save_conversation_as_workflow()
+        assert informed == [True]
+    finally:
+        window.close()
+
+
+def test_save_conversation_as_workflow_derives_steps_from_user_messages(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    from aida.config.settings import list_workflow_names, load_workflow
+    from aida.ui.qt.workflow_management_dialog import WorkflowFormDialog
+
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="first reply"), MockTurn(text="second reply")],
+        profile_name="mock-profile",
+    )
+    try:
+        assert pump_until(qapp, lambda: window.bridge.session is not None)
+        window.bridge.send("first prompt")
+        assert pump_until(qapp, lambda: not window.bridge.is_busy)
+        window.bridge.send("second prompt")
+        assert pump_until(qapp, lambda: not window.bridge.is_busy)
+
+        # Drive the real WorkflowFormDialog constructor (cheap, builds real
+        # widgets) so the derived draft is genuinely what the form was
+        # seeded with — only exec() is stubbed, to avoid a real modal loop.
+        captured_draft = {}
+        original_init = WorkflowFormDialog.__init__
+
+        def _capturing_init(self, *, settings, workflow=None, is_edit=None, parent=None):
+            captured_draft["workflow"] = workflow
+            captured_draft["is_edit"] = is_edit
+            original_init(self, settings=settings, workflow=workflow, is_edit=is_edit, parent=parent)
+            self._name_edit.setText("from-chat")  # the draft's own name is blank; fill it in like a user would
+
+        monkeypatch.setattr(WorkflowFormDialog, "__init__", _capturing_init)
+        monkeypatch.setattr(WorkflowFormDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+
+        window._on_save_conversation_as_workflow()
+
+        draft = captured_draft["workflow"]
+        assert captured_draft["is_edit"] is False
+        assert [s.prompt for s in draft.steps] == ["first prompt", "second prompt"]
+        assert "from-chat" in list_workflow_names()
+        assert [s.prompt for s in load_workflow("from-chat").steps] == ["first prompt", "second prompt"]
+    finally:
+        window.close()
