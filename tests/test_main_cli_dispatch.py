@@ -54,3 +54,23 @@ def test_unknown_command_reports_error(capsys):
     out = capsys.readouterr().out
     assert rc == 1
     assert "Unknown command" in out
+
+
+def test_commands_table_includes_phase10_subcommands():
+    assert "run" in _COMMANDS
+    assert "workflow" in _COMMANDS
+    assert "schedule" in _COMMANDS
+
+
+def test_dispatches_to_workflow_list(aida_home: Path, records_home: Path, capsys):
+    rc = main(["workflow", "list"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No workflows stored." in out
+
+
+def test_dispatches_to_schedule_list(aida_home: Path, records_home: Path, capsys):
+    rc = main(["schedule", "list"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No schedules configured." in out

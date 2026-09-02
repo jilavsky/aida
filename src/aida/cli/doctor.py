@@ -20,12 +20,13 @@ checking, so tests can assert on structured results without parsing text.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from aida.config import paths
-from aida.config.secrets import keyring_available
+from aida.config.secrets import env_var_name, keyring_available
 from aida.config.settings import Settings, load_settings
 from aida.core.context import CONTEXT_SAFETY_FRACTION
 from aida.mcp.pyirena_setup import find_pyirena_mcp, pyirena_version
@@ -83,6 +84,62 @@ def _check_keyring() -> CheckResult:
         ok,
         "keyring backend available" if ok else "no usable keyring backend found",
     )
+
+
+def _check_secrets_non_interactive(settings: Settings | None) -> list[CheckResult]:
+    """Phase 10: can each profile's secret actually be read from an
+    unattended process (``aida run``, a schedule)?
+
+    A profile without ``secret_ref`` (a local Ollama endpoint, say) needs
+    no secret at all and is skipped. For the rest: the env-var override
+    (``AIDA_SECRET_<PROFILE>``, ``aida.config.secrets``) always works
+    non-interactively, on every platform — the OS keychain does not: a
+    macOS keychain item not yet granted to this binary raises an
+    unanswerable "allow access?" GUI prompt the first time a new process
+    reads it, a Windows Credential Manager entry is unreachable from a task
+    configured to run while logged out, and Linux's Secret Service needs an
+    unlocked session keyring a cron job outside a graphical session may not
+    have (planning/phase10_scheduling_design.md §3.2). This check cannot
+    detect "would hang on a keychain prompt" without actually triggering
+    one, which ``aida doctor`` must never risk doing — so it reports
+    "reachable via the OS keychain" as informational, not a guarantee, and
+    always names the env var that sidesteps the question entirely.
+    """
+    if settings is None or not settings.providers.profiles:
+        return []
+
+    from aida.config.secrets import get_secret
+
+    results: list[CheckResult] = []
+    for profile in settings.providers.profiles.values():
+        if not profile.secret_ref:
+            continue
+        var_name = env_var_name(profile.secret_ref)
+        if os.environ.get(var_name) is not None:
+            results.append(
+                CheckResult(f"secret_headless:{profile.name}", True, f"set via ${var_name} — safe for unattended use")
+            )
+            continue
+        found = get_secret(profile.secret_ref) is not None
+        if found:
+            results.append(
+                CheckResult(
+                    f"secret_headless:{profile.name}",
+                    True,
+                    f"found in the OS keychain (not ${var_name}) — reachable interactively; for `aida run`/a "
+                    f"schedule, verify it also works unattended, or set ${var_name} to be certain",
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    f"secret_headless:{profile.name}",
+                    False,
+                    f"no secret found for {profile.secret_ref!r} — set it with `aida config secret set "
+                    f"{profile.secret_ref}` or export ${var_name}",
+                )
+            )
+    return results
 
 
 def _check_provider_endpoints(settings: Settings | None) -> list[CheckResult]:
@@ -292,6 +349,7 @@ def run_checks() -> list[CheckResult]:
     results.append(_check_pyirena_mcp(settings))
     results.append(_check_context_windows(settings))
     results.append(_check_max_tokens_vs_context_window(settings))
+    results.extend(_check_secrets_non_interactive(settings))
     results.extend(_check_provider_endpoints(settings))
     return results
 

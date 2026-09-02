@@ -26,7 +26,9 @@ _COMMANDS = {
     "workspace": "List/show/create/edit named workspaces (Phase 4)",
     "mcp": "Manage MCP servers, groups, and per-tool permissions (Phase 7)",
     "kb": "Manage RAG knowledge bases: config, build/update indexes, query (Phase 8)",
-    "run": "Run a stored workflow headlessly (Phase 10)",
+    "run": "Non-interactive single turn: `aida run --workspace W \"prompt\"` (Phase 10)",
+    "workflow": "Run/list/show/validate stored named workflows (Phase 10)",
+    "schedule": "Manage and run scheduled workflows (Phase 10)",
     "config": "Show on-device config locations; `config secret set/get/delete` manages OS-keychain secrets",
 }
 
@@ -84,6 +86,14 @@ def main(argv: list[str] | None = None) -> int:
         from aida.cli.run import main as run_main
 
         return run_main(rest)
+    if command == "workflow":
+        from aida.cli.workflow_cmds import main as workflow_main
+
+        return workflow_main(rest)
+    if command == "schedule":
+        from aida.cli.schedule_cmds import main as schedule_main
+
+        return schedule_main(rest)
     # command == "config"
     from aida.cli.config_cmds import main as config_main
 

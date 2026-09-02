@@ -311,3 +311,84 @@ def test_max_tokens_vs_context_window_silent_when_either_field_is_unset(aida_hom
 def test_run_checks_includes_max_tokens_vs_context_window(aida_home: Path, records_home: Path):
     results = run_checks()
     assert any(r.name == "max_tokens_vs_context_window" for r in results)
+
+
+# --- Phase 10: non-interactive secret reachability ---------------------
+
+
+def test_secret_check_skips_profile_with_no_secret_ref(aida_home: Path, records_home: Path):
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["local"] = ProviderProfile(name="local", kind="openai_compat", model="m")
+
+    assert doctor._check_secrets_non_interactive(settings) == []
+
+
+def test_secret_check_ok_when_env_var_set(monkeypatch, aida_home: Path, records_home: Path):
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["argo"] = ProviderProfile(
+        name="argo", kind="anthropic", model="m", secret_ref="argo-claude"
+    )
+    monkeypatch.setenv("AIDA_SECRET_ARGO_CLAUDE", "sk-whatever")
+
+    results = doctor._check_secrets_non_interactive(settings)
+
+    assert len(results) == 1
+    assert results[0].ok is True
+    assert "AIDA_SECRET_ARGO_CLAUDE" in results[0].detail
+
+
+def test_secret_check_informational_when_only_in_keyring(monkeypatch, aida_home: Path, records_home: Path):
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["argo"] = ProviderProfile(
+        name="argo", kind="anthropic", model="m", secret_ref="argo-claude"
+    )
+    monkeypatch.delenv("AIDA_SECRET_ARGO_CLAUDE", raising=False)
+    monkeypatch.setattr("aida.config.secrets.get_secret", lambda profile: "from-keyring")
+
+    results = doctor._check_secrets_non_interactive(settings)
+
+    assert len(results) == 1
+    assert results[0].ok is True
+    assert "OS keychain" in results[0].detail
+
+
+def test_secret_check_fails_when_nowhere_to_find_it(monkeypatch, aida_home: Path, records_home: Path):
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["argo"] = ProviderProfile(
+        name="argo", kind="anthropic", model="m", secret_ref="argo-claude"
+    )
+    monkeypatch.delenv("AIDA_SECRET_ARGO_CLAUDE", raising=False)
+    monkeypatch.setattr("aida.config.secrets.get_secret", lambda profile: None)
+
+    results = doctor._check_secrets_non_interactive(settings)
+
+    assert len(results) == 1
+    assert results[0].ok is False
+    assert "argo-claude" in results[0].detail
+
+
+def test_run_checks_includes_secret_headless_check(monkeypatch, aida_home: Path, records_home: Path):
+    from aida.config.settings import load_settings, save_providers_config
+
+    settings = load_settings()
+    settings.providers.profiles["argo"] = ProviderProfile(
+        name="argo", kind="anthropic", model="m", secret_ref="argo-claude"
+    )
+    save_providers_config(settings.providers)
+    monkeypatch.setenv("AIDA_SECRET_ARGO_CLAUDE", "sk-whatever")
+
+    results = run_checks()
+
+    assert any(r.name == "secret_headless:argo" for r in results)

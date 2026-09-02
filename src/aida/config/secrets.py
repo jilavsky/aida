@@ -21,7 +21,12 @@ SERVICE_NAME = "aida"
 ENV_PREFIX = "AIDA_SECRET_"
 
 
-def _env_var_name(profile: str) -> str:
+def env_var_name(profile: str) -> str:
+    """The environment variable name checked for ``profile``'s secret
+    before the OS keychain — public (not just an internal helper) so
+    ``aida doctor``'s non-interactive-reachability check
+    (Phase 10) can name it in a diagnostic without duplicating the
+    ``AIDA_SECRET_<PROFILE>`` naming convention."""
     return ENV_PREFIX + profile.upper().replace("-", "_")
 
 
@@ -32,7 +37,7 @@ def get_secret(profile: str) -> str | None:
     """
     import os
 
-    env_val = os.environ.get(_env_var_name(profile))
+    env_val = os.environ.get(env_var_name(profile))
     if env_val is not None:
         return env_val
 
