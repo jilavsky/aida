@@ -475,3 +475,84 @@ async def test_for_workspace_wires_command_allowlist():
     guard = SafetyGuard.for_workspace(command_allowlist=["git status"])
     assert guard.command_allowlist.is_allowed("git status")
     assert not guard.command_allowlist.is_allowed("ls")
+
+
+# --- remember_scope (Phase 11: "Allow for this chat") -----------------------
+
+
+def _record():
+    seen: list[ConfirmationRequest] = []
+
+    async def _confirm(request: ConfirmationRequest) -> bool:
+        seen.append(request)
+        return True
+
+    return _confirm, seen
+
+
+@pytest.mark.asyncio
+async def test_authorize_write_remember_scope_is_containing_folder(tmp_path: Path):
+    confirm, seen = _record()
+    guard = SafetyGuard(allowed_roots=[tmp_path], mode="confirm", confirm_callback=confirm)
+    await guard.authorize_write(tmp_path / "sub" / "out.txt")
+    assert seen[0].remember_scope == str((tmp_path / "sub").resolve())
+
+
+@pytest.mark.asyncio
+async def test_authorize_delete_remember_scope_is_containing_folder(tmp_path: Path):
+    target = tmp_path / "old.txt"
+    target.write_text("x")
+    confirm, seen = _record()
+    guard = SafetyGuard(allowed_roots=[tmp_path], mode="confirm", confirm_callback=confirm)
+    await guard.authorize_delete(target)
+    assert seen[0].remember_scope == str(tmp_path.resolve())
+
+
+@pytest.mark.asyncio
+async def test_authorize_read_outside_roots_remember_scope_is_containing_folder(tmp_path: Path):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside_dir = tmp_path / "elsewhere"
+    outside_dir.mkdir()
+    outside_file = outside_dir / "notes.txt"
+    confirm, seen = _record()
+    guard = SafetyGuard(allowed_roots=[allowed], mode="relaxed", confirm_callback=confirm)
+    await guard.authorize_read(outside_file)
+    assert seen[0].remember_scope == str(outside_dir.resolve())
+    assert seen[0].in_allowed_roots is False
+
+
+@pytest.mark.asyncio
+async def test_authorize_execute_remember_scope_is_cwd(tmp_path: Path):
+    confirm, seen = _record()
+    guard = SafetyGuard(
+        allowed_roots=[tmp_path],
+        mode="confirm",
+        confirm_callback=confirm,
+        command_allowlist=CommandAllowlist(["git status"]),
+    )
+    await guard.authorize_execute("git status", tmp_path)
+    assert seen[0].remember_scope == str(tmp_path.resolve())
+
+
+@pytest.mark.asyncio
+async def test_run_script_and_execute_use_distinct_actions_even_with_the_same_folder(tmp_path: Path):
+    """Regression: authorize_run_script and authorize_execute used to both
+    say action="execute". RememberingConfirm's cache key is
+    (action, remember_scope), so if a script's folder and a command's cwd
+    coincide (as they do here), sharing the action string would let
+    approving one silently approve the other."""
+    confirm, seen = _record()
+    guard = SafetyGuard(
+        allowed_roots=[tmp_path],
+        mode="confirm",
+        confirm_callback=confirm,
+        command_allowlist=CommandAllowlist(["git status"]),
+    )
+    await guard.authorize_run_script(tmp_path / "script.py")
+    await guard.authorize_execute("git status", tmp_path)
+
+    actions = {r.action for r in seen}
+    assert actions == {"run_script", "execute"}
+    scopes = {r.remember_scope for r in seen}
+    assert scopes == {str(tmp_path.resolve())}, "both requests share the same folder scope, by design"

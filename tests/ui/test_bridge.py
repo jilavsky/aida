@@ -11,6 +11,7 @@ import asyncio
 from pathlib import Path
 
 from aida.config.settings import ProviderProfile, load_settings
+from aida.core.confirmation import ConfirmAnswer
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
 from aida.ui.qt.bridge import ChatBridge
 from aida.workspace.safety import ConfirmationRequest
@@ -205,9 +206,9 @@ def test_cancel_before_session_ready_is_a_safe_noop(qapp, loop_thread, aida_home
 
 
 def test_confirm_bridges_signal_to_a_resolvable_future(qapp, loop_thread, aida_home: Path, records_home: Path):
-    """``ChatBridge._confirm`` runs on the background asyncio thread; this
-    pins down that emitting confirmation_requested delivers (request,
-    future) to a Qt-thread receiver, and that resolving the plain
+    """``ChatBridge._confirm_interactive`` runs on the background asyncio
+    thread; this pins down that emitting confirmation_requested delivers
+    (request, future) to a Qt-thread receiver, and that resolving the plain
     concurrent.futures.Future there is what unblocks the awaiting
     coroutine — without going through a real tool call at all."""
     bridge = ChatBridge(loop_thread)
@@ -215,15 +216,15 @@ def test_confirm_bridges_signal_to_a_resolvable_future(qapp, loop_thread, aida_h
     bridge.confirmation_requested.connect(lambda request, future: received.append((request, future)))
 
     request = ConfirmationRequest(action="write", path="/tmp/x", detail="Write /tmp/x?")
-    outer_future = asyncio.run_coroutine_threadsafe(bridge._confirm(request), loop_thread.loop)
+    outer_future = asyncio.run_coroutine_threadsafe(bridge._confirm_interactive(request), loop_thread.loop)
 
     assert pump_until(qapp, lambda: received), "confirmation_requested never fired"
     inner_request, inner_future = received[0]
     assert inner_request is request
 
-    inner_future.set_result(True)
+    inner_future.set_result(ConfirmAnswer.ALLOW_ONCE)
     assert pump_until(qapp, lambda: outer_future.done())
-    assert outer_future.result(timeout=1) is True
+    assert outer_future.result(timeout=1) is ConfirmAnswer.ALLOW_ONCE
 
 
 def test_confirm_denial_resolves_false(qapp, loop_thread, aida_home: Path, records_home: Path):
@@ -232,12 +233,47 @@ def test_confirm_denial_resolves_false(qapp, loop_thread, aida_home: Path, recor
     bridge.confirmation_requested.connect(lambda request, future: received.append((request, future)))
 
     request = ConfirmationRequest(action="delete", path="/tmp/x", detail="Delete /tmp/x?")
-    outer_future = asyncio.run_coroutine_threadsafe(bridge._confirm(request), loop_thread.loop)
+    outer_future = asyncio.run_coroutine_threadsafe(bridge._confirm_interactive(request), loop_thread.loop)
     assert pump_until(qapp, lambda: received)
 
-    received[0][1].set_result(False)
+    received[0][1].set_result(ConfirmAnswer.DENY)
     assert pump_until(qapp, lambda: outer_future.done())
-    assert outer_future.result(timeout=1) is False
+    assert outer_future.result(timeout=1) is ConfirmAnswer.DENY
+
+
+def test_remembering_confirm_skips_repeat_prompt_for_same_scope(
+    qapp, loop_thread, aida_home: Path, records_home: Path
+):
+    """The RememberingConfirm wrapper start() hands to start_session: once
+    an ALLOW_FOR_CHAT answer is given for a (action, remember_scope) pair,
+    a second identical request never reaches the interactive dialog at
+    all — this is the actual "Allow for this chat" behavior, independent
+    of any specific tool call."""
+    bridge = ChatBridge(loop_thread)
+    prompted = []
+
+    def _approve_once(request, future):
+        prompted.append(request)
+        future.set_result(ConfirmAnswer.ALLOW_FOR_CHAT)
+
+    bridge.confirmation_requested.connect(_approve_once)
+    remembering = bridge._remembering_confirm_callback()
+
+    request = ConfirmationRequest(
+        action="write", path="/tmp/a.txt", detail="Write /tmp/a.txt?", remember_scope="/tmp"
+    )
+    first = asyncio.run_coroutine_threadsafe(remembering(request), loop_thread.loop)
+    assert pump_until(qapp, lambda: first.done())
+    assert first.result(timeout=1) is True
+    assert len(prompted) == 1
+
+    second_request = ConfirmationRequest(
+        action="write", path="/tmp/b.txt", detail="Write /tmp/b.txt?", remember_scope="/tmp"
+    )
+    second = asyncio.run_coroutine_threadsafe(remembering(second_request), loop_thread.loop)
+    assert pump_until(qapp, lambda: second.done())
+    assert second.result(timeout=1) is True
+    assert len(prompted) == 1, "second request in the same (action, folder) scope must not re-prompt"
 
 
 def test_start_defaults_confirm_callback_to_bridge_confirm(
@@ -245,9 +281,10 @@ def test_start_defaults_confirm_callback_to_bridge_confirm(
 ):
     """End-to-end: a write_file tool call to a path outside the (empty)
     allowed-folders set triggers SafetyGuard's confirmation, which — because
-    ChatBridge.start defaults confirm_callback to self._confirm — surfaces
-    as confirmation_requested rather than silently denying (the CLI's
-    deny_all-less default) or hanging."""
+    ChatBridge.start defaults confirm_callback to a RememberingConfirm
+    wrapping self._confirm_interactive — surfaces as confirmation_requested
+    rather than silently denying (the CLI's deny_all-less default) or
+    hanging."""
     target = tmp_path / "note.txt"
     monkeypatch.setattr(
         "aida.core.session.build_provider",
@@ -278,7 +315,7 @@ def test_start_defaults_confirm_callback_to_bridge_confirm(
 
     def _approve(request, future):
         confirmations.append(request)
-        future.set_result(True)
+        future.set_result(ConfirmAnswer.ALLOW_ONCE)
 
     bridge.confirmation_requested.connect(_approve)
 

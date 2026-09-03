@@ -42,7 +42,7 @@ from aida.config.settings import (
     ProviderProfile,
     Settings,
 )
-from aida.core.confirmation import ConfirmationRequest
+from aida.core.confirmation import ConfirmAnswer, ConfirmationRequest, RememberingConfirm
 from aida.core.session import (
     ChatSession,
     UnknownMcpServerError,
@@ -149,13 +149,14 @@ class ChatBridge(QObject):
     # Conversation" menu action's failure/no-op path — success is
     # deliberately *not* a separate signal, see compact_context's docstring.
     compaction_failed = Signal(str)  # message: an error, or "nothing to compact yet"
-    # Phase 6: emitted from the background asyncio thread whenever a
-    # SafetyGuard-gated tool needs a yes/no answer. The second argument is a
-    # plain concurrent.futures.Future the receiver (MainWindow, on the Qt
-    # thread) must resolve with a bool by calling future.set_result(...) —
-    # see ChatBridge._confirm's docstring for why a plain Future (not a Qt
-    # signal-based reply) is what bridges the two threads here.
-    confirmation_requested = Signal(object, object)  # (ConfirmationRequest, concurrent.futures.Future[bool])
+    # Phase 6 (Phase 11: tri-state): emitted from the background asyncio
+    # thread whenever a SafetyGuard-gated tool needs an answer. The second
+    # argument is a plain concurrent.futures.Future the receiver
+    # (MainWindow, on the Qt thread) must resolve with a ConfirmAnswer by
+    # calling future.set_result(...) — see
+    # ChatBridge._confirm_interactive's docstring for why a plain Future
+    # (not a Qt signal-based reply) is what bridges the two threads here.
+    confirmation_requested = Signal(object, object)  # (ConfirmationRequest, concurrent.futures.Future[ConfirmAnswer])
     # Phase 7: MCP management dialog live-control signals. A single
     # "changed"/"failed" pair per action rather than one signal per verb
     # (start/stop/restart/register/unregister) — the dialog just refreshes
@@ -197,6 +198,16 @@ class ChatBridge(QObject):
         # otherwise miss the scratch-folder wiring (see aida.core.session
         # and aida.mcp.manager for why every MCP subprocess gets one).
         self._scratch_dir: Path | None = None
+        # Phase 11 ("Allow for this chat"): one RememberingConfirm per
+        # bridge, lazily built and reused by both start() and
+        # _ensure_mcp_manager() below — never a fresh instance per call, or
+        # a remembered approval from one wouldn't be visible to the other,
+        # and a second McpManager built by _ensure_mcp_manager() would
+        # silently fragment the chat's remembered-approvals state. Dies
+        # with this bridge (a New Chat/resume/workspace switch always
+        # builds a brand-new ChatBridge), which is what makes "remember for
+        # this chat, not beyond" true with no extra lifetime plumbing.
+        self._remembering_confirm: RememberingConfirm | None = None
         # Startup is asynchronous, so a bridge can be asked to shut down
         # while its session is still being built (the user switches
         # workspace, or closes the window, before MCP servers finish
@@ -234,29 +245,46 @@ class ChatBridge(QObject):
         raised exception.
 
         Unless the caller already supplied one, ``confirm_callback`` is
-        defaulted to ``self._confirm`` — a real modal dialog on the Qt
-        thread, per PLAN.md's "GUI: confirmation flow uses a real dialog"
-        requirement (the CLI's own default, ``aida.cli.chat.cli_confirm``,
-        would just block invisibly on stdin here since the GUI has no
-        terminal)."""
-        start_session_kwargs.setdefault("confirm_callback", self._confirm)
+        defaulted to ``self._remembering_confirm_callback()`` — wrapping
+        ``self._confirm_interactive`` (a real modal dialog on the Qt
+        thread) so an "Allow for this chat" answer is remembered for the
+        rest of this bridge's life, per PLAN.md's "GUI: confirmation flow
+        uses a real dialog" requirement (the CLI's own default,
+        ``aida.cli.chat.cli_confirm``, would just block invisibly on stdin
+        here since the GUI has no terminal)."""
+        start_session_kwargs.setdefault("confirm_callback", self._remembering_confirm_callback())
         self._scratch_dir = ensure_scratch_dir(settings.app.scratch_dir)
         self._start_future = asyncio.run_coroutine_threadsafe(
             self._start(settings, start_session_kwargs), self._loop_thread.loop
         )
 
-    async def _confirm(self, request: ConfirmationRequest) -> bool:
-        """The GUI's ``ConfirmCallback`` (Phase 6). Runs on the background
-        asyncio thread (it's called from inside a tool coroutine that
-        ``SafetyGuard`` is awaiting) but the actual yes/no decision has to
-        come from a real modal dialog on the Qt thread. Bridges the two via
-        a plain ``concurrent.futures.Future`` (thread-safe by design, unlike
-        an ``asyncio.Future``): emitting ``confirmation_requested`` onto a
+    def _remembering_confirm_callback(self) -> RememberingConfirm:
+        """The one ``RememberingConfirm`` this bridge ever hands out — see
+        its docstring on ``self._remembering_confirm`` in ``__init__`` for
+        why it must be a single shared instance rather than one per call
+        site."""
+        if self._remembering_confirm is None:
+            self._remembering_confirm = RememberingConfirm(self._confirm_interactive)
+        return self._remembering_confirm
+
+    async def _confirm_interactive(self, request: ConfirmationRequest) -> ConfirmAnswer:
+        """The GUI's raw, interactive ``RawConfirmCallback`` (Phase 6; made
+        tri-state in Phase 11). Runs on the background asyncio thread (it's
+        called from inside a tool coroutine that ``SafetyGuard`` is
+        awaiting) but the actual decision has to come from a real modal
+        dialog on the Qt thread. Bridges the two via a plain
+        ``concurrent.futures.Future`` (thread-safe by design, unlike an
+        ``asyncio.Future``): emitting ``confirmation_requested`` onto a
         Qt-thread-owned receiver is automatically a thread-safe queued
         delivery (same mechanism ``event_received`` already relies on — see
         this module's docstring), and ``asyncio.wrap_future`` lets this
         coroutine ``await`` the plain ``Future`` the Qt-side handler
-        resolves once the user answers the dialog."""
+        resolves once the user answers the dialog.
+
+        Never handed to ``SafetyGuard``/``McpManager`` directly — always
+        wrapped by ``_remembering_confirm_callback()`` first, which turns
+        this tri-state ``ConfirmAnswer`` back into the plain bool every
+        ``ConfirmCallback`` consumer expects."""
         future: concurrent.futures.Future = concurrent.futures.Future()
         self.confirmation_requested.emit(request, future)
         return await asyncio.wrap_future(future)
@@ -448,7 +476,9 @@ class ChatBridge(QObject):
             # deny_all default, or a confirm-flagged tool on it would
             # always silently refuse.
             self.mcp_manager = McpManager(
-                [], confirm_callback=self._confirm, scratch_dir=self._scratch_dir or ensure_scratch_dir()
+                [],
+                confirm_callback=self._remembering_confirm_callback(),
+                scratch_dir=self._scratch_dir or ensure_scratch_dir(),
             )
         return self.mcp_manager
 

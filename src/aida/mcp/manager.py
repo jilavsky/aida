@@ -418,6 +418,11 @@ class McpManager:
                     action="tool_call",
                     path=namespaced,
                     detail=f'Run {namespaced}({arguments})? This tool is marked "confirm before run".',
+                    # "Allow for this chat" (RememberingConfirm) remembers by
+                    # exact tool name, not a folder — a per-tool flag, so
+                    # approving it once should stop re-prompting for that
+                    # same tool for the rest of the chat.
+                    remember_scope=namespaced,
                 )
             )
             if not approved:

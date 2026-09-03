@@ -19,6 +19,7 @@ from aida.config.settings import (
     Settings,
     load_settings,
 )
+from aida.core.confirmation import ConfirmAnswer
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
 from aida.ui.qt._qt import QDialog, QMessageBox, Qt
 from aida.ui.qt.bridge import ChatBridge
@@ -479,9 +480,12 @@ def test_confirm_flagged_tool_triggers_the_modal_even_in_relaxed_workspace(
         ),
     )
     asked: list[str] = []
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda self, title, text, *a, **k: (asked.append(text), QMessageBox.StandardButton.Yes)[1]
-    )
+
+    def _fake_ask_confirmation(self, request):
+        asked.append(request.detail)
+        return ConfirmAnswer.ALLOW_ONCE
+
+    monkeypatch.setattr("aida.ui.qt.main_window.MainWindow._ask_confirmation", _fake_ask_confirmation)
 
     window = MainWindow(settings, loop_thread, start_kwargs={"workspace_name": "ws"})
     try:

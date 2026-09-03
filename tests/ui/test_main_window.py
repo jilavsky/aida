@@ -24,6 +24,7 @@ from aida.config.settings import (
     WorkspacesConfig,
     load_settings,
 )
+from aida.core.confirmation import ConfirmAnswer
 from aida.core.events import ContextTrimmed
 from aida.persistence.store import ConversationStore
 from aida.providers.base import Message
@@ -1496,18 +1497,19 @@ def test_safety_confirmation_shows_modal_and_approving_lets_write_through(
 ):
     """Phase 6 GUI wiring: a write_file tool call outside the (empty)
     allowed-folders set triggers SafetyGuard's confirm_callback, which
-    ChatBridge.start defaults to bridge._confirm -> confirmation_requested ->
-    MainWindow._on_confirmation_requested -> a real (mocked-out) QMessageBox.
-    Approving lets the write through."""
+    ChatBridge.start defaults to a RememberingConfirm wrapping
+    bridge._confirm_interactive -> confirmation_requested ->
+    MainWindow._on_confirmation_requested -> a real (mocked-out) dialog via
+    MainWindow._ask_confirmation. Approving lets the write through."""
     target = tmp_path / "note.txt"
     settings = _settings_with_profile()
     seen_prompts = []
 
-    def _fake_question(self, title, text, *args, **kwargs):
-        seen_prompts.append(text)
-        return QMessageBox.StandardButton.Yes
+    def _fake_ask_confirmation(self, request):
+        seen_prompts.append(request.detail)
+        return ConfirmAnswer.ALLOW_ONCE
 
-    monkeypatch.setattr("aida.ui.qt.main_window.QMessageBox.question", _fake_question)
+    monkeypatch.setattr("aida.ui.qt.main_window.MainWindow._ask_confirmation", _fake_ask_confirmation)
 
     script = [
         MockTurn(
@@ -1534,7 +1536,7 @@ def test_safety_confirmation_declining_blocks_the_write(
     target = tmp_path / "note.txt"
     settings = _settings_with_profile()
     monkeypatch.setattr(
-        "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.No
+        "aida.ui.qt.main_window.MainWindow._ask_confirmation", lambda self, request: ConfirmAnswer.DENY
     )
 
     script = [

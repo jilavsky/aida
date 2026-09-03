@@ -181,9 +181,23 @@ class SafetyGuard:
     def is_allowed(self, path: str | Path) -> bool:
         return self._containing_root(normalize_path(path)) is not None
 
-    async def _authorize(self, action: str, path: str | Path, *, always_confirm_in_bounds: bool) -> Path:
+    async def _authorize(
+        self,
+        action: str,
+        path: str | Path,
+        *,
+        always_confirm_in_bounds: bool,
+        detail_verb: str | None = None,
+    ) -> Path:
         candidate = normalize_path(path)
         inside = self._containing_root(candidate) is not None
+        # "Allow for this chat" (RememberingConfirm) remembers per (action,
+        # folder) — the containing folder, not the exact file, so approving
+        # one write into a folder covers the next differently-named file
+        # written there too. `candidate` itself is used when it's a
+        # directory (e.g. a delete/write target that is itself a folder).
+        remember_scope = str(candidate if candidate.is_dir() else candidate.parent)
+        phrase = detail_verb or action
         logger.debug(
             "authorize %s %s (inside_allowed_roots=%s mode=%s allowed_roots=%s)",
             action,
@@ -199,8 +213,9 @@ class SafetyGuard:
                 ConfirmationRequest(
                     action=action,
                     path=str(candidate),
-                    detail=f"{action} outside the allowed folders: {candidate}",
+                    detail=f"{phrase} outside the allowed folders: {candidate}",
                     in_allowed_roots=False,
+                    remember_scope=remember_scope,
                 )
             )
             logger.info("%s outside allowed folders %s: %s", action, "approved" if approved else "denied", candidate)
@@ -213,8 +228,9 @@ class SafetyGuard:
                 ConfirmationRequest(
                     action=action,
                     path=str(candidate),
-                    detail=f"{action.capitalize()} {candidate}?",
+                    detail=f"{phrase.capitalize()} {candidate}?",
                     in_allowed_roots=True,
+                    remember_scope=remember_scope,
                 )
             )
             logger.debug("%s inside allowed folders %s: %s", action, "approved" if approved else "denied", candidate)
@@ -247,8 +263,17 @@ class SafetyGuard:
         commands", not scripts already sitting in a folder the workspace
         already trusts (the same trust ``write_file``/``delete_file``
         already extend there) — that's what ``authorize_execute`` (below)
-        is for."""
-        return await self._authorize("execute", path, always_confirm_in_bounds=False)
+        is for.
+
+        Uses its own ``"run_script"`` action string, distinct from
+        ``authorize_execute``'s ``"execute"`` — both scope "Allow for this
+        chat" by folder (this one: the script's containing folder;
+        ``authorize_execute``: the command's cwd), and sharing one action
+        string would let an approval for one silently cover the other
+        whenever those two folders happen to coincide."""
+        return await self._authorize(
+            "run_script", path, always_confirm_in_bounds=False, detail_verb="run script"
+        )
 
     async def authorize_execute(self, command: str, cwd: str | Path) -> Path:
         """Gates a raw shell command (Phase 9: ``run_command``). Two
@@ -273,6 +298,13 @@ class SafetyGuard:
             self.mode,
         )
 
+        # "Allow for this chat" scopes a shell-command approval by cwd, not
+        # by the exact command text — a deliberately bigger grant than the
+        # file-safety gates above (accepted tradeoff: approving one command
+        # from a directory also silences *different* future commands run
+        # from that same directory for the rest of the chat).
+        remember_scope = str(candidate)
+
         if not inside or not allowlisted:
             reason = "outside the allowed folders" if not inside else "not on the command allowlist"
             logger.info("execute %s, requesting confirmation: %r (cwd=%s)", reason, command, candidate)
@@ -282,6 +314,7 @@ class SafetyGuard:
                     path=command,
                     detail=f"Run {reason}: {command!r} (cwd={candidate})",
                     in_allowed_roots=False,
+                    remember_scope=remember_scope,
                 )
             )
             if not approved:
@@ -295,6 +328,7 @@ class SafetyGuard:
                     path=command,
                     detail=f"Run {command!r} (cwd={candidate})?",
                     in_allowed_roots=True,
+                    remember_scope=remember_scope,
                 )
             )
             if not approved:

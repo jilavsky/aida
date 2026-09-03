@@ -58,6 +58,48 @@ refuse to replace a file that already exists unless the call passes
 applies in `relaxed` mode too, because an overwritten file has no `_trash`
 copy to recover from.
 
+## "Allow for this chat"
+
+Every confirmation dialog/prompt offers a third answer alongside Deny and
+Allow: **"Allow for this chat"** (CLI: answer `a` at the `[y/N/a]` prompt).
+It exists because a `confirm`-mode workspace pops a fresh, identical-looking
+dialog for every single write into the same folder — five scratch files
+written to the same already-allowed folder is five dialogs — which is
+exactly the kind of repetition that trains people to stop reading and just
+click "Yes." Choosing "Allow for this chat" remembers that specific
+approval for the rest of the current conversation only:
+
+- **Scope is the containing folder, not the exact file** — approving a
+  write into `~/Documents/Aida/temp/` covers the next differently-named
+  file written into that same folder too, but not a subfolder of it and
+  not a sibling folder.
+- **Scope is per action** — approving a write to a folder never silently
+  approves a delete or a read there; each action kind remembers
+  separately.
+- **Shell commands** (`run_command`) are scoped by the command's working
+  directory, not by the exact command text — a bigger grant than the
+  file-safety gates above, deliberately: approving one command from a
+  directory also stops asking about *different* commands run from that
+  same directory for the rest of the chat.
+- **MCP per-tool "confirm before run" flags** are scoped by the exact tool
+  name — approving one call silences only that specific tool, not every
+  tool on that server.
+- **Applies whether the path was inside an allowed folder or not** — a
+  dropped/attached file from outside every allowed folder can also be
+  "allowed for this chat," which then covers other files in that same
+  outside folder too, for the rest of the conversation.
+- **Never persisted, never crosses a chat boundary.** It lives only in
+  memory for as long as the current `SafetyGuard`/session does — starting
+  a New Chat, resuming a different conversation, switching workspace, or
+  starting a fresh `aida chat` process all forget it completely. Nothing
+  in `workspaces.yaml` or `config.yaml` changes.
+- **`fetch_url` is excluded and always asks**, with no exceptions — see
+  below. This is enforced at two independent points (the URL fetcher never
+  attaches a rememberable scope to its confirmation, and the remembering
+  layer only ever caches an explicit allowlist of action kinds that does
+  not include `fetch_url`), specifically so this guarantee can't be
+  accidentally broken by a future change to one of those two places alone.
+
 ## What *always* asks, regardless of mode
 
 This is the part that matters most, because it's independent of whether the

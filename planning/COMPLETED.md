@@ -327,3 +327,60 @@ reason noted there.
   AIDA's sample skills (`saxs-basics`, `pyirena-usage`, `review-checklist`)
   directly, instead of only as a side effect of `add-pyirena`.
   (`aida/ui/qt/mcp_management_dialog.py`)
+
+---
+
+## 8. "Allow for this chat" — remembered safety confirmations (2026-09-03)
+
+Bug report, in effect: a `confirm`-mode workspace pops an identical dialog
+for every single write into the same already-allowed folder — five
+scratch files written to one folder is five dialogs — which is exactly
+the kind of repetition that trains a user to stop reading and just click
+"Yes." The fix is a third answer, "Allow for this chat," alongside every
+existing Deny/Allow — not a permanently relaxed workspace, and nothing
+written to `workspaces.yaml`/`config.yaml`.
+
+Decided scope: remembering is folder-level (the containing folder, not
+the exact file, not subfolders) and per-action (approving a write never
+covers a delete or a read in the same folder). Shell commands
+(`authorize_execute`) are scoped by working directory instead — a
+deliberately bigger grant, since a remembered approval there also covers
+*different* future commands from that same directory. MCP per-tool
+"confirm before run" flags are scoped by exact tool name. A folder outside
+every allowed root participates too (not just in-bounds `confirm`-mode
+folders). `fetch_url` is the one deliberate exception — it always asks,
+unconditionally, with no remember option — enforced two independent ways
+(the URL fetcher never attaches a scope to its own confirmation, and the
+remembering layer only ever caches an explicit allowlist of action kinds
+that omits `fetch_url`), so the guarantee can't be broken by a future
+change to only one of those two places.
+
+Mechanism (`aida/core/confirmation.py`): `ConfirmationRequest` gained a
+`remember_scope: str | None` field (`None` = never remembered). A new
+tri-state `ConfirmAnswer` (`DENY`/`ALLOW_ONCE`/`ALLOW_FOR_CHAT`) is what
+the two *interactive* raw callbacks — `cli_confirm`
+(`aida/core/session.py`) and `ChatBridge._confirm_interactive`
+(`aida/ui/qt/bridge.py`) — return; a `RememberingConfirm` wrapper turns
+that back into the plain bool every `ConfirmCallback` consumer
+(`SafetyGuard`, `McpManager`) already expects, caching an
+`ALLOW_FOR_CHAT` answer under `(action, remember_scope)` for its own
+in-memory lifetime. One `RememberingConfirm` instance lives exactly as
+long as one chat: the CLI builds one per `_start_session` call (one per
+process), and `ChatBridge` builds exactly one per bridge instance, shared
+between `start()`'s default and the separate `McpManager` built lazily by
+`_ensure_mcp_manager()` (missing that sharing would have silently
+defeated confirmation there once the interactive callback stopped
+returning a plain bool — enums are truthy, so `if not approved` would
+never fire). `SafetyGuard.authorize_run_script` was given its own
+`"run_script"` action string, distinct from `authorize_execute`'s
+`"execute"` — they used to share the literal string, which would have let
+an approval for one silently cover the other whenever a script's folder
+and a shell command's cwd happened to coincide, exactly the cross-action
+leak the per-action scoping rule above was meant to prevent.
+
+Every non-interactive `ConfirmCallback` consumer (tests, headless mode's
+`build_headless_confirm_callback`, an explicitly-supplied callback) is
+untouched — only the two interactive raw callbacks changed their return
+type, and only the two places that supply *defaults* wrap them.
+Documented in
+[docs/safety-and-permissions.md](../docs/safety-and-permissions.md#allow-for-this-chat).

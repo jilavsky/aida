@@ -43,6 +43,7 @@ from aida.config.paths import (
 )
 from aida.config.settings import McpConfig, McpServerConfig, Settings, WorkspaceConfig
 from aida.core.agent import AgentLoop
+from aida.core.confirmation import REMEMBERABLE_ACTIONS, ConfirmAnswer, RememberingConfirm
 from aida.core.context import (
     DEFAULT_RESERVED_OUTPUT_TOKENS,
     TrimPlan,
@@ -96,15 +97,32 @@ from aida.workspace.workspaces import (
 )
 
 
-async def cli_confirm(request: ConfirmationRequest) -> bool:
-    """The default ``ConfirmCallback`` for any terminal-based caller
-    (today, only ``aida.cli.chat``): blocks on a real terminal prompt via
-    ``asyncio.to_thread(input, ...)`` so it doesn't freeze the event loop
-    out from under any concurrently-streaming output. The GUI
+async def cli_confirm(request: ConfirmationRequest) -> ConfirmAnswer:
+    """The raw, interactive ``RawConfirmCallback`` for any terminal-based
+    caller (today, only ``aida.cli.chat``): blocks on a real terminal
+    prompt via ``asyncio.to_thread(input, ...)`` so it doesn't freeze the
+    event loop out from under any concurrently-streaming output. The GUI
     (``aida.ui.qt.bridge.ChatBridge``) always passes its own callback that
-    shows a modal dialog instead — see ``start_session``'s docstring."""
-    answer = await asyncio.to_thread(input, f"\n[confirm] {request.detail} [y/N] ")
-    return answer.strip().lower() in ("y", "yes")
+    shows a modal dialog instead — see ``start_session``'s docstring.
+
+    Never handed to ``SafetyGuard``/``McpManager`` directly — always
+    wrapped in a ``RememberingConfirm`` first (see ``_start_session``),
+    which is what turns this tri-state ``ConfirmAnswer`` back into the
+    plain bool every ``ConfirmCallback`` consumer expects, and remembers
+    an ``ALLOW_FOR_CHAT`` answer for the rest of this process's session."""
+    rememberable = request.remember_scope is not None and request.action in REMEMBERABLE_ACTIONS
+    suffix = "[y/N/a]" if rememberable else "[y/N]"
+    if rememberable:
+        prompt = f"\n[confirm] {request.detail} {suffix} (a = allow for the rest of this chat) "
+    else:
+        prompt = f"\n[confirm] {request.detail} {suffix} "
+    answer = await asyncio.to_thread(input, prompt)
+    normalized = answer.strip().lower()
+    if rememberable and normalized in ("a", "always"):
+        return ConfirmAnswer.ALLOW_FOR_CHAT
+    if normalized in ("y", "yes"):
+        return ConfirmAnswer.ALLOW_ONCE
+    return ConfirmAnswer.DENY
 
 
 logger = get_logger("session")
@@ -893,7 +911,14 @@ async def _start_session(
         mcp_names,
         resume_conversation_id,
     )
-    confirm_callback = confirm_callback or cli_confirm
+    # Wrapping only the *default* (cli_confirm) in RememberingConfirm here —
+    # an explicitly-passed confirm_callback (the GUI's already-wrapped
+    # instance, a test's own bool stub, build_headless_confirm_callback(...))
+    # is used exactly as given, so "Allow for this chat" plumbing never
+    # leaks into headless/test callers that never intended tri-state
+    # semantics. One fresh RememberingConfirm per _start_session call means
+    # its remembered-approvals set lives exactly as long as this session.
+    confirm_callback = confirm_callback or RememberingConfirm(cli_confirm)
     store = ConversationStore()
     # Registered here, not at each `raise` below: every early exit from this
     # point on releases it, including ones added later that would otherwise

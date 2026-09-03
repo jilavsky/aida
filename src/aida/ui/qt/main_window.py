@@ -33,6 +33,7 @@ from aida.config.settings import (
     save_app_config,
     save_workflow,
 )
+from aida.core.confirmation import REMEMBERABLE_ACTIONS, ConfirmAnswer
 from aida.core.cost import estimate_cost_usd
 from aida.core.events import ContextTrimmed
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
@@ -786,21 +787,42 @@ class MainWindow(QMainWindow):
     def _on_turn_failed(self, message: str) -> None:
         QMessageBox.warning(self, "Turn Failed", message)
 
+    def _ask_confirmation(self, request) -> ConfirmAnswer:
+        """Builds and runs the actual confirmation dialog — split out from
+        ``_on_confirmation_requested`` so tests can patch this one method
+        directly instead of reaching into a hand-built multi-button
+        ``QMessageBox``'s internals (``clickedButton()`` etc). A third
+        button, "Allow for This Chat", only appears when the request is
+        actually eligible to be remembered (``request.remember_scope`` set
+        and ``request.action`` in ``REMEMBERABLE_ACTIONS`` — e.g. never for
+        ``fetch_url``, which must always ask)."""
+        box = QMessageBox(self)
+        box.setWindowTitle("Confirm Action")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(request.detail)
+        deny_button = box.addButton("Deny", QMessageBox.ButtonRole.RejectRole)
+        allow_button = box.addButton("Allow", QMessageBox.ButtonRole.YesRole)
+        remember_button = None
+        if request.remember_scope is not None and request.action in REMEMBERABLE_ACTIONS:
+            remember_button = box.addButton("Allow for This Chat", QMessageBox.ButtonRole.YesRole)
+        box.setDefaultButton(deny_button)
+        box.exec()
+        clicked = box.clickedButton()
+        if remember_button is not None and clicked is remember_button:
+            return ConfirmAnswer.ALLOW_FOR_CHAT
+        if clicked is allow_button:
+            return ConfirmAnswer.ALLOW_ONCE
+        return ConfirmAnswer.DENY
+
     def _on_confirmation_requested(self, request, future) -> None:
-        """Handles ``ChatBridge.confirmation_requested`` (Phase 6): shows a
-        real modal dialog for a ``SafetyGuard`` confirmation and resolves
-        the paired ``concurrent.futures.Future`` with the answer, unblocking
-        the background asyncio thread's ``await`` in ``ChatBridge._confirm``.
-        A plain ``concurrent.futures.Future`` is safe to resolve from this
-        (the Qt) thread — see that method's docstring."""
-        answer = QMessageBox.question(
-            self,
-            "Confirm Action",
-            request.detail,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        future.set_result(answer == QMessageBox.StandardButton.Yes)
+        """Handles ``ChatBridge.confirmation_requested`` (Phase 6; tri-state
+        in Phase 11): shows a real modal dialog for a ``SafetyGuard``
+        confirmation and resolves the paired ``concurrent.futures.Future``
+        with a ``ConfirmAnswer``, unblocking the background asyncio
+        thread's ``await`` in ``ChatBridge._confirm_interactive``. A plain
+        ``concurrent.futures.Future`` is safe to resolve from this (the Qt)
+        thread — see that method's docstring."""
+        future.set_result(self._ask_confirmation(request))
 
     def _on_send_requested(self, text: str) -> None:
         if self.bridge.is_busy:

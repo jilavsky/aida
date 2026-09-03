@@ -16,6 +16,20 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Added
+
+- **"Allow for this chat"**: every safety-confirmation dialog/prompt now
+  offers a third answer alongside Deny and Allow. Choosing it remembers
+  that approval — scoped to the containing folder (or, for a shell
+  command, its working directory; for an MCP per-tool confirm flag, the
+  exact tool name) and to that one action kind — for the rest of the
+  current conversation only, so repeated writes/deletes/commands into the
+  same already-approved folder stop popping identical dialogs. Nothing is
+  persisted to disk; a New Chat, a resumed conversation, a workspace
+  switch, or a fresh `aida chat` process all forget it. `fetch_url` is
+  deliberately excluded and keeps asking unconditionally, every time. See
+  [docs/safety-and-permissions.md](docs/safety-and-permissions.md#allow-for-this-chat).
+
 ## [0.1.0b3] - 2026-09-01
 
 ### Added

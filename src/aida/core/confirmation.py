@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from enum import Enum
 
 
 class ConfirmationDenied(Exception):
@@ -72,9 +73,84 @@ class ConfirmationRequest:
     path: str
     detail: str
     in_allowed_roots: bool = True
+    #: "Allow for this chat" (Phase 11): the key a ``RememberingConfirm``
+    #: should remember this approval under, paired with ``action`` — e.g.
+    #: a folder path for a file-safety gate, a cwd for a shell command, or
+    #: an exact namespaced tool name for an MCP ``"tool_call"``. ``None``
+    #: means "never remember this" — the caller (``web.py``'s ``fetch_url``)
+    #: deliberately never sets it, so that always-confirms unconditionally
+    #: regardless of what a user clicks elsewhere. Defaults to ``None`` so
+    #: every pre-existing ``ConfirmationRequest(...)`` construction (tests
+    #: included) keeps working unchanged.
+    remember_scope: str | None = None
 
 
 ConfirmCallback = Callable[[ConfirmationRequest], Awaitable[bool]]
+
+
+class ConfirmAnswer(Enum):
+    """What an interactive, tri-state raw confirmation prompt (``cli_confirm``,
+    ``ChatBridge``'s interactive method) actually returns — richer than the
+    plain bool every other ``ConfirmCallback`` implementer (``SafetyGuard``,
+    ``McpManager``, tests, ``build_headless_confirm_callback``) uses, so
+    that a human can distinguish "yes, just this once" from "yes, and stop
+    asking me about this for the rest of the chat"."""
+
+    DENY = "deny"
+    ALLOW_ONCE = "allow_once"
+    ALLOW_FOR_CHAT = "allow_for_chat"
+
+
+#: The type of a raw, interactive confirmation prompt — distinct from
+#: ``ConfirmCallback`` (bool-returning), which every non-interactive
+#: consumer (``SafetyGuard``, ``McpManager``, tests, headless mode) still
+#: uses unchanged. Only ``RememberingConfirm`` ever calls a
+#: ``RawConfirmCallback`` directly.
+RawConfirmCallback = Callable[[ConfirmationRequest], Awaitable[ConfirmAnswer]]
+
+#: Actions eligible for "Allow for this chat". Deliberately an allowlist,
+#: not a denylist of the one excluded action (``fetch_url``) — a future
+#: action type someone adds must opt in by name here, rather than relying
+#: on everyone remembering not to opt `fetch_url` in. This is what backs
+#: docs/safety-and-permissions.md's "fetch_url... every single call asks,
+#: unconditionally, in every mode" guarantee: even if a future caller
+#: mistakenly attached a ``remember_scope`` to a ``fetch_url`` request, it
+#: still could never be remembered because ``"fetch_url"`` is absent here.
+REMEMBERABLE_ACTIONS = frozenset({"read", "write", "delete", "run_script", "execute", "tool_call"})
+
+
+class RememberingConfirm:
+    """Wraps a ``RawConfirmCallback`` (tri-state) into a plain
+    ``ConfirmCallback`` (bool) — the shape ``SafetyGuard``/``McpManager``
+    already expect, so neither needs to change how it calls
+    ``confirm_callback``. Remembers ``ALLOW_FOR_CHAT`` answers in an
+    in-memory set for its own lifetime only: never written to disk, never
+    shared across instances. One instance should live exactly as long as
+    one chat/session (one ``ChatBridge``, one CLI process) — construct a
+    fresh one per session, not a shared global, so "remember for this
+    chat" can't leak into the next one."""
+
+    def __init__(self, raw: RawConfirmCallback) -> None:
+        self._raw = raw
+        self._approved: set[tuple[str, str]] = set()
+
+    async def __call__(self, request: ConfirmationRequest) -> bool:
+        rememberable = request.remember_scope is not None and request.action in REMEMBERABLE_ACTIONS
+        key = (request.action, request.remember_scope)
+        if rememberable and key in self._approved:
+            return True
+
+        answer = await self._raw(request)
+        if not isinstance(answer, ConfirmAnswer):
+            # A RawConfirmCallback that returns a plain bool would silently
+            # misbehave here: `False is not ConfirmAnswer.DENY` is True, so
+            # a denial would be reported as approved. Fail loudly instead —
+            # this class must only ever wrap a real tri-state callback.
+            raise TypeError(f"raw confirm callback must return ConfirmAnswer, got {answer!r}")
+
+        if answer is ConfirmAnswer.ALLOW_FOR_CHAT and rememberable:
+            self._approved.add(key)
+        return answer is not ConfirmAnswer.DENY
 
 
 async def deny_all(_request: ConfirmationRequest) -> bool:
@@ -84,4 +160,13 @@ async def deny_all(_request: ConfirmationRequest) -> bool:
     return False
 
 
-__all__ = ["ConfirmCallback", "ConfirmationDenied", "ConfirmationRequest", "deny_all"]
+__all__ = [
+    "REMEMBERABLE_ACTIONS",
+    "ConfirmAnswer",
+    "ConfirmCallback",
+    "ConfirmationDenied",
+    "ConfirmationRequest",
+    "RawConfirmCallback",
+    "RememberingConfirm",
+    "deny_all",
+]

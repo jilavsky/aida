@@ -24,6 +24,7 @@ from aida.config.settings import (
     Settings,
     load_settings,
 )
+from aida.core.confirmation import ConfirmAnswer
 from aida.core.events import (
     AgentError,
     ContextTrimmed,
@@ -273,14 +274,14 @@ def test_completion_settings_for_profile_uses_profile_overrides(aida_home: Path,
 async def test_cli_confirm_yes_approves(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda prompt: "y")
     request = ConfirmationRequest(action="write", path="/tmp/x", detail="Write /tmp/x?")
-    assert await cli_confirm(request) is True
+    assert await cli_confirm(request) is ConfirmAnswer.ALLOW_ONCE
 
 
 @pytest.mark.asyncio
 async def test_cli_confirm_blank_denies(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt: "")
     request = ConfirmationRequest(action="delete", path="/tmp/x", detail="Delete /tmp/x?")
-    assert await cli_confirm(request) is False
+    assert await cli_confirm(request) is ConfirmAnswer.DENY
 
 
 @pytest.mark.asyncio
@@ -293,8 +294,26 @@ async def test_cli_confirm_shows_the_request_detail(monkeypatch):
 
     monkeypatch.setattr("builtins.input", _fake_input)
     request = ConfirmationRequest(action="write", path="/tmp/x", detail="Write outside allowed folders: /tmp/x")
-    assert await cli_confirm(request) is False
+    assert await cli_confirm(request) is ConfirmAnswer.DENY
     assert "Write outside allowed folders: /tmp/x" in seen_prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_cli_confirm_allow_for_chat_when_rememberable(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda prompt: "a")
+    request = ConfirmationRequest(
+        action="write", path="/tmp/x", detail="Write /tmp/x?", remember_scope="/tmp"
+    )
+    assert await cli_confirm(request) is ConfirmAnswer.ALLOW_FOR_CHAT
+
+
+@pytest.mark.asyncio
+async def test_cli_confirm_allow_for_chat_not_offered_when_not_rememberable(monkeypatch):
+    # remember_scope=None (e.g. fetch_url) -> "a" isn't a recognized answer,
+    # so it's treated like any other non-"y" input: denied.
+    monkeypatch.setattr("builtins.input", lambda prompt: "a")
+    request = ConfirmationRequest(action="fetch_url", path="https://example.com", detail="Fetch it?")
+    assert await cli_confirm(request) is ConfirmAnswer.DENY
 
 
 # --- ChatSession -------------------------------------------------------------
