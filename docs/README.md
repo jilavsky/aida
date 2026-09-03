@@ -24,6 +24,7 @@ commented example config files, see [`examples/config/`](../examples/config/).
 | [`knowledge-bases.md`](knowledge-bases.md) | RAG: indexing your own documents so the agent can search them |
 | [`gui-overview.md`](gui-overview.md) | A spatial tour of the desktop app — what's where |
 | [`pyirena.md`](pyirena.md) | Using AIDA with pyIrena: one-click MCP setup, and sharing an environment between the two packages |
+| [`workflows.md`](workflows.md) | Headless `aida run`, stored named workflows, and the in-app scheduler (Phase 10) |
 
 New to AIDA? Start with `installation.md`, then `providers-and-secrets.md`,
 then `workspaces.md` — that's enough to have a working chat session. The
@@ -31,8 +32,8 @@ rest are opt-in features you can add as you need them.
 
 ## Not implemented yet
 
-So you don't go looking for them: `aida run` (headless one-shot execution),
-stored named workflows, and the scheduler are Phase 10 — `aida run` prints a
-"not yet implemented" message today. Remote (HTTP) MCP servers, voice
-input/output, and an alternative web frontend are parked ideas, not planned
-work. See [`PLAN.md`](../PLAN.md).
+So you don't go looking for them: OS-level scheduler installers
+(launchd/Task Scheduler/systemd) were deliberately deferred in favor of the
+in-app scheduler — see [`workflows.md`](workflows.md#why-no-os-level-scheduler).
+Remote (HTTP) MCP servers, voice input/output, and an alternative web
+frontend are parked ideas, not planned work. See [`PLAN.md`](../PLAN.md).

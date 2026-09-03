@@ -91,13 +91,14 @@ safety model, MCP servers, scripting, RAG, a GUI tour — live in
 
 ## Status and roadmap
 
-Phases 1–9 of [`PLAN.md`](PLAN.md) are implemented: config and diagnostics,
+Phases 1–10 of [`PLAN.md`](PLAN.md) are implemented: config and diagnostics,
 the provider layer and agent loop, MCP with typed artifacts, persistence and
 workspaces, the PySide6 GUI, documents and the safety model, MCP management
-UI, RAG, and coding/scripting. Phase 10 (headless `aida run`, stored
-workflows, a scheduler) is the remaining planned work — `aida run` is
-currently a stub. Completed per-phase checklists live in
-[`planning/`](planning/); what is still open is at the top of `PLAN.md`.
+UI, RAG, coding/scripting, and headless automation — `aida run`, stored
+workflows, and the in-app scheduler (see [`docs/workflows.md`](docs/workflows.md)).
+Distribution (real PyPI/conda release automation) is what remains open.
+Completed per-phase checklists live in [`planning/`](planning/); what is
+still open is at the top of `PLAN.md`.
 
 Released and unreleased changes, version by version, are in
 [`CHANGELOG.md`](CHANGELOG.md).

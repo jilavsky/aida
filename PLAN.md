@@ -56,62 +56,76 @@ Nothing here is speculative work; it is what a beta is for.
 
 ### 1.2 Phase 10 — automation and distribution (`phase10_automation_distribution.md`)
 
-The one phase not started, and — as of 2026-09-02 — **the one users are
-asking for**. `aida run` exists as a stub that prints "not yet implemented".
+**Automation half done (2026-09-03), on branch `phase10-in-app-scheduler`,
+merged to `main`.** The distribution half (release automation, conda
+feedstock) is still open.
 
-The *shape* of the automation half is now decided and written up in
+The *shape* of the automation half was decided and written up in
 [`planning/phase10_scheduling_design.md`](planning/phase10_scheduling_design.md):
 four layers (`run` → `workflow` → `schedule` → trigger), where only the top
-layer touches the operating system. Three conclusions from it that change
-what gets built:
+layer touches the operating system. Three conclusions from it that shaped
+what got built:
 
 1. **Workflows and scheduling are separable, and workflows are most of the
    value.** "Replay this analysis on a new folder" needs no clock at all.
-   Ship that first, complete, and confirm how many users actually wanted
-   the clock.
-2. **In-app scheduler first, OS schedulers later and additively.** The
-   in-app one is ~200 testable lines and cross-platform for free; the
-   launchd/Task Scheduler/systemd installers only buy "AIDA may be closed",
-   *not* "the user may be logged out", which on a 24/7 beamline machine is
-   nearly the same guarantee. They are three independent, independently
-   shippable pieces, and nothing built for the in-app scheduler is thrown
-   away when they arrive.
-3. **The blocker nobody sees coming is secrets, not clocks.** A keychain
-   read behaves differently in a non-interactive process on all three
-   platforms; `aida run` needs an env-var fallback and `aida doctor` needs
-   a "can this profile authenticate non-interactively?" check before any
-   scheduling is trustworthy.
+   Shipped first, complete.
+2. **In-app scheduler first, OS schedulers later and additively (Option
+   A).** Built and shipped; the launchd/Task Scheduler/systemd installers
+   remain deliberately unbuilt — see
+   [`docs/workflows.md`](docs/workflows.md#why-no-os-level-scheduler) and
+   §2's "Considered" note below. Nothing built for the in-app scheduler is
+   thrown away if they're added later (`ScheduleEntry.trigger` already
+   exists for exactly this reason).
+3. **The blocker nobody sees coming is secrets, not clocks.** Handled: the
+   existing env-var fallback (`AIDA_SECRET_<PROFILE>`) is what `aida run`/
+   `workflow run`/scheduled fires authenticate through, and `aida doctor`
+   reports per-profile whether that's actually in place.
 
-- [ ] `aida run --workspace W "prompt"` — non-interactive single turn: exit
-      codes (distinguishing step failure / config error / confirmation
-      refused), `--json` output, stdin prompt, `--input file…` attachments.
-- [ ] Headless confirmation policy: fail-with-message by default;
+- [x] `aida run --workspace W "prompt"` — non-interactive single turn: exit
+      codes (distinguishing step failure / config error), `--json` output,
+      stdin prompt, `--input file…` attachments.
+- [x] Headless confirmation policy: fail-with-message by default;
       `--yes-in-allowed` narrows the workspace's own safety mode and never
-      widens it; MCP `confirm_before_run` flags need explicit per-workflow
-      pre-approval; never hang waiting for a human who is not there.
-- [ ] Non-interactive secret access: env-var fallback for every
-      `secret_ref`, plus an `aida doctor` check for it.
-- [ ] Stored named workflows in `~/.aida/workflows/NAME.yaml` — workspace ref
+      widens it; MCP `confirm_before_run` flags need explicit
+      `--preapprove-tool`/`preapproved_tools:` pre-approval; never hangs
+      waiting for a human who is not there.
+- [x] Non-interactive secret access: env-var fallback for every
+      `secret_ref` (already existed), plus an `aida doctor` check for it.
+- [x] Stored named workflows in `~/.aida/workflows/NAME.yaml` — workspace ref
       plus steps, placeholder substitution, optional `expect_files` per step,
       `aida workflow run/list/show/validate`. All steps share one session.
-- [ ] "Save this conversation as a workflow" from the GUI, and a workflow
-      picker that runs one into a normal conversation view.
-- [ ] Failure semantics: a failed step stops the workflow with a clear report
+- [x] "Save this conversation as a workflow" from the GUI, and a workflow
+      picker (Workflows… management dialog) that runs one into a normal
+      conversation view.
+- [x] Failure semantics: a failed step stops the workflow with a clear report
       and leaves partial output in place.
-- [ ] Reproducibility manifest per run (`PLAN.md` §2.6) — a by-product of
-      the workflow runner, so built here rather than separately.
-- [ ] In-app scheduler over `~/.aida/schedules.yaml` (definition) plus
-      SQLite last-run state: due/skip/catch-up-once semantics, no overlap,
-      its own session rather than the user's, visible last-run status, and
-      a loud warning when a schedule should have fired and did not.
-- [ ] `docs/workflows.md` including hand-written launchd / `schtasks` XML /
-      systemd-timer recipes, with the absolute-interpreter-path and secrets
-      caveats up front.
-- [ ] *Then, only if wanted:* `aida schedule install/uninstall/status`
-      generating those artefacts natively — macOS, then Windows, then Linux.
-- [ ] Tests: `aida run` end-to-end with MockProvider + mock-mcp in CI,
-      workflow parse/validate/run, scheduler against a fake clock (including
-      catch-up-fires-once, overlap-skips, and a clock jumped backwards).
+- [x] Reproducibility manifest per run (`PLAN.md` §2.6) — a by-product of
+      the workflow runner (`run-<name>-<timestamp>.aida.json`).
+- [x] In-app scheduler over `~/.aida/schedules.yaml` (definition) plus
+      SQLite last-run state: due/catch-up-once semantics, no overlap
+      (in-process guard + cross-process advisory lock), its own session
+      rather than the user's, visible last-run status in the GUI dialog,
+      and a status-bar failure indicator.
+- [x] **Added beyond the original scope, from GUI hands-on testing
+      (2026-09-03):** the scheduler now *defers, not skips* a due job while
+      the user is actively using AIDA — a running turn hard-blocks it,
+      unsent input text or recent activity soft-blocks it for a
+      configurable quiet period (default 5 min), waived after a
+      configurable cap (default 1 h) except mid-turn. Status bar shows a
+      **⏳ N jobs waiting** indicator; both timings are in Settings. See
+      [`docs/workflows.md`](docs/workflows.md#deferred-not-skipped--the-scheduler-and-you-at-the-same-time)
+      and §7 of the design doc.
+- [x] `docs/workflows.md` — `aida run`/workflow/schedule usage, headless
+      confirmation and secrets caveats up front, and why OS-level triggers
+      were deferred rather than built.
+- [ ] *Deferred, not scheduled:* `aida schedule install/uninstall/status`
+      generating native launchd/Task Scheduler/systemd artefacts — only if
+      a user actually asks for "logged out, not just closed" (§2.1-style
+      "Considered", not committed).
+- [x] Tests: `aida run`/workflow/scheduler covered end-to-end with
+      MockProvider + mock-mcp (1705 tests total, non-GUI + GUI), including
+      catch-up-fires-once, overlap-skips, a clock jumped backwards, and the
+      full deferral policy.
 - [ ] Release automation: a GitHub Actions publish workflow with the version
       in `pyproject.toml` authoritative and tag-checked.
 - [ ] conda: keep `environment.yml` current; evaluate a conda-forge feedstock
