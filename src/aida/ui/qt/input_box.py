@@ -109,6 +109,13 @@ class InputBox(QWidget):
     cancel_requested = Signal()
     folder_dropped = Signal(str)
     attachments_changed = Signal(list)  # current list of attached paths
+    #: Phase 10: every keystroke in the prompt box. The in-app scheduler
+    #: treats typing as user activity (so its quiet period restarts) and
+    #: refuses to start a job while there is unsent text — a scheduled run
+    #: must never land in the middle of someone composing a prompt. Only
+    #: re-exported here because reaching into the internal text widget from
+    #: MainWindow would couple it to this widget's private layout.
+    text_changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -128,6 +135,7 @@ class InputBox(QWidget):
         self._text_edit = _InputTextEdit(self)
         self._text_edit.setPlaceholderText(_IDLE_PLACEHOLDER)
         self._text_edit.submit_requested.connect(self._on_submit)
+        self._text_edit.textChanged.connect(self.text_changed.emit)
         layout.addWidget(self._text_edit)
 
         button_column = QVBoxLayout()

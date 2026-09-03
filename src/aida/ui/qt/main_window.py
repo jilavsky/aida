@@ -118,6 +118,24 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AIDA")
         self.setWindowIcon(app_icon())
 
+        # Phase 10: one SchedulerBridge for the whole app run, deliberately
+        # not part of _wire_bridge_signals/_restart_session — it must keep
+        # running across every "New Chat"/workspace switch (see its own
+        # docstring), unlike self.bridge, which is replaced on exactly
+        # those. Connected once, never reconnected.
+        #
+        # Constructed *first*, before any UI or bridge signal is wired,
+        # because several of those handlers report user activity into
+        # `scheduler_bridge.activity` — nothing may connect to a handler
+        # that touches it before it exists. `start()` still happens last,
+        # once everything it can notify is in place.
+        self._schedule_failure_count = 0
+        self.scheduler_bridge = SchedulerBridge(loop_thread, parent=self)
+        self.scheduler_bridge.activity.quiet_period_seconds = settings.app.scheduler_quiet_period_seconds
+        self.scheduler_bridge.run_started.connect(self._on_schedule_run_started)
+        self.scheduler_bridge.run_finished.connect(self._on_schedule_run_finished)
+        self.scheduler_bridge.deferred_changed.connect(self._on_schedule_deferred_changed)
+
         self._build_ui()
         self._wire_ui_signals()
 
@@ -132,14 +150,6 @@ class MainWindow(QMainWindow):
         self._wire_bridge_signals()
         self.bridge.start(settings, **(start_kwargs or {}))
 
-        # Phase 10: one SchedulerBridge for the whole app run, deliberately
-        # wired here rather than in _wire_bridge_signals/_restart_session —
-        # it must keep running across every "New Chat"/workspace switch
-        # (see its own docstring), unlike self.bridge, which is replaced on
-        # exactly those. Connected once, never reconnected.
-        self._schedule_failure_count = 0
-        self.scheduler_bridge = SchedulerBridge(loop_thread, parent=self)
-        self.scheduler_bridge.run_finished.connect(self._on_schedule_run_finished)
         self.scheduler_bridge.start()
 
         apply_window_state(self, settings.app)
@@ -297,6 +307,16 @@ class MainWindow(QMainWindow):
         self._schedule_failures_button.clicked.connect(self._on_schedule_failures_clicked)
         self._schedule_failures_button.hide()
         self.statusBar().addPermanentWidget(self._schedule_failures_button)
+        # A due job held back because the user is mid-something (see
+        # _scheduler_should_defer). Distinct from the failure button above:
+        # this one is transient and self-clearing — it reflects whatever
+        # the scheduler's latest tick reported as waiting, and disappears
+        # on its own the moment the job actually runs.
+        self._schedule_pending_button = QPushButton("", self)
+        self._schedule_pending_button.setFlat(True)
+        self._schedule_pending_button.clicked.connect(self.open_schedule_management_dialog)
+        self._schedule_pending_button.hide()
+        self.statusBar().addPermanentWidget(self._schedule_pending_button)
 
     def _build_menu_bar(self) -> None:
         """U7 paper cut: "A menu bar (File/Help) with 'Open config folder',
@@ -412,6 +432,23 @@ class MainWindow(QMainWindow):
         self.quick_tasks_panel.task_selected.connect(self._on_quick_task_selected)
         self.quick_tasks_panel.tasks_changed.connect(self._on_quick_tasks_changed)
         self.notes_panel.notes_changed.connect(self._on_notes_changed)
+        # Phase 10: typing counts as activity for the scheduler's quiet
+        # period, and half-written text blocks a scheduled run outright —
+        # a job must never start in the middle of the user composing a
+        # prompt.
+        self.input_box.text_changed.connect(self._on_input_text_changed)
+
+    def _on_input_text_changed(self) -> None:
+        self._note_user_activity()
+        self.scheduler_bridge.activity.has_unsent_text = bool(self.input_box.text().strip())
+
+    def _note_user_activity(self) -> None:
+        """Called on every signal meaning "the user is still working", to
+        restart the scheduler's quiet period. Writes into the *bridge's*
+        plain state object rather than storing anything on the window: the
+        background loop reads it, and must never hold a reference to a
+        widget it can outlive (see ``UserActivityState``)."""
+        self.scheduler_bridge.activity.note_activity()
 
     def _wire_bridge_signals(self) -> None:
         # Every connection here must have *this window* as the receiver, so
@@ -478,12 +515,19 @@ class MainWindow(QMainWindow):
         self.input_box.set_busy(True)
         self._set_session_mutating(True)
         self._usage_refresh_timer.start()
+        self.scheduler_bridge.activity.turn_in_flight = True
+        self._note_user_activity()
 
     def _on_turn_finished(self) -> None:
         self.input_box.set_busy(False)
         self._set_session_mutating(False)
         self._usage_refresh_timer.stop()
         self._restore_undelivered_messages()
+        self.scheduler_bridge.activity.turn_in_flight = False
+        # The quiet period the scheduler waits out is measured from here,
+        # not from turn *start* — a ten-minute tool loop shouldn't count as
+        # ten minutes of the user being idle.
+        self._note_user_activity()
 
     def _set_session_mutating(self, busy: bool) -> None:
         """Enable/disable the controls that mutate session state from
@@ -1039,6 +1083,13 @@ class MainWindow(QMainWindow):
         self._unwire_bridge_signals(old_bridge)
         old_bridge.setParent(None)
         old_bridge.deleteLater()
+        # A bridge retired mid-turn suppresses its own final
+        # `turn_finished` (ChatBridge._drain gates every emit on
+        # `_closing`), so `_on_turn_finished` never runs and the scheduler
+        # would keep believing a turn is live — deferring every job
+        # forever. Cleared explicitly here, the one place a turn can end
+        # without that signal.
+        self.scheduler_bridge.activity.turn_in_flight = False
 
         self.chat_panel.clear()
         self.statusBar().showMessage("Starting session…")
@@ -1058,6 +1109,28 @@ class MainWindow(QMainWindow):
     def open_schedule_management_dialog(self) -> None:
         dialog = ScheduleManagementDialog(self.settings, self.scheduler_bridge, self)
         dialog.exec()
+
+    def _on_schedule_deferred_changed(self, deferred: dict) -> None:
+        """One authoritative snapshot per tick — just replace what's shown
+        rather than tracking add/remove, so a schedule deleted or disabled
+        while waiting leaves nothing stale behind."""
+        if not deferred:
+            self._schedule_pending_button.hide()
+            return
+        count = len(deferred)
+        self._schedule_pending_button.setText(f"⏳ {count} job{'s' if count != 1 else ''} waiting")
+        reasons = "\n".join(f"{name}: {reason}" for name, reason in sorted(deferred.items()))
+        self._schedule_pending_button.setToolTip(
+            f"{reasons}\n\nClick to open Schedules — use Run Now to let one through immediately."
+        )
+        self._schedule_pending_button.show()
+
+    def _on_schedule_run_started(self, name: str) -> None:
+        """Previously unconnected: a scheduled run gave no sign at all that
+        it was underway, so a burst of MCP/provider activity had no visible
+        cause. It clears itself via the status bar's own timeout, and the
+        pending badge is refreshed by the next tick's snapshot."""
+        self.statusBar().showMessage(f"Running scheduled job {name!r}…", 15000)
 
     def _on_schedule_run_finished(
         self, name: str, ok: bool, conversation_id: str, error: str
@@ -1566,6 +1639,10 @@ class MainWindow(QMainWindow):
         # font size/log level above.
         if self.bridge.session is not None:
             self.bridge.session.loop.max_iterations = self.settings.app.max_agent_iterations
+        # Same "takes effect immediately" treatment: the scheduler reads
+        # its quiet period from this live object every tick, so a changed
+        # value applies to the very next one rather than at next launch.
+        self.scheduler_bridge.activity.quiet_period_seconds = self.settings.app.scheduler_quiet_period_seconds
         save_app_config(self.settings.app)
 
     # --- shutdown ----------------------------------------------------------
@@ -1578,11 +1655,12 @@ class MainWindow(QMainWindow):
         capture_window_state(self, self.settings.app)
         save_app_config(self.settings.app)
         conversation_id = self._active_conversation_id(self.bridge)
-        self.bridge.shutdown()
-        # Phase 10: the scheduler outlives every bridge replacement, so it
-        # gets its own explicit stop here rather than living inside
-        # bridge.shutdown() above — nothing else ever tears it down.
+        # Phase 10: stopped *before* the chat bridge, not after. The
+        # scheduler outlives every bridge replacement (nothing else ever
+        # tears it down), and stopping it first means no tick can start a
+        # new run against a session that is in the middle of being closed.
         self.scheduler_bridge.stop()
+        self.bridge.shutdown()
         # Same cleanup as _restart_session — quitting on a conversation
         # nothing was ever typed into shouldn't leave it behind either.
         self._delete_conversation_if_empty(conversation_id)

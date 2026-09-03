@@ -356,6 +356,23 @@ class AppConfig:
     # not something to re-decide on every launch. Unknown titles are
     # ignored on load, so renaming or removing a panel can't break startup.
     collapsed_panels: list[str] = field(default_factory=list)
+    # Phase 10 (planning/phase10_scheduling_design.md §7): how long after
+    # the user's last interaction the in-app scheduler waits before it will
+    # start a due job. Without this, a scheduled run fired the instant it
+    # came due — starting a second set of MCP servers and a second session
+    # on top of whatever the user was in the middle of, with no indication
+    # in the UI that it had happened at all. Measured from the *later* of
+    # "last turn ended" and "last keystroke in the input box", so composing
+    # a long prompt keeps holding a job off too. GUI-only: `aida schedule
+    # watch` has no user session in its process and never defers.
+    scheduler_quiet_period_seconds: int = 300
+    # How long a job may be held off before the quiet period is waived and
+    # it runs anyway. A job that silently never ran all day is a worse
+    # failure than a mildly untimely one — but even past this cap a run
+    # never starts on top of an actively streaming turn (see
+    # aida.core.scheduler_runtime.DeferralRequest.hard). 0 disables the cap
+    # entirely: jobs then wait indefinitely for a real idle moment.
+    scheduler_max_defer_seconds: int = 3600
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -376,6 +393,16 @@ class AppConfig:
         if "assistant_name" in filtered and not filtered["assistant_name"].strip():
             _logger.warning("config.yaml: assistant_name must not be blank; using the default instead")
             filtered.pop("assistant_name")
+        # Both scheduler timings accept 0 (quiet period 0 = never wait for
+        # idleness; cap 0 = never waive the quiet period) but neither is
+        # meaningful negative.
+        for scheduler_field in ("scheduler_quiet_period_seconds", "scheduler_max_defer_seconds"):
+            if filtered.get(scheduler_field, 0) < 0:
+                _logger.warning(
+                    "config.yaml: %s=%r must not be negative; using the default instead",
+                    scheduler_field,
+                    filtered.pop(scheduler_field),
+                )
         # Fail closed, and say so. An unrecognized safety mode used to reach
         # SafetyGuard unchanged, where it matched neither the "relaxed" nor
         # the "confirm" branch and therefore skipped confirmation entirely —
@@ -420,6 +447,8 @@ class AppConfig:
             "assistant_name": self.assistant_name,
             "user_context": self.user_context,
             "collapsed_panels": self.collapsed_panels,
+            "scheduler_quiet_period_seconds": self.scheduler_quiet_period_seconds,
+            "scheduler_max_defer_seconds": self.scheduler_max_defer_seconds,
         }
 
 
@@ -448,6 +477,8 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "assistant_name": "str",
     "user_context": "str",
     "collapsed_panels": "list[str]",
+    "scheduler_quiet_period_seconds": "int",
+    "scheduler_max_defer_seconds": "int",
 }
 
 

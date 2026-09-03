@@ -22,7 +22,7 @@ import contextlib
 
 from aida.config.logging_setup import get_logger
 from aida.config.settings import ScheduleEntry, Settings
-from aida.core.scheduler_runtime import fire_schedule_now, scheduler_loop
+from aida.core.scheduler_runtime import UserActivityState, fire_schedule_now, scheduler_loop
 from aida.ui.qt._qt import QObject, Signal
 from aida.ui.qt.bridge import AsyncLoopThread
 
@@ -38,13 +38,33 @@ class SchedulerBridge(QObject):
 
     run_started = Signal(str)  # schedule name
     run_finished = Signal(str, bool, str, str)  # name, ok, conversation_id, error
+    #: ``{schedule name: reason}`` for everything currently held back
+    #: waiting for the user to be idle — a whole snapshot per tick, so a
+    #: listener can just replace whatever it was showing (see
+    #: ``aida.core.scheduler_runtime.scheduler_loop``'s docstring).
+    deferred_changed = Signal(object)  # dict[str, str]
 
     def __init__(
-        self, loop_thread: AsyncLoopThread, *, poll_interval_seconds: float = 30.0, parent: QObject | None = None
+        self,
+        loop_thread: AsyncLoopThread,
+        *,
+        poll_interval_seconds: float = 30.0,
+        defer_to_user: bool = True,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._loop_thread = loop_thread
         self._poll_interval_seconds = poll_interval_seconds
+        #: Written by the Qt thread (``MainWindow`` keeps it current), read
+        #: by the background loop thread each tick. Owned *here* rather
+        #: than by ``MainWindow`` on purpose: the loop must never hold a
+        #: reference to a widget it could outlive — see
+        #: ``UserActivityState``'s docstring for the segfault that caused.
+        self.activity = UserActivityState()
+        #: ``False`` disables the whole politeness layer (used by tests
+        #: that want a tick to fire immediately); the schedule still runs
+        #: through the identical code path either way.
+        self._should_defer = self.activity.should_defer if defer_to_user else None
         self._stop_event: asyncio.Event | None = None
         self._future: concurrent.futures.Future | None = None
 
@@ -63,6 +83,8 @@ class SchedulerBridge(QObject):
                 poll_interval_seconds=self._poll_interval_seconds,
                 on_run_started=self._emit_started,
                 on_run_finished=self._emit_finished,
+                should_defer=self._should_defer,
+                on_deferred_changed=self._emit_deferred_changed,
                 stop_event=self._stop_event,
             )
         except Exception:  # noqa: BLE001 - must never crash the loop thread
@@ -70,6 +92,9 @@ class SchedulerBridge(QObject):
 
     def _emit_started(self, name: str) -> None:
         self.run_started.emit(name)
+
+    def _emit_deferred_changed(self, deferred: dict[str, str]) -> None:
+        self.deferred_changed.emit(deferred)
 
     def _emit_finished(self, name: str, ok: bool, conversation_id: str | None, error: str | None) -> None:
         self.run_finished.emit(name, ok, conversation_id or "", error or "")

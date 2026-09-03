@@ -2450,3 +2450,117 @@ def test_save_conversation_as_workflow_derives_steps_from_user_messages(
         assert [s.prompt for s in load_workflow("from-chat").steps] == ["first prompt", "second prompt"]
     finally:
         window.close()
+
+
+# --- Phase 10: deferring scheduled jobs to the user ------------------------
+
+
+def test_typing_marks_activity_and_unsent_text(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        activity = window.scheduler_bridge.activity
+        activity.last_activity_monotonic -= 10_000
+        assert activity.should_defer() is None  # idle, nothing typed
+
+        window.input_box.set_text("half a prompt")
+        qapp.processEvents()
+
+        assert activity.has_unsent_text is True
+        deferral = activity.should_defer()
+        assert deferral is not None
+        assert "unsent text" in deferral.reason
+    finally:
+        window.close()
+
+
+def test_clearing_the_input_box_clears_unsent_text(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window.input_box.set_text("something")
+        qapp.processEvents()
+        assert window.scheduler_bridge.activity.has_unsent_text is True
+
+        window.input_box.set_text("")
+        qapp.processEvents()
+        assert window.scheduler_bridge.activity.has_unsent_text is False
+    finally:
+        window.close()
+
+
+def test_turn_start_and_finish_track_turn_in_flight(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        assert pump_until(qapp, lambda: window.bridge.session is not None)
+        assert window.scheduler_bridge.activity.turn_in_flight is False
+
+        window._on_turn_started()
+        assert window.scheduler_bridge.activity.turn_in_flight is True
+
+        window._on_turn_finished()
+        assert window.scheduler_bridge.activity.turn_in_flight is False
+    finally:
+        window.close()
+
+
+def test_pending_badge_appears_and_clears_from_the_snapshot(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window._on_schedule_deferred_changed({"nightly": "waiting 240s for you to finish"})
+        assert window._schedule_pending_button.isVisibleTo(window)
+        assert "1 job waiting" in window._schedule_pending_button.text()
+        assert "nightly" in window._schedule_pending_button.toolTip()
+
+        window._on_schedule_deferred_changed({"nightly": "x", "other": "y"})
+        assert "2 jobs waiting" in window._schedule_pending_button.text()
+
+        window._on_schedule_deferred_changed({})
+        assert not window._schedule_pending_button.isVisibleTo(window)
+    finally:
+        window.close()
+
+
+def test_schedule_run_started_reports_in_the_status_bar(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        window._on_schedule_run_started("nightly")
+        assert "nightly" in window.statusBar().currentMessage()
+    finally:
+        window.close()
+
+
+def test_quiet_period_comes_from_settings(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    settings = _settings_with_profile()
+    settings.app.scheduler_quiet_period_seconds = 42
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        assert window.scheduler_bridge.activity.quiet_period_seconds == 42
+    finally:
+        window.close()
+
+
+def test_retiring_a_bridge_mid_turn_clears_turn_in_flight(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A bridge retired mid-turn suppresses its own turn_finished, so
+    nothing else would ever clear the flag — and the scheduler would
+    defer every job forever."""
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    try:
+        assert pump_until(qapp, lambda: window.bridge.session is not None)
+        window.scheduler_bridge.activity.turn_in_flight = True
+
+        window._restart_session(workspace_name=None, profile_name="mock-profile", resume_conversation_id=None)
+
+        assert window.scheduler_bridge.activity.turn_in_flight is False
+    finally:
+        window.close()

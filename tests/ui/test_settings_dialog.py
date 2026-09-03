@@ -265,3 +265,34 @@ def test_theme_field_no_longer_exists_on_app_config(qapp):
     back."""
     assert not hasattr(AppConfig(), "theme")
     assert not hasattr(SettingsDialog(AppConfig()), "_theme_combo")
+
+
+def test_scheduler_timings_round_trip_in_minutes(qapp, aida_home):
+    """Stored in seconds, edited in minutes — nobody reasons about "wait
+    300 seconds before starting a job"."""
+    from aida.config.settings import AppConfig
+    from aida.ui.qt.settings_dialog import SettingsDialog
+
+    dialog = SettingsDialog(
+        AppConfig(scheduler_quiet_period_seconds=300, scheduler_max_defer_seconds=3600), {}
+    )
+    assert dialog._scheduler_quiet_spin.value() == 5
+    assert dialog._scheduler_max_defer_spin.value() == 60
+
+    dialog._scheduler_quiet_spin.setValue(2)
+    dialog._scheduler_max_defer_spin.setValue(30)
+    updated = dialog.updated_app_config()
+    assert updated.scheduler_quiet_period_seconds == 120
+    assert updated.scheduler_max_defer_seconds == 1800
+
+
+def test_scheduler_timings_accept_the_disabling_zero(qapp, aida_home):
+    from aida.config.settings import AppConfig
+    from aida.ui.qt.settings_dialog import SettingsDialog
+
+    dialog = SettingsDialog(AppConfig(), {})
+    dialog._scheduler_quiet_spin.setValue(0)  # "Never wait"
+    dialog._scheduler_max_defer_spin.setValue(0)  # "Wait indefinitely"
+    updated = dialog.updated_app_config()
+    assert updated.scheduler_quiet_period_seconds == 0
+    assert updated.scheduler_max_defer_seconds == 0

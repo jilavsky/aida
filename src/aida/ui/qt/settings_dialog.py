@@ -141,6 +141,31 @@ class SettingsDialog(QDialog):
         self._max_context_tokens_spin.setValue(app_config.max_context_tokens)
         form.addRow("Max context tokens:", self._max_context_tokens_spin)
 
+        # Phase 10: how considerate the in-app scheduler is of a user who
+        # is mid-something. Both are in seconds but shown in minutes —
+        # nobody reasons about "wait 300 seconds before starting a job".
+        self._scheduler_quiet_spin = QSpinBox(self)
+        self._scheduler_quiet_spin.setRange(0, 120)
+        self._scheduler_quiet_spin.setSuffix(" min")
+        self._scheduler_quiet_spin.setSpecialValueText("Never wait")
+        self._scheduler_quiet_spin.setValue(round(app_config.scheduler_quiet_period_seconds / 60))
+        self._scheduler_quiet_spin.setToolTip(
+            "How long after your last message or keystroke a scheduled job waits "
+            "before starting. A job never starts while a turn is running, whatever this is set to."
+        )
+        form.addRow("Scheduler: wait for me:", self._scheduler_quiet_spin)
+
+        self._scheduler_max_defer_spin = QSpinBox(self)
+        self._scheduler_max_defer_spin.setRange(0, 1440)
+        self._scheduler_max_defer_spin.setSuffix(" min")
+        self._scheduler_max_defer_spin.setSpecialValueText("Wait indefinitely")
+        self._scheduler_max_defer_spin.setValue(round(app_config.scheduler_max_defer_seconds / 60))
+        self._scheduler_max_defer_spin.setToolTip(
+            "After waiting this long, a job runs even if you are still active — "
+            "but still never on top of a turn that is actually running."
+        )
+        form.addRow("Scheduler: run anyway after:", self._scheduler_max_defer_spin)
+
         layout.addLayout(form)
 
         self._profiles_list = QListWidget(self)
@@ -200,6 +225,12 @@ class SettingsDialog(QDialog):
     def max_context_tokens(self) -> int:
         return self._max_context_tokens_spin.value()
 
+    def scheduler_quiet_period_seconds(self) -> int:
+        return self._scheduler_quiet_spin.value() * 60
+
+    def scheduler_max_defer_seconds(self) -> int:
+        return self._scheduler_max_defer_spin.value() * 60
+
     def updated_app_config(self) -> AppConfig:
         """A copy of the ``AppConfig`` this dialog was opened with, with
         this dialog's edited fields applied — window geometry and every
@@ -217,6 +248,8 @@ class SettingsDialog(QDialog):
             allowed_folders=self.allowed_folders(),
             command_allowlist=self.command_allowlist(),
             max_context_tokens=self.max_context_tokens(),
+            scheduler_quiet_period_seconds=self.scheduler_quiet_period_seconds(),
+            scheduler_max_defer_seconds=self.scheduler_max_defer_seconds(),
         )
 
 

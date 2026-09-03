@@ -206,3 +206,171 @@ async def test_scheduler_loop_runs_a_tick_and_stops_on_stop_event(monkeypatch, a
 
     assert len(finished) == 1
     assert finished[0][0] == "s"
+
+
+# --- deferring to the user (Phase 10) --------------------------------------
+
+
+def test_evaluate_user_deferral_allows_an_idle_user():
+    from aida.core.scheduler_runtime import evaluate_user_deferral
+
+    assert (
+        evaluate_user_deferral(
+            turn_in_flight=False, has_unsent_text=False, idle_seconds=600, quiet_period_seconds=300
+        )
+        is None
+    )
+
+
+def test_evaluate_user_deferral_running_turn_is_hard():
+    from aida.core.scheduler_runtime import evaluate_user_deferral
+
+    deferral = evaluate_user_deferral(
+        turn_in_flight=True, has_unsent_text=False, idle_seconds=99_999, quiet_period_seconds=300
+    )
+    assert deferral is not None
+    assert deferral.hard is True
+
+
+def test_evaluate_user_deferral_unsent_text_is_soft():
+    from aida.core.scheduler_runtime import evaluate_user_deferral
+
+    deferral = evaluate_user_deferral(
+        turn_in_flight=False, has_unsent_text=True, idle_seconds=99_999, quiet_period_seconds=300
+    )
+    assert deferral is not None
+    assert deferral.hard is False
+
+
+def test_evaluate_user_deferral_quiet_period_is_soft_and_reports_remaining():
+    from aida.core.scheduler_runtime import evaluate_user_deferral
+
+    deferral = evaluate_user_deferral(
+        turn_in_flight=False, has_unsent_text=False, idle_seconds=60, quiet_period_seconds=300
+    )
+    assert deferral is not None
+    assert deferral.hard is False
+    assert "240" in deferral.reason
+
+
+def test_evaluate_user_deferral_zero_quiet_period_never_waits():
+    from aida.core.scheduler_runtime import evaluate_user_deferral
+
+    assert (
+        evaluate_user_deferral(
+            turn_in_flight=False, has_unsent_text=False, idle_seconds=0, quiet_period_seconds=0
+        )
+        is None
+    )
+
+
+def test_user_activity_state_note_activity_resets_the_clock():
+    from aida.core.scheduler_runtime import UserActivityState
+
+    state = UserActivityState(quiet_period_seconds=300)
+    state.last_activity_monotonic -= 10_000
+    assert state.should_defer() is None
+
+    state.note_activity()
+    assert state.should_defer() is not None
+
+
+@pytest.mark.asyncio
+async def test_due_schedule_is_deferred_not_skipped(monkeypatch, aida_home: Path, records_home: Path):
+    """Deferral writes nothing to ScheduleRunStore, so the job stays due
+    and runs at the first opportunity rather than being lost."""
+    from aida.core.scheduler_runtime import DeferralRequest
+
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    _workflow()
+    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")}))
+    now = datetime(2026, 9, 2, 10, 0)
+
+    deferred: dict[str, str] = {}
+    ran = await run_due_schedules(
+        settings,
+        now=now,
+        should_defer=lambda: DeferralRequest("busy"),
+        on_run_deferred=deferred.__setitem__,
+    )
+    assert ran == []
+    assert deferred == {"s": "busy"}
+
+    store = ScheduleRunStore()
+    assert store.last_run("s") is None  # nothing recorded — still due
+    store.close()
+
+    # Same tick conditions, but the user is now idle: it runs.
+    ran_now = await run_due_schedules(settings, now=now, should_defer=lambda: None)
+    assert ran_now == ["s"]
+
+
+@pytest.mark.asyncio
+async def test_soft_deferral_is_waived_past_the_cap(monkeypatch, aida_home: Path, records_home: Path):
+    from aida.core.scheduler_runtime import DeferralRequest
+
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    _workflow()
+    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", at="07:00")}))
+    settings.app.scheduler_max_defer_seconds = 3600
+
+    # Due since 07:00; it is now 09:00, so it has waited 2h — past the cap.
+    ran = await run_due_schedules(
+        settings, now=datetime(2026, 9, 2, 9, 0), should_defer=lambda: DeferralRequest("you just typed something")
+    )
+    assert ran == ["s"]
+
+
+@pytest.mark.asyncio
+async def test_hard_deferral_is_never_waived_past_the_cap(monkeypatch, aida_home: Path, records_home: Path):
+    """A live turn blocks a run at any age — starting a second session on
+    top of a streaming one is the collision this all exists to prevent."""
+    from aida.core.scheduler_runtime import DeferralRequest
+
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    _workflow()
+    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", at="07:00")}))
+    settings.app.scheduler_max_defer_seconds = 3600
+
+    ran = await run_due_schedules(
+        settings,
+        now=datetime(2026, 9, 2, 9, 0),  # 2h overdue, well past the cap
+        should_defer=lambda: DeferralRequest("a turn is running", hard=True),
+    )
+    assert ran == []
+
+
+@pytest.mark.asyncio
+async def test_cap_of_zero_defers_indefinitely(monkeypatch, aida_home: Path, records_home: Path):
+    from aida.core.scheduler_runtime import DeferralRequest
+
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    _workflow()
+    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", at="07:00")}))
+    settings.app.scheduler_max_defer_seconds = 0  # never force
+
+    ran = await run_due_schedules(
+        settings, now=datetime(2026, 9, 3, 9, 0), should_defer=lambda: DeferralRequest("still busy")
+    )
+    assert ran == []
+
+
+@pytest.mark.asyncio
+async def test_fire_schedule_now_is_refused_while_the_lock_is_held(aida_home: Path, records_home: Path):
+    """Run Now must not land on top of a scheduled run already going —
+    the one overlap the cross-process lock exists to prevent."""
+    from aida.config.paths import scheduler_lock_path
+    from aida.core.proc_lock import try_acquire_scheduler_lock
+    from aida.core.scheduler_runtime import fire_schedule_now
+
+    _workflow()
+    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")}))
+    entry = settings.schedules.schedules["s"]
+
+    finished = []
+    with try_acquire_scheduler_lock(scheduler_lock_path()) as held:
+        assert held is True
+        await fire_schedule_now("s", entry, settings, on_run_finished=lambda *a: finished.append(a))
+
+    assert finished[0][1] is False
+    assert "already in progress" in finished[0][3]

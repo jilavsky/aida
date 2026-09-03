@@ -42,7 +42,11 @@ def test_start_runs_a_due_schedule_and_emits_signals(qapp, loop_thread, aida_hom
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
     monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
 
-    scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
+    # defer_to_user=False: this covers the loop/signal mechanics, not the
+    # quiet-period policy (which has its own tests below and in
+    # tests/test_scheduler_runtime.py). Left on, the default 5-minute quiet
+    # period would hold every run back and this would test nothing.
+    scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60, defer_to_user=False)
     started = []
     finished = []
     scheduler.run_started.connect(started.append)
@@ -63,7 +67,7 @@ def test_start_is_idempotent(qapp, loop_thread, aida_home: Path, records_home: P
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")] * 3))
     monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
 
-    scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
+    scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60, defer_to_user=False)
     finished = []
     scheduler.run_finished.connect(lambda *args: finished.append(args))
 
@@ -117,3 +121,105 @@ def test_run_now_fires_regardless_of_due_state(qapp, loop_thread, aida_home: Pat
     scheduler.run_now("s", entry, settings)  # forced again, right away — must still fire
     assert pump_until(qapp, lambda: finished), "second forced run never fired"
     assert finished[0][1] is True
+
+
+# --- deferring to the user -------------------------------------------------
+
+
+def test_due_job_is_deferred_while_the_user_is_active(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """The default: a job that comes due right after the user did anything
+    waits out the quiet period instead of firing on top of them."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
+
+    scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
+    scheduler.activity.note_activity()  # "the user just did something"
+    deferrals = []
+    finished = []
+    scheduler.deferred_changed.connect(deferrals.append)
+    scheduler.run_finished.connect(lambda *args: finished.append(args))
+
+    scheduler.start()
+    assert pump_until(qapp, lambda: deferrals), "deferred_changed never fired"
+
+    assert "s" in deferrals[0]
+    assert "waiting" in deferrals[0]["s"]
+    assert finished == []  # and it really did not run
+
+    scheduler.stop()
+
+
+def test_a_running_turn_defers_hard(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
+
+    scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
+    scheduler.activity.turn_in_flight = True
+    # Idle for hours as far as the quiet period is concerned — only the
+    # live turn should be holding it back.
+    scheduler.activity.last_activity_monotonic -= 10_000
+    deferrals = []
+    scheduler.deferred_changed.connect(deferrals.append)
+
+    scheduler.start()
+    assert pump_until(qapp, lambda: deferrals), "deferred_changed never fired"
+
+    assert deferrals[0]["s"] == "a turn is running"
+
+    scheduler.stop()
+
+
+def test_job_runs_once_the_quiet_period_has_elapsed(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
+
+    scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
+    scheduler.activity.last_activity_monotonic -= 10_000  # long since idle
+    finished = []
+    scheduler.run_finished.connect(lambda *args: finished.append(args))
+
+    scheduler.start()
+    assert pump_until(qapp, lambda: finished), "run_finished never fired"
+    assert finished[0][1] is True
+
+    scheduler.stop()
+
+
+def test_unsent_text_defers(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
+
+    scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
+    scheduler.activity.last_activity_monotonic -= 10_000  # quiet period satisfied
+    scheduler.activity.has_unsent_text = True
+    deferrals = []
+    scheduler.deferred_changed.connect(deferrals.append)
+
+    scheduler.start()
+    assert pump_until(qapp, lambda: deferrals), "deferred_changed never fired"
+    assert "unsent text" in deferrals[0]["s"]
+
+    scheduler.stop()
+
+
+def test_deferred_changed_reports_an_empty_snapshot_when_nothing_waits(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """The snapshot is authoritative every tick, so "nothing waiting" has
+    to be reported too — that is what lets a UI badge clear itself."""
+    settings = load_settings()  # no schedules at all
+    monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", lambda: settings)
+
+    scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
+    snapshots = []
+    scheduler.deferred_changed.connect(snapshots.append)
+
+    scheduler.start()
+    assert pump_until(qapp, lambda: snapshots), "deferred_changed never fired"
+    assert snapshots[0] == {}
+
+    scheduler.stop()

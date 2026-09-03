@@ -335,6 +335,40 @@ to retrofit.
 - **Overlap.** A run still going when the next slot arrives must be
   skipped, with a logged warning and a visible `last_status: skipped`.
   Never stack. One process-wide "scheduled run in progress" guard.
+- **The user is mid-something.** *(Added 2026-09-03, after the in-app
+  scheduler shipped and this turned out to be missing entirely.)* Overlap
+  above is about two *scheduled* runs; this is about a scheduled run
+  landing on top of the person at the keyboard. Without a guard a due job
+  fired instantly — starting a second set of MCP servers and a second
+  session while the user was mid-analysis, with nothing in the UI saying
+  it had happened.
+
+  The rule: a due job is **deferred, not skipped** (nothing is written to
+  `schedule_runs`, so it stays due and runs at the first opportunity —
+  this falls out of the existing design with no "pending" state to
+  persist). It waits while *any* of: a turn is streaming; there is unsent
+  text in the input box; less than `scheduler_quiet_period_seconds`
+  (default 5 min) has passed since the later of the last turn ending and
+  the last keystroke.
+
+  Deferral is capped by `scheduler_max_defer_seconds` (default 1 h, 0 =
+  never force): past it the two *soft* conditions are waived, because a
+  report that silently never appeared is a worse failure than a mildly
+  untimely one. A **hard** deferral — a turn actually streaming — is never
+  waived at any cap. An explicit "Run Now" is never deferred at all.
+
+  Two things this deliberately does not do: it does not use window focus
+  as a signal (alt-tabbing for thirty seconds is not "away"), and it does
+  not close the sub-second race where a user starts a turn in the instant
+  between the check passing and the run starting — that needs a real lock
+  across two sessions, and its worst case is exactly the old behaviour.
+
+  `aida schedule watch` passes no defer check: there is no user session in
+  that process. A GUI *and* a `watch` running together therefore still
+  arbitrate only by the cross-process lock — whichever process wins the
+  tick runs, and `watch` winning does not know the GUI's user is busy.
+  Accepted for now; a beamline machine is expected to run one or the
+  other.
 - **Catch-up must not backfill.** Missing eight hourly slots means firing
   *once*, not eight times. `catch_up: true` means "the last slot was
   missed, run now"; there is no mode that replays history.

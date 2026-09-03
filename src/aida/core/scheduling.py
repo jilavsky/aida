@@ -85,8 +85,8 @@ def _most_recent_slot(at: time, now: datetime) -> datetime:
     return candidate
 
 
-def is_due(schedule: ParsedSchedule, *, last_fired_at: datetime | None, now: datetime) -> bool:
-    """Whether ``schedule`` should fire right now.
+def due_since(schedule: ParsedSchedule, *, last_fired_at: datetime | None, now: datetime) -> datetime | None:
+    """*When* ``schedule`` became due, or ``None`` if it isn't due yet.
 
     ``at``: due iff the most recent daily slot at-or-before ``now`` is one
     that hasn't been fired yet (``last_fired_at`` before it, or never
@@ -96,11 +96,18 @@ def is_due(schedule: ParsedSchedule, *, last_fired_at: datetime | None, now: dat
     ``every``: due iff at least one full interval has elapsed since the
     last fire (or it has never fired — an interval schedule with no fire
     history yet fires on the very next check, since there is no creation
-    timestamp to measure "one interval" from). A backward clock jump
+    timestamp to measure "one interval" from, and so reports ``now`` as its
+    due-since: nothing is overdue on a first run). A backward clock jump
     (``now`` ends up before ``last_fired_at``) naturally computes as *not*
     due on both branches — no special-casing needed, since neither
     comparison can be satisfied by a ``last_fired_at`` that looks like it's
     in the future.
+
+    Returning the timestamp rather than a bool is what lets
+    ``aida.core.scheduler_runtime`` measure how long a job has been waiting
+    (for the deferral cap) with no extra state to persist: "overdue by" is
+    just ``now - due_since(...)``, recomputed from scratch every tick and
+    therefore correct across an app restart too.
     """
     if schedule.at is not None:
         if last_fired_at is None:
@@ -110,16 +117,26 @@ def is_due(schedule: ParsedSchedule, *, last_fired_at: datetime | None, now: dat
             # does not fall back to yesterday's slot the way
             # _most_recent_slot does for a schedule that has fired before.
             today_slot = now.replace(hour=schedule.at.hour, minute=schedule.at.minute, second=0, microsecond=0)
-            return now >= today_slot
+            return today_slot if now >= today_slot else None
         slot = _most_recent_slot(schedule.at, now)
-        return last_fired_at < slot
+        return slot if last_fired_at < slot else None
     assert schedule.every is not None
-    return last_fired_at is None or now >= last_fired_at + schedule.every
+    if last_fired_at is None:
+        return now
+    next_due = last_fired_at + schedule.every
+    return next_due if now >= next_due else None
+
+
+def is_due(schedule: ParsedSchedule, *, last_fired_at: datetime | None, now: datetime) -> bool:
+    """Whether ``schedule`` should fire right now — a thin bool view of
+    ``due_since``, which is the single source of truth for the rule."""
+    return due_since(schedule, last_fired_at=last_fired_at, now=now) is not None
 
 
 __all__ = [
     "ParsedSchedule",
     "ScheduleConfigError",
+    "due_since",
     "is_due",
     "parse_at",
     "parse_every",
