@@ -35,6 +35,15 @@ HDF5 is deliberately **not** implemented here — that's pyIrena MCP's job
 (Phase 3 already covers science-data formats via MCP), not a general
 document reader.
 
+**None of these readers extract images** — every one is text-only, and a
+figure, plot, scanned page or embedded chart is dropped. Since a silently
+incomplete document is worse than an obviously incomplete one, each reader
+appends a short note saying how many images it dropped, and the PDF reader
+additionally detects the case where there was no usable text layer at all
+(a scanned paper, a photographed logbook) and says so rather than handing
+back an empty-looking document. See ``planning/document_images.md`` for the
+richer options this note is the floor of.
+
 Every reader applies a size/token guard (PLAN.md: "long docs summarized-by-
 section or chunk-selected rather than context-bombed") — callers that want
 the *whole* document regardless of size should read the file directly
@@ -46,6 +55,7 @@ from __future__ import annotations
 import csv
 import json
 import mimetypes
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -77,6 +87,84 @@ _TEXT_SUFFIXES = {
     ".rs", ".go", ".rb", ".sh", ".bash", ".yaml", ".yml", ".toml", ".ini",
     ".cfg", ".xml", ".html", ".htm", ".css", ".sql",
 }
+
+#: Below this many non-whitespace characters *per page*, a PDF is treated as
+#: having no usable text layer. The failure this catches: a scanned paper, a
+#: photographed logbook page or a signed form extracts as empty or
+#: near-empty text, and the model receives what looks like an empty document
+#: with no way to tell that from an unreadable one — so it guesses, or
+#: reports the attachment as blank. 50 is deliberately generous: a real page
+#: of prose is thousands of characters, while a scanned page still yields a
+#: few stray glyphs from headers, stamps or OCR already baked into the file.
+_SCANNED_TEXT_CHARS_PER_PAGE = 50
+
+#: Where each Office format keeps its embedded media inside its own zip
+#: container. Counting entries here is stdlib-only, cheap (the central
+#: directory, not the file bodies), independent of library internals, and —
+#: unlike ``openpyxl``'s ``sheet._images`` — works with the ``read_only``
+#: loading mode the xlsx reader deliberately uses.
+_MEDIA_DIR_BY_SUFFIX = {
+    ".docx": "word/media/",
+    ".xlsx": "xl/media/",
+    ".pptx": "ppt/media/",
+}
+
+
+def _count_embedded_media(path: Path) -> int:
+    """How many embedded media files an Office document contains.
+
+    Slightly over-counts for ``.pptx``, where ``ppt/media/`` also holds
+    images belonging to slide layouts, masters and the theme. That is the
+    right direction to be wrong in: the note this feeds tells the model
+    content was dropped, and over-reporting makes it ask, while
+    under-reporting would let it assume a figure-heavy deck was fully read.
+    """
+    prefix = _MEDIA_DIR_BY_SUFFIX.get(path.suffix.lower())
+    if prefix is None:
+        return 0
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return sum(1 for name in archive.namelist() if name.startswith(prefix) and not name.endswith("/"))
+    except (OSError, zipfile.BadZipFile):
+        # Not fatal: the reader itself has already parsed this file, so a
+        # failure here means only that the count is unavailable. Say
+        # nothing rather than guess.
+        return 0
+
+
+def _dropped_images_note(count: int) -> str:
+    """The note appended when a reader extracted text but silently dropped
+    the document's images — every reader in this module is text-only (see
+    the module docstring). Empty string when there is nothing to say."""
+    if count <= 0:
+        return ""
+    subject = "1 embedded image, which was" if count == 1 else f"{count} embedded images, which were"
+    return (
+        f"\n\n[This document contains {subject} not extracted — only its text "
+        f"is shown above. Say so if the answer depends on a figure.]"
+    )
+
+
+def _pdf_content_note(*, pages_read: int, text_chars: int, image_count: int) -> str:
+    """The PDF equivalent, which also has to cover the case a plain image
+    count cannot: a page-image-only document, where the *absence* of text is
+    the finding rather than the presence of figures."""
+    if pages_read and text_chars < _SCANNED_TEXT_CHARS_PER_PAGE * pages_read:
+        if image_count:
+            pages = "1 page" if pages_read == 1 else f"{pages_read} pages"
+            images = "1 image, which was" if image_count == 1 else f"{image_count} images, which were"
+            return (
+                f"\n\n[No usable text layer — this appears to be a scanned or "
+                f"image-only PDF. Its {pages} hold {images} not extracted. "
+                f"Treat this as a document that could not be read, not as an "
+                f"empty one.]"
+            )
+        return (
+            "\n\n[No extractable text and no embedded images — this PDF may be "
+            "empty or damaged. Treat it as unread rather than blank.]"
+        )
+    return _dropped_images_note(image_count)
+
 
 
 class UnsupportedDocumentFormatError(Exception):
@@ -129,14 +217,31 @@ def _read_pdf_file(path: Path, *, max_chars: int, max_pdf_pages: int = DEFAULT_M
     import pymupdf
 
     parts: list[str] = []
+    image_xrefs: set[int] = set()
+    text_chars = 0
+    pages_read = 0
     with pymupdf.open(path) as doc:
         page_count = doc.page_count
         for index, page in enumerate(doc):
             if index >= max_pdf_pages:
                 parts.append(f"--- [{page_count - max_pdf_pages} more pages truncated] ---")
                 break
-            parts.append(f"--- page {index + 1} ---\n{page.get_text()}")
-    return [TextArtifact(text=_truncate("\n\n".join(parts), max_chars))]
+            page_text = page.get_text()
+            parts.append(f"--- page {index + 1} ---\n{page_text}")
+            pages_read += 1
+            # Non-whitespace only, and counted from the page text rather
+            # than from `parts` — the "--- page N ---" markers are ours, and
+            # counting them would make an image-only PDF look like it had
+            # text in proportion to its page count.
+            text_chars += len("".join(page_text.split()))
+            # Keyed by xref so one logo repeated on every page counts once,
+            # not fourteen times. Metadata only; no pixels are decoded.
+            image_xrefs.update(image[0] for image in page.get_images(full=False))
+    body = _truncate("\n\n".join(parts), max_chars)
+    # Appended *after* truncation, deliberately: a note explaining what was
+    # dropped is worthless if it is itself the thing that gets dropped. It
+    # costs a few dozen characters over the budget in the worst case.
+    return [TextArtifact(text=body + _pdf_content_note(pages_read=pages_read, text_chars=text_chars, image_count=len(image_xrefs)))]
 
 
 def _read_docx_file(path: Path, *, max_chars: int, **_ignored) -> list[Artifact]:
@@ -148,7 +253,8 @@ def _read_docx_file(path: Path, *, max_chars: int, **_ignored) -> list[Artifact]
         parts.append("")
         for row in table.rows:
             parts.append(" | ".join(cell.text for cell in row.cells))
-    return [TextArtifact(text=_truncate("\n".join(parts), max_chars))]
+    body = _truncate("\n".join(parts), max_chars)
+    return [TextArtifact(text=body + _dropped_images_note(_count_embedded_media(path)))]
 
 
 def _read_xlsx_file(
@@ -180,6 +286,12 @@ def _read_xlsx_file(
             artifacts.append(
                 TextArtifact(text=f"... [{len(workbook.sheetnames) - max_sheets} more sheet(s) truncated]")
             )
+        # Its own artifact rather than appended to a table's text: these are
+        # TableArtifacts, whose whole point is that they are not flattened
+        # into prose. The truncation marker above already sets the pattern.
+        note = _dropped_images_note(_count_embedded_media(path))
+        if note:
+            artifacts.append(TextArtifact(text=note.strip()))
         return artifacts
     finally:
         workbook.close()
@@ -193,7 +305,8 @@ def _read_pptx_file(path: Path, *, max_chars: int, **_ignored) -> list[Artifact]
     for index, slide in enumerate(presentation.slides):
         texts = [shape.text_frame.text for shape in slide.shapes if shape.has_text_frame and shape.text_frame.text]
         parts.append(f"--- slide {index + 1} ---\n" + "\n".join(texts))
-    return [TextArtifact(text=_truncate("\n\n".join(parts), max_chars))]
+    body = _truncate("\n\n".join(parts), max_chars)
+    return [TextArtifact(text=body + _dropped_images_note(_count_embedded_media(path)))]
 
 
 _READERS: dict[str, Callable[..., list[Artifact]]] = {

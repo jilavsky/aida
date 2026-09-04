@@ -32,6 +32,23 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Fixed
 
+- A document's images are still not extracted — every reader is text-only —
+  but AIDA no longer stays **silent** about it, which was the part that
+  actually misled the model. Each reader now counts the embedded images it
+  dropped and says so in the text it returns ("[This document contains 7
+  embedded images, which were not extracted...]"), and the PDF reader
+  additionally detects the case where there was no usable text layer at all
+  — a scanned paper, a photographed logbook page, a signed form — and
+  reports it as a document that *could not be read* rather than handing
+  back an empty-looking one. Previously a scanned PDF extracted as empty
+  text with no warning, so the model could not tell it from an empty file
+  and would either guess or report the attachment as blank. A repeated
+  logo counts once rather than once per page, the note is appended after
+  the size budget so truncation can never drop the explanation itself, and
+  an ordinary text-only document with no images gets no note at all. See
+  [`planning/document_images.md`](planning/document_images.md) for the
+  richer options this is the floor of.
+
 - Reading or attaching a real document (e.g. a multi-page PDF) silently
   handed the model well under one page of it. `read_document()` already
   truncates PDF/DOCX/XLSX/PPTX/text content to a reasonable 20,000-char

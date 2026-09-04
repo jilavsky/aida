@@ -3,14 +3,27 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 0.1.0b3 (beta), 2026-09-01.** Phases 1–9 are implemented, tested
-(1,400+ tests, three OSes) and in daily use. This file now holds **only what is
-not done**.
+**Status: 0.1.0b3 (beta), reconciled 2026-09-04.** Phases 1–10's automation
+half are implemented, tested (1,700+ tests, three OSes) and in daily use.
+This file holds **only what is not done** — anything ticked here has been
+moved to `planning/COMPLETED.md`, and anything shipped is dated in
+`CHANGELOG.md`. If you find a `[x]` below, it is a bug in this file.
 
 - What AIDA is, and every design decision behind it → [`planning/DESIGN.md`](planning/DESIGN.md)
-- What has been delivered → [`planning/COMPLETED.md`](planning/COMPLETED.md)
-- Per-phase checklists → `planning/phase01…phase09_*.md`
+- What has been delivered, with rationale → [`planning/COMPLETED.md`](planning/COMPLETED.md)
+- What shipped in which release → [`CHANGELOG.md`](CHANGELOG.md)
+- Per-phase checklists → `planning/phase01…phase10_*.md`
 - User-facing setup and configuration → [`docs/`](docs/README.md)
+
+Two companion proposals live at the repo root rather than in §1, because
+they are accepted-in-principle but not yet committed work. Items graduate
+from them into §1 as they are taken on:
+
+- [`PLAN_INSTRUMENT_INTEGRATION.md`](PLAN_INSTRUMENT_INTEGRATION.md) —
+  BeamlineAdvisor retirement, aievaluator, a safety-limited EPICS MCP, and
+  the deployment model for `usaxscontrol`.
+- [`AIEVALUATOR_EPICS_MCP_SETUP.md`](AIEVALUATOR_EPICS_MCP_SETUP.md) — the
+  concrete wiring checklist for those two MCP servers.
 
 Code comments and docstrings that cite "PLAN.md §N" or "PLAN.md Phase N"
 refer to the sections and phase files as they were before this split — the
@@ -54,113 +67,77 @@ Nothing here is speculative work; it is what a beta is for.
       The two are deliberately kept identical so no pip resolution order can
       break the other package; nothing enforces that automatically.
 
-### 1.2 Phase 10 — automation and distribution (`phase10_automation_distribution.md`)
+### 1.2 Phase 10 — the distribution half (`phase10_automation_distribution.md`)
 
-**Automation half done (2026-09-03), on branch `phase10-in-app-scheduler`,
-merged to `main`.** The distribution half (release automation, conda
-feedstock) is still open.
+The **automation** half shipped 2026-09-03: `aida run`, stored workflows,
+the in-app scheduler with its deferral policy, and `docs/workflows.md`.
+Full account in [`planning/COMPLETED.md`](planning/COMPLETED.md) §9. What
+remains is distribution, plus one deliberate deferral:
 
-The *shape* of the automation half was decided and written up in
-[`planning/phase10_scheduling_design.md`](planning/phase10_scheduling_design.md):
-four layers (`run` → `workflow` → `schedule` → trigger), where only the top
-layer touches the operating system. Three conclusions from it that shaped
-what got built:
-
-1. **Workflows and scheduling are separable, and workflows are most of the
-   value.** "Replay this analysis on a new folder" needs no clock at all.
-   Shipped first, complete.
-2. **In-app scheduler first, OS schedulers later and additively (Option
-   A).** Built and shipped; the launchd/Task Scheduler/systemd installers
-   remain deliberately unbuilt — see
-   [`docs/workflows.md`](docs/workflows.md#why-no-os-level-scheduler) and
-   §2's "Considered" note below. Nothing built for the in-app scheduler is
-   thrown away if they're added later (`ScheduleEntry.trigger` already
-   exists for exactly this reason).
-3. **The blocker nobody sees coming is secrets, not clocks.** Handled: the
-   existing env-var fallback (`AIDA_SECRET_<PROFILE>`) is what `aida run`/
-   `workflow run`/scheduled fires authenticate through, and `aida doctor`
-   reports per-profile whether that's actually in place.
-
-- [x] `aida run --workspace W "prompt"` — non-interactive single turn: exit
-      codes (distinguishing step failure / config error), `--json` output,
-      stdin prompt, `--input file…` attachments.
-- [x] Headless confirmation policy: fail-with-message by default;
-      `--yes-in-allowed` narrows the workspace's own safety mode and never
-      widens it; MCP `confirm_before_run` flags need explicit
-      `--preapprove-tool`/`preapproved_tools:` pre-approval; never hangs
-      waiting for a human who is not there.
-- [x] Non-interactive secret access: env-var fallback for every
-      `secret_ref` (already existed), plus an `aida doctor` check for it.
-- [x] Stored named workflows in `~/.aida/workflows/NAME.yaml` — workspace ref
-      plus steps, placeholder substitution, optional `expect_files` per step,
-      `aida workflow run/list/show/validate`. All steps share one session.
-- [x] "Save this conversation as a workflow" from the GUI, and a workflow
-      picker (Workflows… management dialog) that runs one into a normal
-      conversation view.
-- [x] Failure semantics: a failed step stops the workflow with a clear report
-      and leaves partial output in place.
-- [x] Reproducibility manifest per run (`PLAN.md` §2.6) — a by-product of
-      the workflow runner (`run-<name>-<timestamp>.aida.json`).
-- [x] In-app scheduler over `~/.aida/schedules.yaml` (definition) plus
-      SQLite last-run state: due/catch-up-once semantics, no overlap
-      (in-process guard + cross-process advisory lock), its own session
-      rather than the user's, visible last-run status in the GUI dialog,
-      and a status-bar failure indicator.
-- [x] **Added beyond the original scope, from GUI hands-on testing
-      (2026-09-03):** the scheduler now *defers, not skips* a due job while
-      the user is actively using AIDA — a running turn hard-blocks it,
-      unsent input text or recent activity soft-blocks it for a
-      configurable quiet period (default 5 min), waived after a
-      configurable cap (default 1 h) except mid-turn. Status bar shows a
-      **⏳ N jobs waiting** indicator; both timings are in Settings. See
-      [`docs/workflows.md`](docs/workflows.md#deferred-not-skipped--the-scheduler-and-you-at-the-same-time)
-      and §7 of the design doc.
-- [x] `docs/workflows.md` — `aida run`/workflow/schedule usage, headless
-      confirmation and secrets caveats up front, and why OS-level triggers
-      were deferred rather than built.
-- [ ] *Deferred, not scheduled:* `aida schedule install/uninstall/status`
-      generating native launchd/Task Scheduler/systemd artefacts — only if
-      a user actually asks for "logged out, not just closed" (§2.1-style
-      "Considered", not committed).
-- [x] Tests: `aida run`/workflow/scheduler covered end-to-end with
-      MockProvider + mock-mcp (1705 tests total, non-GUI + GUI), including
-      catch-up-fires-once, overlap-skips, a clock jumped backwards, and the
-      full deferral policy.
 - [ ] Release automation: a GitHub Actions publish workflow with the version
       in `pyproject.toml` authoritative and tag-checked.
 - [ ] conda: keep `environment.yml` current; evaluate a conda-forge feedstock
       once PyPI releases are routine (record the decision either way).
+- [ ] *Deferred, not scheduled:* `aida schedule install/uninstall/status`
+      generating native launchd/Task Scheduler/systemd artefacts — only if
+      a user actually asks for "logged out, not just closed". `ScheduleEntry.
+      trigger` already exists so nothing shipped has to be rewritten for it.
 
-### 1.3 Context-window management and compaction — done (2026-08-28)
+### 1.3 Conversation organization — the "user" layer
 
-The failure this prevented: a long pyIrena analysis conversation dying
-halfway through, with no in-app recovery. Shipped: per-message/tool-schema
-token counting, a per-profile `context_window` budget, CLI + GUI
-context-fullness display, and automatic + manual (`/compact`, **Compact
-Conversation**) summarizing compaction. Full detail in
-[`planning/COMPLETED.md`](planning/COMPLETED.md) §6; user-facing docs in
-[`docs/context-and-limits.md`](docs/context-and-limits.md).
+**Committed 2026-09-04**, ahead of deploying AIDA at the beamline. Framed
+first as per-user chats, better understood as **an organization axis for
+conversations**: at the beamline the buckets are people, on a laptop they
+are tasks or projects. Same mechanism either way. The motivating problem is
+the same in both: a flat, ever-growing chat list has no safe bulk cleanup,
+because deleting in a shared list takes conversations someone wanted kept.
+Not authentication and not secrecy — a name picker. Shape, sizing and
+step-by-step in [`planning/multiuser_plan.md`](planning/multiuser_plan.md).
+
+**Sequencing: steps 1, 2 and 4 below go before the attachment store in
+§1.5**, because a DB column can be added at any time but a folder layout
+cannot be changed once users have files in it. See `multiuser_plan.md` §0.
+
+- [ ] Schema migration 4: nullable `user` column on `conversations` (+
+      index), quoted as `"user"` in every statement — it is a reserved word
+      in other engines and reads confusingly unquoted even where SQLite
+      accepts it. Note §2.1 previously claimed this column already existed
+      as "cheap insurance" — it does not; migrations 1–3 never added it.
+- [ ] **Path resolution**: a single `resolve_for_user()` expanding
+      `{user}` in `records_dir`, `target_folder`, `saved_scripts_dir`,
+      `templates_dir` and `source_folders` — run **before**
+      `SafetyGuard.for_workspace` builds `allowed_roots`, or every write
+      prompts as out-of-bounds. The one real hazard; make it a test.
+- [ ] Stamp on create: `ConversationRecorder` writes the active user
+      (one call site); `list_conversations(user=…)` filters.
+- [ ] **Workspace filter — nearly free, no schema.** `workspace_name` is
+      already recorded and already *displayed* in the sidebar row, but
+      `_apply_filter` matches `title` only, so typing a workspace name
+      does nothing. Make the filter match both and add a workspace
+      dropdown: ~20 lines, and it may cover much of the felt problem alone.
+- [ ] Active-user identity: `AppConfig.active_user`, a `UserSelector`
+      in the GUI toolbar, `--user` on the CLI, `AIDA_USER` for headless,
+      and a *Show all* escape in the sidebar.
+- [ ] Per-user `user_context` (the B15 identity block) instead of one
+      per-install string.
+- [ ] Document what stays deliberately shared: providers, secrets, MCP
+      config, workspaces, knowledge bases, schedules — and that this is
+      organization, not security, in those words.
 
 ### 1.4 Verification owed (cannot be done from a sandbox)
 
 Every one of these is a *manual* check the phase files left open because no
 sandbox can perform it. They are the acceptance evidence for work already
-believed complete.
+believed complete. Items verified so far — the pyirena-mcp keystone, MCP
+group switching, UC2, UC3, and live `ollama-local`/`argo-claude` profiles
+— are recorded in `planning/COMPLETED.md`.
 
 - [ ] CI green on all three OSes after the next push (phases 1, 3, 4, 6, 7, 8, 9
       each left this box open for the same reason).
-- [x] `aida chat --profile ollama-local` against a real local model, and
-      `--profile argo-claude` through the ANL proxy on-site.
-- [x] **Keystone, against the real thing:** a real model calling real
-      pyirena-mcp, PNG decoded and displayed, saved to disk.
 - [ ] bait_mcp connects and lists its tools from AIDA (no instrument needed).
-- [x] Switching MCP groups demonstrably changes the tool list the model sees.
-- [x] **UC2:** drop a PDF and an MD file on the GUI, ask questions, get a new
-      MD plus figures sidecar in the target folder.
-- [x] **UC3 full:** "find data in <source folder> with Rg 20–50 Å, plot them,
-      write it up" end to end.
 - [ ] **UC5:** check beamline status via an AIEvaluator script plus bait_mcp
-      from an AIDA workspace.
+      from an AIDA workspace. See `AIEVALUATOR_EPICS_MCP_SETUP.md` for the
+      pre-flight commands.
 - [ ] **UC1 full:** a documentation folder indexed, answers citing retrieved
       passages, index rebuilt from the GUI; the same knowledge base working
       with local *and* Argo embeddings; the ten canned USAXS questions
@@ -173,41 +150,36 @@ believed complete.
 
 ### 1.5 Small, decided, not yet done
 
-Reviewed 2026-08-29: of the eight items below, four were quick, unambiguous,
-backward-compatible wins and are now done; four turned out to need either a
-real UX decision or missing domain knowledge only the user can supply, and
-are deferred with the reason noted inline.
+Reviewed 2026-08-29 and again 2026-09-04. Everything that was quick and
+unambiguous is done and archived in `planning/COMPLETED.md` §7; what is
+left below either needs a real UX decision, needs domain knowledge only
+the user can supply, or is a read-through rather than a mechanical edit.
 
-- [x] Show estimated tool count per group in the MCP dialog — done
-      (2026-08-29).
-- [x] Let the model place images *within* a generated report rather than
-      always appended at the end — done (2026-08-29).
-- [x] A cheaper `AnthropicProvider.ping()` — done (2026-08-29).
-- [x] Offer to install the bundled skills from the GUI generally, not only
-      as a side effect of `add-pyirena` — done (2026-08-29).
-
-Full detail on all four in [`planning/COMPLETED.md`](planning/COMPLETED.md) §7.
-
-- [ ] Diff-style view when the agent proposes changes to an existing script
-      (`phase09`, left open) — **deferred**. This was already an explicit
-      "may slip"/dropped nice-to-have when Phase 9 shipped, not a plain
-      cleanup: it needs a real UX decision (a side-by-side pane? inline
-      +/- markup in the chat transcript? a separate review dialog before the
-      write happens?) that only the user can settle — there's no single
-      "obviously correct" shape to just build.
-- [x] Per-workspace extra skills selection beyond server-linked ones
-      (`phase07`) — done: `WorkspaceManagementDialog`'s Add/Edit form
-      covers `skills` along with `profile`, `mcp_group`, `knowledge_bases`,
-      `system_prompt`, `safety`, `scripting_enabled` and the script-timeout
-      spinner. The blocker these two entries cited — "no GUI workspace
-      editor exists yet" — no longer holds; the dialog is reachable from
-      the toolbar. See [`docs/workspaces.md`](docs/workspaces.md) for the
-      two fields (`templates_dir`, `saved_scripts_dir`) that remain
-      config-file only.
-- [ ] Set a workspace's default MCP group from the MCP dialog itself
-      (`phase07`) — still open, but no longer blocked: the workspace editor
-      it was waiting on now exists, so this is a matter of adding the
-      control to the MCP dialog and writing through to `workspaces.yaml`.
+- [ ] **Documents: the attachment store (Phase B).** A real persistence
+      bug: extracted *text* survives a resume (it is inlined into the
+      persisted message), but the original file is never copied and an
+      attached image is recorded at the user's own path — clean out that
+      folder and a resumed conversation silently loses the pixels. The
+      `.md` transcript omits attachments entirely (it filters on
+      `kind == "ImageArtifact"`; attachments are `"UserImage"`). Ingest
+      into `<records_dir>/attachments/<conv8>/` as a peer of the existing
+      `figures/` sidecar. **Blocked on §1.3's path resolution** — build it
+      once, on the settled layout.
+- [ ] **Documents: deletion must be complete.** Deleting a chat deletes its
+      documents — a user who deletes a conversation holding an unpublished
+      manuscript must not find it still in their home directory. Needs a
+      recorded `attachments_path` on the conversation row (like
+      `record_path`) rather than recomputing it, because
+      `delete_conversation` currently derives the sidecar path from the
+      *current* `records_dir` — change that setting in Settings and older
+      folders become undeletable orphans. Latent for `figures/` today;
+      unacceptable for attachments. Plus an orphan sweeper in
+      `aida doctor` as a backstop.
+- [ ] **Documents: figure index + OCR (Phases C, D).** Labeled figure index
+      and a `get_document_figure` pull tool; then the optional Mistral OCR
+      backend behind an `ocr` extra, a per-workspace switch, an upload
+      confirmation and a plain-text fallback. Full build order in
+      [`planning/documents_implementation.md`](planning/documents_implementation.md).
 - [ ] **Enforce `ruff format` in CI** (external review, P3). `ruff check`
       passes and is gated; `ruff format --check .` currently reports
       **128 files would be reformatted, 97 already formatted**. Two commits,
@@ -215,28 +187,29 @@ Full detail on all four in [`planning/COMPLETED.md`](planning/COMPLETED.md) §7.
       (so it can be added to `.git-blame-ignore-revs`), then a
       `ruff format --check .` step next to the existing lint step in
       `.github/workflows/ci.yml`. Doing it the other way round makes CI red
-      on main. Nothing else in the review's P3 list is still open — docs
-      reconciliation, the vacuous `or True` assertions, the tracked
-      `.DS_Store`, the wheel-build/install smoke job and `pip check` all
-      landed in `59a4b92`.
+      on main. Nothing else in the review's P3 list is still open.
 - [ ] **Comment hygiene pass** (external review, P3). Long historical
-      "this used to be broken because…" comments are genuinely useful while
-      a fix is fresh and become false as the code moves on — the review
-      caught two that had already gone stale (the startup-cleanup comment
-      and the profile-switch failure handler's claim that the session was
-      left untouched; both were rewritten in `59a4b92`). The rule going
-      forward: a code comment states the *current* invariant and why it
-      exists; the history and the rationale for the change move to
-      `planning/COMPLETED.md` or a short decision record. This is a
-      read-through, not a mechanical edit, so it wants doing once before
-      1.0 rather than continuously.
+      "this used to be broken because…" comments are useful while a fix is
+      fresh and become false as the code moves on — the review caught two
+      that had already gone stale. The rule going forward: a code comment
+      states the *current* invariant and why it exists; the history and the
+      rationale move to `planning/COMPLETED.md` or a short decision record.
+      A read-through, wanted once before 1.0 rather than continuously.
+- [ ] Set a workspace's default MCP group from the MCP dialog itself
+      (`phase07`) — no longer blocked: the workspace editor it was waiting
+      on now exists, so this is adding the control to the MCP dialog and
+      writing through to `workspaces.yaml`.
+- [ ] Diff-style view when the agent proposes changes to an existing script
+      (`phase09`) — **deferred**. An explicit "may slip" nice-to-have when
+      Phase 9 shipped, not a cleanup: it needs a UX decision (side-by-side
+      pane? inline +/- markup in the transcript? a review dialog before the
+      write?) that only the user can settle.
 - [ ] Extend the one-click MCP setup pattern beyond pyIrena — `bait_mcp`
       first, then a small offer list of npx-based servers. The detection and
       config-building shape in `aida.mcp.pyirena_setup` generalizes; what
-      does not is knowing *which* env vars and group each server wants,
-      which is exactly the per-server knowledge that makes it worth doing
-      — **deferred**: this needs `bait_mcp`'s actual env-var names and
-      group conventions from the user; nothing to build against yet.
+      does not is knowing *which* env vars and group each server wants —
+      **deferred**: needs `bait_mcp`'s actual env-var names and group
+      conventions; nothing to build against yet.
 
 ---
 
@@ -248,12 +221,12 @@ concrete asks for it.
 
 ### 2.1 Deployment and multi-user
 
-- **Per-user beamline credentials.** Username selection → per-user chats and
-  saved scripts, as in BeamlineAdvisor. Real overhead: data separation in the
-  DB, per-user records folders, per-user secrets. Revisit when AIDA is
-  actually deployed on `usaxscontrol`; likely a thin "active user" layer over
-  persistence, not real auth. The Phase 4 schema already carries a nullable
-  `user` column as cheap insurance.
+- **Per-user beamline credentials.** The identity half graduated to §1.3;
+  the *secrets* half did not. Per-user provider profiles would mean
+  per-user secrets in the OS keychain of one shared login — which the
+  keychain does not partition. A shared staff profile is what
+  BeamlineAdvisor effectively does today and what §1.3 assumes. Revisit
+  only if per-person Argo billing or auditing becomes a requirement.
 - **Credentials for browser automation.** How an automated Playwright MCP
   run could log in to a web system without the agent, the provider, or
   AIDA's own records ever seeing the password — session reuse, a
@@ -265,7 +238,9 @@ concrete asks for it.
   work inside that session" practice covers the attended case meanwhile.
 - **Two AIDA instances sharing `~/.aida`** (SQLite + config writes) is
   unguarded. The single-user assumption is fine today; a lock file would at
-  least make the failure mode explicit.
+  least make the failure mode explicit. §1.3 makes this materially more
+  likely (two people at one beamline machine), so it may need to graduate
+  with it — see `planning/multiuser_plan.md` §6.
 - **Preinstall Node/npx and offer common npx-based MCP servers** (Playwright
   and friends). Two separable pieces: `environment.yml` could pull `nodejs`
   from conda-forge so `npx` comes along, and AIDA could ship ready-to-enable
@@ -291,7 +266,9 @@ concrete asks for it.
 
 - **Alternative web frontend** (NiceGUI or similar) on the same event API, for
   browser access from beamline LAN machines. Only worthwhile once the event
-  API has proven stable through the PySide6 app.
+  API has proven stable through the PySide6 app. See
+  `PLAN_INSTRUMENT_INTEGRATION.md` §1.3 — this is one of the deployment
+  options there, and the one that would give users access without an install.
 - **Voice STT input** — macOS dictation already covers it; Windows/Linux would
   mean local Whisper, a heavy dependency. Criterion: real demand at the
   beamline. If ever done: a mic button feeding the normal input box, nothing
@@ -300,12 +277,38 @@ concrete asks for it.
   ships and earns its keep.
 - **Extra GUI niceties**: per-display font/scaling profiles, more dockable
   widgets.
+- **Context-aware Quick Tasks.** BeamlineAdvisor's `get_suggestions()` is
+  ~60 lines of keyword heuristics ("traceback" → "Debug this"; a code block
+  in the last reply → "Load into editor"). The same heuristics could drive a
+  transient second row of buttons under the input box; the Quick Tasks panel
+  and event API already exist. Low value unless users miss it.
 - **Native app bundles** (PyInstaller/Briefcase) — a timeboxed investigation
   at most. `pip install aida-workbench[gui]` is acceptable for an audience
   that already installs pyIrena that way.
 
 ### 2.4 Knowledge and analysis
 
+- **Figures from documents, and an OCR backend.** The readers are
+  text-only, so every figure in an attached paper is dropped — and a
+  scanned PDF reads as empty with no warning. The warning and the
+  attachment-folder fix graduated to §1.5; what stays here is the richer
+  half. The shape decided in discussion (2026-09-04): **do not push
+  figures at the model** — an unlabeled blob it cannot name is worse than
+  a note saying a figure exists. Ingest a document once into its
+  attachments folder, hand the model the text plus a *labeled figure
+  index*, and add a `get_document_figure(document, label)` tool so the
+  agent pulls the one or two figures it needs. That turns
+  `MAX_ATTACHED_IMAGES = 4` from a limitation into the correct budget for
+  a pull. It all rests on the index being right, which `pymupdf` alone
+  cannot reliably deliver on two-column journal layouts — which is the
+  actual argument for an optional **Mistral OCR** backend (three REST
+  calls, no new package beyond declaring `httpx`; ~1000 pages per dollar;
+  returns reading-ordered markdown with inline image placeholders, so
+  caption pairing stops being a layout problem). Off by default, per
+  workspace, confirmation on upload, never in a headless run without
+  explicit pre-approval, and always falling back to plain text extraction
+  when unavailable. Full analysis, including what survives a chat restart
+  today, in [`planning/document_images.md`](planning/document_images.md).
 - **RAG over past conversations** ("what did we conclude last week?").
 - **A reranking model** in retrieval, if quality plateaus.
 - **Automatic knowledge-base refresh** via a folder watcher.
@@ -321,7 +324,8 @@ concrete asks for it.
 ### 2.5 Sharing
 
 - **Conversation export bundles** (a zip of transcript plus artifacts) for
-  sending an analysis session to a colleague.
+  sending an analysis session to a colleague. BeamlineAdvisor could export a
+  chat as JSON; graduate when someone asks.
 - **pynika and other package MCPs** as they appear — should "just work"
   through the Phase 7 management UI; ship starter skills files alongside.
 
@@ -330,18 +334,10 @@ concrete asks for it.
 The review's P1/P2 findings are fixed (`59a4b92`); its P3 remainder is in
 §1.5. What follows is the review's *feature* list — recorded here rather
 than in §1 because none of it has a concrete need pushing on it yet.
-Ordered as the review ordered it, by value-to-complexity.
+Ordered as the review ordered it, by value-to-complexity. The
+reproducibility manifest that headed this list shipped with Phase 10's
+workflow runner (`COMPLETED.md` §9) and has been removed from it.
 
-- **Reproducibility manifest beside every generated report.** A
-  `report.md.aida.json` (or one per run) naming conversation / workspace /
-  profile / model, input paths with size+mtime and SHA-256 on demand, MCP
-  server and tool names, tool arguments and artifact paths, the generated
-  script and interpreter, timestamps and AIDA version. Almost all of it
-  already exists in the session, tool log, artifact store and config; the
-  first version is plain JSON with no schema migration. For a scientist
-  this answers "what exactly produced this plot?", which is worth more
-  than most agentic features — and it is the natural by-product of a
-  Phase 10 workflow run, so **build it together with §1.2, not before**.
 - **First-class table and JSON artifact cards.** `TableArtifact` and
   `JsonArtifact` exist but only image/file artifacts get frontend creation
   events, so structured results are flattened into the tool-call detail
@@ -353,19 +349,21 @@ Ordered as the review ordered it, by value-to-complexity.
   arguments as editable JSON and resubmits through the normal confirmation
   path — plus "save this invocation as a Quick Task" — turns successful
   exploration into repeatable practice, and is a much smaller step than
-  §1.2's workflows.
+  Phase 10's workflows.
 - **Source freshness indicators.** Compare a saved input's size/mtime to
   the file on disk when showing an artifact or resuming a conversation, and
   say "source changed since analysis" instead of letting an old result look
   current. Size/mtime by default so large HDF5/NXcanSAS files stay cheap;
-  hash only on request. Pairs with the manifest above.
+  hash only on request. Pairs with the run manifest.
 - **MCP tool allowlists, not only denylists.** `disabled_tools` cannot stop
   an upstream server update from silently adding twenty new schemas — or a
   new mutating tool — to a workspace that had reviewed the old set. An
   `enabled_tools` allowlist/preset can, and it is leaner. Show the resolved
   workspace's estimated schema-token budget next to the group tool count
   (§1.5 shipped the count). Directly helps small local models. Cheap
-  enough to graduate to §1 whenever a workspace's tool list gets noisy.
+  enough to graduate to §1 whenever a workspace's tool list gets noisy —
+  and `PLAN_INSTRUMENT_INTEGRATION.md` §4 wants exactly this for the
+  `usaxs-user` / `usaxs-staff` split.
 - **Local feedback and a diagnostic bundle.** A thumbs-up/down plus
   optional note stored locally on an answer or tool run, and an "Export
   diagnostic bundle" producing sanitized logs, active configuration *names*

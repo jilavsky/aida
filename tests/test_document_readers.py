@@ -229,3 +229,195 @@ def test_is_supported_true_for_known_and_extensionless():
 def test_is_supported_false_for_unknown_binary_extension():
     assert not is_supported("foo.zip")
     assert not is_supported("foo.exe")
+
+
+# --- Phase A: what the readers say about the images they drop -----------
+#
+# Every reader here is text-only. The bug these cover is not the dropping
+# itself but the *silence*: a scanned PDF used to arrive as an empty-looking
+# document, and the model had no way to tell that from an empty file.
+
+
+def _pdf_with_image(path: Path, pymupdf, *, pages: int = 1, text: str | None = None) -> None:
+    """A PDF with the same tiny PNG placed on every page — the shape of a
+    scanned document (one image per page, no text layer) unless ``text`` is
+    given."""
+    doc = pymupdf.open()
+    for _ in range(pages):
+        page = doc.new_page()
+        if text:
+            page.insert_text((72, 72), text)
+        page.insert_image(pymupdf.Rect(200, 200, 300, 300), stream=TINY_PNG_BYTES)
+    doc.save(str(path))
+    doc.close()
+
+
+def test_pdf_with_text_and_images_reports_the_dropped_images(tmp_path: Path):
+    pymupdf = pytest.importorskip("pymupdf")
+    path = tmp_path / "figures.pdf"
+    _pdf_with_image(path, pymupdf, pages=1, text="Real body text " * 40)
+
+    text = read_document(path)[0].text
+    assert "Real body text" in text
+    assert "1 embedded image" in text
+    assert "not extracted" in text
+    # It has a text layer, so it must NOT be called scanned.
+    assert "scanned" not in text
+
+
+def test_pdf_repeated_image_counted_once_not_per_page(tmp_path: Path):
+    """A journal ornament or logo on every page is one image, not N."""
+    pymupdf = pytest.importorskip("pymupdf")
+    path = tmp_path / "logo-on-every-page.pdf"
+    _pdf_with_image(path, pymupdf, pages=5, text="Body text for this page. " * 20)
+
+    text = read_document(path)[0].text
+    assert "1 embedded image" in text
+    assert "5 embedded" not in text
+
+
+def test_pdf_without_text_layer_is_reported_as_scanned(tmp_path: Path):
+    pymupdf = pytest.importorskip("pymupdf")
+    path = tmp_path / "scan.pdf"
+    _pdf_with_image(path, pymupdf, pages=3)  # images only, no text
+
+    text = read_document(path)[0].text
+    assert "scanned or image-only" in text
+    assert "3 pages hold 1 image, which was not extracted" in text
+    # The whole point: the model must not read this as an empty document.
+    assert "not as an empty one" in text
+
+
+def test_empty_pdf_is_reported_as_unread_not_blank(tmp_path: Path):
+    pymupdf = pytest.importorskip("pymupdf")
+    doc = pymupdf.open()
+    doc.new_page()
+    path = tmp_path / "blank.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    text = read_document(path)[0].text
+    assert "may be empty or damaged" in text
+    assert "scanned" not in text
+
+
+def test_text_only_pdf_gets_no_note_at_all(tmp_path: Path):
+    """No images and a real text layer: nothing to warn about, and the
+    note must not appear as noise on every ordinary document."""
+    pymupdf = pytest.importorskip("pymupdf")
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "Plenty of ordinary body text here. " * 20)
+    path = tmp_path / "plain.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    text = read_document(path)[0].text
+    assert "not extracted" not in text
+    assert "scanned" not in text
+
+
+def test_pdf_note_survives_truncation(tmp_path: Path):
+    """A note explaining what was dropped is worthless if truncation drops
+    it — it is appended after the budget is applied, on purpose."""
+    pymupdf = pytest.importorskip("pymupdf")
+    path = tmp_path / "long.pdf"
+    _pdf_with_image(path, pymupdf, pages=1, text="x" * 500)
+
+    text = read_document(path, max_chars=50)[0].text
+    assert "[truncated]" in text
+    assert "embedded image" in text
+
+
+def test_docx_reports_dropped_images(tmp_path: Path):
+    docx = pytest.importorskip("docx")
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), "red").save(buffer, format="PNG")
+    buffer.seek(0)
+
+    document = docx.Document()
+    document.add_paragraph("Body paragraph.")
+    document.add_picture(buffer)
+    path = tmp_path / "with-image.docx"
+    document.save(str(path))
+
+    text = read_document(path)[0].text
+    assert "Body paragraph." in text
+    assert "1 embedded image" in text
+
+
+def test_docx_without_images_gets_no_note(tmp_path: Path):
+    docx = pytest.importorskip("docx")
+    document = docx.Document()
+    document.add_paragraph("Just text.")
+    path = tmp_path / "plain.docx"
+    document.save(str(path))
+
+    assert "not extracted" not in read_document(path)[0].text
+
+
+def test_pptx_reports_dropped_images(tmp_path: Path):
+    pptx_module = pytest.importorskip("pptx")
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), "blue").save(buffer, format="PNG")
+    buffer.seek(0)
+
+    presentation = pptx_module.Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+    slide.shapes.title.text = "Slide One"
+    slide.shapes.add_picture(buffer, 0, 0)
+    path = tmp_path / "deck.pptx"
+    presentation.save(str(path))
+
+    text = read_document(path)[0].text
+    assert "Slide One" in text
+    assert "embedded image" in text
+
+
+def test_xlsx_image_note_is_its_own_artifact(tmp_path: Path):
+    """Tables must not be flattened into prose to carry the note."""
+    openpyxl = pytest.importorskip("openpyxl")
+    pytest.importorskip("PIL")
+
+    from PIL import Image
+
+    image_path = tmp_path / "chart.png"
+    Image.new("RGB", (8, 8), "green").save(image_path)
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.append(["name", "value"])
+    sheet.append(["a", 1])
+    sheet.add_image(openpyxl.drawing.image.Image(str(image_path)), "D4")
+    path = tmp_path / "book.xlsx"
+    workbook.save(str(path))
+
+    artifacts = read_document(path)
+    tables = [a for a in artifacts if isinstance(a, TableArtifact)]
+    notes = [a for a in artifacts if isinstance(a, TextArtifact)]
+    assert tables and tables[0].rows == [["a", 1]]
+    assert any("embedded image" in n.text for n in notes)
+
+
+def test_non_office_file_is_not_probed_as_a_zip(tmp_path: Path):
+    """`_count_embedded_media` is keyed by suffix — a .txt file must never
+    be opened as a zip container, and a corrupt .docx must degrade to
+    'no count' rather than raising."""
+    from aida.documents.readers import _count_embedded_media
+
+    plain = tmp_path / "notes.txt"
+    plain.write_text("hello", encoding="utf-8")
+    assert _count_embedded_media(plain) == 0
+
+    corrupt = tmp_path / "broken.docx"
+    corrupt.write_bytes(b"not a zip at all")
+    assert _count_embedded_media(corrupt) == 0

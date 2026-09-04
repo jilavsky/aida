@@ -384,3 +384,109 @@ untouched — only the two interactive raw callbacks changed their return
 type, and only the two places that supply *defaults* wrap them.
 Documented in
 [docs/safety-and-permissions.md](../docs/safety-and-permissions.md#allow-for-this-chat).
+
+---
+
+## 9. Phase 10 — automation, the half that shipped (2026-09-03)
+
+`PLAN.md` §1.2 tracked Phase 10 as one item with fourteen checkboxes; this
+is what got ticked. The *shape* was decided first, in
+[`phase10_scheduling_design.md`](phase10_scheduling_design.md): four layers
+(`run` → `workflow` → `schedule` → trigger), where only the top layer
+touches the operating system. Three conclusions from that design drove
+what was built:
+
+1. **Workflows and scheduling are separable, and workflows are most of the
+   value.** "Replay this analysis on a new folder" needs no clock at all.
+   Shipped first, complete.
+2. **In-app scheduler first, OS schedulers later and additively (Option
+   A).** The launchd/Task Scheduler/systemd installers remain deliberately
+   unbuilt — see
+   [`docs/workflows.md`](../docs/workflows.md#why-no-os-level-scheduler).
+   Nothing built for the in-app scheduler is thrown away if they are added
+   later (`ScheduleEntry.trigger` exists for exactly this reason).
+3. **The blocker nobody sees coming is secrets, not clocks.** The existing
+   env-var fallback (`AIDA_SECRET_<PROFILE>`) is what `aida run`,
+   `workflow run` and scheduled fires authenticate through, and `aida
+   doctor` now reports per-profile whether that is actually in place.
+
+Delivered:
+
+- `aida run --workspace W "prompt"` — non-interactive single turn: exit
+  codes distinguishing step failure from config error, `--json` output,
+  stdin prompt, `--input file…` attachments.
+- Headless confirmation policy: fail-with-message by default;
+  `--yes-in-allowed` narrows the workspace's own safety mode and never
+  widens it; MCP `confirm_before_run` flags need explicit
+  `--preapprove-tool`/`preapproved_tools:` pre-approval; never hangs
+  waiting for a human who is not there.
+- Non-interactive secret access: env-var fallback for every `secret_ref`
+  (already existed), plus an `aida doctor` check for it.
+- Stored named workflows in `~/.aida/workflows/NAME.yaml` — workspace ref
+  plus steps, placeholder substitution, optional `expect_files` per step,
+  `aida workflow run/list/show/validate`. All steps share one session.
+- "Save this conversation as a workflow" from the GUI, and a Workflows…
+  management dialog that runs one into a normal conversation view.
+- Failure semantics: a failed step stops the workflow with a clear report
+  and leaves partial output in place.
+- Reproducibility manifest per run (`run-<name>-<timestamp>.aida.json`) —
+  the by-product of the workflow runner that `PLAN.md` §2.6 asked for.
+- In-app scheduler over `~/.aida/schedules.yaml` (definition) plus SQLite
+  last-run state (`schedule_runs`, migration 3): due/catch-up-once
+  semantics, no overlap (in-process guard + cross-process advisory lock),
+  its own session rather than the user's, visible last-run status in the
+  GUI dialog, and a status-bar failure indicator. Definition and run
+  history are deliberately separate files — user-edited config and
+  machine-written history should not be the same thing.
+- **Added beyond the original scope, from GUI hands-on testing:** the
+  scheduler *defers, not skips* a due job while the user is actively using
+  AIDA. A running turn hard-blocks it; unsent input text or recent
+  activity soft-blocks it for a configurable quiet period (default 5 min),
+  waived after a configurable cap (default 1 h) except mid-turn. The
+  status bar shows **⏳ N jobs waiting**; both timings are in Settings.
+  See [`docs/workflows.md`](../docs/workflows.md#deferred-not-skipped--the-scheduler-and-you-at-the-same-time)
+  and §7 of the design doc.
+- `docs/workflows.md` — usage for all three layers, headless confirmation
+  and secrets caveats up front, and why OS-level triggers were deferred
+  rather than built.
+- Tests: `aida run`/workflow/scheduler covered end to end with
+  MockProvider + mock-mcp (1705 tests total, non-GUI + GUI), including
+  catch-up-fires-once, overlap-skips, a clock jumped backwards, and the
+  full deferral policy.
+
+Still open, and still in `PLAN.md` §1.2: the **distribution** half —
+release automation and the conda decision — plus the deliberately deferred
+`aida schedule install/uninstall/status` native-trigger generators.
+
+---
+
+## 10. Document reading budget — the truncation-on-truncation bug (2026-09-04)
+
+Reading or attaching a real document (a multi-page PDF, say) silently
+handed the model well under one page of it. `read_document()` already
+truncates PDF/DOCX/XLSX/PPTX/text content to a 20,000-char budget, but
+both the `read_file` tool and the GUI's drag-and-drop/"Attach…" path then
+ran that text through `describe_for_model()`'s own separate 4,000-char
+default *on top*, with neither call site overriding it.
+
+The user-visible symptom was worse than a clipped document: a dropped
+journal paper arrived truncated almost immediately, and the model —
+correctly noticing the content was incomplete — fell back to writing and
+running its own PDF-extraction script via `run_python_script`, costing two
+script-execution confirmation dialogs for something that should need none.
+
+Both call sites now share one larger *interactive* budget
+(`INTERACTIVE_MAX_CHARS` = 100,000 chars, `INTERACTIVE_MAX_PDF_PAGES` =
+150) and pass a matching `max_chars` to `describe_for_model()`, so a full
+paper reaches the model in one native `read_file` call or attachment. This
+is the pattern RAG ingestion already used for itself. Three budgets now
+exist deliberately and are named as such in `aida/documents/readers.py`:
+`DEFAULT_MAX_CHARS` for cheap fallback text reads, `INTERACTIVE_MAX_CHARS`
+for the two paths above, and ingestion's own much larger
+`_INGEST_MAX_CHARS` (which wants the whole document for chunking, not for
+chat context).
+
+Note for anyone extending this: these readers extract **text only**.
+Images embedded in a PDF, DOCX or PPTX are not extracted and never reach
+the model — see `PLAN.md` §2.4 and
+[`document_images.md`](document_images.md).
