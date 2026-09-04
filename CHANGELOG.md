@@ -30,6 +30,24 @@ decision revised), unrelated to what shipped when. Entries below link to
   deliberately excluded and keeps asking unconditionally, every time. See
   [docs/safety-and-permissions.md](docs/safety-and-permissions.md#allow-for-this-chat).
 
+### Fixed
+
+- Reading or attaching a real document (e.g. a multi-page PDF) silently
+  handed the model well under one page of it. `read_document()` already
+  truncates PDF/DOCX/XLSX/PPTX/text content to a reasonable 20,000-char
+  budget, but both the `read_file` tool and the GUI's drag-and-drop/
+  "Attach…" path then ran that text through `describe_for_model()`'s own,
+  separate 4,000-char default on top — re-truncating it without either
+  call site overriding it. In practice this meant a dropped journal paper
+  arrived clipped almost immediately, and the model (correctly noticing
+  the content was incomplete) would fall back to writing and running its
+  own PDF-extraction script via `run_python_script` instead of just
+  reading the file, costing two script-execution confirmation dialogs for
+  something that should need none. Both call sites now share a single,
+  larger interactive budget (100,000 chars / 150 pages) so a full paper
+  reaches the model in one native `read_file` call or attachment, matching
+  the pattern RAG ingestion already used for itself.
+
 ## [0.1.0b3] - 2026-09-01
 
 ### Added
