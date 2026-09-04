@@ -34,7 +34,25 @@ from aida.ui.qt._qt import (
 #: length here on top of that keeps the collapsed view scannable even for
 #: a genuinely huge argument dict — the full, untruncated arguments are
 #: always available via "Details" (mark_finished stores them verbatim).
-_MAX_SUMMARY_ARGS_CHARS = 300
+#:
+#: Bug report: "a lot of tool calls... all I see are tool calls which are
+#: taking pages of space (Playwright). I need to be able to inspect them,
+#: but they could be smaller by default (vertically)". Rows were already
+#: collapsed by default (Details starts hidden, below), but at 300 chars a
+#: word-wrapped summary for a call with several/long arguments (routine
+#: for browser-automation tools like Playwright's) still ran several lines
+#: tall, and with "a lot of tool calls" that adds up to real scrolling.
+#: Shrunk so the common case is one, at most two, lines — still enough to
+#: recognize the call at a glance, with the untruncated arguments one
+#: "Details" click away either way.
+_MAX_SUMMARY_ARGS_CHARS = 120
+
+#: Same bug report: bound the *expanded* detail view too, so clicking
+#: "Details" on one huge Playwright snapshot/result can't itself push
+#: everything below it off-screen — QTextEdit already scrolls internally,
+#: this just keeps that scrolling from starting only after swallowing most
+#: of the visible transcript.
+_MAX_DETAIL_HEIGHT_PX = 240
 
 
 def _format_arguments(arguments: dict) -> str:
@@ -67,7 +85,15 @@ class ToolCallRow(QFrame):
         self.setFrameShape(QFrame.Shape.StyledPanel)
 
         outer = QVBoxLayout(self)
+        # Bug report: rows were taking "pages of space" with a lot of tool
+        # calls in the transcript (Playwright-heavy sessions especially) —
+        # Qt's default QVBoxLayout/QHBoxLayout margins/spacing (9-11px a
+        # side) add up fast across dozens of collapsed rows. Tightened
+        # alongside the shorter summary cap above.
+        outer.setContentsMargins(6, 3, 6, 3)
+        outer.setSpacing(2)
         header = QHBoxLayout()
+        header.setSpacing(6)
         self._summary_label = QLabel(self)
         # Word-wrap is the actual fix for the reported bug: a QLabel
         # without it has a minimum size hint equal to its full, unwrapped
@@ -86,6 +112,7 @@ class ToolCallRow(QFrame):
 
         self._detail_text = QTextEdit(self)
         self._detail_text.setReadOnly(True)
+        self._detail_text.setMaximumHeight(_MAX_DETAIL_HEIGHT_PX)
         self._detail_text.hide()
         outer.addWidget(self._detail_text)
 

@@ -301,6 +301,22 @@ class MessageBubble(QFrame):
         _unwrap_preformatted_blocks(self._view.document())
         self._update_open_in_editor_visibility()
 
+    def refresh_font(self) -> None:
+        """Bug report: "font change in settings dialog does not change for
+        the chat window... it does change the other widgets' fonts (left
+        and right panel)". Those panels are plain widgets that paint with
+        their live ``font()`` every frame, so Qt's normal
+        application-font-change cascade (``aida.ui.qt.window_state.
+        apply_font_size``) is all they need. ``QTextBrowser.setMarkdown``
+        is different: Qt's Markdown/HTML importer resolves relative sizes
+        into *absolute* ones against the document's default font at parse
+        time and bakes that into each character's format, so a bubble
+        rendered before a font-size change stays at the old size forever
+        — changing ``self._view``'s font afterwards (already handled by
+        the cascade) only affects text rendered *after* the change.
+        Re-running the exact same render call bakes in the new size."""
+        self._render_now()
+
     def stop_pending_render(self) -> None:
         """Stop the coalescing timer before this bubble is torn down.
 
@@ -447,6 +463,17 @@ class ChatPanel(QWidget):
 
     def widget_at(self, index: int) -> QWidget:
         return self._content_layout.itemAt(index).widget()
+
+    def refresh_fonts(self) -> None:
+        """Re-renders every already-shown ``MessageBubble`` so a settings
+        dialog font-size change takes effect on the transcript, not just
+        newly-appended messages — see ``MessageBubble.refresh_font``'s
+        docstring for why that widget alone needs telling. Call right
+        after ``aida.ui.qt.window_state.apply_font_size``."""
+        for i in range(self._content_layout.count() - 1):
+            widget = self._content_layout.itemAt(i).widget()
+            if isinstance(widget, MessageBubble):
+                widget.refresh_font()
 
     # --- public API ----------------------------------------------------------
 

@@ -52,15 +52,28 @@ def test_start_runs_a_due_schedule_and_emits_signals(qapp, loop_thread, aida_hom
     scheduler.run_started.connect(started.append)
     scheduler.run_finished.connect(lambda *args: finished.append(args))
 
-    scheduler.start()
-    assert pump_until(qapp, lambda: finished), "run_finished never fired"
+    # try/finally, not a trailing stop() call: CI flake (Windows, Python
+    # 3.11) — an assertion failing between start() and stop() used to skip
+    # stop() entirely, leaving the background loop's task alive into this
+    # test's own fixture teardown. aida_home/records_home's AIDA_HOME
+    # override gets reverted there (monkeypatch's finalizer), so a tick
+    # that finally got to run afterwards did its file lookups against the
+    # *real* ~/.aida on the CI runner instead of the test's tmp_path — that
+    # is exactly the "no workflow named 'daily'... Available: (none)"
+    # warning that showed up in this test's "teardown" capture, not its
+    # call capture, on the run that failed. stop() blocks until the loop
+    # thread's task actually returns, so it must run even when an assert
+    # below raises.
+    try:
+        scheduler.start()
+        assert pump_until(qapp, lambda: finished), "run_finished never fired"
 
-    assert started == ["s"]
-    assert finished[0][0] == "s"
-    assert finished[0][1] is True  # ok
-    assert finished[0][2]  # conversation_id
-
-    scheduler.stop()
+        assert started == ["s"]
+        assert finished[0][0] == "s"
+        assert finished[0][1] is True  # ok
+        assert finished[0][2]  # conversation_id
+    finally:
+        scheduler.stop()
 
 
 def test_start_is_idempotent(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
@@ -71,11 +84,12 @@ def test_start_is_idempotent(qapp, loop_thread, aida_home: Path, records_home: P
     finished = []
     scheduler.run_finished.connect(lambda *args: finished.append(args))
 
-    scheduler.start()
-    scheduler.start()  # second call must be a no-op, not a second concurrent loop
-    assert pump_until(qapp, lambda: finished), "run_finished never fired"
-
-    scheduler.stop()
+    try:
+        scheduler.start()
+        scheduler.start()  # second call must be a no-op, not a second concurrent loop
+        assert pump_until(qapp, lambda: finished), "run_finished never fired"
+    finally:
+        scheduler.stop()
 
 
 def test_stop_before_start_is_a_safe_noop(qapp, loop_thread):
@@ -90,9 +104,11 @@ def test_stop_ends_the_loop(qapp, loop_thread, aida_home: Path, records_home: Pa
     monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", lambda: settings)
 
     scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
-    scheduler.start()
-    qapp.processEvents()
-    scheduler.stop()
+    try:
+        scheduler.start()
+        qapp.processEvents()
+    finally:
+        scheduler.stop()
 
     assert scheduler._future is None
 
@@ -141,14 +157,15 @@ def test_due_job_is_deferred_while_the_user_is_active(
     scheduler.deferred_changed.connect(deferrals.append)
     scheduler.run_finished.connect(lambda *args: finished.append(args))
 
-    scheduler.start()
-    assert pump_until(qapp, lambda: deferrals), "deferred_changed never fired"
+    try:
+        scheduler.start()
+        assert pump_until(qapp, lambda: deferrals), "deferred_changed never fired"
 
-    assert "s" in deferrals[0]
-    assert "waiting" in deferrals[0]["s"]
-    assert finished == []  # and it really did not run
-
-    scheduler.stop()
+        assert "s" in deferrals[0]
+        assert "waiting" in deferrals[0]["s"]
+        assert finished == []  # and it really did not run
+    finally:
+        scheduler.stop()
 
 
 def test_a_running_turn_defers_hard(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
@@ -163,12 +180,13 @@ def test_a_running_turn_defers_hard(qapp, loop_thread, aida_home: Path, records_
     deferrals = []
     scheduler.deferred_changed.connect(deferrals.append)
 
-    scheduler.start()
-    assert pump_until(qapp, lambda: deferrals), "deferred_changed never fired"
+    try:
+        scheduler.start()
+        assert pump_until(qapp, lambda: deferrals), "deferred_changed never fired"
 
-    assert deferrals[0]["s"] == "a turn is running"
-
-    scheduler.stop()
+        assert deferrals[0]["s"] == "a turn is running"
+    finally:
+        scheduler.stop()
 
 
 def test_job_runs_once_the_quiet_period_has_elapsed(
@@ -182,11 +200,12 @@ def test_job_runs_once_the_quiet_period_has_elapsed(
     finished = []
     scheduler.run_finished.connect(lambda *args: finished.append(args))
 
-    scheduler.start()
-    assert pump_until(qapp, lambda: finished), "run_finished never fired"
-    assert finished[0][1] is True
-
-    scheduler.stop()
+    try:
+        scheduler.start()
+        assert pump_until(qapp, lambda: finished), "run_finished never fired"
+        assert finished[0][1] is True
+    finally:
+        scheduler.stop()
 
 
 def test_unsent_text_defers(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
@@ -199,11 +218,12 @@ def test_unsent_text_defers(qapp, loop_thread, aida_home: Path, records_home: Pa
     deferrals = []
     scheduler.deferred_changed.connect(deferrals.append)
 
-    scheduler.start()
-    assert pump_until(qapp, lambda: deferrals), "deferred_changed never fired"
-    assert "unsent text" in deferrals[0]["s"]
-
-    scheduler.stop()
+    try:
+        scheduler.start()
+        assert pump_until(qapp, lambda: deferrals), "deferred_changed never fired"
+        assert "unsent text" in deferrals[0]["s"]
+    finally:
+        scheduler.stop()
 
 
 def test_deferred_changed_reports_an_empty_snapshot_when_nothing_waits(
@@ -218,8 +238,9 @@ def test_deferred_changed_reports_an_empty_snapshot_when_nothing_waits(
     snapshots = []
     scheduler.deferred_changed.connect(snapshots.append)
 
-    scheduler.start()
-    assert pump_until(qapp, lambda: snapshots), "deferred_changed never fired"
-    assert snapshots[0] == {}
-
-    scheduler.stop()
+    try:
+        scheduler.start()
+        assert pump_until(qapp, lambda: snapshots), "deferred_changed never fired"
+        assert snapshots[0] == {}
+    finally:
+        scheduler.stop()

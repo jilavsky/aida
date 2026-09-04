@@ -1648,6 +1648,11 @@ class MainWindow(QMainWindow):
         if warning:
             QMessageBox.warning(self, "Relaxed Mode", warning)
         apply_font_size(QApplication.instance(), self.settings.app)  # takes effect immediately, no restart
+        # Bug report: the chat transcript's font stayed fixed while every
+        # other panel picked up the new size immediately — see
+        # ChatPanel.refresh_fonts' docstring for why the transcript needs
+        # an explicit nudge that the rest of the UI does not.
+        self.chat_panel.refresh_fonts()
         # "Change the debug level so I can help with console report" (bug
         # report): configure_logging is safe to call again — it only
         # adjusts the "aida" logger tree's level, doesn't duplicate
