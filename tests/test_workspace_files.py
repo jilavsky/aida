@@ -185,6 +185,37 @@ async def test_read_file_plain_text(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_read_file_does_not_truncate_below_the_interactive_cap(tmp_path: Path):
+    """Regression test: read_file used to hand read_document's already-
+    truncated text through describe_for_model() with *its* smaller 4,000-
+    char default, silently re-truncating anything over ~4KB (e.g. a real
+    PDF/paper) long before read_document's own, much larger budget kicked
+    in. A 10,000-char file — over the old 4,000-char ceiling but under the
+    fixed 100,000-char interactive cap — must now come through whole."""
+    text = "abcdefghij" * 1_000  # 10,000 chars
+    (tmp_path / "a.txt").write_text(text)
+    tools = default_file_tools(_guard(tmp_path))
+    result = await _call(tools, "read_file", path=str(tmp_path / "a.txt"))
+    assert not result.is_error
+    assert result.content == text
+    assert "truncated" not in result.content
+
+
+@pytest.mark.asyncio
+async def test_read_file_still_truncates_above_the_interactive_cap(tmp_path: Path):
+    """The larger interactive cap is still a cap, not an unbounded read —
+    an unusually huge document (a thesis, a book) must still be truncated
+    rather than context-bombing the model."""
+    text = "x" * 150_000
+    (tmp_path / "a.txt").write_text(text)
+    tools = default_file_tools(_guard(tmp_path))
+    result = await _call(tools, "read_file", path=str(tmp_path / "a.txt"))
+    assert not result.is_error
+    assert "truncated" in result.content
+    assert len(result.content) < len(text)
+
+
+@pytest.mark.asyncio
 async def test_read_file_on_a_directory_is_error(tmp_path: Path):
     tools = default_file_tools(_guard(tmp_path))
     result = await _call(tools, "read_file", path=str(tmp_path))

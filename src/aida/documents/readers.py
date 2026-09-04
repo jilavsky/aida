@@ -57,6 +57,17 @@ DEFAULT_MAX_SHEETS = 5
 DEFAULT_MAX_ROWS_PER_SHEET = 200
 DEFAULT_MAX_CSV_ROWS = 500
 
+#: Budget for the two *interactive* read paths — the `read_file` tool and
+#: the GUI drag-and-drop/"Attach..." path — where the point is handing a
+#: real document (e.g. a journal paper) to the model in one shot, as
+#: opposed to `DEFAULT_MAX_CHARS` above (sized for cheap fallback text
+#: reads) or RAG ingestion's much larger `_INGEST_MAX_CHARS` (which wants
+#: the whole document for chunking, not chat context). Callers using these
+#: must also pass a matching `max_chars` to `describe_for_model()` —
+#: otherwise its own smaller default silently re-truncates on top of this.
+INTERACTIVE_MAX_CHARS = 100_000
+INTERACTIVE_MAX_PDF_PAGES = 150
+
 _TRUNCATION_NOTE = "\n... [truncated]"
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
@@ -251,6 +262,8 @@ __all__ = [
     "DEFAULT_MAX_PDF_PAGES",
     "DEFAULT_MAX_ROWS_PER_SHEET",
     "DEFAULT_MAX_SHEETS",
+    "INTERACTIVE_MAX_CHARS",
+    "INTERACTIVE_MAX_PDF_PAGES",
     "UnsupportedDocumentFormatError",
     "is_image_path",
     "is_supported",

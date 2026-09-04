@@ -66,7 +66,12 @@ from typing import Any
 from aida.artifacts.base import FileArtifact, JsonArtifact, TableArtifact
 from aida.artifacts.policy import describe_for_model
 from aida.core.tools import NativeTool, ToolResult, wrap_tool_errors
-from aida.documents.readers import UnsupportedDocumentFormatError, read_document
+from aida.documents.readers import (
+    INTERACTIVE_MAX_CHARS,
+    INTERACTIVE_MAX_PDF_PAGES,
+    UnsupportedDocumentFormatError,
+    read_document,
+)
 from aida.providers.base import ToolSchema
 from aida.workspace.safety import ConfirmationDenied, SafetyGuard
 
@@ -453,8 +458,13 @@ def default_file_tools(
         candidate = await guard.authorize_read(path)
         if not candidate.is_file():
             return ToolResult(content=f"Not a file: {candidate}", is_error=True)
-        artifacts = await _run_blocking(read_document, candidate)
-        content = "\n\n".join(describe_for_model(a) for a in artifacts)
+        artifacts = await _run_blocking(
+            read_document,
+            candidate,
+            max_chars=INTERACTIVE_MAX_CHARS,
+            max_pdf_pages=INTERACTIVE_MAX_PDF_PAGES,
+        )
+        content = "\n\n".join(describe_for_model(a, max_chars=INTERACTIVE_MAX_CHARS) for a in artifacts)
         return ToolResult(content=content, artifacts=artifacts)
 
     @_tool

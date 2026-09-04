@@ -941,14 +941,20 @@ class MainWindow(QMainWindow):
         file reference. Catching broadly here — and telling the model (and
         the user, via the status bar) plainly that the read failed instead
         of just not happening — is the fix."""
-        from aida.documents.readers import read_document
+        from aida.documents.readers import (
+            INTERACTIVE_MAX_CHARS,
+            INTERACTIVE_MAX_PDF_PAGES,
+            read_document,
+        )
 
         name = Path(path).name
         try:
             from aida.artifacts.policy import describe_for_model
 
-            artifacts = read_document(path)
-            body = "\n\n".join(describe_for_model(a) for a in artifacts)
+            artifacts = read_document(
+                path, max_chars=INTERACTIVE_MAX_CHARS, max_pdf_pages=INTERACTIVE_MAX_PDF_PAGES
+            )
+            body = "\n\n".join(describe_for_model(a, max_chars=INTERACTIVE_MAX_CHARS) for a in artifacts)
         except Exception as exc:  # noqa: BLE001 - see docstring: must never propagate past this method
             self._logger.warning("could not read attachment %s: %s", path, exc, exc_info=True)
             detail = str(exc)

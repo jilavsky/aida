@@ -1595,6 +1595,37 @@ def test_send_with_attachment_includes_file_content_in_the_message(
         window.close()
 
 
+def test_send_with_large_attachment_is_not_truncated_below_the_interactive_cap(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    """Regression test: _read_attachment_for_model used to hand
+    read_document()'s text through describe_for_model() with its own
+    separate, much smaller 4,000-char default, silently re-truncating any
+    attached document (e.g. a real PDF paper) far below what read_document
+    itself allows. A 10,000-char attachment — over the old 4,000-char
+    ceiling, under the fixed 100,000-char interactive cap — must arrive
+    whole in the message actually sent to the provider."""
+    text = "abcdefghij" * 1_000  # 10,000 chars
+    note = tmp_path / "notes.txt"
+    note.write_text(text, encoding="utf-8")
+
+    settings = _settings_with_profile()
+    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="got it")], profile_name="mock-profile")
+    try:
+        window.input_box.add_attachment(str(note))
+        window.input_box.set_text("please summarize")
+        window.input_box._send_button.click()
+
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+
+        sent_messages = window.bridge.session.provider.calls[-1][0]
+        last_user_message = [m for m in sent_messages if m.role == "user"][-1]
+        assert text in last_user_message.content
+        assert "truncated" not in last_user_message.content
+    finally:
+        window.close()
+
+
 def test_send_with_attachment_and_no_text_still_sends_the_file_content(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
 ):
