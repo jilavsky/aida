@@ -17,6 +17,7 @@ from datetime import datetime
 from aida.persistence.store import ConversationSummary
 from aida.ui.qt._qt import (
     QAbstractItemView,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -34,6 +35,19 @@ from aida.ui.qt._qt import (
     QWidget,
     Signal,
 )
+
+ALL_USERS_LABEL = "All users"
+
+
+def _matches(summary: ConversationSummary, query: str) -> bool:
+    """Match anything the conversation row visibly identifies.
+
+    The workspace is shown beside the title, so a search that ignored it
+    looked broken rather than deliberately narrow.  User labels are useful
+    search terms for the same reason.
+    """
+    haystacks = (summary.title, summary.workspace_name, summary.user)
+    return any(query in (value or "").lower() for value in haystacks)
 
 
 def _format_timestamp(iso_str: str) -> str:
@@ -123,6 +137,16 @@ class ConversationsSidebar(QWidget):
 
         layout = QVBoxLayout(self)
 
+        # User labels organize shared work; they are not access control.
+        # Keep "All users" one click away so selecting a label can never
+        # make another person's conversations look lost.
+        self._user_filter = QComboBox(self)
+        self._user_filter.addItem(ALL_USERS_LABEL)
+        self._user_filter.currentTextChanged.connect(
+            lambda _text: self._apply_filter(self._search_edit.text())
+        )
+        layout.addWidget(self._user_filter)
+
         # U5 bug report follow-up: "the list grows fast in real use" — a
         # substring filter over the title, applied live as the user types.
         self._search_edit = QLineEdit(self)
@@ -172,7 +196,18 @@ class ConversationsSidebar(QWidget):
         # of this) — filtering here also retroactively hides any already-
         # accumulated empty rows from *before* that existed, with no
         # migration needed.
+        summaries = list(summaries)
         self._all_summaries = [s for s in summaries if s.message_count > 0]
+        selected = self._user_filter.currentText()
+        names = sorted({summary.user for summary in summaries if summary.user})
+        self._user_filter.blockSignals(True)
+        self._user_filter.clear()
+        self._user_filter.addItem(ALL_USERS_LABEL)
+        self._user_filter.addItems(names)
+        index = self._user_filter.findText(selected)
+        self._user_filter.setCurrentIndex(index if index >= 0 else 0)
+        self._user_filter.setVisible(bool(names))
+        self._user_filter.blockSignals(False)
         self._apply_filter(self._search_edit.text())
 
     def _apply_filter(self, query: str) -> None:
@@ -180,8 +215,11 @@ class ConversationsSidebar(QWidget):
         visible = (
             self._all_summaries
             if not query
-            else [s for s in self._all_summaries if query in (s.title or "").lower()]
+            else [s for s in self._all_summaries if _matches(s, query)]
         )
+        selected = self._user_filter.currentText()
+        if selected != ALL_USERS_LABEL:
+            visible = [summary for summary in visible if summary.user in (selected, None)]
         self._list.clear()
         self._ids_by_row = []
         self._titles_by_row = []

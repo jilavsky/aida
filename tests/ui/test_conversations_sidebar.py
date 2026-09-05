@@ -6,11 +6,16 @@ import re
 
 from aida.persistence.store import ConversationSummary
 from aida.ui.qt._qt import QAbstractItemView, QDialog, QMessageBox
-from aida.ui.qt.conversations_sidebar import CleanupDialog, ConversationsSidebar
+from aida.ui.qt.conversations_sidebar import ALL_USERS_LABEL, CleanupDialog, ConversationsSidebar
 
 
 def _summary(
-    conv_id: str, title: str = "chat", workspace: str | None = "use-pyirena", *, message_count: int = 2
+    conv_id: str,
+    title: str = "chat",
+    workspace: str | None = "use-pyirena",
+    *,
+    message_count: int = 2,
+    user: str | None = None,
 ) -> ConversationSummary:
     return ConversationSummary(
         id=conv_id,
@@ -22,6 +27,7 @@ def _summary(
         updated_at="2026-08-19T00:00:00",
         record_path=None,
         message_count=message_count,
+        user=user,
     )
 
 
@@ -226,6 +232,60 @@ def test_search_filters_by_title_case_insensitively(qapp):
     sidebar._search_edit.setText("usaxs")
     assert sidebar.count == 1
     assert sidebar._ids_by_row == ["id1"]
+
+
+def test_search_filters_by_workspace_and_user(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [
+            _summary("id1", title="first", workspace="usaxs-staff", user="Alice"),
+            _summary("id2", title="second", workspace="manuals", user="Bob"),
+        ]
+    )
+
+    sidebar._search_edit.setText("USAXS")
+    assert sidebar._ids_by_row == ["id1"]
+
+    sidebar._search_edit.setText("bob")
+    assert sidebar._ids_by_row == ["id2"]
+
+
+def test_user_filter_is_visible_only_when_user_labels_exist(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", user="Alice"), _summary("id2", user="Bob")])
+    assert not sidebar._user_filter.isHidden()
+    assert [sidebar._user_filter.itemText(i) for i in range(sidebar._user_filter.count())] == [
+        ALL_USERS_LABEL,
+        "Alice",
+        "Bob",
+    ]
+
+    sidebar.set_conversations([_summary("id3")])
+    assert sidebar._user_filter.isHidden()
+
+
+def test_user_filter_keeps_unowned_conversations_visible_and_all_users_restores_everything(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [_summary("alice", user="Alice"), _summary("bob", user="Bob"), _summary("legacy")]
+    )
+
+    sidebar._user_filter.setCurrentText("Alice")
+    assert sidebar._ids_by_row == ["alice", "legacy"]
+
+    sidebar._user_filter.setCurrentText(ALL_USERS_LABEL)
+    assert sidebar._ids_by_row == ["alice", "bob", "legacy"]
+
+
+def test_set_conversations_preserves_the_selected_user(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("alice", user="Alice"), _summary("bob", user="Bob")])
+    sidebar._user_filter.setCurrentText("Bob")
+
+    sidebar.set_conversations([_summary("bob-2", user="Bob"), _summary("alice-2", user="Alice")])
+
+    assert sidebar._user_filter.currentText() == "Bob"
+    assert sidebar._ids_by_row == ["bob-2"]
 
 
 def test_search_with_no_matches_shows_an_empty_list(qapp):
