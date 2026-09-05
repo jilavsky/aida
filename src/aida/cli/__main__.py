@@ -29,6 +29,7 @@ _COMMANDS = {
     "run": "Non-interactive single turn: `aida run --workspace W \"prompt\"` (Phase 10)",
     "workflow": "Run/list/show/validate stored named workflows (Phase 10)",
     "schedule": "Manage and run scheduled workflows (Phase 10)",
+    "documents": "Inspect document extraction: `documents figures FILE`, `documents verify-ocr`",
     "config": "Show on-device config locations; `config secret set/get/delete` manages OS-keychain secrets",
 }
 
@@ -94,6 +95,10 @@ def main(argv: list[str] | None = None) -> int:
         from aida.cli.schedule_cmds import main as schedule_main
 
         return schedule_main(rest)
+    if command == "documents":
+        from aida.cli.documents_cmds import main as documents_main
+
+        return documents_main(rest)
     # command == "config"
     from aida.cli.config_cmds import main as config_main
 

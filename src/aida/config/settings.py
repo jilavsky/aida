@@ -356,6 +356,15 @@ class AppConfig:
     #: last, which is a convenience and explicitly *not* a claim about who
     #: is sitting there. Overridden per run by ``--user`` or ``$AIDA_USER``.
     active_user: str = ""
+    #: Names the user has declared but that may not (yet) appear on any
+    #: conversation. Deriving the list from the conversations alone was not
+    #: enough: a session's conversation row is created empty and deleted
+    #: again if nothing is ever sent (``_delete_conversation_if_empty``), so
+    #: creating a name and then switching away before typing anything made
+    #: the name silently disappear. Unioned with the names actually in the
+    #: database rather than replacing them, so this can only ever *add* a
+    #: name — it can never contradict what the conversations say.
+    known_users: list[str] = field(default_factory=list)
     # Titles of the right-hand session panels (Folders / MCP Servers /
     # Quick Tasks / Workspace Notes) the user has collapsed. Persisted so
     # the column reopens the way they left it — with four panels stacked
@@ -454,6 +463,7 @@ class AppConfig:
             "assistant_name": self.assistant_name,
             "user_context": self.user_context,
             "active_user": self.active_user,
+            "known_users": self.known_users,
             "collapsed_panels": self.collapsed_panels,
             "scheduler_quiet_period_seconds": self.scheduler_quiet_period_seconds,
             "scheduler_max_defer_seconds": self.scheduler_max_defer_seconds,
@@ -485,6 +495,7 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "assistant_name": "str",
     "user_context": "str",
     "active_user": "str",
+    "known_users": "list[str]",
     "collapsed_panels": "list[str]",
     "scheduler_quiet_period_seconds": "int",
     "scheduler_max_defer_seconds": "int",

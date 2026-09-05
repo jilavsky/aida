@@ -6,7 +6,12 @@ import re
 
 from aida.persistence.store import ConversationSummary
 from aida.ui.qt._qt import QAbstractItemView, QDialog, QMessageBox
-from aida.ui.qt.conversations_sidebar import ALL_USERS_LABEL, CleanupDialog, ConversationsSidebar
+from aida.ui.qt.conversations_sidebar import (
+    ALL_USERS_LABEL,
+    NO_USER_LABEL,
+    CleanupDialog,
+    ConversationsSidebar,
+)
 
 
 def _summary(
@@ -258,20 +263,28 @@ def test_user_filter_is_visible_only_when_user_labels_exist(qapp):
         ALL_USERS_LABEL,
         "Alice",
         "Bob",
-    ]
+    ], "no (no user) entry when every conversation is labelled"
 
     sidebar.set_conversations([_summary("id3")])
     assert sidebar._user_filter.isHidden()
 
 
-def test_user_filter_keeps_unowned_conversations_visible_and_all_users_restores_everything(qapp):
+def test_user_filter_narrows_to_one_user_and_all_users_restores_everything(qapp):
+    """Selecting a name shows only that name. Unlabelled conversations used
+    to be included with every user — meant to keep a pre-existing history
+    from vanishing, but since *all* of that history is unlabelled it made
+    picking a name look like it did nothing. "(no user)" reaches them, and
+    "All users" is the safety net."""
     sidebar = ConversationsSidebar()
     sidebar.set_conversations(
         [_summary("alice", user="Alice"), _summary("bob", user="Bob"), _summary("legacy")]
     )
 
     sidebar._user_filter.setCurrentText("Alice")
-    assert sidebar._ids_by_row == ["alice", "legacy"]
+    assert sidebar._ids_by_row == ["alice"]
+
+    sidebar._user_filter.setCurrentText(NO_USER_LABEL)
+    assert sidebar._ids_by_row == ["legacy"]
 
     sidebar._user_filter.setCurrentText(ALL_USERS_LABEL)
     assert sidebar._ids_by_row == ["alice", "bob", "legacy"]
@@ -412,17 +425,19 @@ def test_context_menu_on_a_single_row_offers_resume_rename_delete(qapp):
     sidebar._list.item(0).setSelected(True)
     menu = sidebar._build_context_menu()
     labels = [action.text() for action in menu.actions() if not action.isSeparator()]
-    assert labels == ["Resume", "Rename…", "Delete…"]
+    assert labels == ["Resume", "Rename…", "Move to User", "Delete…"]
 
 
-def test_context_menu_on_multiple_rows_offers_delete_only(qapp):
+def test_context_menu_on_multiple_rows_offers_move_and_delete(qapp):
+    """Resume and Rename stay single-selection; moving several chats to the
+    right label at once is the common case, not the exception."""
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1"), _summary("id2")])
     sidebar._list.item(0).setSelected(True)
     sidebar._list.item(1).setSelected(True)
     menu = sidebar._build_context_menu()
-    labels = [action.text() for action in menu.actions()]
-    assert labels == ["Delete…"]
+    labels = [action.text() for action in menu.actions() if not action.isSeparator()]
+    assert labels == ["Move to User", "Delete…"]
 
 
 def test_right_clicking_an_unselected_row_selects_just_that_row(qapp, monkeypatch):
@@ -475,3 +490,167 @@ def test_refreshing_conversations_preserves_an_active_filter(qapp):
     sidebar.set_conversations([_summary("id1", title="alpha"), _summary("id2", title="beta"), _summary("id3", title="alpha two")])
     assert sidebar.count == 2
     assert sidebar._search_edit.text() == "alpha"
+
+
+def _rows(sidebar) -> list[str]:
+    return [sidebar._list.item(i).text() for i in range(sidebar._list.count())]
+
+
+def _mixed() -> list:
+    return [
+        _summary("a", "Jan fits", user="Jan"),
+        _summary("b", "Eva scans", user="Eva"),
+        _summary("c", "Old chat", user=None),
+    ]
+
+
+def test_selecting_a_user_shows_only_that_users_conversations(qapp):
+    """Bug report: creating a new user and selecting it still showed the
+    same old chats. Unlabelled rows used to be included with every user —
+    meant to stop a pre-existing history vanishing, but since *all* of that
+    history is unlabelled it made picking a name look like a no-op."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed())
+
+    sidebar._user_filter.setCurrentText("Jan")
+    rows = _rows(sidebar)
+    assert len(rows) == 1
+    assert "Jan fits" in rows[0]
+
+
+def test_a_brand_new_user_shows_an_empty_list_not_everyone_elses(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed(), active_user="Brand New")
+    assert _rows(sidebar) == []
+    assert sidebar._user_filter.currentText() == "Brand New"
+
+
+def test_the_filter_follows_a_switch_in_the_toolbar(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed(), active_user="Jan")
+    assert sidebar._user_filter.currentText() == "Jan"
+
+    sidebar.set_conversations(_mixed(), active_user="Eva")
+    assert sidebar._user_filter.currentText() == "Eva"
+    assert [r for r in _rows(sidebar) if "Eva scans" in r]
+
+
+def test_an_explicit_choice_survives_an_ordinary_refresh(qapp):
+    """Only a real switch overrides what was picked here — otherwise every
+    sidebar refresh would yank the filter back."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed(), active_user="Jan")
+    sidebar._user_filter.setCurrentText(ALL_USERS_LABEL)
+
+    sidebar.set_conversations(_mixed(), active_user="Jan")
+    assert sidebar._user_filter.currentText() == ALL_USERS_LABEL
+    assert len(_rows(sidebar)) == 3
+
+
+def test_unlabelled_conversations_are_reachable_on_their_own(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed())
+
+    sidebar._user_filter.setCurrentText(NO_USER_LABEL)
+    rows = _rows(sidebar)
+    assert len(rows) == 1
+    assert "Old chat" in rows[0]
+
+
+def test_no_user_entry_is_absent_when_everything_is_labelled(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([s for s in _mixed() if s.user])
+    entries = [sidebar._user_filter.itemText(i) for i in range(sidebar._user_filter.count())]
+    assert NO_USER_LABEL not in entries
+
+
+def test_all_users_still_shows_everything(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed(), active_user="Jan")
+    sidebar._user_filter.setCurrentText(ALL_USERS_LABEL)
+    assert len(_rows(sidebar)) == 3
+
+
+def test_context_menu_offers_move_to_user_for_one_and_for_many(qapp):
+    """The wrong-name-selected mistake is exactly the kind that happens to
+    a run of chats at once, so the submenu is offered for a multi-selection
+    too — unlike Resume and Rename."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed())
+    sidebar.set_known_users(["Jan", "Eva"])
+
+    sidebar._list.setCurrentRow(0)
+    single = [a.text() for a in sidebar._build_context_menu().actions()]
+    assert "Move to User" in single
+
+    sidebar._list.selectAll()
+    many = [a.text() for a in sidebar._build_context_menu().actions()]
+    assert "Move to User" in many
+    assert "Rename…" not in many
+
+
+def test_move_to_user_submenu_lists_names_plus_no_user_and_new(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed())
+    sidebar.set_known_users(["Jan", "Eva"])
+    sidebar._list.setCurrentRow(0)
+
+    menu = sidebar._build_context_menu()
+    submenu = next(a.menu() for a in menu.actions() if a.text() == "Move to User")
+    entries = [a.text() for a in submenu.actions() if a.text()]
+    assert entries[:2] == ["Jan", "Eva"]
+    assert NO_USER_LABEL in entries
+    assert "New user…" in entries
+
+
+def test_choosing_a_name_emits_the_selected_ids(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed())
+    sidebar.set_known_users(["Jan"])
+    sidebar._list.setCurrentRow(1)
+    emitted = []
+    sidebar.move_to_user_requested.connect(lambda ids, user: emitted.append((ids, user)))
+
+    sidebar._on_move_to_user("Jan")
+    assert emitted == [([sidebar.selected_conversation_ids()[0]], "Jan")]
+
+
+def test_choosing_no_user_emits_an_empty_name(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed())
+    sidebar._list.setCurrentRow(0)
+    emitted = []
+    sidebar.move_to_user_requested.connect(lambda ids, user: emitted.append(user))
+
+    sidebar._on_move_to_user("")
+    assert emitted == [""]
+
+
+def test_move_to_a_new_name_prompts_and_emits(qapp, monkeypatch):
+    from aida.ui.qt._qt import QInputDialog
+
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed())
+    sidebar._list.setCurrentRow(0)
+    emitted = []
+    sidebar.move_to_user_requested.connect(lambda ids, user: emitted.append(user))
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("  Carol  ", True))
+    sidebar._on_move_to_new_user()
+    assert emitted == ["Carol"]
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Carol", False))
+    sidebar._on_move_to_new_user()
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("   ", True))
+    sidebar._on_move_to_new_user()
+    assert emitted == ["Carol"], "cancelled or blank must emit nothing"
+
+
+def test_move_to_user_with_nothing_selected_emits_nothing(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(_mixed())
+    sidebar._list.setCurrentRow(-1)
+    emitted = []
+    sidebar.move_to_user_requested.connect(lambda ids, user: emitted.append(user))
+    sidebar._on_move_to_user("Jan")
+    assert emitted == []

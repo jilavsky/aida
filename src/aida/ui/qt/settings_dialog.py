@@ -33,6 +33,7 @@ from aida.ui.qt._qt import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -193,6 +194,13 @@ class SettingsDialog(QDialog):
         self._ocr_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self._ocr_api_key_edit.setPlaceholderText("(unchanged)")
         key_row.addWidget(self._ocr_api_key_edit)
+        # "Is my key working?" must be answerable without uploading a
+        # document — otherwise the only way to test the configuration is to
+        # perform the exact action the user is being careful about. This
+        # lists models instead, the cheapest authenticated call there is.
+        self._verify_ocr_key_button = QPushButton("Verify key", ocr_group)
+        self._verify_ocr_key_button.clicked.connect(self._on_verify_ocr_key)
+        key_row.addWidget(self._verify_ocr_key_button)
         self._clear_ocr_key_button = QPushButton("Clear key", ocr_group)
         self._clear_ocr_key_button.clicked.connect(self._on_clear_ocr_key)
         key_row.addWidget(self._clear_ocr_key_button)
@@ -219,6 +227,23 @@ class SettingsDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(self, "Scratchpad Folder", self._scratch_dir_edit.text())
         if folder:
             self._scratch_dir_edit.setText(folder)
+
+    def _on_verify_ocr_key(self) -> None:
+        """Check the key in the box, or the stored one if the box is empty
+        (it is never pre-filled, so "empty" means "the saved one")."""
+        from aida.config.secrets import get_secret
+        from aida.documents.ocr.mistral import MistralOcrError, verify_api_key
+
+        key = self._ocr_api_key_edit.text().strip() or (get_secret(SECRET_REF) or "")
+        if not key:
+            QMessageBox.warning(self, "Document OCR", "No API key to check — enter one first.")
+            return
+        try:
+            detail = verify_api_key(key)
+        except MistralOcrError as exc:
+            QMessageBox.warning(self, "Document OCR", f"That key did not work:\n\n{exc}")
+            return
+        QMessageBox.information(self, "Document OCR", detail)
 
     def _on_clear_ocr_key(self) -> None:
         delete_secret(SECRET_REF)

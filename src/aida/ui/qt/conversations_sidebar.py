@@ -38,6 +38,12 @@ from aida.ui.qt._qt import (
 
 ALL_USERS_LABEL = "All users"
 
+#: The conversations that carry no user label at all — everything created
+#: before the feature existed, and anything a user cleared. Reachable on
+#: its own rather than only via "All users", because otherwise the only way
+#: to see unlabelled work is to see *everyone's*.
+NO_USER_LABEL = "(no user)"
+
 
 def _matches(summary: ConversationSummary, query: str) -> bool:
     """Match anything the conversation row visibly identifies.
@@ -123,6 +129,11 @@ class ConversationsSidebar(QWidget):
     # unchanged — MainWindow just adds one more connection, mirroring
     # _on_cleanup_requested's own "loop then refresh once" shape.
     delete_many_requested = Signal(list)  # list[str] of conversation_ids, already confirmed
+    #: (conversation_ids, user) — move chats to a label, "" to unlabel.
+    #: The repair for the mistake a free-text label makes easy: having the
+    #: wrong name selected when a conversation was started. Nothing else
+    #: could fix it — rename_user moves *everything* a name owns.
+    move_to_user_requested = Signal(list, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -134,6 +145,10 @@ class ConversationsSidebar(QWidget):
         # again) re-applies whatever the user has typed instead of
         # silently clearing it.
         self._all_summaries: list[ConversationSummary] = []
+        #: The active name at the last refresh, so the filter follows a
+        #: real switch without stamping on a choice made here.
+        self._last_active_user: str | None = None
+        self._known_users: list[str] = []
 
         layout = QVBoxLayout(self)
 
@@ -186,7 +201,18 @@ class ConversationsSidebar(QWidget):
         buttons.addWidget(self._cleanup_button)
         layout.addLayout(buttons)
 
-    def set_conversations(self, summaries: Iterable[ConversationSummary]) -> None:
+    def set_conversations(
+        self, summaries: Iterable[ConversationSummary], *, active_user: str | None = None
+    ) -> None:
+        """Refresh the list.
+
+        ``active_user`` makes the filter *follow* the toolbar: switching to
+        a name in the toolbar and then not having the list change was the
+        first thing everybody tried. It only re-selects when the active
+        name actually changed since the last refresh, so an explicit
+        "All users" (or another name) picked here survives an ordinary
+        refresh and is only overridden by a real switch.
+        """
         # Bug report: "Let's not add in this list ... conversations which
         # have no messages in them. Currently there are conversations which
         # are empty (were created on start or workspace change and never
@@ -200,10 +226,23 @@ class ConversationsSidebar(QWidget):
         self._all_summaries = [s for s in summaries if s.message_count > 0]
         selected = self._user_filter.currentText()
         names = sorted({summary.user for summary in summaries if summary.user})
+        if active_user and active_user not in names:
+            # A freshly created name has no conversations yet, but the
+            # filter still has to be able to show it — as an empty list,
+            # which is the honest answer.
+            names = sorted([*names, active_user])
+        has_unlabelled = any(summary.user is None for summary in self._all_summaries)
+
+        if active_user is not None and active_user != self._last_active_user:
+            selected = active_user or ALL_USERS_LABEL
+            self._last_active_user = active_user
+
         self._user_filter.blockSignals(True)
         self._user_filter.clear()
         self._user_filter.addItem(ALL_USERS_LABEL)
         self._user_filter.addItems(names)
+        if has_unlabelled:
+            self._user_filter.addItem(NO_USER_LABEL)
         index = self._user_filter.findText(selected)
         self._user_filter.setCurrentIndex(index if index >= 0 else 0)
         self._user_filter.setVisible(bool(names))
@@ -218,8 +257,17 @@ class ConversationsSidebar(QWidget):
             else [s for s in self._all_summaries if _matches(s, query)]
         )
         selected = self._user_filter.currentText()
-        if selected != ALL_USERS_LABEL:
-            visible = [summary for summary in visible if summary.user in (selected, None)]
+        if selected == NO_USER_LABEL:
+            visible = [summary for summary in visible if summary.user is None]
+        elif selected != ALL_USERS_LABEL:
+            # Only this user's conversations — not theirs plus every
+            # unlabelled one. Including unlabelled rows here was meant to
+            # protect a pre-existing history from vanishing, but since all
+            # of that history is unlabelled it made picking a name look
+            # like it did nothing at all. "All users" is the safety net,
+            # it is one click away, and "(no user)" reaches the unlabelled
+            # ones on their own.
+            visible = [summary for summary in visible if summary.user == selected]
         self._list.clear()
         self._ids_by_row = []
         self._titles_by_row = []
@@ -331,6 +379,36 @@ class ConversationsSidebar(QWidget):
         for mouse input no automated test can provide."""
         menu.exec(global_pos)
 
+    def set_known_users(self, names: list[str]) -> None:
+        """The names offered by the context menu's "Move to User" submenu.
+        Supplied by the window rather than read here, so the menu offers
+        exactly what the toolbar offers — including a name declared but not
+        yet used by any conversation."""
+        self._known_users = list(names)
+
+    def _on_move_to_user(self, user: str) -> None:
+        ids = self.selected_conversation_ids()
+        if ids:
+            self.move_to_user_requested.emit(ids, user)
+
+    def _on_move_to_new_user(self) -> None:
+        ids = self.selected_conversation_ids()
+        if not ids:
+            return
+        name, ok = QInputDialog.getText(self, "Move to User", "Name:")
+        if ok and name.strip():
+            self.move_to_user_requested.emit(ids, name.strip())
+
+    def _add_move_to_user_menu(self, menu: QMenu) -> QMenu:
+        submenu = menu.addMenu("Move to User")
+        for name in self._known_users:
+            submenu.addAction(name, lambda checked=False, n=name: self._on_move_to_user(n))
+        if self._known_users:
+            submenu.addSeparator()
+        submenu.addAction(NO_USER_LABEL, lambda checked=False: self._on_move_to_user(""))
+        submenu.addAction("New user…", lambda checked=False: self._on_move_to_new_user())
+        return submenu
+
     def _build_context_menu(self) -> QMenu:
         """Split out from ``_on_context_menu_requested`` so tests can
         inspect the built menu's actions without popping up a real, modal
@@ -342,9 +420,11 @@ class ConversationsSidebar(QWidget):
             menu.addAction("Resume", self._on_resume_clicked)
             menu.addAction("Rename…", self._on_rename_clicked)
             menu.addSeparator()
-            menu.addAction("Delete…", self._on_delete_clicked)
-        else:
-            menu.addAction("Delete…", self._on_delete_clicked)
+        # Offered for a multi-selection too: putting a run of chats under
+        # the right name is exactly when several are wrong at once.
+        self._add_move_to_user_menu(menu)
+        menu.addSeparator()
+        menu.addAction("Delete…", self._on_delete_clicked)
         return menu
 
 

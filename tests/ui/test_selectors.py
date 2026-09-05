@@ -64,9 +64,69 @@ def test_user_selector_emits_blank_and_named_changes(qapp):
     selector.user_changed.connect(changes.append)
 
     selector._combo.setCurrentText("")
+    selector._combo.lineEdit().editingFinished.emit()
     selector._combo.setCurrentText("New project")
+    selector._combo.lineEdit().editingFinished.emit()
 
     assert changes == ["", "New project"]
+
+
+def test_user_selector_does_not_emit_while_a_name_is_being_typed(qapp):
+    """The bug this guards: with ``currentTextChanged`` wired up, typing
+    "jan" emitted "j", "ja", "jan" — and since the handler restarts the
+    session, the app tore down and rebuilt a session three times while the
+    user was still on the first letter. It passed every test that used
+    ``setCurrentText``, because that sets the whole string at once."""
+    selector = UserSelector()
+    selector.set_users(["Alice"])
+    changes = []
+    selector.user_changed.connect(changes.append)
+
+    line = selector._combo.lineEdit()
+    for partial in ("j", "ja", "jan"):
+        line.setText(partial)
+        line.textEdited.emit(partial)
+    assert changes == [], "typing must not commit anything"
+
+    line.editingFinished.emit()
+    assert changes == ["jan"], "committing (Return / focus out) is what emits"
+
+
+def test_user_selector_ignores_a_commit_that_changes_nothing(qapp):
+    """Return on an unchanged box, or focus merely passing through, must
+    not restart the session."""
+    selector = UserSelector()
+    selector.set_users(["Alice"], current="Alice")
+    changes = []
+    selector.user_changed.connect(changes.append)
+
+    selector._combo.lineEdit().editingFinished.emit()
+    selector._combo.lineEdit().editingFinished.emit()
+    assert changes == []
+
+
+def test_user_selector_repopulating_is_not_a_user_action(qapp):
+    """`set_users` runs on every sidebar refresh; it must never look like
+    somebody picked a name."""
+    selector = UserSelector()
+    changes = []
+    selector.user_changed.connect(changes.append)
+
+    selector.set_users(["Alice", "Bob"], current="Bob")
+    selector.set_users(["Alice", "Bob", "Carol"], current="Bob")
+    assert changes == []
+    assert selector.current_user() == "Bob"
+
+
+def test_user_selector_strips_surrounding_whitespace(qapp):
+    selector = UserSelector()
+    selector.set_users([])
+    changes = []
+    selector.user_changed.connect(changes.append)
+
+    selector._combo.setCurrentText("  Jan  ")
+    selector._combo.lineEdit().editingFinished.emit()
+    assert changes == ["Jan"]
 
 
 def test_profile_selector_set_and_get_current(qapp):
@@ -490,3 +550,14 @@ def test_mcp_quick_panel_manage_button_emits_manage_requested(qapp):
     panel.manage_requested.connect(lambda: requests.append(True))
     panel._manage_button.click()
     assert requests == [True]
+
+
+def test_user_selector_is_wide_enough_to_show_a_name(qapp):
+    """Bug report: "It fits 2 characters." An editable combo sizes to its
+    widest *item*, and on a fresh install the widest item is the empty
+    "no user" entry — so the box collapsed to nothing and a name could
+    neither be read nor typed."""
+    selector = UserSelector()
+    selector.set_users([])
+    assert selector._combo.minimumContentsLength() >= 12
+    assert selector._combo.sizeHint().width() > 80

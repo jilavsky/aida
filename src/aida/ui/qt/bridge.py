@@ -326,6 +326,7 @@ class ChatBridge(QObject):
         *,
         images: list[ImageRef] | None = None,
         attachment_paths: list[str] | None = None,
+        attachment_texts: dict[str, str] | None = None,
     ) -> None:
         """Start a new turn. No-op if the session hasn't finished starting
         yet — callers (the input box) should be disabled until
@@ -339,7 +340,8 @@ class ChatBridge(QObject):
         if self.session is None or self._closing:
             return
         self._turn_future = asyncio.run_coroutine_threadsafe(
-            self._drain(user_text, images, attachment_paths), self._loop_thread.loop
+            self._drain(user_text, images, attachment_paths, attachment_texts),
+            self._loop_thread.loop,
         )
 
     async def _drain(
@@ -347,6 +349,7 @@ class ChatBridge(QObject):
         user_text: str,
         images: list[ImageRef] | None = None,
         attachment_paths: list[str] | None = None,
+        attachment_texts: dict[str, str] | None = None,
     ) -> None:
         """Stream one turn's events out as signals.
 
@@ -364,7 +367,10 @@ class ChatBridge(QObject):
             self.turn_started.emit()
         try:
             async for event in self.session.send(
-                user_text, images=images, attachment_paths=attachment_paths
+                user_text,
+                images=images,
+                attachment_paths=attachment_paths,
+                attachment_texts=attachment_texts,
             ):
                 if not self._closing:
                     self.event_received.emit(event)

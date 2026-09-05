@@ -82,6 +82,7 @@ from aida.ui.qt.selectors import (
     WorkspaceSelector,
 )
 from aida.ui.qt.settings_dialog import SettingsDialog
+from aida.ui.qt.users_dialog import UsersDialog
 from aida.ui.qt.window_state import apply_font_size, apply_window_state, capture_window_state
 from aida.ui.qt.workflow_management_dialog import WorkflowFormDialog, WorkflowManagementDialog
 from aida.ui.qt.workspace_management_dialog import WorkspaceManagementDialog
@@ -173,13 +174,18 @@ class MainWindow(QMainWindow):
 
         toolbar = QToolBar("Session", self)
         self.addToolBar(toolbar)
+        # Left to right in the order the choices actually depend on each
+        # other: who is working, which workspace they want, and only then
+        # which provider — each narrowing the one after it. User first also
+        # matches how a shared beamline machine is picked up: you say who
+        # you are before you say what you are doing.
+        self.user_selector = UserSelector(self)
+        toolbar.addWidget(self.user_selector)
+        self.user_selector.user_changed.connect(self._on_user_changed)
         self.workspace_selector = WorkspaceSelector(self)
         toolbar.addWidget(self.workspace_selector)
         self.profile_selector = ProfileSelector(self)
         toolbar.addWidget(self.profile_selector)
-        self.user_selector = UserSelector(self)
-        toolbar.addWidget(self.user_selector)
-        self.user_selector.user_changed.connect(self._on_user_changed)
 
         # Bug report: "How do I create a new chat within same Workspace?
         # ... something which will not contain the history from prior
@@ -345,6 +351,14 @@ class MainWindow(QMainWindow):
         open_records_action.triggered.connect(self._on_open_records_folder)
         file_menu.addAction(open_records_action)
 
+        # The user box on the toolbar is free text and nothing validates a
+        # typed name, so "Jan"/"jan"/"Jam" split one person's history with
+        # no way to repair it from inside the app. That is what this is
+        # for — renaming (and merging) an existing label, or clearing one.
+        manage_users_action = QAction("Manage Users…", self)
+        manage_users_action.triggered.connect(self.open_users_dialog)
+        file_menu.addAction(manage_users_action)
+
         open_attachments_action = QAction("Open Conversation Folder", self)
         open_attachments_action.triggered.connect(self._on_open_conversation_folder)
         file_menu.addAction(open_attachments_action)
@@ -447,6 +461,7 @@ class MainWindow(QMainWindow):
         self.sidebar.resume_requested.connect(self._on_resume_requested)
         self.sidebar.delete_requested.connect(self._on_delete_requested)
         self.sidebar.delete_many_requested.connect(self._on_delete_many_requested)
+        self.sidebar.move_to_user_requested.connect(self._on_move_conversations_to_user)
         self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
         self.sidebar.rename_requested.connect(self._on_rename_requested)
         self.chat_panel.code_editor_requested.connect(self._on_code_editor_requested)
@@ -864,7 +879,7 @@ class MainWindow(QMainWindow):
         self.input_box.clear_attachments()
         self.chat_panel.add_user_message(text)
         try:
-            outgoing, failures, images = self._augment_with_attachments(text, attachments)
+            outgoing, failures, images, texts = self._augment_with_attachments(text, attachments)
         except Exception as exc:  # noqa: BLE001 - belt-and-suspenders: see _read_attachment_for_model's
             # docstring for the real bug this whole two-layer defense is
             # guarding against — a send must never silently vanish.
@@ -884,12 +899,21 @@ class MainWindow(QMainWindow):
             outgoing,
             images=images,
             attachment_paths=kept,
+            attachment_texts={path: texts[path] for path in kept if path in texts},
         )
         if kept:
             names = ", ".join(Path(path).name for path in kept)
-            self.statusBar().showMessage(
-                f"Attached {names} — copied into this conversation's folder", 6000
-            )
+            message = f"Attached {names} — copied into this conversation's folder"
+            # Nothing has been sent to OCR at this point and nothing will be
+            # until the figures are asked for, which is not obvious from the
+            # outside: with the workspace switch on, the natural assumption
+            # is that attaching a PDF uploads it.
+            workspace = self._current_workspace_config
+            if workspace is not None and workspace.use_ocr and any(
+                path.lower().endswith(".pdf") for path in kept
+            ):
+                message += ". Ask about its figures to read them (OCR runs then, and asks first)"
+            self.statusBar().showMessage(message, 8000)
 
     def _queue_message_for_running_turn(self, text: str) -> None:
         """Send pressed while a turn is running: hand the text to that turn
@@ -1062,6 +1086,7 @@ class MainWindow(QMainWindow):
         if name == (self.settings.app.active_user or ""):
             return
         self.settings.app.active_user = name
+        self._remember_user(name)
         save_app_config(self.settings.app)
         workspace_name = self.workspace_selector.current_workspace() or None
         # A workspace supplies its configured profile during startup. With
@@ -1266,14 +1291,29 @@ class MainWindow(QMainWindow):
     # --- conversations sidebar ---------------------------------------------
 
     def _refresh_conversations_sidebar(self) -> None:
+        """Re-read the conversations and re-offer the names.
+
+        One store open for both reads, and both the toolbar box and the
+        sidebar's "Move to User" menu get the *same* merged list — names
+        the conversations carry, plus names declared but not yet used. They
+        used to disagree: the toolbar went through the union while this
+        refresh handed it the raw database names, so a freshly declared
+        name reappeared and then vanished again on the next refresh.
+        """
         store = ConversationStore()
         try:
-            self.sidebar.set_conversations(store.list_conversations())
-            self.user_selector.set_users(
-                store.known_users(), current=self.settings.app.active_user
-            )
+            summaries = store.list_conversations()
+            from_db = store.known_users()
         finally:
             store.close()
+
+        merged = {name.casefold(): name for name in self.settings.app.known_users}
+        merged.update({name.casefold(): name for name in from_db})
+        names = sorted(merged.values(), key=str.casefold)
+
+        self.sidebar.set_known_users(names)
+        self.sidebar.set_conversations(summaries, active_user=self.settings.app.active_user or "")
+        self.user_selector.set_users(names, current=self.settings.app.active_user)
 
     @staticmethod
     def _active_conversation_id(bridge: ChatBridge) -> str | None:
@@ -1709,6 +1749,114 @@ class MainWindow(QMainWindow):
         self.open_code_editor_dialog(initial_path=path)
 
     # --- settings ------------------------------------------------------------
+
+    def open_users_dialog(self) -> None:
+        """File ▸ Manage Users…
+
+        Two outcomes to tell apart. Choosing a *new* name is a switch, and
+        goes through the same handler the toolbar box uses so both start a
+        new chat identically. *Renaming* the name you are working under is
+        not a switch — the open conversation was relabelled in place by the
+        UPDATE — so it only carries the new name into the config and the
+        toolbar; restarting there would cost the user their chat for a
+        spelling fix.
+        """
+        store = ConversationStore()
+        try:
+            dialog = UsersDialog(store, self, active_user=self.settings.app.active_user or "")
+            dialog.exec()
+            switch_to = dialog.new_active_user
+            renamed_from = getattr(dialog, "renamed_from", None)
+            renamed_active = renamed_from is not None and renamed_from == (
+                self.settings.app.active_user or ""
+            )
+            if switch_to is None and not dialog.changed:
+                return
+        finally:
+            store.close()
+
+        if switch_to is not None:
+            # Picking a name here and typing one in the toolbar must end in
+            # exactly the same place, so this goes through the same handler
+            # — including starting the new chat that a switch implies.
+            # Remembered first, so the combo is repopulated *with* the new
+            # name rather than having it appear only after the next refresh.
+            self._remember_user(switch_to)
+            self.user_selector.set_users(self._known_users(), current=switch_to)
+            self._on_user_changed(switch_to)
+            return
+
+        if renamed_from is not None:
+            remembered = [n for n in self.settings.app.known_users if n != renamed_from]
+            renamed_to = getattr(dialog, "renamed_to", "")
+            if renamed_to and renamed_to.casefold() not in {n.casefold() for n in remembered}:
+                remembered.append(renamed_to)
+            self.settings.app.known_users = remembered
+            save_app_config(self.settings.app)
+
+        if renamed_active:
+            # A rename is *not* a switch: the open conversation was
+            # relabelled in place by the UPDATE, so restarting the session
+            # would cost the user their chat for what was a spelling fix.
+            # Just carry the new name in the config and the toolbar.
+            self.settings.app.active_user = dialog.renamed_to
+            save_app_config(self.settings.app)
+        self._refresh_conversations_sidebar()
+
+    def _on_move_conversations_to_user(self, conversation_ids: list[str], user: str) -> None:
+        """Sidebar ▸ right-click ▸ Move to User.
+
+        The repair for having the wrong name selected when a chat was
+        started — the mistake a free-text label makes easy, and the one
+        thing ``rename_user`` cannot fix, since that moves everything a
+        name owns.
+        """
+        from datetime import UTC, datetime
+
+        store = ConversationStore()
+        try:
+            moved = store.set_conversation_user(
+                conversation_ids, user, timestamp=datetime.now(UTC).isoformat()
+            )
+        finally:
+            store.close()
+        if user:
+            self._remember_user(user)
+        where = f"user {user!r}" if user else "no user"
+        self.statusBar().showMessage(f"Moved {moved} conversation(s) to {where}", 6000)
+        self._refresh_conversations_sidebar()
+
+    def _known_users(self) -> list[str]:
+        """Names the conversations carry, plus names declared but not yet
+        used, case-insensitively sorted.
+
+        The union is the point. A conversation row is created empty and
+        deleted again if nothing is ever sent, so a name that only had an
+        unused conversation behind it would vanish the moment the user
+        switched away — which is exactly what happened. The remembered list
+        can only add, never subtract, so it cannot contradict the database.
+        """
+        store = ConversationStore()
+        try:
+            from_db = store.known_users()
+        finally:
+            store.close()
+        merged = {name.casefold(): name for name in self.settings.app.known_users}
+        merged.update({name.casefold(): name for name in from_db})
+        return sorted(merged.values(), key=str.casefold)
+
+    def _remember_user(self, name: str) -> None:
+        """Keep a declared name across the restart that follows choosing
+        it. Case-insensitive so picking "jan" after "Jan" does not leave
+        both in the toolbar."""
+        name = (name or "").strip()
+        if not name:
+            return
+        existing = {n.casefold() for n in self.settings.app.known_users}
+        if name.casefold() in existing:
+            return
+        self.settings.app.known_users = [*self.settings.app.known_users, name]
+        save_app_config(self.settings.app)
 
     def open_settings_dialog(self) -> None:
         dialog = SettingsDialog(self.settings.app, self.settings.providers.profiles, self)

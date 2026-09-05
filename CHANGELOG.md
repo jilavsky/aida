@@ -111,6 +111,90 @@ decision revised), unrelated to what shipped when. Entries below link to
   status bar and provides **File → Open Conversation Folder** without
   creating empty folders for chats that have no attachments.
 
+- **`aida documents figures FILE`** — run the real extraction against a
+  file and see exactly what happened: which backend ran, what it found,
+  and the reason if OCR was configured but did not run (no key, extra
+  missing, workspace switch off, upload declined, or the service's own
+  error). An OCR failure exits non-zero. There is also
+  `aida documents verify-ocr`, the command-line twin of Settings' Verify
+  key.
+
+  This existed to answer a question nothing else could: *was my document
+  actually sent to Mistral?* Every other signal was indirect — a dialog
+  that only appears once the agent asks about figures, a note inside a tool
+  result, a `backend` field in a JSON file — and "attach a PDF and read the
+  reply carefully" is not a way to check a setup. A failing OCR call used
+  to leave nothing but a line in a log file nobody was watching and figures
+  quietly a little worse than expected.
+
+- **Fixed: the extracted text was never written beside an attached
+  document.** The attachments folder was documented as holding both the
+  original and the text the model was given, but the text was dropped on
+  the way — `keep_attachments` was called without it — so the folder held
+  only the file. It now shows what the model actually received.
+
+- `aida doctor`'s `ocr` line no longer implies a document is uploaded when
+  it is attached. It says what really happens: OCR runs the first time a
+  document's figures are asked for, and asks first. The GUI says the same
+  in the status bar when a PDF is attached to an OCR-enabled workspace.
+
+- **Right-click a conversation ▸ Move to User** — the repair for having the
+  wrong name selected when a chat was started, which is the mistake a
+  free-text label makes easy and the one thing renaming cannot fix (that
+  moves everything a name owns). Works on a multi-selection too, since a
+  run of chats is usually wrong together, and offers "(no user)" and a
+  "New user…" prompt alongside the existing names. Relabelling deliberately
+  does not touch a conversation's timestamp: it is not activity, and
+  bumping it would reorder the list and change what a cleanup-older-than
+  sweep would catch.
+
+- **Settings ▸ Document OCR ▸ Verify key** checks a Mistral key against the
+  service and reports what it found, **without uploading a document** — it
+  lists models, the cheapest authenticated call there is. Otherwise the
+  only way to test the setup would be to perform the exact action the key
+  is there to be careful about. It also flags the confusing middle state: a
+  valid key whose account cannot see an OCR model, where the upload would
+  succeed and the OCR call fail.
+
+- **File ▸ Manage Users…** gained **New User…**, and the toolbar's User
+  box no longer acts on every keystroke. Two problems with the first cut: typing a name emitted a
+  change per character — so "jan" tore down and rebuilt the session three
+  times before you finished the word — and there was no way to fix a
+  mistyped name once it existed. The box now commits on Return or when
+  focus leaves it, shows a "type a name to add" hint, and the new dialog
+  renames a label (merging, if the new name already exists — which is what
+  fixing a typo means) or clears it. Clearing removes the *label*: the
+  conversations stay and become visible under every user.
+
+  **New User…** starts working under a name. Nothing is registered
+  anywhere — a name exists from the moment a conversation uses it — so the
+  button makes the name active and the list shows it as "no conversations
+  yet — active" rather than pretending something was saved. Without it the
+  dialog was a dead end with no names in use: an empty list and two greyed
+  buttons. There is still no "delete user": deleting conversations stays in
+  the sidebar, where it already is, rather than being duplicated somewhere
+  the wrong one can be clicked.
+
+  The toolbar now reads **User, Workspace, Provider**, left to right in the
+  order the choices narrow each other, and the User box is wide enough to
+  read a name (it sized itself to its widest *item*, and on a fresh install
+  that is the empty "no user" entry — about two characters).
+
+  Two behaviours were wrong and are fixed. **A name you declare no longer
+  disappears** when you switch away before sending anything: a session's
+  conversation row is created empty and deleted again if unused, so a name
+  whose only conversation was that empty one vanished from the toolbar.
+  Declared names are now remembered in `config.yaml` and unioned with the
+  names the conversations carry, so the list can only ever gain a name, not
+  contradict the database. And **selecting a user filters the conversation
+  list to that user** — it used to also include every unlabelled
+  conversation, which was meant to stop a pre-existing history vanishing
+  but, since all of that history is unlabelled, made picking a name look
+  like it did nothing. The sidebar filter now follows the toolbar, an
+  explicit choice there survives ordinary refreshes, and a new **(no user)**
+  entry reaches unlabelled conversations without having to show
+  everyone's.
+
 - **Conversations can carry a `user` label** — an organization axis for a
   shared beamline machine (where the buckets are people) or a laptop with
   several projects on it (where they are tasks). A flat, ever-growing chat

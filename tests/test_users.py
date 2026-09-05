@@ -295,3 +295,127 @@ def test_empty_user_is_stored_as_null_not_empty_string(tmp_path: Path):
         assert store.get_conversation(conv_id).user is None
     finally:
         store.close()
+
+
+# --- repairing a mistyped name -------------------------------------------
+#
+# The toolbar's user box is free text and nothing validates it, so "Jan",
+# "jan" and "Jam" are three people as far as the DB is concerned. Without
+# a rename, one typo splits a history permanently.
+
+
+def test_rename_user_moves_every_conversation(tmp_path: Path):
+    store, _ = _store_with_conversations(tmp_path)
+    try:
+        moved = store.rename_user("jan", "Jan Ilavsky", timestamp="2026-01-05")
+        assert moved == 1
+        assert [c.title for c in store.list_conversations("Jan Ilavsky", include_unowned=False)] == [
+            "Jan's fits"
+        ]
+        assert store.list_conversations("jan", include_unowned=False) == []
+    finally:
+        store.close()
+
+
+def test_renaming_onto_an_existing_name_merges(tmp_path: Path):
+    """A merge is the point, not an accident: fixing a typo *means*
+    combining the two histories."""
+    store = ConversationStore(tmp_path / "aida.db")
+    try:
+        for user, title in [("Jan", "a"), ("Jam", "b")]:
+            conv = store.create_conversation(timestamp="2026-01-01", title=title, user=user)
+            store.append_message(conv, Message(role="user", content="hi"), timestamp="2026-01-02")
+
+        store.rename_user("Jam", "Jan", timestamp="2026-01-05")
+        assert store.user_counts() == [("Jan", 2)]
+    finally:
+        store.close()
+
+
+def test_renaming_to_empty_clears_the_label_without_deleting_anything(tmp_path: Path):
+    """"Remove this user" means remove the *label*. Their conversations
+    stay and become visible to everyone — deleting work is a different,
+    louder operation."""
+    store, _ = _store_with_conversations(tmp_path)
+    try:
+        cleared = store.rename_user("jan", "", timestamp="2026-01-05")
+        assert cleared == 1
+        assert len(store.list_conversations()) == 3
+        assert "jan" not in store.known_users()
+        # NULL now, so it shows for everyone — same as pre-migration rows.
+        assert [c.title for c in store.list_conversations("eva")] == ["Eva's scans", "Jan's fits", "Before users"]
+    finally:
+        store.close()
+
+
+def test_renaming_an_unknown_or_empty_name_is_a_no_op(tmp_path: Path):
+    store, _ = _store_with_conversations(tmp_path)
+    try:
+        assert store.rename_user("nobody", "someone", timestamp="2026-01-05") == 0
+        assert store.rename_user("", "someone", timestamp="2026-01-05") == 0
+        assert store.user_counts() == [("eva", 1), ("jan", 1)]
+    finally:
+        store.close()
+
+
+def test_user_counts_ignores_conversations_that_were_never_used(tmp_path: Path):
+    """A conversation row is created up front and deleted again if nothing
+    was ever sent — the sidebar already hides those, and a name must not
+    appear to own work that does not exist."""
+    store = ConversationStore(tmp_path / "aida.db")
+    try:
+        store.create_conversation(timestamp="2026-01-01", title="never used", user="ghost")
+        used = store.create_conversation(timestamp="2026-01-01", title="real", user="ghost")
+        store.append_message(used, Message(role="user", content="hi"), timestamp="2026-01-02")
+        assert store.user_counts() == [("ghost", 1)]
+    finally:
+        store.close()
+
+
+def test_set_conversation_user_moves_only_the_named_conversations(tmp_path: Path):
+    """The repair for "I had the wrong name selected when I started that
+    chat" — which `rename_user` cannot fix, since it moves everything a
+    name owns."""
+    store, ids = _store_with_conversations(tmp_path)
+    try:
+        moved = store.set_conversation_user([ids["legacy"]], "jan", timestamp="2026-01-05")
+        assert moved == 1
+        assert store.get_conversation(ids["legacy"]).user == "jan"
+        assert store.get_conversation(ids["eva"]).user == "eva", "others untouched"
+    finally:
+        store.close()
+
+
+def test_set_conversation_user_can_unlabel(tmp_path: Path):
+    store, ids = _store_with_conversations(tmp_path)
+    try:
+        store.set_conversation_user([ids["jan"]], "", timestamp="2026-01-05")
+        assert store.get_conversation(ids["jan"]).user is None
+    finally:
+        store.close()
+
+
+def test_moving_conversations_does_not_reorder_the_sidebar(tmp_path: Path):
+    """`updated_at` is left alone on purpose: relabelling is not activity,
+    and bumping it would reorder the list and change what a
+    cleanup-older-than sweep would catch."""
+    store, ids = _store_with_conversations(tmp_path)
+    try:
+        before = store.get_conversation(ids["legacy"]).updated_at
+        store.set_conversation_user([ids["legacy"]], "jan", timestamp="2099-01-01")
+        assert store.get_conversation(ids["legacy"]).updated_at == before
+    finally:
+        store.close()
+
+
+def test_set_conversation_user_handles_several_at_once(tmp_path: Path):
+    store, ids = _store_with_conversations(tmp_path)
+    try:
+        moved = store.set_conversation_user(
+            [ids["jan"], ids["eva"], ids["legacy"]], "team", timestamp="2026-01-05"
+        )
+        assert moved == 3
+        assert store.known_users() == ["team"]
+        assert store.set_conversation_user([], "team", timestamp="2026-01-05") == 0
+    finally:
+        store.close()

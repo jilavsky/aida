@@ -614,6 +614,7 @@ class ChatSession:
         *,
         images: list[ImageRef] | None = None,
         attachment_paths: list[str] | None = None,
+        attachment_texts: dict[str, str] | None = None,
     ):
         """Run one turn, holding the session's mutation lock for its whole
         duration.
@@ -636,7 +637,10 @@ class ChatSession:
             raise SessionBusyError("A turn is already running in this session.")
         async with self._mutation_lock:
             async for event in self._run_turn(
-                user_text, images=images, attachment_paths=attachment_paths
+                user_text,
+                images=images,
+                attachment_paths=attachment_paths,
+                attachment_texts=attachment_texts,
             ):
                 yield event
 
@@ -646,6 +650,7 @@ class ChatSession:
         *,
         images: list[ImageRef] | None = None,
         attachment_paths: list[str] | None = None,
+        attachment_texts: dict[str, str] | None = None,
     ):
         """Run one turn. Phase 8 (RAG): if any knowledge bases are active,
         retrieves passages for ``user_text`` and injects them as a
@@ -680,7 +685,15 @@ class ChatSession:
                 # After the message is recorded, never before: the copy is
                 # bookkeeping, and a failure in it must not cost the user
                 # the turn they just sent. keep_attachments never raises.
-                self.recorder.keep_attachments(list(attachment_paths))
+                # The extracted text is written beside the copy, so the
+                # folder shows what the model actually received rather than
+                # only the file it came from. Passed in rather than
+                # re-derived: the caller already parsed the document to
+                # build this message, and parsing a 150-page PDF twice on
+                # the turn it arrived on would be felt.
+                self.recorder.keep_attachments(
+                    list(attachment_paths), texts=attachment_texts or None
+                )
         # Keep the *sent* history under budget (the recorded history in the
         # DB is never trimmed — resume/export still show everything). Done
         # here, before `persisted` is captured, because trimming shifts

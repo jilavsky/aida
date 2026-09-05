@@ -237,8 +237,9 @@ def _check_ocr(settings: Settings | None) -> CheckResult:
     return CheckResult(
         "ocr",
         True,
-        f"enabled for {', '.join(wanting)}; key present. Documents are uploaded to Mistral, "
-        f"and you are asked before each one.",
+        f"enabled for {', '.join(wanting)}; key present. Nothing is uploaded when a document is "
+        f"attached — OCR runs the first time its figures are asked for, and asks first. "
+        f"`aida documents figures FILE --workspace {wanting[0]}` checks the whole path.",
     )
 
 

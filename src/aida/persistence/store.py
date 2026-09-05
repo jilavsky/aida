@@ -166,6 +166,68 @@ class ConversationStore:
         rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_summary(row, row["message_count"]) for row in rows]
 
+    def set_conversation_user(self, conversation_ids: list[str], user: str, *, timestamp: str) -> int:
+        """Move specific conversations to ``user`` (or unlabel them when it
+        is empty). Returns how many rows changed.
+
+        Distinct from ``rename_user``, which moves *everything* a name owns:
+        this is the "I had the wrong name selected when I started that
+        chat" repair, which is the mistake a free-text label makes easy and
+        which nothing else could fix. ``updated_at`` is deliberately left
+        alone — relabelling is not activity, and bumping it would reorder
+        the sidebar and quietly change what a cleanup-older-than sweep
+        would catch.
+        """
+        if not conversation_ids:
+            return 0
+        placeholders = ",".join("?" for _ in conversation_ids)
+        cursor = self._conn.execute(
+            f'UPDATE conversations SET "user" = ? WHERE id IN ({placeholders})',  # noqa: S608 - ids are bound
+            (user or None, *conversation_ids),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def rename_user(self, old_name: str, new_name: str, *, timestamp: str) -> int:
+        """Relabel every conversation belonging to ``old_name``. Returns how
+        many rows changed.
+
+        This is the repair operation a free-text name box makes necessary
+        rather than merely nice: nothing validates a typed name, so "Jan",
+        "jan" and "Jam" are three different people as far as the DB is
+        concerned, and without this there is no way to put a split history
+        back together from inside the app. Renaming onto a name that
+        already exists is therefore a *merge*, deliberately — that is
+        exactly what fixing a typo means.
+
+        An empty ``new_name`` clears the label (NULL), which is what
+        "remove this user" means here: their conversations stay, and become
+        visible to everyone, because nothing about this axis is a
+        permission and deleting someone's work is a different, louder
+        operation that already lives in the sidebar.
+        """
+        if not old_name:
+            return 0
+        cursor = self._conn.execute(
+            'UPDATE conversations SET "user" = ?, updated_at = updated_at WHERE "user" = ?',
+            (new_name or None, old_name),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def user_counts(self) -> list[tuple[str, int]]:
+        """``[(name, conversations)]``, case-insensitively sorted — what the
+        management dialog lists. Counts only conversations that actually
+        hold messages, matching what the sidebar shows, so a name does not
+        appear to own work that was never used."""
+        rows = self._conn.execute(
+            'SELECT c."user" AS name, COUNT(*) AS n FROM conversations c '
+            'WHERE c."user" IS NOT NULL AND c."user" != \'\' '
+            "AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id) "
+            'GROUP BY c."user" ORDER BY c."user" COLLATE NOCASE'
+        ).fetchall()
+        return [(row["name"], row["n"]) for row in rows]
+
     def known_users(self) -> list[str]:
         """Every distinct non-empty ``user`` in this DB, case-insensitively
         sorted — what populates the GUI picker. No user table and no

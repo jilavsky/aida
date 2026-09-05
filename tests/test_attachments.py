@@ -354,3 +354,16 @@ def test_a_genuine_markdown_attachment_is_still_listed(tmp_path: Path):
     recorder.record_message(Message(role="user", content="summarise"))
 
     assert "[notes.md]" in recorder.export_transcript().read_text()
+
+
+def test_the_extracted_text_is_written_beside_the_document(tmp_path: Path):
+    """The folder must show what the model actually received, not only the
+    file it came from. The text was being dropped: `keep_attachments` was
+    called without it, so only the PDF ever landed there."""
+    recorder, _store, records = _recorder(tmp_path)
+    source = _paper(tmp_path)
+    recorder.keep_attachments([str(source)], texts={str(source): "Extracted body text"})
+
+    folder = attachments_dir(records, recorder.conversation_id)
+    assert (folder / "paper.pdf").exists()
+    assert (folder / "paper.pdf.md").read_text() == "Extracted body text"

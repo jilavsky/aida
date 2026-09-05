@@ -333,3 +333,143 @@ in this plan but was not included in `gui_implementation_guide.md`.
 **The attachment store (`documents_implementation.md` Phase B) is now
 unblocked** — the records-dir layout is settled and `{user}` expansion
 happens before any consumer sees a path.
+
+
+---
+
+## 8. Managing labels (2026-09-05, after the GUI landed)
+
+Two gaps surfaced the moment the toolbar box was used by hand rather than
+by a test.
+
+**The box acted on every keystroke.** `UserSelector` was wired to
+`QComboBox.currentTextChanged`, which on an *editable* combo fires per
+character: typing "jan" emitted "j", "ja", "jan", and since `user_changed`
+restarts the session, the app tore down and rebuilt a session three times
+while the user was still on the first letter. Every test passed, because
+they all drove it with `setCurrentText`, which sets the whole string at
+once — the tests exercised the API and never the interaction. Now
+`activated` (a real pick from the list) and `lineEdit().editingFinished`
+(Return, or focus leaving) are what emit, an unchanged value is swallowed,
+and `set_users` no longer looks like a user action on the next commit.
+A regression test drives `textEdited` character by character.
+
+**A mistyped name could not be repaired.** Nothing validates a free-text
+name, so "Jan", "jan" and "Jam" are three people to the database, and until
+now nothing in the app could put a split history back together.
+`ConversationStore.rename_user` plus a small **File ▸ Manage Users…**
+dialog does it; renaming onto an existing name is a *merge*, confirmed
+first because it is irreversible from there.
+
+**The dialog was a dead end with no names in use** — an empty list and two
+greyed-out buttons, so a dialog called "Manage Users" could not get you a
+user. **New User…** fixes that. It writes nothing, because there is nowhere
+to write a user to; it makes the name *active*, and the next conversation
+is what brings it into existence. The list shows it as "no conversations
+yet — active" so it does not look as though the button did nothing. This is
+the honest shape: a name exists because a conversation carries it
+(`known_users`), and a second source of truth could only disagree with the
+conversations.
+
+**No "delete user".** Clearing a label sets it to NULL: the conversations
+stay and become visible to everyone, which is what removing a *label*
+means. Deleting somebody's work is louder and different, and it already
+lives in the sidebar — duplicating a destructive action in two places is
+how the wrong one gets clicked.
+
+**A rename is not a switch.** Choosing a new name starts a new chat (the
+same handler the toolbar box uses); renaming the name you are working
+under does not, because the open conversation was relabelled in place by
+the UPDATE and restarting would cost the user their chat for a spelling
+fix.
+
+**Toolbar order: User, Workspace, Provider**, left to right in the order
+the choices narrow each other — and the order a shared machine is picked
+up in: who you are, then what you are doing, then what with.
+
+Still open: per-user `user_context`, which the GUI guide did not cover.
+
+
+---
+
+## 9. Three bugs from first real use (2026-09-05)
+
+All three surfaced within minutes of the GUI being used by hand, and none
+of them was visible from the code alone.
+
+**The User box fitted two characters.** A `QComboBox` sizes itself to its
+widest *item*, and on a fresh install the widest item is the empty
+"no user" entry. The other selectors never hit this because their items are
+always real names. Fixed with `setMinimumContentsLength(18)` plus
+`AdjustToContents`.
+
+**Declaring a second name deleted the first.** `known_users()` derives from
+`SELECT DISTINCT "user" FROM conversations`, and a session's conversation
+row is created empty and deleted again if nothing is ever sent
+(`_delete_conversation_if_empty`). So a name whose only conversation was
+that unused one disappeared the moment the user switched away. The fix is
+`AppConfig.known_users`, **unioned** with the database-derived names rather
+than replacing them — which is the distinction that makes it not the
+"second source of truth" §8 argued against: it can only add a name that has
+no conversations yet, never contradict what the conversations say.
+
+**Selecting a user changed nothing in the list.** Two causes. The sidebar
+filter did not follow the toolbar at all, and — more importantly — a
+selected user matched `summary.user in (selected, None)`, deliberately
+including unlabelled conversations so that a pre-existing history would not
+vanish on upgrade. But *all* of a pre-existing history is unlabelled, so in
+practice the filter appeared to do nothing for exactly the people it was
+protecting. Now a selected name shows only that name's conversations, a new
+**(no user)** entry reaches the unlabelled ones on their own, and "All
+users" remains one click away as the real safety net. The filter follows a
+switch in the toolbar but does not stamp on a choice made in the sidebar
+during ordinary refreshes.
+
+The lesson matching §8's: each of these passed every test, because the
+tests drove the widgets programmatically and never asked what the thing
+looks like or does the second time you touch it.
+
+
+---
+
+## 10. Moving a conversation between labels (2026-09-05)
+
+`rename_user` moves *everything* a name owns, which is right for a typo but
+useless for the commonest mistake a free-text label produces: the wrong
+name was selected when one chat was started. `set_conversation_user` moves
+named conversations, and the sidebar's right-click menu offers it — for a
+multi-selection too, since a run of chats is usually mis-filed together.
+
+It leaves `updated_at` alone on purpose. Relabelling is not activity;
+bumping the timestamp would reorder the sidebar and silently change what a
+cleanup-older-than sweep catches.
+
+One bug found while wiring it: `_refresh_conversations_sidebar` handed the
+toolbar the raw `store.known_users()` while `_known_users()` returned the
+union with the remembered list — so a freshly declared name appeared and
+then vanished on the next refresh. Both now share one merge.
+
+
+---
+
+## 11. A hung GUI suite, and the guard for it (2026-09-05)
+
+Adding one entry to the sidebar's context menu broke three tests that pin
+the menu's exact contents — expected, and my omission for not updating
+them. What was not expected: the run then **hung for ten minutes** with no
+indication of which test or why.
+
+`timeout = 30` is configured and did not help, and the reason is worth
+recording. pytest-timeout raises in the Python main thread — which is
+exactly the thread parked inside a native Qt modal, so the exception is not
+delivered until the modal returns, and it never does because nobody is
+going to click it. A modal in a GUI test is therefore not a slow test; it
+is an unkillable one.
+
+`tests/ui/conftest.py` now has an autouse fixture that replaces every
+blocking call (`QDialog.exec`, `QMenu.exec`, the `QMessageBox` statics,
+`QInputDialog.getText/getInt`, the `QFileDialog` statics) with one that
+raises, naming the call. A test's own `monkeypatch.setattr` still wins,
+since it is applied afterwards — this only catches the paths nobody thought
+to stub. An immediate named failure is worth far more than any of those
+dialogs ever were.

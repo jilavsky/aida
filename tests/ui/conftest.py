@@ -90,3 +90,57 @@ def loop_thread():
     thread.wait_until_ready()
     yield thread
     thread.stop()
+
+
+#: Every call that blocks in Qt's own C++ event loop waiting for a human.
+#: A test that reaches one of these does not fail — it *hangs*, and it hangs
+#: in a way `timeout = 30` cannot rescue: pytest-timeout raises in the
+#: Python main thread, which is exactly the thread parked inside a native
+#: modal, so the exception is not seen until the modal returns. Which it
+#: never does, because nobody is going to click it.
+#:
+#: This bit once: adding one entry to the sidebar's context menu made a
+#: previously-safe test path pop a real dialog, and the suite sat for ten
+#: minutes with no indication of which test or why. Turning that into an
+#: immediate, named failure is worth far more than the modal ever was.
+_BLOCKING_CALLS = [
+    ("QDialog", "exec"),
+    ("QMenu", "exec"),
+    ("QMessageBox", "exec"),
+    ("QMessageBox", "question"),
+    ("QMessageBox", "information"),
+    ("QMessageBox", "warning"),
+    ("QMessageBox", "critical"),
+    ("QInputDialog", "getText"),
+    ("QInputDialog", "getInt"),
+    ("QFileDialog", "getExistingDirectory"),
+    ("QFileDialog", "getOpenFileName"),
+    ("QFileDialog", "getSaveFileName"),
+]
+
+
+@pytest.fixture(autouse=True)
+def no_blocking_dialogs(monkeypatch):
+    """Make a real modal an instant failure instead of a hung suite.
+
+    Applied before each test, so a test's own ``monkeypatch.setattr`` of the
+    same call still wins — this only catches the paths nobody thought to
+    stub. The message names the call, which is the piece of information a
+    hang gives you none of.
+    """
+    from aida.ui.qt import _qt
+
+    for class_name, method in _BLOCKING_CALLS:
+        target = getattr(_qt, class_name, None)
+        if target is None or not hasattr(target, method):
+            continue
+
+        def _refuse(*_args, __where=f"{class_name}.{method}", **_kwargs):
+            raise AssertionError(
+                f"{__where} was called for real in a test. It would block on human input "
+                f"and hang the suite. Stub it with monkeypatch.setattr, or call the "
+                f"handler directly instead of going through the dialog."
+            )
+
+        monkeypatch.setattr(target, method, _refuse, raising=False)
+    return None

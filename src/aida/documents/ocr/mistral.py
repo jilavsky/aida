@@ -98,6 +98,54 @@ def _decode_image(payload: str) -> bytes | None:
         return None
 
 
+def verify_api_key(
+    api_key: str,
+    *,
+    base_url: str = DEFAULT_BASE_URL,
+    timeout: float = 20.0,
+    client: object | None = None,
+) -> str:
+    """Check a key against the service and return a short human-readable
+    result. Raises ``MistralOcrError`` if the key is not usable.
+
+    Uploads nothing: it lists models, which is the cheapest authenticated
+    call the API has. That distinction matters — "is my key right?" must be
+    answerable without sending a document anywhere, or the only way to test
+    the configuration would be to perform the exact action the user is
+    being careful about.
+    """
+    if not api_key:
+        raise MistralOcrError("no API key given")
+    owns_client = client is None
+    if client is None:
+        try:
+            import httpx
+        except ImportError as exc:  # pragma: no cover - the extra being absent
+            raise MistralOcrError(
+                "the 'ocr' extra is not installed (pip install 'aida-workbench[ocr]')"
+            ) from exc
+        client = httpx.Client(timeout=timeout)
+    try:
+        response = client.get(f"{base_url}/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+        _raise_for_status(response, "key check")
+        names = [m.get("id", "") for m in (response.json().get("data") or [])]
+        ocr_models = [name for name in names if "ocr" in name.lower()]
+        if ocr_models:
+            return f"Key works. OCR model available: {', '.join(sorted(ocr_models)[:3])}."
+        # A valid key whose account cannot see an OCR model is a real and
+        # confusing state — the upload would succeed and the OCR call fail.
+        return "Key works, but no OCR model is visible on this account."
+    except MistralOcrError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - one error type for the caller
+        raise MistralOcrError(f"{type(exc).__name__}: {exc}") from exc
+    finally:
+        if owns_client:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+
+
 def ocr_pdf(
     path: Path,
     *,
@@ -286,4 +334,5 @@ __all__ = [
     "OcrResult",
     "figures_from_ocr",
     "ocr_pdf",
+    "verify_api_key",
 ]

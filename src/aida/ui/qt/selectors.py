@@ -36,6 +36,17 @@ class UserSelector(QWidget):
     Editable on purpose: names are not registered anywhere — one exists
     because a conversation used it — so typing is how the first
     conversation for a new person or project is created.
+
+    **Emits on commit, never per keystroke.** The obvious wiring,
+    ``currentTextChanged``, fires on every character typed into an editable
+    combo: typing "jan" would emit "j", "ja", "jan" and — because
+    ``user_changed`` restarts the session — tear down and rebuild the
+    session three times while the user was still typing the first letter of
+    a name. Tests that call ``setCurrentText`` never see it, because that
+    sets the whole string at once. So the signal comes from ``activated``
+    (a real pick from the list) and ``editingFinished`` (Return, or focus
+    leaving the box) instead, and a committed value equal to the last one
+    is swallowed rather than restarting the session for nothing.
     """
 
     user_changed = Signal(str)
@@ -47,19 +58,55 @@ class UserSelector(QWidget):
         layout.addWidget(QLabel("User:", self))
         self._combo = QComboBox(self)
         self._combo.setEditable(True)
-        self._combo.currentTextChanged.connect(self.user_changed.emit)
+        self._combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        # Without this the box sizes itself to its *widest item*, and the
+        # widest item on a fresh install is the empty "no user" entry — so
+        # it collapsed to about two characters and could not show, let
+        # alone let you type, a name. The other selectors get away with it
+        # because their items are always real names.
+        self._combo.setMinimumContentsLength(18)
+        self._combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        # An editable combo looks exactly like a read-only one, so without
+        # this nothing tells you that typing is how a new name is made —
+        # which is the only way to add one.
+        self._combo.lineEdit().setPlaceholderText("(no user) — type a name to add")
+        self._combo.setToolTip(
+            "Labels new conversations, for filtering the list — a person on a shared "
+            "machine, or a project. Type a new name and press Return to add one; "
+            "File ▸ Manage Users… renames or clears existing ones.\n\n"
+            "This is organization, not security: anyone can pick any name, and it "
+            "does not restrict access to anything."
+        )
+        #: The last value actually committed, so a no-op commit (Return on
+        #: an unchanged box, or focus simply passing through) is not
+        #: mistaken for a switch.
+        self._committed = ""
+        self._combo.activated.connect(lambda _index: self._commit())
+        self._combo.lineEdit().editingFinished.connect(self._commit)
         layout.addWidget(self._combo)
+
+    def _commit(self) -> None:
+        value = self._combo.currentText().strip()
+        if value == self._committed:
+            return
+        self._committed = value
+        self.user_changed.emit(value)
 
     def set_users(self, names: list[str], *, current: str | None = None) -> None:
         self._combo.blockSignals(True)
+        self._combo.lineEdit().blockSignals(True)
         self._combo.clear()
         self._combo.addItem("")
         self._combo.addItems(names)
         self._combo.setCurrentText(current or "")
+        self._combo.lineEdit().blockSignals(False)
         self._combo.blockSignals(False)
+        # Repopulating is not a user action, so it must not look like one
+        # on the next commit either.
+        self._committed = (current or "").strip()
 
     def current_user(self) -> str:
-        return self._combo.currentText()
+        return self._combo.currentText().strip()
 
 
 class WorkspaceSelector(QWidget):

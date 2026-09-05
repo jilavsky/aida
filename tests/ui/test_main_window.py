@@ -203,7 +203,10 @@ def test_user_selector_updates_config_and_stamps_the_restarted_conversation(
         assert pump_until(qapp, lambda: settings.app.last_profile_name == "mock-profile")
         first_conversation_id = window.bridge.session.recorder.conversation_id
 
+        # setCurrentText alone no longer emits: the selector commits on
+        # Return / focus-out, not per keystroke (see UserSelector).
         window.user_selector._combo.setCurrentText("Alice")
+        window.user_selector._combo.lineEdit().editingFinished.emit()
 
         assert pump_until(
             qapp,
@@ -2729,5 +2732,163 @@ def test_retiring_a_bridge_mid_turn_clears_turn_in_flight(
         window._restart_session(workspace_name=None, profile_name="mock-profile", resume_conversation_id=None)
 
         assert window.scheduler_bridge.activity.turn_in_flight is False
+    finally:
+        window.close()
+
+
+def test_manage_users_new_name_switches_like_the_toolbar_box_does(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Picking a name in the dialog and typing one in the toolbar must end
+    in the same place — including the new chat a switch implies."""
+    from aida.ui.qt import users_dialog as users_dialog_module
+    from aida.ui.qt._qt import QDialog as _QDialog
+
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert pump_until(qapp, lambda: settings.app.last_profile_name == "mock-profile")
+        first_conversation_id = window.bridge.session.recorder.conversation_id
+
+        def _fake_exec(self):
+            self.new_active_user = "Jan"
+            return _QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr(users_dialog_module.UsersDialog, "exec", _fake_exec)
+        window.open_users_dialog()
+
+        assert pump_until(
+            qapp,
+            lambda: window.bridge.session is not None
+            and window.bridge.session.recorder.conversation_id != first_conversation_id,
+        )
+        assert settings.app.active_user == "Jan"
+        assert window.bridge.session.recorder.user == "Jan"
+        assert window.user_selector.current_user() == "Jan"
+    finally:
+        window.close()
+
+
+def test_renaming_the_active_user_does_not_restart_the_session(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A rename is a spelling fix, not a switch. The open conversation was
+    relabelled in place by the UPDATE, so restarting would cost the user
+    their chat for nothing."""
+    from aida.ui.qt import users_dialog as users_dialog_module
+    from aida.ui.qt._qt import QDialog as _QDialog
+
+    settings = _settings_with_profile()
+    settings.app.active_user = "Jam"
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert pump_until(qapp, lambda: settings.app.last_profile_name == "mock-profile")
+        conversation_id = window.bridge.session.recorder.conversation_id
+
+        def _fake_exec(self):
+            self._store.rename_user("Jam", "Jan", timestamp="2026-01-03")
+            self.changed = True
+            self.renamed_from, self.renamed_to = "Jam", "Jan"
+            return _QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr(users_dialog_module.UsersDialog, "exec", _fake_exec)
+        window.open_users_dialog()
+
+        assert settings.app.active_user == "Jan"
+        assert window.bridge.session.recorder.conversation_id == conversation_id
+    finally:
+        window.close()
+
+
+def test_a_declared_user_survives_switching_away_before_typing_anything(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "Creating second user seems to remove first user."
+
+    A session's conversation row is created empty and deleted again if
+    nothing is ever sent, so a name whose only conversation was that empty
+    one vanished from the toolbar the moment the user switched away. The
+    remembered list is unioned with the names the conversations carry, so
+    it can only ever add — never contradict the database.
+    """
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert pump_until(qapp, lambda: settings.app.last_profile_name == "mock-profile")
+
+        window.user_selector._combo.setCurrentText("Alice")
+        window.user_selector._combo.lineEdit().editingFinished.emit()
+        assert pump_until(qapp, lambda: settings.app.active_user == "Alice")
+
+        window.user_selector._combo.setCurrentText("Bob")
+        window.user_selector._combo.lineEdit().editingFinished.emit()
+        assert pump_until(qapp, lambda: settings.app.active_user == "Bob")
+
+        assert set(window._known_users()) >= {"Alice", "Bob"}, "Alice must not have vanished"
+    finally:
+        window.close()
+
+
+def test_switching_user_filters_the_sidebar_to_that_user(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: selecting a newly created user still listed the old
+    chats. The sidebar filter has to follow the toolbar."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert pump_until(qapp, lambda: settings.app.last_profile_name == "mock-profile")
+        store = ConversationStore()
+        try:
+            conv = store.create_conversation(timestamp="2026-01-01", title="old unlabelled chat")
+            store.append_message(conv, Message(role="user", content="hi"), timestamp="2026-01-02")
+        finally:
+            store.close()
+        window._refresh_conversations_sidebar()
+        assert window.sidebar.count >= 1
+
+        window.user_selector._combo.setCurrentText("Alice")
+        window.user_selector._combo.lineEdit().editingFinished.emit()
+        assert pump_until(qapp, lambda: settings.app.active_user == "Alice")
+        window._refresh_conversations_sidebar()
+
+        assert window.sidebar._user_filter.currentText() == "Alice"
+        assert window.sidebar.count == 0, "a brand-new user has no history to show"
+    finally:
+        window.close()
+
+
+def test_moving_a_conversation_to_a_user_relabels_and_remembers_the_name(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert pump_until(qapp, lambda: settings.app.last_profile_name == "mock-profile")
+        store = ConversationStore()
+        try:
+            conv = store.create_conversation(timestamp="2026-01-01", title="misfiled chat")
+            store.append_message(conv, Message(role="user", content="hi"), timestamp="2026-01-02")
+        finally:
+            store.close()
+
+        window._on_move_conversations_to_user([conv], "Carol")
+
+        store = ConversationStore()
+        try:
+            assert store.get_conversation(conv).user == "Carol"
+        finally:
+            store.close()
+        assert "Carol" in window._known_users(), "a name used only here must still be offered"
     finally:
         window.close()

@@ -32,6 +32,7 @@ from aida.documents.ocr.mistral import (
     MistralOcrError,
     figures_from_ocr,
     ocr_pdf,
+    verify_api_key,
 )
 
 pymupdf = pytest.importorskip("pymupdf")
@@ -308,3 +309,155 @@ def test_a_cached_index_is_never_re_uploaded(tmp_path: Path):
     client.calls.clear()
     _run_list(tmp_path, backend, client)
     assert client.calls == []
+
+
+# --- verifying the key without uploading anything ------------------------
+
+
+class _ModelsClient:
+    def __init__(self, payload=None, status_code: int = 200):
+        self.calls: list[str] = []
+        self._payload = payload if payload is not None else {"data": [{"id": "mistral-ocr-latest"}]}
+        self._status = status_code
+
+    def get(self, url, **_kwargs):
+        self.calls.append(url)
+        return _Response(self._payload, self._status)
+
+    def post(self, *_a, **_k):  # pragma: no cover - must never be reached
+        raise AssertionError("verifying a key must not upload anything")
+
+    def close(self):
+        pass
+
+
+def test_verify_api_key_reports_the_ocr_model_and_uploads_nothing():
+    """"Is my key working?" has to be answerable without sending a
+    document — otherwise the only way to test the setup is to perform the
+    exact action the user is being careful about."""
+    client = _ModelsClient()
+    detail = verify_api_key("k", client=client)
+    assert "works" in detail.lower()
+    assert "mistral-ocr-latest" in detail
+    assert client.calls and client.calls[0].endswith("/v1/models")
+
+
+def test_verify_api_key_flags_a_key_with_no_ocr_model():
+    """A valid key whose account cannot see an OCR model is a real and
+    confusing state: the upload would succeed and the OCR call fail."""
+    detail = verify_api_key("k", client=_ModelsClient({"data": [{"id": "mistral-small"}]}))
+    assert "no OCR model" in detail
+
+
+def test_verify_api_key_rejects_a_bad_key():
+    with pytest.raises(MistralOcrError, match="API key"):
+        verify_api_key("k", client=_ModelsClient(status_code=401))
+
+
+def test_verify_api_key_needs_a_key():
+    with pytest.raises(MistralOcrError, match="no API key"):
+        verify_api_key("", client=_ModelsClient())
+
+
+# --- the `aida documents figures` diagnostic -----------------------------
+#
+# The question this answers: "how do I tell whether my document was sent to
+# Mistral?" Every other signal is indirect — a dialog that only appears
+# when the agent asks about figures, a note in a tool result, a field in a
+# JSON file. "Attach a PDF and read the reply carefully" is not a way to
+# check a setup.
+
+
+def _run_figures(tmp_path: Path, argv: list[str], monkeypatch) -> tuple[int, str]:
+    import io
+    from contextlib import redirect_stdout
+
+    from aida.cli.documents_cmds import main as documents_main
+
+    monkeypatch.setenv("AIDA_HOME", str(tmp_path / ".aida"))
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        code = documents_main(argv)
+    return code, buffer.getvalue()
+
+
+def test_figures_reports_the_builtin_backend_and_why(tmp_path: Path, monkeypatch):
+    pdf = _pdf(tmp_path / "paper.pdf")
+    code, out = _run_figures(
+        tmp_path, ["figures", str(pdf), "--assets-dir", str(tmp_path / "a")], monkeypatch
+    )
+    assert code == 0
+    assert "backend: builtin" in out
+    assert "--ocr not passed" in out, "a bare 'not used' is useless — it must say which reason"
+
+
+def test_figures_names_a_missing_key_rather_than_failing_silently(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("aida.cli.documents_cmds.get_secret", lambda _ref: None)
+    pdf = _pdf(tmp_path / "paper.pdf")
+    code, out = _run_figures(
+        tmp_path,
+        ["figures", str(pdf), "--ocr", "--yes", "--assets-dir", str(tmp_path / "a")],
+        monkeypatch,
+    )
+    assert code == 0
+    assert "no API key" in out
+
+
+def test_figures_surfaces_an_ocr_failure_instead_of_burying_it_in_a_log(tmp_path: Path, monkeypatch):
+    """The whole reason the command exists: this string used to go to a log
+    file nobody was watching, and the only symptom was figures quietly a
+    bit worse than expected."""
+    monkeypatch.setattr("aida.cli.documents_cmds.get_secret", lambda _ref: "k")
+
+    def _boom(*_a, **_k):
+        raise MistralOcrError("upload failed with HTTP 401 — check the API key")
+
+    monkeypatch.setattr("aida.cli.documents_cmds.ocr_pdf", _boom)
+    pdf = _pdf(tmp_path / "paper.pdf")
+    code, out = _run_figures(
+        tmp_path,
+        ["figures", str(pdf), "--ocr", "--yes", "--assets-dir", str(tmp_path / "a")],
+        monkeypatch,
+    )
+    assert code == 1, "a failed OCR run must be a non-zero exit, not a quiet fallback"
+    assert "OCR failed" in out and "401" in out
+    assert "backend: builtin" in out, "…and it still falls back, so the figures are there"
+
+
+def test_figures_json_output_carries_the_backend(tmp_path: Path, monkeypatch):
+    import json as _json
+
+    pdf = _pdf(tmp_path / "paper.pdf")
+    code, out = _run_figures(
+        tmp_path,
+        ["figures", str(pdf), "--json", "--assets-dir", str(tmp_path / "a")],
+        monkeypatch,
+    )
+    payload = _json.loads(out)
+    assert code == 0
+    assert payload["backend"] == "builtin"
+    assert payload["figures"] and payload["figures"][0]["label"]
+
+
+def test_figures_uses_the_workspace_switch(tmp_path: Path, monkeypatch):
+    from aida.config.settings import WorkspaceConfig, WorkspacesConfig, load_settings
+
+    monkeypatch.setenv("AIDA_HOME", str(tmp_path / ".aida"))
+    settings = load_settings()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={"manuals": WorkspaceConfig(name="manuals", use_ocr=False)}
+    )
+    monkeypatch.setattr("aida.cli.documents_cmds.load_settings", lambda: settings)
+    pdf = _pdf(tmp_path / "paper.pdf")
+    code, out = _run_figures(
+        tmp_path,
+        ["figures", str(pdf), "--workspace", "manuals", "--assets-dir", str(tmp_path / "a")],
+        monkeypatch,
+    )
+    assert code == 0
+    assert "use_ocr disabled" in out
+
+
+def test_figures_rejects_a_missing_file(tmp_path: Path, monkeypatch):
+    code, _out = _run_figures(tmp_path, ["figures", str(tmp_path / "nope.pdf")], monkeypatch)
+    assert code == 1

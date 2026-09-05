@@ -1091,3 +1091,32 @@ async def test_looking_up_figures_never_creates_an_attachments_row(
         assert not (session.recorder.records_dir / "attachments").exists()
     finally:
         await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_attachment_text_reaches_the_conversation_folder(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """End to end for the plumbing that was missing: the extracted text has
+    to travel with the path, or the attachments folder holds a PDF and no
+    record of what the model was actually given."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    source = tmp_path / "Downloads" / "paper.pdf"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"%PDF-1.4 pretend")
+
+    session, _ = await start_session(_settings(), profile_name="mock-profile")
+    try:
+        _ = [
+            e
+            async for e in session.send(
+                "summarise this",
+                attachment_paths=[str(source)],
+                attachment_texts={str(source): "The full extracted text."},
+            )
+        ]
+        folder = Path(session.recorder.attachments_dir())
+        assert (folder / "paper.pdf").exists()
+        assert (folder / "paper.pdf.md").read_text() == "The full extracted text."
+    finally:
+        await session.aclose()
