@@ -349,6 +349,13 @@ class AppConfig:
     # a fresh install says nothing about the user until they fill it in.
     assistant_name: str = "Aida"
     user_context: str = ""
+    #: The active organization label for new conversations — see
+    #: ``aida.config.users``. Empty (the default) means today's behaviour:
+    #: nothing is stamped, nothing is filtered, and no path gains a user
+    #: segment. Persisted so a shared machine reopens as whoever used it
+    #: last, which is a convenience and explicitly *not* a claim about who
+    #: is sitting there. Overridden per run by ``--user`` or ``$AIDA_USER``.
+    active_user: str = ""
     # Titles of the right-hand session panels (Folders / MCP Servers /
     # Quick Tasks / Workspace Notes) the user has collapsed. Persisted so
     # the column reopens the way they left it — with four panels stacked
@@ -446,6 +453,7 @@ class AppConfig:
             "command_allowlist": self.command_allowlist,
             "assistant_name": self.assistant_name,
             "user_context": self.user_context,
+            "active_user": self.active_user,
             "collapsed_panels": self.collapsed_panels,
             "scheduler_quiet_period_seconds": self.scheduler_quiet_period_seconds,
             "scheduler_max_defer_seconds": self.scheduler_max_defer_seconds,
@@ -476,6 +484,7 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "command_allowlist": "list[str]",
     "assistant_name": "str",
     "user_context": "str",
+    "active_user": "str",
     "collapsed_panels": "list[str]",
     "scheduler_quiet_period_seconds": "int",
     "scheduler_max_defer_seconds": "int",

@@ -49,6 +49,12 @@ class ConversationSummary:
     #: ``aida.core.workflows.run_workflow`` — see ``aida.persistence.db``
     #: migration 3.
     origin: str | None = None
+    #: The organization label this conversation belongs to (migration 4) —
+    #: a person on a shared beamline machine, a project on a laptop. NULL
+    #: for everything created before the column existed and for every
+    #: install that never sets one. Not an identity and not a permission:
+    #: see ``aida.config.users``.
+    user: str | None = None
 
 
 @dataclass
@@ -103,13 +109,14 @@ class ConversationStore:
         profile_name: str | None = None,
         sidecar_dirname: str = "figures",
         origin: str | None = None,
+        user: str | None = None,
     ) -> str:
         conv_id = conversation_id or new_conversation_id()
         self._conn.execute(
             "INSERT INTO conversations "
-            "(id, title, workspace_name, profile_name, sidecar_dirname, created_at, updated_at, origin) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (conv_id, title, workspace_name, profile_name, sidecar_dirname, timestamp, timestamp, origin),
+            '(id, title, workspace_name, profile_name, sidecar_dirname, created_at, updated_at, origin, "user") '
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (conv_id, title, workspace_name, profile_name, sidecar_dirname, timestamp, timestamp, origin, user or None),
         )
         self._conn.commit()
         return conv_id
@@ -125,13 +132,41 @@ class ConversationStore:
         ).fetchone()[0]
         return self._row_to_summary(row, count)
 
-    def list_conversations(self) -> list[ConversationSummary]:
-        rows = self._conn.execute(
+    def list_conversations(
+        self, user: str | None = None, *, include_unowned: bool = True
+    ) -> list[ConversationSummary]:
+        """Newest first. ``user=None`` means no filtering at all — today's
+        behaviour, and what cleanup and every "show all" path want.
+
+        ``include_unowned`` keeps conversations with a NULL ``user`` visible
+        while filtering, and defaults to True on purpose: every conversation
+        that predates migration 4 has NULL there, so excluding them would
+        make a user's whole history vanish from the sidebar the first time
+        they picked a name — a data-loss-shaped surprise from what is only a
+        labelling feature.
+        """
+        sql = (
             "SELECT c.*, "
             "(SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count "
-            "FROM conversations c ORDER BY c.updated_at DESC"
-        ).fetchall()
+            "FROM conversations c"
+        )
+        params: tuple[str, ...] = ()
+        if user:
+            sql += ' WHERE (c."user" = ?' + (' OR c."user" IS NULL)' if include_unowned else ")")
+            params = (user,)
+        sql += " ORDER BY c.updated_at DESC"
+        rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_summary(row, row["message_count"]) for row in rows]
+
+    def known_users(self) -> list[str]:
+        """Every distinct non-empty ``user`` in this DB, case-insensitively
+        sorted — what populates the GUI picker. No user table and no
+        registration step: a name exists because a conversation used it."""
+        rows = self._conn.execute(
+            'SELECT DISTINCT "user" FROM conversations '
+            'WHERE "user" IS NOT NULL AND "user" != \'\' ORDER BY "user" COLLATE NOCASE'
+        ).fetchall()
+        return [row["user"] for row in rows]
 
     def set_title(self, conversation_id: str, title: str, *, timestamp: str) -> None:
         self._conn.execute(
@@ -160,6 +195,7 @@ class ConversationStore:
             record_path=row["record_path"],
             message_count=message_count,
             origin=row["origin"],
+            user=row["user"],
         )
 
     # --- messages --------------------------------------------------------

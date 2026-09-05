@@ -98,31 +98,35 @@ step-by-step in [`planning/multiuser_plan.md`](planning/multiuser_plan.md).
 §1.5**, because a DB column can be added at any time but a folder layout
 cannot be changed once users have files in it. See `multiuser_plan.md` §0.
 
-- [ ] Schema migration 4: nullable `user` column on `conversations` (+
-      index), quoted as `"user"` in every statement — it is a reserved word
-      in other engines and reads confusingly unquoted even where SQLite
-      accepts it. Note §2.1 previously claimed this column already existed
-      as "cheap insurance" — it does not; migrations 1–3 never added it.
-- [ ] **Path resolution**: a single `resolve_for_user()` expanding
-      `{user}` in `records_dir`, `target_folder`, `saved_scripts_dir`,
-      `templates_dir` and `source_folders` — run **before**
-      `SafetyGuard.for_workspace` builds `allowed_roots`, or every write
-      prompts as out-of-bounds. The one real hazard; make it a test.
-- [ ] Stamp on create: `ConversationRecorder` writes the active user
-      (one call site); `list_conversations(user=…)` filters.
+**Core layer shipped 2026-09-05** — schema, path resolution, stamping and
+the CLI surface, with 44 new tests. What remains is the GUI, which needs an
+environment where the Qt suite actually runs. Detail in `multiuser_plan.md`
+§7.
+
+- [ ] **GUI user picker.** A `UserSelector` in `ui/qt/selectors.py`,
+      modelled on `WorkspaceSelector`; an editable combo of
+      `ConversationStore.known_users()` plus free text. Switching it ends
+      the session and starts a new chat, exactly as switching workspace
+      already does, and writes `AppConfig.active_user`.
+- [ ] **Sidebar filtering, with the escape hatch in the same commit.**
+      `store.list_conversations(active_user)` already does the filtering
+      and already keeps NULL-user history visible; what is missing is a
+      **Show all** control. Shipping the filter without it would be worse
+      than not filtering — hidden work reads as lost work.
 - [ ] **Workspace filter — nearly free, no schema.** `workspace_name` is
       already recorded and already *displayed* in the sidebar row, but
       `_apply_filter` matches `title` only, so typing a workspace name
       does nothing. Make the filter match both and add a workspace
       dropdown: ~20 lines, and it may cover much of the felt problem alone.
-- [ ] Active-user identity: `AppConfig.active_user`, a `UserSelector`
-      in the GUI toolbar, `--user` on the CLI, `AIDA_USER` for headless,
-      and a *Show all* escape in the sidebar.
-- [ ] Per-user `user_context` (the B15 identity block) instead of one
-      per-install string.
-- [ ] Document what stays deliberately shared: providers, secrets, MCP
-      config, workspaces, knowledge bases, schedules — and that this is
-      organization, not security, in those words.
+- [ ] Per-user `user_context` (the B15 identity block): store
+      `user_contexts: dict[str, str]` alongside the flat string and look up
+      the active user, falling back to it. `build_identity_context_block`
+      needs no change — only its one caller in `session.py`.
+- [ ] `docs/organizing-conversations.md`, opening with *this is
+      organization, not security*, plus `{user}` in the shipped
+      `usaxs-user`/`usaxs-staff` examples and an `aida doctor` check
+      reporting the resolved per-user folders. Held until the GUI lands so
+      the doc does not describe a half-built interface.
 
 ### 1.4 Verification owed (cannot be done from a sandbox)
 

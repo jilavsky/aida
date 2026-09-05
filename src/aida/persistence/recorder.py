@@ -79,6 +79,7 @@ class ConversationRecorder:
         resume: bool = False,
         transcript_min_interval_seconds: float = DEFAULT_TRANSCRIPT_MIN_INTERVAL_SECONDS,
         origin: str | None = None,
+        user: str | None = None,
     ) -> None:
         self.store = store
         self.artifact_store = artifact_store
@@ -103,6 +104,11 @@ class ConversationRecorder:
             self.profile_name = existing.profile_name
             self.sidecar_dirname = existing.sidecar_dirname
             self.origin = existing.origin
+            # Resume never re-stamps: a conversation belongs to whoever
+            # created it, even if someone else is at the machine now.
+            # Re-labelling on resume would silently move another person's
+            # conversation into the current user's bucket.
+            self.user = existing.user
             self._record_path = Path(existing.record_path) if existing.record_path else None
         else:
             self.title = None
@@ -110,6 +116,7 @@ class ConversationRecorder:
             self.profile_name = profile_name
             self.sidecar_dirname = sidecar_dirname
             self.origin = origin
+            self.user = user or None
             self.conversation_id = store.create_conversation(
                 timestamp=_now_iso(),
                 conversation_id=conversation_id,
@@ -117,6 +124,7 @@ class ConversationRecorder:
                 profile_name=profile_name,
                 sidecar_dirname=sidecar_dirname,
                 origin=origin,
+                user=user,
             )
             self._record_path = None
 

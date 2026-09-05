@@ -42,6 +42,11 @@ from aida.config.paths import (
     skills_dir,
 )
 from aida.config.settings import McpConfig, McpServerConfig, Settings, WorkspaceConfig
+from aida.config.users import (
+    resolve_active_user,
+    resolve_records_dir_for_user,
+    resolve_workspace_for_user,
+)
 from aida.core.agent import AgentLoop
 from aida.core.confirmation import REMEMBERABLE_ACTIONS, ConfirmAnswer, RememberingConfirm
 from aida.core.context import (
@@ -827,6 +832,7 @@ async def start_session(
     resume_conversation_id: str | None = None,
     confirm_callback: ConfirmCallback | None = None,
     origin: str | None = None,
+    user: str | None = None,
 ) -> tuple[ChatSession, McpManager | None]:
     """Start a session, releasing everything it acquired if any step fails.
 
@@ -859,6 +865,7 @@ async def start_session(
             resume_conversation_id=resume_conversation_id,
             confirm_callback=confirm_callback,
             origin=origin,
+            user=user,
         )
         # Construction succeeded: the session owns these now, so unregister
         # every cleanup rather than running it on the way out of the `async
@@ -879,6 +886,7 @@ async def _start_session(
     resume_conversation_id: str | None = None,
     confirm_callback: ConfirmCallback | None = None,
     origin: str | None = None,
+    user: str | None = None,
 ) -> tuple[ChatSession, McpManager | None]:
     """Shared session-startup logic for ``aida chat`` and
     ``aida conversations resume`` — resolves the workspace (if any), starts
@@ -925,7 +933,16 @@ async def _start_session(
     # forget to.
     stack.callback(store.close)
     artifact_store = ArtifactStore()
-    records_dir = ensure_records_dir(Path(settings.app.records_dir) if settings.app.records_dir else None)
+    # Resolved once, here, and threaded through everything below: an
+    # explicit argument beats $AIDA_USER beats config.yaml's active_user.
+    # Empty string means "no user", which is every install that has not
+    # opted in and every code path that predates this.
+    active_user = resolve_active_user(user, app_config=settings.app)
+    records_dir = ensure_records_dir(
+        Path(resolve_records_dir_for_user(settings.app.records_dir, active_user))
+        if settings.app.records_dir
+        else None
+    )
 
     resumed_summary = None
     if resume_conversation_id:
@@ -958,6 +975,17 @@ async def _start_session(
                 f"Unknown workspace {effective_workspace_name!r}. "
                 f"Configured workspaces: {', '.join(sorted(settings.workspaces.workspaces)) or '(none)'}"
             )
+        # {user} expansion happens HERE, before anything reads this
+        # workspace's folders: validate_workspace checks they exist,
+        # _ensure_workspace_folders creates them, SafetyGuard.for_workspace
+        # turns them into allowed roots, and build_workspace_context_block
+        # tells the model about them. A guard built from an unexpanded path
+        # would hold a literal ".../{user}/" root, so every write into the
+        # real folder would read as outside the workspace and prompt —
+        # which looks like a broken safety model rather than a broken path.
+        # Returns the same object untouched when the workspace has no
+        # placeholder in it, which is every pre-existing configuration.
+        workspace = resolve_workspace_for_user(workspace, active_user)
         validation = validate_workspace(settings, workspace)
         for warning in validation.warnings:
             print(f"[workspace] warning: {warning}")
@@ -1156,6 +1184,7 @@ async def _start_session(
             profile_name=effective_profile_name,
             sidecar_dirname=sidecar_dirname,
             origin=origin,
+            user=active_user,
         )
         initial_messages = None
 

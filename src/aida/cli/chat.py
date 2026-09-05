@@ -312,6 +312,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Comma-separated MCP server names to enable directly, bypassing groups",
     )
     parser.add_argument(
+        "--user",
+        default="",
+        help="Organization label for new conversations — a person on a shared machine or a project name (default: $AIDA_USER, else config.yaml's active_user). Not authentication: it labels and filters, nothing more.",
+    )
+    parser.add_argument(
         "--max-iterations",
         type=int,
         default=None,
@@ -328,6 +333,7 @@ async def _async_main(
     skill_names: list[str],
     mcp_group: str,
     mcp_names: list[str],
+    user: str | None = None,
 ) -> int:
     try:
         session, mcp_manager = await start_session(
@@ -337,6 +343,7 @@ async def _async_main(
             skill_names=skill_names,
             mcp_group=mcp_group,
             mcp_names=mcp_names,
+            user=user,
         )
     except (UnknownProfileError, UnknownWorkspaceError, UnknownMcpServerError) as exc:
         print(str(exc))
@@ -368,5 +375,6 @@ def main(argv: list[str] | None = None) -> int:
             skill_names=skill_names,
             mcp_group=args.mcp_group,
             mcp_names=mcp_names,
+            user=args.user or None,
         )
     )

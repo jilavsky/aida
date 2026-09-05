@@ -886,3 +886,117 @@ async def test_start_session_shuts_down_mcp_servers_when_the_session_fails_to_bu
 
     assert _FakeMcpManager.instances, "the fake manager should have been constructed"
     assert all(instance.closed for instance in _FakeMcpManager.instances)
+
+
+# --- the user organization axis (planning/multiuser_plan.md) -------------
+
+
+@pytest.mark.asyncio
+async def test_start_session_stamps_the_active_user_on_a_new_conversation(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    settings = _settings()
+
+    session, _ = await start_session(settings, profile_name="mock-profile", user="jan")
+    try:
+        assert session.recorder.user == "jan"
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_falls_back_to_the_configured_active_user(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    settings = _settings()
+    settings.app.active_user = "from-config"
+
+    session, _ = await start_session(settings, profile_name="mock-profile")
+    try:
+        assert session.recorder.user == "from-config"
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_records_no_user_by_default(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """Every install that has not opted in keeps today's behaviour."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+
+    session, _ = await start_session(_settings(), profile_name="mock-profile")
+    try:
+        assert session.recorder.user is None
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_resuming_never_relabels_someone_elses_conversation(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """A conversation belongs to whoever created it, even if a different
+    name is active at the machine now. Re-stamping on resume would quietly
+    move another person's work into the current user's bucket."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    settings = _settings()
+
+    first, _ = await start_session(settings, profile_name="mock-profile", user="eva")
+    conversation_id = first.recorder.conversation_id
+    _ = [e async for e in first.send("hello")]
+    await first.aclose()
+
+    resumed, _ = await start_session(
+        settings, profile_name="mock-profile", resume_conversation_id=conversation_id, user="jan"
+    )
+    try:
+        assert resumed.recorder.user == "eva"
+    finally:
+        await resumed.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_creates_the_expanded_workspace_folder_not_a_literal_one(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """End-to-end proof that `{user}` is expanded before *anything* reads
+    the workspace's folders: `_ensure_workspace_folders` creates the real
+    directory, and no folder literally named `{user}` is left behind."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    ws = _workspace(target_folder=str(tmp_path / "out" / "{user}"), safety="relaxed")
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+
+    session, _ = await start_session(settings, workspace_name="use-ws", user="Jan Ilavsky")
+    try:
+        assert (tmp_path / "out" / "jan-ilavsky").is_dir()
+        assert not (tmp_path / "out" / "{user}").exists()
+        # ...and the model is told the real path, not the template.
+        content = session.messages[0].content
+        assert str(tmp_path / "out" / "jan-ilavsky") in content
+        assert "{user}" not in content
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_expands_the_user_in_the_records_dir(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """The records dir is where transcripts live — and, once the attachment
+    store lands, copies of attached documents. It is the path most worth
+    splitting per user on a shared machine."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    settings = _settings()
+    settings.app.records_dir = str(tmp_path / "records" / "{user}")
+
+    session, _ = await start_session(settings, profile_name="mock-profile", user="jan")
+    try:
+        assert (tmp_path / "records" / "jan").is_dir()
+        assert session.recorder.records_dir == tmp_path / "records" / "jan"
+    finally:
+        await session.aclose()

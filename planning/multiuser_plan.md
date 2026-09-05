@@ -238,3 +238,88 @@ safety model. It is a persistence and presentation change with one
 path-resolution hazard — which is why it is safe to take now, and why now
 is better than after users have accumulated history and attachments under
 no user at all.
+
+---
+
+## 7. What shipped, 2026-09-05
+
+Steps 1, 2 and 4 — the core layer, and everything the attachment store was
+waiting on. 44 new tests; full non-GUI suite green (1258 passed), ruff
+clean.
+
+**Schema (migration 4).** `conversations."user" TEXT`, nullable, plus
+`idx_conversations_user (user, updated_at)`. Quoted everywhere. Verified by
+a test that builds a real v3 database with rows in it, opens it through
+`connect()`, and asserts the rows survive with `user IS NULL`.
+
+**`aida/config/users.py`** — a new leaf module so the GUI, CLI and session
+layer can all reach it without importing each other:
+
+- `user_slug()` — the security-relevant piece, though not in the way the
+  word "user" suggests. It is not protecting one person from another; it is
+  stopping a *typed name* from escaping the folder it is interpolated into.
+  Collapsing every non-alphanumeric run to a hyphen destroys `..`, `/` and
+  `\` rather than escaping them, so `"../../etc"` becomes `"etc"` and a
+  name of pure punctuation becomes `"default"`. Ten hostile inputs are
+  tested, each asserted to resolve *inside* its parent.
+- `resolve_active_user()` — flag → `$AIDA_USER` → `config.yaml`, skipping
+  blank values at every level so a stray whitespace env var cannot win.
+- `resolve_workspace_for_user()` — returns **the same object**, not a copy,
+  when the workspace has no `{user}` in it. Every configuration predating
+  this feature is therefore untouched in a way nothing downstream can
+  observe.
+
+**The ordering hazard, closed.** `{user}` is expanded in exactly one place
+in `_start_session`: immediately after `get_workspace()`, before
+`validate_workspace`, `_ensure_workspace_folders`,
+`SafetyGuard.for_workspace` and `build_workspace_context_block`. Two tests
+hold it:
+
+- A unit test asserting both halves — that a guard built from an
+  *unexpanded* workspace does **not** cover the real folder, and that one
+  built from a resolved workspace does. The negative half is the point: if
+  it ever starts passing, the placeholder is being expanded somewhere else
+  and the positive half no longer proves anything.
+- An end-to-end test through `start_session` asserting the real directory
+  is created, that no folder literally named `{user}` is left behind, and
+  that the model is told the resolved path.
+
+`resolved_saved_scripts_dir()` needed no change: it derives from
+`target_folder`, so expanding the workspace first makes the derived path
+per-user for free.
+
+**Stamping.** One call site, as predicted. `create_conversation(user=…)`
+stores `None` for an empty name, so "no user" has exactly one
+representation and the `IS NULL` filter cannot miss half of them.
+**Resume never re-labels** — a conversation belongs to whoever created it,
+even if a different name is active now; re-stamping would quietly move
+someone else's work into the current bucket. Tested.
+
+**Filtering.** `list_conversations(user=None, *, include_unowned=True)`.
+The default matters more than it looks: every conversation predating
+migration 4 has a NULL user, so excluding them would make a user's entire
+history vanish from the sidebar the first time they picked a name — a
+data-loss-shaped surprise from a labelling feature. `known_users()` reads
+`SELECT DISTINCT "user"`, so a name exists because a conversation used it;
+no user table, no registration step.
+
+**CLI.** `--user` on `aida chat` and `aida run`; `--user` and `--all-users`
+on `aida conversations list`, where `--all-users` beats `--user` beats the
+configured default (an explicit "show me everything" must never be narrowed
+by an `active_user` left in `config.yaml`). The listing's user column
+appears only once something in the DB uses it, so a single-user install's
+output is byte-for-byte unchanged.
+
+### Not done, and why
+
+The GUI (§3 step 3, §3 step 5). Qt could not be run in the session that did
+this work — `libEGL` is missing from that container — and the sidebar
+filter is precisely the change that should not be written untested: a
+filter shipped without its **Show all** escape makes hidden work read as
+lost work. `AppConfig.active_user` is already honoured by the GUI through
+`resolve_active_user`, so setting it in `config.yaml` labels conversations
+today; only the picker and the filtering are missing.
+
+**The attachment store (`documents_implementation.md` Phase B) is now
+unblocked** — the records-dir layout is settled and `{user}` expansion
+happens before any consumer sees a path.

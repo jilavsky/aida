@@ -30,6 +30,32 @@ decision revised), unrelated to what shipped when. Entries below link to
   deliberately excluded and keeps asking unconditionally, every time. See
   [docs/safety-and-permissions.md](docs/safety-and-permissions.md#allow-for-this-chat).
 
+- **Conversations can carry a `user` label** — an organization axis for a
+  shared beamline machine (where the buckets are people) or a laptop with
+  several projects on it (where they are tasks). A flat, ever-growing chat
+  list has no safe bulk cleanup: "delete everything older than 30 days" in
+  a shared list takes conversations somebody else wanted kept. Set
+  `active_user` in `config.yaml`, or pass `--user NAME` to `aida chat` /
+  `aida run`, or set `$AIDA_USER` for headless and scheduled runs
+  (precedence in that order, flag first). `aida conversations list` gains
+  `--user` and `--all-users`.
+
+  **This is organization, not security.** Anyone at the machine can pick
+  any name; there is no password and no permission difference between
+  names. Nothing changes for an install that does not set one: the column
+  stays NULL, nothing is filtered, and no path gains a user segment.
+
+  `{user}` can be written into `records_dir`, `target_folder`,
+  `source_folders`, `templates_dir` and `saved_scripts_dir`, and is
+  expanded to a path-safe slug of the active name (`Jan Ilavsky` →
+  `jan-ilavsky`, no active user → `default`) before anything reads those
+  folders — so each bucket's transcripts and scripts land in their own
+  place. Resuming a conversation never re-labels it: it belongs to
+  whoever created it, even if a different name is active now. The GUI
+  picker and sidebar filtering are still to come; the label is set through
+  `config.yaml` or the CLI meanwhile. See
+  [`planning/multiuser_plan.md`](planning/multiuser_plan.md).
+
 ### Fixed
 
 - A document's images are still not extracted — every reader is text-only —

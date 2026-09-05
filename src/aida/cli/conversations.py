@@ -19,6 +19,7 @@ from pathlib import Path
 from aida.artifacts.store import ArtifactStore
 from aida.config.paths import ensure_records_dir
 from aida.config.settings import Settings, load_settings
+from aida.config.users import resolve_active_user
 from aida.persistence.cleanup import delete_conversation
 from aida.persistence.recorder import ConversationNotFoundError, ConversationRecorder
 from aida.persistence.store import ConversationStore, ConversationSummary
@@ -58,14 +59,31 @@ def _records_dir(settings: Settings) -> Path:
 def _format_row(summary: ConversationSummary) -> str:
     title = summary.title or "(untitled)"
     workspace = summary.workspace_name or "-"
-    return f"{summary.id[:8]}  {summary.updated_at}  {workspace:<16}  {summary.message_count:>4} msgs  {title}"
+    # The user column only appears once something in the DB actually uses
+    # it, so a single-user install's listing is byte-for-byte unchanged.
+    user = f"  [{summary.user}]" if summary.user else ""
+    return (
+        f"{summary.id[:8]}  {summary.updated_at}  {workspace:<16}  "
+        f"{summary.message_count:>4} msgs  {title}{user}"
+    )
 
 
-def cmd_list(_args: argparse.Namespace) -> int:
+def cmd_list(args: argparse.Namespace) -> int:
+    # --all-users wins over --user, and both win over the configured
+    # default: an explicit "show me everything" must never be narrowed by
+    # an active_user someone left in config.yaml.
+    active_user = (
+        ""
+        if getattr(args, "all_users", False)
+        else resolve_active_user(getattr(args, "user", "") or None, app_config=load_settings().app)
+    )
     store = ConversationStore()
     try:
-        summaries = store.list_conversations()
+        summaries = store.list_conversations(active_user or None)
         if not summaries:
+            if active_user:
+                print(f"No conversations for user {active_user!r} yet (--all-users to see every one).")
+                return 0
             print("No conversations yet.")
             return 0
         for summary in summaries:
@@ -239,7 +257,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aida conversations")
     sub = parser.add_subparsers(dest="subcommand", required=True)
 
-    sub.add_parser("list", help="List all conversations, most recently updated first")
+    listing = sub.add_parser("list", help="List all conversations, most recently updated first")
+    listing.add_argument(
+        "--user",
+        default="",
+        help="Show only this user's conversations, plus unlabelled ones (default: $AIDA_USER, "
+        "else config.yaml's active_user; pass --all-users to ignore it)",
+    )
+    listing.add_argument(
+        "--all-users",
+        action="store_true",
+        help="List every conversation regardless of its user label",
+    )
 
     resume = sub.add_parser("resume", help="Resume a conversation in an interactive chat session")
     resume.add_argument("id", help="Conversation id, or an unambiguous prefix (e.g. the first 8 chars)")

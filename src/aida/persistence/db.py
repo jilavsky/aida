@@ -28,7 +28,7 @@ from pathlib import Path
 
 from aida.config.paths import db_path
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 # The Phase 5 GUI opens the first-ever connection to a fresh DB file from
 # two threads at once (MainWindow.__init__ starts a session on the
@@ -124,6 +124,25 @@ _MIGRATIONS: dict[int, str] = {
     );
 
     CREATE INDEX IF NOT EXISTS idx_schedule_runs_name ON schedule_runs(schedule_name, fired_at);
+    """,
+    # The "user" organization axis (planning/multiuser_plan.md). NULL for
+    # every conversation created before this column existed and for every
+    # install that never sets an active user — which is why the filtering
+    # side treats NULL as "visible to everyone" rather than "belongs to
+    # nobody": on upgrade, a user's entire history must not vanish from
+    # their sidebar the first time they type a name.
+    #
+    # Quoted as "user" in every statement here and in store.py. SQLite
+    # accepts it bare, but it is reserved in other engines and reads
+    # confusingly next to `PRAGMA user_version`, which is unrelated to it.
+    #
+    # This is an organization label, not an identity: no password, no
+    # permission difference, and nothing here is a security boundary. It is
+    # as likely to hold a project name as a person's.
+    4: """
+    ALTER TABLE conversations ADD COLUMN "user" TEXT;
+
+    CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations("user", updated_at);
     """,
 }
 

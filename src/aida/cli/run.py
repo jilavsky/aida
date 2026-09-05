@@ -75,6 +75,12 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="preapproved_tools",
         help="A namespaced MCP tool name to approve despite its 'confirm before run' flag (repeatable)",
     )
+    parser.add_argument(
+        "--user",
+        default="",
+        help="Organization label for the conversation this run creates (default: $AIDA_USER, else "
+        "config.yaml's active_user). Labels and filters only — not authentication.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit a machine-readable JSON result summary")
     return parser
 
@@ -101,6 +107,7 @@ async def _async_main(
     yes_in_allowed: bool,
     preapproved_tools: set[str],
     as_json: bool,
+    user: str | None = None,
 ) -> int:
     confirm_callback = build_headless_confirm_callback(
         yes_in_allowed=yes_in_allowed, preapproved_tools=preapproved_tools
@@ -114,6 +121,7 @@ async def _async_main(
             mcp_group=mcp_group,
             mcp_names=mcp_names,
             confirm_callback=confirm_callback,
+            user=user,
         )
     except (UnknownProfileError, UnknownWorkspaceError, UnknownMcpServerError) as exc:
         print(str(exc), file=sys.stderr)
@@ -188,5 +196,6 @@ def main(argv: list[str] | None = None) -> int:
             yes_in_allowed=args.yes_in_allowed,
             preapproved_tools=set(args.preapproved_tools),
             as_json=args.json,
+            user=args.user or None,
         )
     )
