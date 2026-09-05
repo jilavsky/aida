@@ -16,6 +16,13 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+## [0.1.0b4] - 2026-09-05
+
+Conversation organization, attached-document handling, figure tools, and an
+optional OCR backend — plus a documentation pass ahead of wider use. Every
+new capability here is opt-in and off by default; an install that changes
+nothing behaves as 0.1.0b3 did.
+
 ### Added
 
 - **"Allow for this chat"**: every safety-confirmation dialog/prompt now
@@ -433,7 +440,8 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0b3...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0b4...HEAD
+[0.1.0b4]: https://github.com/jilavsky/aida/compare/v0.1.0b3...v0.1.0b4
 [0.1.0b3]: https://github.com/jilavsky/aida/compare/v0.1.0b2...v0.1.0b3
 [0.1.0b2]: https://github.com/jilavsky/aida/compare/v0.1.0b1...v0.1.0b2
 [0.1.0b1]: https://github.com/jilavsky/aida/compare/v0.0.1...v0.1.0b1

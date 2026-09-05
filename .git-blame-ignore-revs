@@ -1,0 +1,14 @@
+# Revisions `git blame` should look through rather than at.
+#
+# Enable it once per clone:
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub's blame view honours this file automatically.)
+#
+# Only ever add a commit that changed *no behaviour*. A mixed commit cannot
+# be un-mixed later, which is why the formatting pass below was kept
+# deliberately separate from the work around it.
+
+# Formatting: ruff format across the tree, 2026-09-05.
+# Verified AST-identical before and after, except 14 files where only
+# docstring indentation changed.
+70d5d0b90f53ba32333a2db864c77c0387de199b

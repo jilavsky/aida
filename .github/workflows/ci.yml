@@ -40,11 +40,21 @@ jobs:
             libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
             libdbus-1-3
 
-      - name: Install package (dev, gui, docs extras)
-        run: pip install -e ".[dev,gui,docs]"
+      - name: Install package (dev, gui, docs, ocr extras)
+        # `ocr` is only httpx, which the openai/anthropic SDKs already pull
+        # in — installing it explicitly means CI exercises the real
+        # optional-import path rather than the stubs alone.
+        run: pip install -e ".[dev,gui,docs,ocr]"
 
       - name: Ruff lint
         run: ruff check .
+
+      # Added after a one-off `ruff format` pass over the whole tree
+      # (see .git-blame-ignore-revs). Gating it only made sense once the
+      # tree was already clean: doing it the other way round turns main red
+      # on the very commit that fixes it.
+      - name: Ruff format check
+        run: ruff format --check .
 
       # Two invocations, not one `pytest -v` over the whole tree: every GUI
       # test shares a single process-wide QApplication (Qt disallows more

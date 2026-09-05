@@ -18,6 +18,7 @@ in `PLAN.md` and `planning/`. Before opening a PR:
    ```bash
    pip install -e ".[dev]"
    ruff check .
+   ruff format --check .
    pytest
    ```
 
