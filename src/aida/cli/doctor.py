@@ -197,6 +197,42 @@ def _effective_records_dir(settings: Settings | None) -> Path:
     return paths.ensure_records_dir(Path(configured) if configured else None)
 
 
+def _check_orphan_attachments(settings: Settings | None) -> CheckResult:
+    """Attachment folders with no conversation behind them.
+
+    The backstop for "deleting a chat deletes its documents". Every orphan
+    is a copy of a document somebody believed they had deleted — left by an
+    interrupted delete, a hand-removed database, or a records folder that
+    moved before the paths were recorded. Reported, never removed here:
+    `aida conversations gc` does that, so a diagnostic command never
+    deletes anything on its own.
+    """
+    from aida.persistence.cleanup import find_orphan_attachment_dirs
+    from aida.persistence.store import ConversationStore
+
+    try:
+        records_dir = _effective_records_dir(settings)
+        store = ConversationStore()
+        try:
+            orphans = find_orphan_attachment_dirs(store, records_dir=records_dir)
+        finally:
+            store.close()
+    except Exception as exc:  # noqa: BLE001 - a diagnostic must never crash the report
+        return CheckResult("orphan_attachments", True, f"skipped — could not check ({exc})")
+
+    if not orphans:
+        return CheckResult("orphan_attachments", True, "no leftover attachment folders")
+    names = ", ".join(o.name for o in orphans[:5])
+    more = f" (+{len(orphans) - 5} more)" if len(orphans) > 5 else ""
+    return CheckResult(
+        "orphan_attachments",
+        False,
+        f"{len(orphans)} attachment folder(s) with no conversation: {names}{more} — "
+        f"these hold copies of documents whose chat is gone; "
+        f"run `aida conversations gc` to remove them",
+    )
+
+
 def _check_pyirena_mcp(settings: Settings | None) -> CheckResult:
     """Is pyIrena's MCP server installed, and is AIDA actually configured to
     use it?
@@ -346,6 +382,7 @@ def run_checks() -> list[CheckResult]:
     results.append(_check_writable("artifacts_dir", paths.artifacts_dir()))
     results.append(_check_writable("records_dir", _effective_records_dir(settings)))
     results.append(_check_keyring())
+    results.append(_check_orphan_attachments(settings))
     results.append(_check_pyirena_mcp(settings))
     results.append(_check_context_windows(settings))
     results.append(_check_max_tokens_vs_context_window(settings))

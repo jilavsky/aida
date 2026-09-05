@@ -37,6 +37,27 @@ def sidecar_dir(records_dir: Path, sidecar_dirname: str, conversation_id: str) -
     return records_dir / sidecar_dirname / conversation_id[:8]
 
 
+#: Folder name under the records dir holding the *originals* the user
+#: attached to a conversation, plus what AIDA derived from them. A peer of
+#: the sidecar folder rather than a child of it: a sidecar holds images the
+#: conversation *produced*, this holds what was fed *into* it.
+ATTACHMENTS_DIRNAME = "attachments"
+
+
+def attachments_dir(records_dir: Path, conversation_id: str) -> Path:
+    """Where one conversation's attached documents and their derived files
+    live — one subfolder per conversation, mirroring ``sidecar_dir``, so
+    deleting it can never touch another conversation's.
+
+    Callers must not recompute this at delete time: the effective
+    ``records_dir`` can change (Settings has a Records folder field), which
+    would leave the real folder orphaned and undeletable. The resolved path
+    is recorded on the conversation row — see
+    ``ConversationStore.set_attachments_path`` — and deletion reads it back.
+    """
+    return records_dir / ATTACHMENTS_DIRNAME / conversation_id[:8]
+
+
 def record_file_path(records_dir: Path, conversation_id: str, title: str | None) -> Path:
     slug = slugify(title) if title else conversation_id[:8]
     return records_dir / f"{slug}-{conversation_id[:8]}.md"
@@ -58,6 +79,7 @@ def render_transcript(
     artifacts: list[ArtifactRecord],
     sidecar_dirname: str,
     sidecar_filenames: dict[str, str] | None = None,
+    attachment_names: list[str] | None = None,
 ) -> str:
     """Render the full Markdown transcript text (no file I/O — callers that
     also need to copy artifact files use ``write_transcript`` instead).
@@ -79,6 +101,13 @@ def render_transcript(
     lines.append(f"- **workspace:** {workspace_name or '(none)'}")
     lines.append(f"- **profile:** {profile_name or '(none)'}")
     lines.append(f"- **conversation id:** `{conversation_id}`")
+    # Linked relatively, like the sidecar images, so the transcript still
+    # resolves after the records folder is moved or zipped up. Listed at
+    # all because a transcript that discusses a paper without pointing at
+    # it is an incomplete record of the conversation.
+    for name in attachment_names or []:
+        rel = f"{ATTACHMENTS_DIRNAME}/{conversation_id[:8]}/{name}"
+        lines.append(f"- **attachment:** [{name}]({rel})")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -120,6 +149,7 @@ def write_transcript(
     messages: list[Message],
     artifacts: list[ArtifactRecord],
     sidecar_dirname: str = "figures",
+    attachments_path: Path | None = None,
 ) -> Path:
     """Copy every image/file artifact into this conversation's sidecar
     folder, render the transcript referencing those copies, and write it to
@@ -155,6 +185,22 @@ def write_transcript(
     copied = copy_images_to_sidecar(placeholders, target_dir, artifact_store)
     sidecar_filenames = {artifact_id: path.name for artifact_id, path in copied.items()}
 
+    # Read off disk rather than tracked separately: the folder is the
+    # record. A file the user dropped in there by hand is listed too, and
+    # one they deleted stops being listed, with no bookkeeping to drift.
+    attachment_names: list[str] = []
+    if attachments_path is not None and attachments_path.is_dir():
+        present = {entry.name for entry in attachments_path.iterdir() if entry.is_file()}
+        # List the documents themselves, not what was derived from them:
+        # `paper.pdf.md` holds the extracted text of `paper.pdf` and is not
+        # a second attachment. Recognised by the companion actually being
+        # there, rather than by trusting a naming convention on its own.
+        attachment_names = sorted(
+            name
+            for name in present
+            if not (name.endswith(".md") and name[: -len(".md")] in present)
+        )
+
     text = render_transcript(
         conversation_id=conversation_id,
         title=title,
@@ -164,12 +210,15 @@ def write_transcript(
         artifacts=artifacts,
         sidecar_dirname=sidecar_dirname,
         sidecar_filenames=sidecar_filenames,
+        attachment_names=attachment_names,
     )
     path.write_text(text, encoding="utf-8")
     return path
 
 
 __all__ = [
+    "ATTACHMENTS_DIRNAME",
+    "attachments_dir",
     "record_file_path",
     "render_transcript",
     "sidecar_dir",

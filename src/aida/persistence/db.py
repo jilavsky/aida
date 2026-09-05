@@ -28,7 +28,7 @@ from pathlib import Path
 
 from aida.config.paths import db_path
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 # The Phase 5 GUI opens the first-ever connection to a fresh DB file from
 # two threads at once (MainWindow.__init__ starts a session on the
@@ -143,6 +143,20 @@ _MIGRATIONS: dict[int, str] = {
     ALTER TABLE conversations ADD COLUMN "user" TEXT;
 
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations("user", updated_at);
+    """,
+    # Where this conversation's files actually went, recorded rather than
+    # recomputed. `delete_conversation` used to derive the sidecar folder
+    # from the *current* records_dir setting — so changing the Records
+    # folder in Settings orphaned every older conversation's sidecar,
+    # undeletable because nothing pointed at it any more. For `figures/`
+    # that is clutter; for `attachments/`, which holds copies of documents
+    # the user fed into the conversation, it would be a broken promise:
+    # deleting a chat has to delete its documents. Both columns are NULL
+    # for conversations created before this migration, and deletion falls
+    # back to the computed path for those — the old behaviour, unchanged.
+    5: """
+    ALTER TABLE conversations ADD COLUMN attachments_path TEXT;
+    ALTER TABLE conversations ADD COLUMN sidecar_path TEXT;
     """,
 }
 

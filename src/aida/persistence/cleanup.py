@@ -35,8 +35,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from aida.config.paths import artifacts_dir as default_artifacts_dir
-from aida.persistence.records import sidecar_dir
+from aida.persistence.records import ATTACHMENTS_DIRNAME, attachments_dir, sidecar_dir
 from aida.persistence.store import ConversationStore, ConversationSummary
+
+
+def _is_own_conversation_dir(candidate: Path, *, parent_name: str, conversation_id: str) -> bool:
+    """Whether ``candidate`` has the shape of a folder this application
+    wrote for this conversation: ``<anything>/<parent_name>/<conv8>``.
+
+    Needed because the two checks that guard an ``rmtree`` here pull
+    against each other. Containment in the *current* records dir is the
+    obvious guard, but it fails exactly when the recorded path matters
+    most: the user changed their Records folder after the files were
+    written, which is the whole reason the path is recorded rather than
+    recomputed. Structure is the check that survives that move — a folder
+    named for this conversation, directly under a folder named
+    ``figures``/``attachments``, is ours wherever it now sits, while a
+    corrupted or hand-edited row pointing at ``/`` or a home directory
+    matches neither test and is refused.
+    """
+    return candidate.parent.name == parent_name and candidate.name == conversation_id[:8]
 
 
 def _is_inside(candidate: Path, root: Path) -> bool:
@@ -59,6 +77,12 @@ class DeletionResult:
     deleted_artifact_files: list[str] = field(default_factory=list)
     deleted_sidecar_dir: bool = False
     deleted_record_file: bool = False
+    #: Whether this conversation's attachments folder — the copies of
+    #: documents a person fed into it — was removed. Surfaced rather than
+    #: silent because it is the visible half of a promise: deleting a chat
+    #: deletes its documents, so someone who deletes a conversation holding
+    #: a manuscript under review does not find it still on disk.
+    deleted_attachments_dir: bool = False
     #: Recorded artifact paths that live outside AIDA's own storage — the
     #: user's source files and the reports written into their target
     #: folder. Left on disk on purpose (see the module docstring); surfaced
@@ -121,12 +145,41 @@ def delete_conversation(
             deleted_files.append(str(path))
 
     deleted_sidecar = False
+    deleted_attachments = False
     deleted_record = False
     if conversation is not None:
-        sidecar = sidecar_dir(records_dir, conversation.sidecar_dirname, conversation_id)
-        if sidecar.exists():
+        # Recorded path first, computed path as the fallback for rows that
+        # predate migration 5. Recomputing alone is what left folders
+        # orphaned whenever the Records folder setting changed after the
+        # files were written.
+        sidecar = (
+            Path(conversation.sidecar_path)
+            if conversation.sidecar_path
+            else sidecar_dir(records_dir, conversation.sidecar_dirname, conversation_id)
+        )
+        sidecar_ok = _is_inside(sidecar, records_dir) or _is_own_conversation_dir(
+            sidecar, parent_name=conversation.sidecar_dirname, conversation_id=conversation_id
+        )
+        if sidecar_ok and sidecar.exists():
             shutil.rmtree(sidecar)
             deleted_sidecar = True
+
+        attachments = (
+            Path(conversation.attachments_path)
+            if conversation.attachments_path
+            else attachments_dir(records_dir, conversation_id)
+        )
+        # The gate is not optional. A recorded path is data from a row that
+        # could have been hand-edited or corrupted, and this is an rmtree:
+        # refusing anything that is neither inside the current records dir
+        # nor shaped like one of our own conversation folders is the
+        # difference between a cleanup and an incident.
+        attachments_ok = _is_inside(attachments, records_dir) or _is_own_conversation_dir(
+            attachments, parent_name=ATTACHMENTS_DIRNAME, conversation_id=conversation_id
+        )
+        if attachments_ok and attachments.exists():
+            shutil.rmtree(attachments)
+            deleted_attachments = True
 
         if conversation.record_path:
             record_path = Path(conversation.record_path)
@@ -142,14 +195,49 @@ def delete_conversation(
         deleted_artifact_rows=artifact_count,
         deleted_artifact_files=deleted_files,
         deleted_sidecar_dir=deleted_sidecar,
+        deleted_attachments_dir=deleted_attachments,
         deleted_record_file=deleted_record,
         skipped_external_files=skipped_files,
     )
 
 
+def find_orphan_attachment_dirs(store: ConversationStore, *, records_dir: Path) -> list[Path]:
+    """Attachment folders under ``records_dir`` with no conversation row.
+
+    The backstop for the promise that deleting a chat deletes its
+    documents. Orphans are not hypothetical: an interrupted delete, a
+    hand-removed database, or a records folder that moved before the paths
+    were recorded all leave one — and every orphan is a copy of a document
+    somebody believed they had deleted. Read-only; callers decide what to
+    do with the list (``aida doctor`` reports, ``aida conversations gc``
+    removes).
+    """
+    root = records_dir / ATTACHMENTS_DIRNAME
+    if not root.is_dir():
+        return []
+    live = {c.id[:8] for c in store.list_conversations()}
+    return sorted(child for child in root.iterdir() if child.is_dir() and child.name not in live)
+
+
+def delete_orphan_attachment_dirs(store: ConversationStore, *, records_dir: Path) -> list[Path]:
+    """Remove what ``find_orphan_attachment_dirs`` found. Each is re-checked
+    for our own shape immediately before the ``rmtree`` rather than trusted
+    from the listing, so a folder that appeared in between cannot be caught
+    by a stale path."""
+    removed: list[Path] = []
+    for orphan in find_orphan_attachment_dirs(store, records_dir=records_dir):
+        if orphan.parent.name != ATTACHMENTS_DIRNAME or not _is_inside(orphan, records_dir):
+            continue
+        shutil.rmtree(orphan)
+        removed.append(orphan)
+    return removed
+
+
 __all__ = [
     "DeletionResult",
     "delete_conversation",
+    "delete_orphan_attachment_dirs",
+    "find_orphan_attachment_dirs",
     "list_conversations_by_age",
     "list_conversations_older_than",
 ]

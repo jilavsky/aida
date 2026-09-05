@@ -159,30 +159,21 @@ unambiguous is done and archived in `planning/COMPLETED.md` §7; what is
 left below either needs a real UX decision, needs domain knowledge only
 the user can supply, or is a read-through rather than a mechanical edit.
 
-- [ ] **Documents: the attachment store (Phase B).** A real persistence
-      bug: extracted *text* survives a resume (it is inlined into the
-      persisted message), but the original file is never copied and an
-      attached image is recorded at the user's own path — clean out that
-      folder and a resumed conversation silently loses the pixels. The
-      `.md` transcript omits attachments entirely (it filters on
-      `kind == "ImageArtifact"`; attachments are `"UserImage"`). Ingest
-      into `<records_dir>/attachments/<conv8>/` as a peer of the existing
-      `figures/` sidecar. **Blocked on §1.3's path resolution** — build it
-      once, on the settled layout.
-- [ ] **Documents: deletion must be complete.** Deleting a chat deletes its
-      documents — a user who deletes a conversation holding an unpublished
-      manuscript must not find it still in their home directory. Needs a
-      recorded `attachments_path` on the conversation row (like
-      `record_path`) rather than recomputing it, because
-      `delete_conversation` currently derives the sidecar path from the
-      *current* `records_dir` — change that setting in Settings and older
-      folders become undeletable orphans. Latent for `figures/` today;
-      unacceptable for attachments. Plus an orphan sweeper in
-      `aida doctor` as a backstop.
-- [ ] **Documents: figure index + OCR (Phases C, D).** Labeled figure index
-      and a `get_document_figure` pull tool; then the optional Mistral OCR
-      backend behind an `ocr` extra, a per-workspace switch, an upload
-      confirmation and a plain-text fallback. Full build order in
+- [ ] **Documents: tell the user where an attachment went** (Phase B's
+      remaining GUI half). A status-bar line on ingest and an **Open
+      Conversation Folder** item beside the existing records-folder action.
+      The store, the delete guarantee and the orphan sweep shipped
+      2026-09-05; only these two GUI touches and `docs/documents.md` are
+      left, held until the Qt suite can be run.
+- [ ] **Documents: the Mistral OCR backend (Phase D).** The figure index
+      shipped 2026-09-05 on the `pymupdf` backend, which labels reliably on
+      single-column documents and reports `low` confidence on the
+      two-column layouts most journals use. OCR is what raises that
+      ceiling: an optional backend behind an `ocr` extra (three REST calls,
+      no new package beyond declaring `httpx`), a per-workspace switch,
+      a confirmation on upload, never in a headless run without explicit
+      pre-approval, and a plain-text fallback whenever it is unavailable.
+      Build order in
       [`planning/documents_implementation.md`](planning/documents_implementation.md).
 - [ ] **Enforce `ruff format` in CI** (external review, P3). `ruff check`
       passes and is gated; `ruff format --check .` currently reports

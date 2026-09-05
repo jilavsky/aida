@@ -30,6 +30,55 @@ decision revised), unrelated to what shipped when. Entries below link to
   deliberately excluded and keeps asking unconditionally, every time. See
   [docs/safety-and-permissions.md](docs/safety-and-permissions.md#allow-for-this-chat).
 
+- **You can ask about a figure in an attached paper.** Two new tools:
+  `list_document_figures` names what is in a document — label, caption,
+  page — as *text only*, and `get_document_figure` returns one image by
+  label. Nothing pushes pictures at the model: an unlabelled figure it
+  cannot name is worse than no figure, and this way a twelve-figure paper
+  costs a couple of hundred tokens to describe while the agent spends its
+  vision budget on the two figures that matter.
+
+  Labels are honest about how sure they are. A caption matched on a
+  single-column page is reported as reliable; on a multi-column layout —
+  where the text below an image is regularly the next column — the index
+  says the labels are uncertain and to check the caption before relying on
+  a figure number. An image with no caption nearby gets a positional label
+  (`image 2 (page 4)`) rather than an invented one.
+
+  Extraction happens the first time you ask, not when the document is
+  attached, so a paper nobody asks a figure question about costs nothing;
+  results are cached beside the document in its `.assets` folder and go
+  away with the conversation like everything else there. Figures are
+  available for documents **you attached** — a file the agent opened itself
+  with `read_file` was never copied into the conversation, and the tool
+  says so rather than reporting an empty list.
+
+- **A conversation now keeps the documents you attach to it.** Attached
+  *images* were already copied into AIDA's artifact store and survived a
+  restart; the documents were not — a PDF dropped in from a Downloads
+  folder that later got cleaned left the conversation discussing a paper
+  nobody could open again, and the Markdown transcript held what the model
+  *said* about it but not the thing itself. Attachments are now copied
+  into `<records dir>/attachments/<conversation>/` alongside the text
+  extracted from them, and linked from the transcript. That is the records
+  folder rather than `~/.aida` on purpose: you can find, browse and clean
+  these by hand.
+
+  Only files **you** attach are copied. A file the agent opens with
+  `read_file` is left where it is — it already lives in your own folders,
+  and duplicating it would put a second copy of possibly-sensitive data
+  somewhere you did not ask for.
+
+  **Deleting a conversation deletes its documents.** Not tidiness: someone
+  who deletes a chat holding a manuscript under review must not find that
+  manuscript still in their home directory. The folder's real location is
+  recorded on the conversation rather than recomputed at delete time, so
+  changing the Records folder in Settings can no longer strand it — a
+  latent bug that already applied to the `figures/` sidecar and is fixed
+  for both. As a backstop, `aida doctor` reports attachment folders whose
+  conversation is gone, and a new `aida conversations gc` removes them
+  after asking.
+
 - **Conversations can carry a `user` label** — an organization axis for a
   shared beamline machine (where the buckets are people) or a laptop with
   several projects on it (where they are tasks). A flat, ever-growing chat

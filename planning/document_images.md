@@ -36,16 +36,17 @@ Traced through `recorder.py` → `store.py` → `records.py`:
 | Thing | Survives resume? | Why |
 |---|---|---|
 | Extracted document **text** | **Yes** | `_augment_with_attachments` inlines it into the user message's `content`, and every message is persisted to `messages`. The same is true of an agent-initiated `read_file` — its tool result is a persisted message. |
-| Attached **image pixels** | **Only while the user's original file stays put** | `append_attached_images` stores `ref.path` — the path in whatever folder the user picked it from. Nothing is copied. |
+| Attached **image pixels** | **Yes** — *corrected 2026-09-05* | `ConversationRecorder._own_attached_images` adopts each one into the artifact store first, and it is *that* copy's path `append_attached_images` records. An earlier reading of this file missed the `_own_attached_images` call and reported the raw `ref.path`; verified since by deleting the original and resuming. |
 | The **original PDF** | **No** | Never copied anywhere. Only its extracted text lives on. |
 | Attachments in the **`.md` transcript** | **No** | `render_transcript`/`write_transcript` filter on `kind == "ImageArtifact"`; user attachments are `USER_IMAGE_KIND = "UserImage"`, so they are neither copied into the sidecar folder nor linked in the transcript. |
 
-So the model does keep the document's *words* across a restart — that part
-works, and better than expected. But a dropped figure from a Downloads
-folder that gets cleaned, a file on a USB stick, or a renamed source and
-the pixels are silently gone, with a stale absolute path in the DB as the
-only trace. The transcript in `~/Documents/Aida/` is likewise incomplete:
-it holds what the model *said* about a document but not the document.
+So the model keeps the document's *words* across a restart, and an attached
+image keeps its pixels — both better than expected. The real gap is
+narrower than first written here: it is the **attached documents**. A PDF
+dropped in from a Downloads folder that later gets cleaned leaves the
+conversation discussing a paper nobody can open again, and the transcript
+in `~/Documents/Aida/` holds what the model *said* about it but not the
+thing itself.
 
 `aida.persistence.cleanup` is already correct about this and should stay
 that way: it deletes only files inside `~/.aida/artifacts/`, and

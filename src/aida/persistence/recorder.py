@@ -25,7 +25,8 @@ from pathlib import Path
 from aida.artifacts.base import Artifact
 from aida.artifacts.store import ArtifactStore
 from aida.config.logging_setup import get_logger
-from aida.persistence.records import record_file_path, write_transcript
+from aida.documents.attachments import IngestResult, store_attachments
+from aida.persistence.records import attachments_dir, record_file_path, write_transcript
 from aida.persistence.store import ConversationStore
 from aida.providers.base import ImageRef, Message
 
@@ -91,6 +92,9 @@ class ConversationRecorder:
         #: turn, session close) rather than waiting out the interval.
         self._transcript_dirty = False
         self._last_transcript_export: float | None = None
+        #: Cached so the row is written once per conversation, not on every
+        #: attachment. Populated from the row on resume.
+        self._attachments_path: Path | None = None
 
         if resume:
             if conversation_id is None:
@@ -109,6 +113,9 @@ class ConversationRecorder:
             # Re-labelling on resume would silently move another person's
             # conversation into the current user's bucket.
             self.user = existing.user
+            self._attachments_path = (
+                Path(existing.attachments_path) if existing.attachments_path else None
+            )
             self._record_path = Path(existing.record_path) if existing.record_path else None
         else:
             self.title = None
@@ -127,6 +134,50 @@ class ConversationRecorder:
                 user=user,
             )
             self._record_path = None
+
+    def attachments_dir(self) -> Path:
+        """This conversation's attachments folder. Pure lookup — see
+        ``_claim_attachments_dir`` for the version that records it.
+
+        Recorded, not recomputed: the effective ``records_dir`` can change
+        (Settings has a Records folder field, and it may carry a ``{user}``
+        segment), and deletion must remove the folder the files are
+        *actually* in. Without this, changing that setting would orphan a
+        folder holding copies of the user's documents — undeletable,
+        because nothing points at it any more.
+        """
+        if self._attachments_path is not None:
+            return self._attachments_path
+        return attachments_dir(self.records_dir, self.conversation_id)
+
+    def _claim_attachments_dir(self) -> Path:
+        """Same path, but recorded on the row — called only when something
+        is actually being written there. Keeping the recording out of the
+        read path above matters: the figure tools ask for this folder on
+        every call, and a plain lookup must not write to the database or
+        make an attachment-free conversation look like it had one."""
+        directory = self.attachments_dir()
+        if self._attachments_path is None:
+            self._attachments_path = directory
+            self.store.set_attachments_path(
+                self.conversation_id, str(directory), timestamp=_now_iso()
+            )
+        return directory
+
+    def keep_attachments(self, paths: list[str], *, texts: dict[str, str] | None = None) -> IngestResult:
+        """Copy documents a person attached into this conversation's own
+        folder, so they survive the original being moved or cleaned up and
+        so the transcript in the records folder is complete.
+
+        Only ever called for files a *person* attached — never for one the
+        agent opened with ``read_file``, which already lives where the user
+        put it (see ``aida.documents.attachments``). Failures are reported
+        on the result, never raised: the attachment's content is already in
+        the message, so a failed bookkeeping copy must not fail the turn.
+        """
+        if not paths:
+            return IngestResult()
+        return store_attachments(paths, self._claim_attachments_dir(), texts=texts)
 
     def record_message(self, message: Message) -> int:
         """Persist one finalized message immediately, set an auto-derived
@@ -258,6 +309,10 @@ class ConversationRecorder:
             messages=self.store.load_messages(self.conversation_id),
             artifacts=self.store.load_artifacts(self.conversation_id),
             sidecar_dirname=self.sidecar_dirname,
+            # Only when something has actually been attached — never
+            # created as a side effect of writing a transcript, so an
+            # ordinary conversation leaves no empty folder behind.
+            attachments_path=self._attachments_path,
         )
         self.store.set_record_path(self.conversation_id, str(self._record_path), timestamp=_now_iso())
         self._transcript_dirty = False

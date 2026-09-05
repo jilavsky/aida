@@ -320,20 +320,34 @@ class ChatBridge(QObject):
         """
         return self._turn_future is not None
 
-    def send(self, user_text: str, *, images: list[ImageRef] | None = None) -> None:
+    def send(
+        self,
+        user_text: str,
+        *,
+        images: list[ImageRef] | None = None,
+        attachment_paths: list[str] | None = None,
+    ) -> None:
         """Start a new turn. No-op if the session hasn't finished starting
         yet — callers (the input box) should be disabled until
         ``session_ready``.
 
         ``images`` (B1): GUI image attachments, passed straight through to
-        ``ChatSession.send`` — see its docstring for what happens to them."""
+        ``ChatSession.send`` — see its docstring for what happens to them.
+        ``attachment_paths``: the same attachments as paths, so the
+        conversation keeps its own copies of the documents a person fed
+        into it (``aida.documents.attachments``)."""
         if self.session is None or self._closing:
             return
         self._turn_future = asyncio.run_coroutine_threadsafe(
-            self._drain(user_text, images), self._loop_thread.loop
+            self._drain(user_text, images, attachment_paths), self._loop_thread.loop
         )
 
-    async def _drain(self, user_text: str, images: list[ImageRef] | None = None) -> None:
+    async def _drain(
+        self,
+        user_text: str,
+        images: list[ImageRef] | None = None,
+        attachment_paths: list[str] | None = None,
+    ) -> None:
         """Stream one turn's events out as signals.
 
         Every emit is gated on ``self._closing``: once this bridge is being
@@ -349,7 +363,9 @@ class ChatBridge(QObject):
         if not self._closing:
             self.turn_started.emit()
         try:
-            async for event in self.session.send(user_text, images=images):
+            async for event in self.session.send(
+                user_text, images=images, attachment_paths=attachment_paths
+            ):
                 if not self._closing:
                     self.event_received.emit(event)
         except Exception as exc:  # noqa: BLE001 - must never crash the loop thread

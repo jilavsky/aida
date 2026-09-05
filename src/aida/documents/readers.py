@@ -141,7 +141,10 @@ def _dropped_images_note(count: int) -> str:
     subject = "1 embedded image, which was" if count == 1 else f"{count} embedded images, which were"
     return (
         f"\n\n[This document contains {subject} not extracted — only its text "
-        f"is shown above. Say so if the answer depends on a figure.]"
+        f"is shown above. If it was attached to this conversation, "
+        f"list_document_figures can name its figures and get_document_figure "
+        f"can show you one; otherwise say the answer depends on a figure you "
+        f"cannot see.]"
     )
 
 

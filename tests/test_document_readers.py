@@ -348,6 +348,7 @@ def test_docx_reports_dropped_images(tmp_path: Path):
     text = read_document(path)[0].text
     assert "Body paragraph." in text
     assert "1 embedded image" in text
+    assert "list_document_figures" in text
 
 
 def test_docx_without_images_gets_no_note(tmp_path: Path):

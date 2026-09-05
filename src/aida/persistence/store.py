@@ -55,6 +55,14 @@ class ConversationSummary:
     #: install that never sets one. Not an identity and not a permission:
     #: see ``aida.config.users``.
     user: str | None = None
+    #: Where this conversation's attachments folder and sidecar folder
+    #: actually are (migration 5). NULL for conversations created before
+    #: the columns existed, and for any that never attached anything.
+    #: Recorded rather than recomputed so a later change to the Records
+    #: folder setting cannot orphan files that must be deletable — see
+    #: ``aida.persistence.records.attachments_dir``.
+    attachments_path: str | None = None
+    sidecar_path: str | None = None
 
 
 @dataclass
@@ -175,6 +183,25 @@ class ConversationStore:
         )
         self._conn.commit()
 
+    def set_attachments_path(self, conversation_id: str, path: str, *, timestamp: str) -> None:
+        """Record where this conversation's attachments folder really is,
+        on first use. Deletion reads this back instead of recomputing it
+        from the current records-dir setting."""
+        self._conn.execute(
+            "UPDATE conversations SET attachments_path = ?, updated_at = ? WHERE id = ?",
+            (path, timestamp, conversation_id),
+        )
+        self._conn.commit()
+
+    def set_sidecar_path(self, conversation_id: str, path: str, *, timestamp: str) -> None:
+        """Same, for the sidecar (``figures/``) folder — closing the same
+        recompute-at-delete-time hole for conversation-produced images."""
+        self._conn.execute(
+            "UPDATE conversations SET sidecar_path = ?, updated_at = ? WHERE id = ?",
+            (path, timestamp, conversation_id),
+        )
+        self._conn.commit()
+
     def set_record_path(self, conversation_id: str, path: str, *, timestamp: str) -> None:
         self._conn.execute(
             "UPDATE conversations SET record_path = ?, updated_at = ? WHERE id = ?",
@@ -196,6 +223,8 @@ class ConversationStore:
             message_count=message_count,
             origin=row["origin"],
             user=row["user"],
+            attachments_path=row["attachments_path"],
+            sidecar_path=row["sidecar_path"],
         )
 
     # --- messages --------------------------------------------------------

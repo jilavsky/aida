@@ -842,7 +842,16 @@ class MainWindow(QMainWindow):
         if failures:
             names = ", ".join(Path(p).name for p in failures)
             self.statusBar().showMessage(f"Could not read attachment(s): {names} — see chat for details", 8000)
-        self.bridge.send(outgoing, images=images)
+        # `attachments` are the paths the person actually picked, which is
+        # exactly the set that should be kept — a file the *agent* opens
+        # with read_file is not copied anywhere (aida.documents.attachments
+        # explains why). Failed reads are excluded: there is nothing worth
+        # keeping a copy of, and the message already says so.
+        self.bridge.send(
+            outgoing,
+            images=images,
+            attachment_paths=[p for p in attachments if p not in failures],
+        )
 
     def _queue_message_for_running_turn(self, text: str) -> None:
         """Send pressed while a turn is running: hand the text to that turn

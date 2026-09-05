@@ -69,7 +69,7 @@ Two decisions taken during implementation, worth recording:
 
 ---
 
-## Phase B — the attachment store
+## Phase B — the attachment store — **DONE 2026-09-05**
 
 Fixes a real persistence bug on its own merits (`document_images.md` §2:
 extracted text survives a resume, the files do not) and lays the ground for
@@ -195,7 +195,7 @@ Light touch, no dialog:
 
 ---
 
-## Phase C — the figure index and `get_document_figure`
+## Phase C — the figure index and `get_document_figure` — **DONE 2026-09-05**
 
 Only after B. Backend-agnostic: it consumes whatever the extractor produced.
 
@@ -313,3 +313,147 @@ pre-approval refuses rather than uploading.
 Nothing here touches the agent loop, the provider layer, MCP or RAG.
 Phase A is a bug fix; B is a bug fix with a feature attached; C and D are
 the new capability, and both are optional at runtime.
+
+
+---
+
+## Phase B as built (2026-09-05)
+
+Shipped: 22 new tests, full non-GUI suite green (1280 passed), ruff clean.
+Four things differ from the plan above, each for a reason found in the code.
+
+**1. The gap was narrower than §2 of `document_images.md` said.** Attached
+*images* were already being copied — `ConversationRecorder._own_attached_images`
+adopts each into the artifact store and records *that* path. The earlier
+reading of `append_attached_images` missed that call. Verified by deleting
+an original and resuming. So Phase B is about attached **documents**, and a
+regression test now pins the image behaviour so it cannot quietly rot.
+
+**2. Attach only — decided, not both paths.** A file the agent opens with
+`read_file` is *not* copied. It already lives in the user's own folders
+where they put it; duplicating it would create a second copy of
+possibly-sensitive data for no benefit, which is the opposite of what the
+delete guarantee is for, and a session reading through a folder of plots
+or exports would fill the records folder. Only what a person explicitly
+attached is kept. What AIDA *derives* is always AIDA's own.
+
+**3. The containment guard and the recorded path pulled against each
+other — and the first version was wrong.** `delete_conversation` gating an
+`rmtree` on "is this inside the current `records_dir`?" fails in exactly
+the case migration 5 exists for: the user changed their Records folder
+after the files were written, so the recorded path is *outside* the current
+root and the delete silently skips it. A test written for the migration
+caught it. The fix is `_is_own_conversation_dir`: a path of the shape
+`<anything>/attachments/<conv8>` (or `<anything>/<sidecar_dirname>/<conv8>`)
+is ours wherever it now sits, while a corrupt or hand-edited row pointing
+at `/` or a home directory matches neither test and is refused. Both
+branches are tested, including a right-shape/wrong-conversation-id path,
+so one conversation's delete can never take another's documents.
+
+**4. The transcript lists documents, not derivatives.** `paper.pdf.md`
+holds the extracted text of `paper.pdf`; listing it as a second attachment
+would make the record look like the user handed over two files. Filtered by
+the companion actually being present rather than by trusting a suffix, so a
+genuine `.md` attachment is still listed.
+
+### Surface
+
+- `records.attachments_dir()` / `ATTACHMENTS_DIRNAME`; layout
+  `<records_dir>/attachments/<conv8>/` with `paper.pdf`, `paper.pdf.md`,
+  and `paper.assets/` named but not created until Phase C writes into it.
+- Migration 5: `conversations.attachments_path` **and** `sidecar_path`,
+  recorded on first use, read back on delete.
+- `documents/attachments.py` — `store_attachment(s)`, never raises; a
+  failed copy is reported on the result and the turn proceeds, because the
+  content is already in the message.
+- `ChatSession.send(..., attachment_paths=[...])` →
+  `recorder.keep_attachments()`, after the message is recorded.
+  `ChatBridge.send` and `MainWindow` pass through the paths they already
+  have, minus failed reads.
+- `DeletionResult.deleted_attachments_dir`, surfaced rather than silent.
+- Backstop: `find_orphan_attachment_dirs` / `delete_orphan_attachment_dirs`,
+  an `aida doctor` check that only *reports*, and `aida conversations gc`
+  that removes after asking. A diagnostic command never deletes.
+
+### Left for later
+
+- **Telling the user where it went** (B5) — status-bar line, an **Open
+  Conversation Folder** menu item. Qt could not be run in the session that
+  did this work (`libEGL` missing), and these are GUI-only.
+- `docs/documents.md`. Held with the GUI copy so the two land together.
+
+
+---
+
+## Phase C as built (2026-09-05)
+
+Shipped: 24 new tests, full non-GUI suite green (1302 passed), ruff clean.
+Three departures from the plan, each for a reason.
+
+**1. Extraction is lazy, not part of ingest.** The plan had extractors
+writing figures during attachment. Two problems with that: a paper nobody
+asks a figure question about pays the cost anyway, and extracting a
+150-page PDF on the turn the document arrives would block the event loop
+(`keep_attachments` is called synchronously from `_run_turn`). Extraction
+now happens on the first `list_document_figures` call, in a thread with a
+120 s ceiling, and is cached in the assets folder — the index is written
+**even when empty**, so "we looked and found nothing" is distinguishable
+from "we have not looked yet" and a fruitless scan is not repeated.
+
+**2. No figure index in the message — two tools instead.** The plan put an
+index block into the text handed to the model. That would have needed the
+index *before* the message is built, which is in `MainWindow` — untestable
+Qt, and out of order with ingest. Instead the Phase A note (already in the
+message, already produced by `read_document`) now names the tools, and the
+agent asks. This is strictly better: the index costs nothing for the common
+case where nobody asks about a figure, and it needed no GUI change at all.
+
+**3. The `document` argument is a bare filename, refused otherwise.**
+Taking `Path(name).name` would be *safe* — it cannot escape — but sloppy:
+`"../paper.pdf"` would silently resolve to the attached `paper.pdf` and
+answer a question nobody asked. Refusing is clearer, and the error names
+what is actually attached. Five traversal shapes are tested.
+
+### Labelling, and how honest it is
+
+`page.get_image_rects()` for geometry; captions are text blocks starting
+`Figure|Fig|Table|Scheme|Chart|Plate` within 120 pt below the image
+(preferred) or above (tables). Nothing else counts as a caption — an
+arbitrary nearby paragraph is not a label, and inventing one would be worse
+than admitting there is none.
+
+Three confidence levels, and they reach the model:
+
+- `high` — caption matched on a single-column page.
+- `low` — caption matched on a **multi-column** page, where "the text below
+  this image" is regularly the next column. Detected structurally: two text
+  blocks that overlap vertically but are horizontally disjoint *are*
+  columns, which needs no page-width heuristic or tuning constant. The
+  index then tells the model the labels are uncertain and to check the
+  caption text before relying on a figure number.
+- `none` — no caption found; the label is positional (`image 2 (page 4)`),
+  and the index says the numbering is ours, not the document's.
+
+Noise filters, without which the index fills with specks: minimum 72 pt on
+both edges, maximum 12:1 aspect (kills rules and sidebars), and dedup by
+xref so a logo on fourteen pages is one entry.
+
+A fixture note worth keeping: two runs of `insert_text` at the same `y` are
+merged by pymupdf into **one** wide block, so a two-column fixture built
+that way looks single-column to any detector and tests nothing. The test
+uses `insert_textbox` with separate rects.
+
+### What this does to the vision budget
+
+`MAX_ATTACHED_IMAGES = 4` needed no change and is now the *right* number:
+it bounds a pull of the two figures the agent asked for, instead of
+truncating a push of twelve anonymous ones.
+
+### Left for later
+
+- An OCR backend (Phase D) is what raises `low` to `high` on real journal
+  papers — §4 of `document_images.md` has the argument.
+- Figures for `read_file`'d documents. Attach-only ingest means a document
+  the agent opened itself has nothing to extract from; the tool says so
+  plainly rather than reporting an empty index, which would read as "this
+  paper has no figures".

@@ -1000,3 +1000,94 @@ async def test_start_session_expands_the_user_in_the_records_dir(
         assert session.recorder.records_dir == tmp_path / "records" / "jan"
     finally:
         await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_session_send_keeps_attached_documents(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """End to end: a document attached to a turn is copied into the
+    conversation's own folder and outlives the original."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    source = tmp_path / "Downloads" / "paper.pdf"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"%PDF-1.4 pretend")
+
+    session, _ = await start_session(_settings(), profile_name="mock-profile")
+    try:
+        _ = [e async for e in session.send("what does this say?", attachment_paths=[str(source)])]
+        kept = Path(session.recorder.attachments_dir()) / "paper.pdf"
+        assert kept.exists()
+        source.unlink()
+        assert kept.read_bytes() == b"%PDF-1.4 pretend"
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_session_send_without_attachments_creates_no_folder(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    session, _ = await start_session(_settings(), profile_name="mock-profile")
+    try:
+        _ = [e async for e in session.send("just talking")]
+        assert (session.recorder.records_dir / "attachments").exists() is False
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_attachment_copy_never_fails_the_turn(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """The content is already in the message; losing the turn over a
+    bookkeeping copy would be far worse than not keeping the file."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    session, _ = await start_session(_settings(), profile_name="mock-profile")
+    try:
+        events = [
+            e async for e in session.send("here", attachment_paths=[str(tmp_path / "never-existed.pdf")])
+        ]
+        assert events, "the turn must still have run"
+        assert session.messages[-1].role == "assistant"
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_figure_tools_are_registered_and_see_this_conversations_folder(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """They are built after the recorder, since the attachments folder
+    depends on the conversation id — a regression here would silently drop
+    both tools from every session."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+
+    session, _ = await start_session(_settings(), profile_name="mock-profile")
+    try:
+        assert "list_document_figures" in session.tools
+        assert "get_document_figure" in session.tools
+        result = await session.tools["list_document_figures"].func({"document": "nothing.pdf"})
+        assert result.is_error
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_looking_up_figures_never_creates_an_attachments_row(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """The tools ask for the attachments folder on every call; that lookup
+    must stay a pure read, or an attachment-free conversation would end up
+    recorded as having had one."""
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+
+    session, _ = await start_session(_settings(), profile_name="mock-profile")
+    try:
+        await session.tools["list_document_figures"].func({"document": "nothing.pdf"})
+        store = session.recorder.store
+        assert store.get_conversation(session.recorder.conversation_id).attachments_path is None
+        assert not (session.recorder.records_dir / "attachments").exists()
+    finally:
+        await session.aclose()

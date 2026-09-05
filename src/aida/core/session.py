@@ -75,6 +75,7 @@ from aida.core.events import (
     UsageInfo,
 )
 from aida.core.tools import NativeTool, default_native_tools
+from aida.documents.figure_tools import default_figure_tools
 from aida.documents.tools import default_document_tools
 from aida.knowledge.rag import index as kb_index
 from aida.knowledge.rag.retrieval import (
@@ -605,7 +606,13 @@ class ChatSession:
             persisted += 1
         return persisted
 
-    async def send(self, user_text: str, *, images: list[ImageRef] | None = None):
+    async def send(
+        self,
+        user_text: str,
+        *,
+        images: list[ImageRef] | None = None,
+        attachment_paths: list[str] | None = None,
+    ):
         """Run one turn, holding the session's mutation lock for its whole
         duration.
 
@@ -626,10 +633,18 @@ class ChatSession:
         if self._mutation_lock.locked():
             raise SessionBusyError("A turn is already running in this session.")
         async with self._mutation_lock:
-            async for event in self._run_turn(user_text, images=images):
+            async for event in self._run_turn(
+                user_text, images=images, attachment_paths=attachment_paths
+            ):
                 yield event
 
-    async def _run_turn(self, user_text: str, *, images: list[ImageRef] | None = None):
+    async def _run_turn(
+        self,
+        user_text: str,
+        *,
+        images: list[ImageRef] | None = None,
+        attachment_paths: list[str] | None = None,
+    ):
         """Run one turn. Phase 8 (RAG): if any knowledge bases are active,
         retrieves passages for ``user_text`` and injects them as a
         *strictly ephemeral* extra message — appended to ``self.messages``
@@ -644,12 +659,26 @@ class ChatSession:
         defaults to none so the CLI's plain ``session.send(line)`` call is
         unaffected. Whether they actually reach the model as vision input
         this turn still depends on the active profile's ``supports_vision``
-        and the recency cap — see ``aida.providers.vision``."""
+        and the recency cap — see ``aida.providers.vision``.
+
+        ``attachment_paths``: files a *person* attached to this message, as
+        paths on their machine. Kept as copies in the conversation's own
+        folder so they outlive the original being moved or cleaned up, and
+        so the Markdown transcript is complete — see
+        ``aida.documents.attachments``. Deliberately separate from
+        ``images``, which are about what the *model* sees this turn; these
+        are about what the *conversation* keeps. Never passed for a file the
+        agent opened itself: those already live where the user put them."""
         user_message = Message(role="user", content=user_text, images=list(images or []))
         self.messages.append(user_message)
         self._history_generation += 1  # see __init__ / _apply_trim_plan
         if self.recorder is not None:
             self.recorder.record_message(user_message)
+            if attachment_paths:
+                # After the message is recorded, never before: the copy is
+                # bookkeeping, and a failure in it must not cost the user
+                # the turn they just sent. keep_attachments never raises.
+                self.recorder.keep_attachments(list(attachment_paths))
         # Keep the *sent* history under budget (the recorded history in the
         # DB is never trimmed — resume/export still show everything). Done
         # here, before `persisted` is captured, because trimming shifts
@@ -1187,6 +1216,13 @@ async def _start_session(
             user=active_user,
         )
         initial_messages = None
+
+    # Registered here rather than with the other document tools, because
+    # they need the conversation's attachments folder — which depends on
+    # the conversation id the recorder only just assigned. Passed as a
+    # callable, not a path: it must be re-read per call, since it is a
+    # lookup and the recorder is the thing that knows it.
+    tools.update(default_figure_tools(recorder.attachments_dir))
 
     # No try/except here any more. `ChatSession.__init__` can fail in
     # several ways — `build_provider` (UnknownProviderKindError for a typo'd

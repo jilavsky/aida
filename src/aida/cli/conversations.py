@@ -20,7 +20,11 @@ from aida.artifacts.store import ArtifactStore
 from aida.config.paths import ensure_records_dir
 from aida.config.settings import Settings, load_settings
 from aida.config.users import resolve_active_user
-from aida.persistence.cleanup import delete_conversation
+from aida.persistence.cleanup import (
+    delete_conversation,
+    delete_orphan_attachment_dirs,
+    find_orphan_attachment_dirs,
+)
 from aida.persistence.recorder import ConversationNotFoundError, ConversationRecorder
 from aida.persistence.store import ConversationStore, ConversationSummary
 
@@ -253,6 +257,38 @@ def cmd_resume(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_gc(args: argparse.Namespace) -> int:
+    """Remove attachment folders whose conversation no longer exists.
+
+    Separate from `doctor`, which only reports: a diagnostic command should
+    never delete anything. This is the one that does, and it asks first
+    unless told otherwise, because the folders hold the user's own
+    documents even if the chat around them is gone.
+    """
+    settings = load_settings()
+    records_dir = ensure_records_dir(settings.app.records_dir)
+    store = ConversationStore()
+    try:
+        orphans = find_orphan_attachment_dirs(store, records_dir=records_dir)
+        if not orphans:
+            print("No leftover attachment folders.")
+            return 0
+        print(f"{len(orphans)} attachment folder(s) with no conversation:")
+        for orphan in orphans:
+            files = sorted(p.name for p in orphan.iterdir() if p.is_file())
+            print(f"  {orphan}  ({', '.join(files) if files else 'empty'})")
+        if not args.yes:
+            answer = input("Delete these permanently? [y/N] ").strip().lower()
+            if answer not in ("y", "yes"):
+                print("Aborted.")
+                return 0
+        removed = delete_orphan_attachment_dirs(store, records_dir=records_dir)
+        print(f"Removed {len(removed)} folder(s).")
+        return 0
+    finally:
+        store.close()
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aida conversations")
     sub = parser.add_subparsers(dest="subcommand", required=True)
@@ -280,6 +316,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     resume.add_argument("--mcp", default="", help="Comma-separated MCP server names to enable directly")
 
+    gc = sub.add_parser(
+        "gc", help="Remove attachment folders left behind by conversations that no longer exist"
+    )
+    gc.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+
     delete = sub.add_parser("delete", help="Delete a conversation: DB rows, artifact files, and its Markdown record")
     delete.add_argument("id", help="Conversation id, or an unambiguous prefix")
     delete.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
@@ -304,4 +345,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_delete(args)
     if args.subcommand == "rename":
         return cmd_rename(args)
+    if args.subcommand == "gc":
+        return cmd_gc(args)
     return cmd_export(args)
