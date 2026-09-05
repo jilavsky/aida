@@ -204,20 +204,52 @@ def extract_pdf_figures(pdf_path: Path, assets_dir: Path) -> list[FigureEntry]:
     return entries
 
 
-def write_index(assets_dir: Path, source_name: str, entries: list[FigureEntry]) -> Path:
+@dataclass
+class FigureIndex:
+    """A document's figures plus how they were found.
+
+    ``backend`` and ``note`` exist so the model can be told *why* the
+    labels are as good or as poor as they are — "extracted with OCR" and
+    "OCR unavailable (no API key), used the built-in extractor" lead to
+    very different levels of trust in a figure number, and hiding that
+    difference would be the same mistake as hiding a low confidence.
+    """
+
+    source: str
+    figures: list[FigureEntry]
+    backend: str = "builtin"
+    note: str = ""
+
+
+def write_index(
+    assets_dir: Path,
+    source_name: str,
+    entries: list[FigureEntry],
+    *,
+    backend: str = "builtin",
+    note: str = "",
+) -> Path:
     """Cache the index beside the extracted images. Written even when empty,
     so "we looked and found nothing" is distinguishable from "we have not
     looked yet" and a fruitless extraction is not repeated on every ask."""
     assets_dir.mkdir(parents=True, exist_ok=True)
     path = assets_dir / INDEX_FILENAME
     path.write_text(
-        json.dumps({"source": source_name, "figures": [asdict(e) for e in entries]}, indent=2),
+        json.dumps(
+            {
+                "source": source_name,
+                "backend": backend,
+                "note": note,
+                "figures": [asdict(e) for e in entries],
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
     return path
 
 
-def read_index(assets_dir: Path) -> list[FigureEntry] | None:
+def read_index(assets_dir: Path) -> FigureIndex | None:
     """The cached index, or ``None`` when this document has not been
     examined yet. A corrupt cache reads as "not examined" so the next ask
     rebuilds it rather than failing."""
@@ -226,18 +258,25 @@ def read_index(assets_dir: Path) -> list[FigureEntry] | None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return [FigureEntry(**entry) for entry in data.get("figures", [])]
+        return FigureIndex(
+            source=data.get("source", ""),
+            figures=[FigureEntry(**entry) for entry in data.get("figures", [])],
+            backend=data.get("backend", "builtin"),
+            note=data.get("note", ""),
+        )
     except (OSError, ValueError, TypeError) as exc:
         logger.warning("ignoring unreadable figure index %s: %s", path, exc)
         return None
 
 
-def describe_index(source_name: str, entries: list[FigureEntry]) -> str:
+def describe_index(source_name: str, index: FigureIndex) -> str:
     """What the model reads. Says how sure the labels are, because a label
     presented as fact and a label presented as a guess lead to very
     different follow-up questions."""
+    entries = index.figures
     if not entries:
-        return f"No figures could be extracted from {source_name}."
+        head = f"No figures could be extracted from {source_name}."
+        return f"{head} {index.note}".strip() if index.note else head
     lines = [f"{len(entries)} figure(s) in {source_name}:"]
     for entry in entries:
         detail = f"  - {entry.label} (page {entry.page})"
@@ -255,6 +294,8 @@ def describe_index(source_name: str, entries: list[FigureEntry]) -> str:
             "Entries labelled 'image N' had no caption found near them; their numbering is "
             "positional, not the document's own."
         )
+    if index.note:
+        lines.append(index.note)
     lines.append("Call get_document_figure with a label to view one.")
     return "\n".join(lines)
 
@@ -262,6 +303,7 @@ def describe_index(source_name: str, entries: list[FigureEntry]) -> str:
 __all__ = [
     "INDEX_FILENAME",
     "FigureEntry",
+    "FigureIndex",
     "describe_index",
     "extract_pdf_figures",
     "read_index",

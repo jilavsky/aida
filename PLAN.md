@@ -103,30 +103,11 @@ the CLI surface, with 44 new tests. What remains is the GUI, which needs an
 environment where the Qt suite actually runs. Detail in `multiuser_plan.md`
 §7.
 
-- [ ] **GUI user picker.** A `UserSelector` in `ui/qt/selectors.py`,
-      modelled on `WorkspaceSelector`; an editable combo of
-      `ConversationStore.known_users()` plus free text. Switching it ends
-      the session and starts a new chat, exactly as switching workspace
-      already does, and writes `AppConfig.active_user`.
-- [ ] **Sidebar filtering, with the escape hatch in the same commit.**
-      `store.list_conversations(active_user)` already does the filtering
-      and already keeps NULL-user history visible; what is missing is a
-      **Show all** control. Shipping the filter without it would be worse
-      than not filtering — hidden work reads as lost work.
-- [ ] **Workspace filter — nearly free, no schema.** `workspace_name` is
-      already recorded and already *displayed* in the sidebar row, but
-      `_apply_filter` matches `title` only, so typing a workspace name
-      does nothing. Make the filter match both and add a workspace
-      dropdown: ~20 lines, and it may cover much of the felt problem alone.
-- [ ] Per-user `user_context` (the B15 identity block): store
-      `user_contexts: dict[str, str]` alongside the flat string and look up
-      the active user, falling back to it. `build_identity_context_block`
-      needs no change — only its one caller in `session.py`.
-- [ ] `docs/organizing-conversations.md`, opening with *this is
-      organization, not security*, plus `{user}` in the shipped
-      `usaxs-user`/`usaxs-staff` examples and an `aida doctor` check
-      reporting the resolved per-user folders. Held until the GUI lands so
-      the doc does not describe a half-built interface.
+- [ ] The GUI half — user picker, sidebar filtering with its *All users*
+      escape hatch, and per-user `user_context` — is specified commit by
+      commit in
+      [`planning/gui_implementation_guide.md`](planning/gui_implementation_guide.md)
+      and tracked as one item in §1.5.
 
 ### 1.4 Verification owed (cannot be done from a sandbox)
 
@@ -159,22 +140,17 @@ unambiguous is done and archived in `planning/COMPLETED.md` §7; what is
 left below either needs a real UX decision, needs domain knowledge only
 the user can supply, or is a read-through rather than a mechanical edit.
 
-- [ ] **Documents: tell the user where an attachment went** (Phase B's
-      remaining GUI half). A status-bar line on ingest and an **Open
-      Conversation Folder** item beside the existing records-folder action.
-      The store, the delete guarantee and the orphan sweep shipped
-      2026-09-05; only these two GUI touches and `docs/documents.md` are
-      left, held until the Qt suite can be run.
-- [ ] **Documents: the Mistral OCR backend (Phase D).** The figure index
-      shipped 2026-09-05 on the `pymupdf` backend, which labels reliably on
-      single-column documents and reports `low` confidence on the
-      two-column layouts most journals use. OCR is what raises that
-      ceiling: an optional backend behind an `ocr` extra (three REST calls,
-      no new package beyond declaring `httpx`), a per-workspace switch,
-      a confirmation on upload, never in a headless run without explicit
-      pre-approval, and a plain-text fallback whenever it is unavailable.
-      Build order in
-      [`planning/documents_implementation.md`](planning/documents_implementation.md).
+- [ ] **GUI work with a Qt environment.** Four commits, fully specified
+      in [`planning/gui_implementation_guide.md`](planning/gui_implementation_guide.md):
+      sidebar filtering (user + workspace, with its *All users* escape
+      hatch in the same commit), the toolbar user picker, the
+      attachment status line and **Open Conversation Folder**, and the
+      Settings/Workspace surfaces for the OCR key and `use_ocr`. Every
+      non-GUI half is built and tested; these were held back because the
+      sessions that did the rest could not run Qt.
+- [ ] **`docs/organizing-conversations.md` and `docs/documents.md`**, plus
+      `{user}` in the shipped `usaxs-user`/`usaxs-staff` examples. Held
+      until the GUI lands so they do not describe a half-built interface.
 - [ ] **Enforce `ruff format` in CI** (external review, P3). `ruff check`
       passes and is gated; `ruff format --check .` currently reports
       **128 files would be reformatted, 97 already formatted**. Two commits,

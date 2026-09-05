@@ -41,6 +41,7 @@ from aida.config.paths import (
     knowledge_db_path,
     skills_dir,
 )
+from aida.config.secrets import env_var_name, get_secret
 from aida.config.settings import McpConfig, McpServerConfig, Settings, WorkspaceConfig
 from aida.config.users import (
     resolve_active_user,
@@ -75,7 +76,8 @@ from aida.core.events import (
     UsageInfo,
 )
 from aida.core.tools import NativeTool, default_native_tools
-from aida.documents.figure_tools import default_figure_tools
+from aida.documents.figure_tools import OcrBackend, default_figure_tools
+from aida.documents.ocr.mistral import SECRET_REF as OCR_SECRET_REF
 from aida.documents.tools import default_document_tools
 from aida.knowledge.rag import index as kb_index
 from aida.knowledge.rag.retrieval import (
@@ -1222,7 +1224,25 @@ async def _start_session(
     # the conversation id the recorder only just assigned. Passed as a
     # callable, not a path: it must be re-read per call, since it is a
     # lookup and the recorder is the thing that knows it.
-    tools.update(default_figure_tools(recorder.attachments_dir))
+    # OCR is opt-in three times over, and all three are checked here rather
+    # than inside the backend: the workspace must have asked for it, a key
+    # must exist, and the user is still asked per document before anything
+    # is uploaded (OcrBackend.approved_for). A None backend is what "off by
+    # default" means structurally — nothing downstream has to remember to
+    # check a flag.
+    ocr_backend = None
+    if workspace is not None and workspace.use_ocr:
+        ocr_key = get_secret(OCR_SECRET_REF)
+        if ocr_key:
+            ocr_backend = OcrBackend(api_key=ocr_key, confirm=confirm_callback)
+        else:
+            print(
+                f"[ocr] workspace {workspace.name!r} has use_ocr enabled but no API key is set "
+                f"(Settings, or ${env_var_name(OCR_SECRET_REF)}) — falling back to the built-in "
+                f"figure extractor."
+            )
+            logger.warning("workspace %r: use_ocr enabled but no %r secret", workspace.name, OCR_SECRET_REF)
+    tools.update(default_figure_tools(recorder.attachments_dir, ocr=ocr_backend))
 
     # No try/except here any more. `ChatSession.__init__` can fail in
     # several ways — `build_provider` (UnknownProviderKindError for a typo'd

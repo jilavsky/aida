@@ -18,6 +18,7 @@ from aida.documents.attachments import assets_dir_for, store_attachment
 from aida.documents.figure_tools import default_figure_tools
 from aida.documents.figures import (
     FigureEntry,
+    FigureIndex,
     describe_index,
     extract_pdf_figures,
     read_index,
@@ -95,7 +96,7 @@ def test_a_multi_column_page_lowers_confidence_rather_than_lying(tmp_path: Path)
 
     assert entries and entries[0].label == "Figure 1"
     assert entries[0].confidence == "low"
-    assert "uncertain" in describe_index("journal.pdf", entries)
+    assert "uncertain" in describe_index("journal.pdf", FigureIndex("journal.pdf", entries))
 
 
 def test_an_uncaptioned_image_gets_a_positional_label_not_an_invented_one(tmp_path: Path):
@@ -106,7 +107,7 @@ def test_an_uncaptioned_image_gets_a_positional_label_not_an_invented_one(tmp_pa
     assert entries[0].confidence == "none"
     assert entries[0].label.startswith("image 1")
     assert entries[0].caption == ""
-    assert "positional" in describe_index("nocaption.pdf", entries)
+    assert "positional" in describe_index("nocaption.pdf", FigureIndex("nocaption.pdf", entries))
 
 
 def test_tiny_ornaments_and_rules_are_not_figures(tmp_path: Path):
@@ -154,7 +155,8 @@ def test_extraction_of_a_damaged_file_returns_empty_not_an_exception(tmp_path: P
 def test_an_empty_index_is_cached_so_a_fruitless_scan_is_not_repeated(tmp_path: Path):
     assets = tmp_path / "assets"
     write_index(assets, "empty.pdf", [])
-    assert read_index(assets) == []  # not None: "we looked and found nothing"
+    index = read_index(assets)
+    assert index is not None and index.figures == []  # not None: "we looked and found nothing"
 
 
 def test_no_index_yet_reads_as_none(tmp_path: Path):
@@ -293,7 +295,7 @@ def test_describe_index_names_every_figure_and_prompts_the_pull(tmp_path: Path):
         FigureEntry(label="Figure 1", caption="Guinier fits", file="fig-01.png", page=2, confidence="high"),
         FigureEntry(label="Figure 2", caption="", file="fig-02.png", page=3, confidence="high"),
     ]
-    described = describe_index("paper.pdf", entries)
+    described = describe_index("paper.pdf", FigureIndex("paper.pdf", entries))
     assert "Figure 1" in described and "Figure 2" in described
     assert "Guinier fits" in described
     assert "get_document_figure" in described

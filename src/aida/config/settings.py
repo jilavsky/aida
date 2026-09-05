@@ -772,6 +772,14 @@ class WorkspaceConfig:
     #: *private*: never added to the system prompt and not readable by any
     #: tool, so nothing typed here costs tokens or steers the model.
     notes: str = ""
+    #: Whether this workspace may send attached documents to the optional
+    #: OCR service for figure extraction (``aida.documents.ocr``). Off by
+    #: default and per *workspace*, not per install, because that is the
+    #: axis the decision actually varies on: a workspace for reading vendor
+    #: manuals can have it on while one used to review unpublished
+    #: manuscripts keeps it off. Enabling it does not skip the per-document
+    #: confirmation — it only makes asking possible at all.
+    use_ocr: bool = False
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> WorkspaceConfig:
@@ -799,6 +807,7 @@ class WorkspaceConfig:
             ),
             quick_tasks=_coerce_quick_tasks(source, data.get("quick_tasks")),
             notes=str(data.get("notes") or ""),
+            use_ocr=_coerce_bool(source, "use_ocr", data.get("use_ocr"), default=False),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -820,6 +829,7 @@ class WorkspaceConfig:
             "script_timeout_seconds": self.script_timeout_seconds,
             "quick_tasks": [task.to_dict() for task in self.quick_tasks],
             "notes": self.notes,
+            "use_ocr": self.use_ocr,
         }
 
     def resolved_saved_scripts_dir(self) -> str | None:

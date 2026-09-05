@@ -53,6 +53,13 @@ Issues = "https://github.com/jilavsky/aida/issues"
 # or drops an exclusion, mirror it here too.
 gui = ["PySide6>=6.6,!=6.7.*,!=6.10.*"]
 docs = ["pymupdf>=1.24", "python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=0.6.23", "Pillow>=10.0"]
+# Optional OCR backend for document figure extraction (aida.documents.ocr).
+# httpx only: three REST endpoints do not justify the `mistralai` SDK and
+# the pydantic/httpx pins it would drag in next to the openai/anthropic
+# SDKs. httpx is already present transitively via those two — declared here
+# because depending on a transitive dependency is what breaks on someone
+# else's resolver.
+ocr = ["httpx>=0.27"]
 dev = [
     "pytest>=8.0",
     "pytest-timeout>=2.3",

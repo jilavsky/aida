@@ -220,7 +220,7 @@ the agent pulls one at a time.
 
 ---
 
-## Phase D — the Mistral OCR backend
+## Phase D — the Mistral OCR backend — **DONE 2026-09-05** (GUI config pending)
 
 Optional, off by default, and the thing that makes C's labels trustworthy
 on real journal papers.
@@ -457,3 +457,64 @@ truncating a push of twelve anonymous ones.
   the agent opened itself has nothing to extract from; the tool says so
   plainly rather than reporting an empty index, which would read as "this
   paper has no figures".
+
+
+---
+
+## Phase D as built (2026-09-05)
+
+Shipped: 18 new tests (HTTP stubbed throughout — no network in CI), full
+non-GUI suite green (1322 passed), ruff clean. The Settings and Workspace
+dialog surfaces are the only part left, and they are specified in
+`gui_implementation_guide.md` §4.
+
+**Transport** (`documents/ocr/mistral.py`): three REST calls, `httpx` only,
+declared as the new `ocr` extra. No `mistralai` SDK — three endpoints do
+not justify it, and it would add another pydantic/httpx pin next to the
+`openai` and `anthropic` SDKs. Every failure mode — no key, missing extra,
+oversized file, 401/429/500, timeout, malformed body — raises one
+`MistralOcrError` so the caller has one thing to catch. Oversize is checked
+locally, so the file never leaves the machine to earn a 413.
+
+**Why it earns its place**: `figures_from_ocr` pairs each inline
+`![img-0.jpeg](img-0.jpeg)` placeholder with the adjacent line of the
+returned Markdown. Because that Markdown is in *reading order*, this is as
+reliable on a two-column page as on a single-column one — which is exactly
+where the built-in extractor can only report `low`. Entries come back
+`high`. An image with no caption beside it still gets `none` and a
+positional label: being sure of the reading order does not conjure a
+caption that is not there.
+
+**Consent reuses `action="tool_call"`** rather than inventing a category
+(`OCR_CONFIRM_NAME = "mistral_ocr_upload"`). That was the key simplification:
+`tool_call` is *already* the "needs explicit per-name approval" path
+everywhere it matters — `build_headless_confirm_callback` approves it only
+when the exact name is in `--preapprove-tool`, and `RememberingConfirm`
+remembers it by name so "Allow for this chat" works and a stack of manuals
+is not a stack of dialogs. Nothing had to be taught that OCR is sensitive;
+it inherits the strictest existing path. `in_allowed_roots=False` means
+`--yes-in-allowed` alone never approves it.
+
+**Off by default, structurally.** The backend is assembled in
+`_start_session` only when the workspace set `use_ocr` *and* a key exists;
+it is `None` otherwise, so nothing downstream has to remember to check a
+flag. `use_ocr` is per **workspace**, not per install — a manuals workspace
+can have it on while one used to review unpublished manuscripts keeps it
+off. A workspace that enables it with no key prints a line saying so and
+carries on with the built-in extractor.
+
+**The fallback always speaks.** Declined, no key, extra missing, service
+down, timeout, garbage response — all fall back to `pymupdf` *and* put a
+note in what the model reads: "OCR was not used for this document, so
+figure labels come from the built-in extractor and may be less reliable on
+a multi-column layout." Silently producing worse labels than the user
+expected is how a "Figure 1" answer becomes quietly wrong.
+
+**A cached index is never re-uploaded.** Every upload is a dialog and a
+document leaving the machine, so a second question about the same paper
+must do neither. Tested.
+
+**`aida doctor`** reports the three preconditions separately — no workspace
+wants it / extra missing / no key — because they need completely different
+fixes and a single pass/fail would hide which applies. It never contacts
+the service: a diagnostic must not upload anything.

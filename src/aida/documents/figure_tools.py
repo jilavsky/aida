@@ -25,14 +25,29 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from aida.artifacts.base import ImageArtifact
 from aida.config.logging_setup import get_logger
+from aida.core.confirmation import ConfirmationRequest, ConfirmCallback
 from aida.core.tools import NativeTool, ToolResult, ToolSchema, wrap_tool_errors
 from aida.documents.attachments import assets_dir_for
-from aida.documents.figures import describe_index, extract_pdf_figures, read_index, write_index
+from aida.documents.figures import (
+    FigureIndex,
+    describe_index,
+    extract_pdf_figures,
+    read_index,
+    write_index,
+)
+from aida.documents.ocr.mistral import (
+    DEFAULT_BASE_URL,
+    DEFAULT_TIMEOUT_SECONDS,
+    MistralOcrError,
+    figures_from_ocr,
+    ocr_pdf,
+)
 
 logger = get_logger(__name__)
 
@@ -46,6 +61,54 @@ _tool = wrap_tool_errors(OSError, ValueError, asyncio.TimeoutError)
 EXTRACT_TIMEOUT_SECONDS = 120.0
 
 _EXTRACTABLE_SUFFIXES = {".pdf"}
+
+#: The confirmation identity for an OCR upload. Deliberately reuses the
+#: ``"tool_call"`` action rather than inventing a new one: that action is
+#: already the "needs explicit per-name approval" category everywhere it
+#: matters — ``build_headless_confirm_callback`` approves it only when the
+#: exact name is in ``--preapprove-tool``, and ``RememberingConfirm``
+#: remembers it by name, so "Allow for this chat" works and a stack of
+#: manuals is not a stack of dialogs. Nothing new had to be taught about
+#: this being sensitive; it inherits the strictest existing path.
+OCR_CONFIRM_NAME = "mistral_ocr_upload"
+
+
+@dataclass
+class OcrBackend:
+    """Everything needed to run one document through OCR, and permission to.
+
+    Assembled by the session only when the workspace opted in *and* a key
+    exists; ``None`` everywhere else, which is what makes "off by default"
+    structural rather than a flag someone can forget to check.
+    """
+
+    api_key: str
+    confirm: ConfirmCallback
+    base_url: str = DEFAULT_BASE_URL
+    timeout: float = DEFAULT_TIMEOUT_SECONDS
+
+    async def approved_for(self, document: Path) -> bool:
+        """Ask before the document leaves the machine.
+
+        The consent moment is the *document*, not the API key. Pasting a
+        key into Settings says "I am willing to use this service"; it does
+        not say "send this particular manuscript". `fetch_url` is the
+        precedent for always asking before network egress, and this is
+        strictly more sensitive because it *sends* the user's content
+        rather than retrieving public content.
+        """
+        return await self.confirm(
+            ConfirmationRequest(
+                action="tool_call",
+                path=OCR_CONFIRM_NAME,
+                detail=(
+                    f"Send {document.name!r} to Mistral OCR to read its figures? "
+                    f"The document is uploaded to a third-party service."
+                ),
+                in_allowed_roots=False,
+                remember_scope=OCR_CONFIRM_NAME,
+            )
+        )
 
 
 def _resolve_document(attachments_dir: Path, name: str) -> Path | None:
@@ -89,28 +152,81 @@ def _not_found_message(attachments_dir: Path, name: str) -> str:
     return f"No attached document called {name!r}. Attached: {', '.join(available)}."
 
 
-async def _figures_for(document: Path) -> list:
+async def _try_ocr(document: Path, assets: Path, ocr: OcrBackend) -> tuple[list, str] | None:
+    """OCR this document, or return ``None`` to fall back.
+
+    ``None`` covers every reason the backend did not produce an answer —
+    the user declined, no key, the extra missing, the service unreachable,
+    a timeout, a malformed response. The caller then uses the built-in
+    extractor and *says so*, because silently producing worse labels than
+    the user was expecting is how a "figure 1" answer becomes wrong without
+    anyone noticing.
+    """
+    try:
+        approved = await ocr.approved_for(document)
+    except Exception as exc:  # noqa: BLE001 - a confirmation channel failure is a decline
+        logger.warning("OCR confirmation failed for %s: %s", document.name, exc)
+        return None
+    if not approved:
+        logger.info("OCR declined for %s; using the built-in extractor", document.name)
+        return None
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                ocr_pdf, document, api_key=ocr.api_key, base_url=ocr.base_url, timeout=ocr.timeout
+            ),
+            timeout=ocr.timeout + 30,
+        )
+        entries = await asyncio.to_thread(figures_from_ocr, result, assets)
+    except (MistralOcrError, TimeoutError) as exc:
+        logger.warning("OCR unavailable for %s (%s); using the built-in extractor", document.name, exc)
+        return None
+    except Exception as exc:  # noqa: BLE001 - never fail a turn over an optional backend
+        logger.warning("OCR failed unexpectedly for %s: %s", document.name, exc)
+        return None
+    return entries, "Figures were read with Mistral OCR, which resolves page reading order."
+
+
+async def _figures_for(document: Path, ocr: OcrBackend | None = None) -> FigureIndex:
     """The document's figure index, extracting it on first use.
 
     Lazy on purpose: a paper nobody asks a figure question about costs
     nothing, and extraction never runs on the turn the document arrives on.
     The cached index is written even when empty, so a fruitless extraction
-    is not repeated on every ask.
+    is not repeated on every ask — and a cached OCR result is never
+    re-uploaded, which matters when every upload is a confirmation dialog
+    and a document leaving the machine.
     """
     assets = assets_dir_for(document)
     cached = read_index(assets)
     if cached is not None:
         return cached
     if document.suffix.lower() not in _EXTRACTABLE_SUFFIXES:
-        return []
-    entries = await asyncio.wait_for(
-        asyncio.to_thread(extract_pdf_figures, document, assets), timeout=EXTRACT_TIMEOUT_SECONDS
-    )
-    await asyncio.to_thread(write_index, assets, document.name, entries)
-    return entries
+        return FigureIndex(source=document.name, figures=[])
+
+    backend, note = "builtin", ""
+    entries = None
+    if ocr is not None:
+        attempt = await _try_ocr(document, assets, ocr)
+        if attempt is not None:
+            entries, note = attempt
+            backend = "mistral-ocr"
+        else:
+            note = (
+                "OCR was not used for this document, so figure labels come from the built-in "
+                "extractor and may be less reliable on a multi-column layout."
+            )
+    if entries is None:
+        entries = await asyncio.wait_for(
+            asyncio.to_thread(extract_pdf_figures, document, assets), timeout=EXTRACT_TIMEOUT_SECONDS
+        )
+    await asyncio.to_thread(write_index, assets, document.name, entries, backend=backend, note=note)
+    return FigureIndex(source=document.name, figures=entries, backend=backend, note=note)
 
 
-def default_figure_tools(attachments_dir_provider: Callable[[], Path]) -> dict[str, NativeTool]:
+def default_figure_tools(
+    attachments_dir_provider: Callable[[], Path], *, ocr: OcrBackend | None = None
+) -> dict[str, NativeTool]:
     """Build the two figure tools around a *callable* rather than a path.
 
     The conversation's attachments folder is not known when the rest of the
@@ -126,8 +242,8 @@ def default_figure_tools(attachments_dir_provider: Callable[[], Path]) -> dict[s
         document = _resolve_document(attachments_dir, name)
         if document is None:
             return ToolResult(content=_not_found_message(attachments_dir, name), is_error=True)
-        entries = await _figures_for(document)
-        return ToolResult(content=describe_index(document.name, entries))
+        index = await _figures_for(document, ocr)
+        return ToolResult(content=describe_index(document.name, index))
 
     @_tool
     async def get_document_figure(arguments: dict[str, Any]) -> ToolResult:
@@ -137,7 +253,7 @@ def default_figure_tools(attachments_dir_provider: Callable[[], Path]) -> dict[s
         document = _resolve_document(attachments_dir, name)
         if document is None:
             return ToolResult(content=_not_found_message(attachments_dir, name), is_error=True)
-        entries = await _figures_for(document)
+        entries = (await _figures_for(document, ocr)).figures
         if not entries:
             return ToolResult(
                 content=f"No figures could be extracted from {document.name}.", is_error=True

@@ -30,6 +30,33 @@ decision revised), unrelated to what shipped when. Entries below link to
   deliberately excluded and keeps asking unconditionally, every time. See
   [docs/safety-and-permissions.md](docs/safety-and-permissions.md#allow-for-this-chat).
 
+- **Optional Mistral OCR backend for reading figures**, off by default.
+  The built-in extractor pairs an image with the caption nearest to it on
+  the page, which is a guess on the two-column layouts most journals use.
+  Mistral OCR returns the page in *reading order*, so a caption pairs with
+  its figure as reliably on two columns as on one — which is what makes
+  "show me Figure 1" trustworthy on a real paper.
+
+  Enabled per **workspace** (`use_ocr`), not per install, because the
+  answer differs: a workspace for reading vendor manuals can have it on
+  while one used to review unpublished manuscripts keeps it off. Needs the
+  new `ocr` extra (`pip install "aida-workbench[ocr]"` — just `httpx`, no
+  vendor SDK) and an API key, stored the same way as a provider key.
+
+  **Documents are uploaded to a third-party service, and AIDA asks before
+  each one** — with "Allow for this chat" available, so working through a
+  stack of manuals is not a stack of dialogs. An unattended run refuses the
+  upload unless the name is explicitly pre-approved with
+  `--preapprove-tool mistral_ocr_upload`. A document already examined is
+  never re-uploaded.
+
+  Every failure — declined, no key, extra not installed, service down,
+  timeout — falls back to the built-in extractor **and says so** in what
+  the model reads, because quietly producing worse labels than expected is
+  how a figure answer becomes wrong without anyone noticing. `aida doctor`
+  reports the three preconditions separately and never contacts the
+  service.
+
 - **You can ask about a figure in an attached paper.** Two new tools:
   `list_document_figures` names what is in a document — label, caption,
   page — as *text only*, and `get_document_figure` returns one image by

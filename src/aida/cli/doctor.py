@@ -197,6 +197,51 @@ def _effective_records_dir(settings: Settings | None) -> Path:
     return paths.ensure_records_dir(Path(configured) if configured else None)
 
 
+def _check_ocr(settings: Settings | None) -> CheckResult:
+    """Whether the optional OCR backend can actually run.
+
+    Reports the three preconditions *separately*, because "no workspace
+    wants it", "the extra is missing" and "no API key" want completely
+    different fixes and a single pass/fail would hide which one applies.
+    Never contacts the service: a diagnostic must not upload anything, and
+    reachability is not something a key check can answer anyway.
+    """
+    from aida.config.secrets import env_var_name, get_secret
+    from aida.documents.ocr.mistral import SECRET_REF
+
+    wanting = (
+        sorted(w.name for w in settings.workspaces.workspaces.values() if w.use_ocr)
+        if settings is not None
+        else []
+    )
+    if not wanting:
+        return CheckResult("ocr", True, "not enabled by any workspace (use_ocr: false everywhere)")
+
+    try:
+        import httpx  # noqa: F401
+    except ImportError:
+        return CheckResult(
+            "ocr",
+            False,
+            f"workspace(s) {', '.join(wanting)} enable OCR but the 'ocr' extra is not installed "
+            f"(pip install 'aida-workbench[ocr]') — figures fall back to the built-in extractor",
+        )
+
+    if not get_secret(SECRET_REF):
+        return CheckResult(
+            "ocr",
+            False,
+            f"workspace(s) {', '.join(wanting)} enable OCR but no API key is set — add one in "
+            f"Settings or set ${env_var_name(SECRET_REF)}; figures fall back to the built-in extractor",
+        )
+    return CheckResult(
+        "ocr",
+        True,
+        f"enabled for {', '.join(wanting)}; key present. Documents are uploaded to Mistral, "
+        f"and you are asked before each one.",
+    )
+
+
 def _check_orphan_attachments(settings: Settings | None) -> CheckResult:
     """Attachment folders with no conversation behind them.
 
@@ -383,6 +428,7 @@ def run_checks() -> list[CheckResult]:
     results.append(_check_writable("records_dir", _effective_records_dir(settings)))
     results.append(_check_keyring())
     results.append(_check_orphan_attachments(settings))
+    results.append(_check_ocr(settings))
     results.append(_check_pyirena_mcp(settings))
     results.append(_check_context_windows(settings))
     results.append(_check_max_tokens_vs_context_window(settings))
