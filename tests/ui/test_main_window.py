@@ -192,6 +192,30 @@ def test_flagship_demo_tool_call_produces_inline_image(
         window.close()
 
 
+def test_user_selector_updates_config_and_stamps_the_restarted_conversation(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert pump_until(qapp, lambda: settings.app.last_profile_name == "mock-profile")
+        first_conversation_id = window.bridge.session.recorder.conversation_id
+
+        window.user_selector._combo.setCurrentText("Alice")
+
+        assert pump_until(
+            qapp,
+            lambda: window.bridge.session is not None
+            and window.bridge.session.recorder.conversation_id != first_conversation_id,
+        )
+        assert settings.app.active_user == "Alice"
+        assert window.bridge.session.recorder.user == "Alice"
+    finally:
+        window.close()
+
+
 def test_resume_conversation_loads_prior_history(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
     settings = _settings_with_profile()
     first = _make_window(

@@ -72,7 +72,13 @@ from aida.ui.qt.profiles_dialog import ProfilesDialog
 from aida.ui.qt.quick_tasks_panel import QuickTaskData, QuickTasksPanel
 from aida.ui.qt.schedule_management_dialog import ScheduleManagementDialog
 from aida.ui.qt.scheduler_bridge import SchedulerBridge
-from aida.ui.qt.selectors import FolderDisplay, McpQuickPanel, ProfileSelector, WorkspaceSelector
+from aida.ui.qt.selectors import (
+    FolderDisplay,
+    McpQuickPanel,
+    ProfileSelector,
+    UserSelector,
+    WorkspaceSelector,
+)
 from aida.ui.qt.settings_dialog import SettingsDialog
 from aida.ui.qt.window_state import apply_font_size, apply_window_state, capture_window_state
 from aida.ui.qt.workflow_management_dialog import WorkflowFormDialog, WorkflowManagementDialog
@@ -169,6 +175,9 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.workspace_selector)
         self.profile_selector = ProfileSelector(self)
         toolbar.addWidget(self.profile_selector)
+        self.user_selector = UserSelector(self)
+        toolbar.addWidget(self.user_selector)
+        self.user_selector.user_changed.connect(self._on_user_changed)
 
         # Bug report: "How do I create a new chat within same Workspace?
         # ... something which will not contain the history from prior
@@ -1015,6 +1024,27 @@ class MainWindow(QMainWindow):
 
     # --- workspace / profile switching ------------------------------------
 
+    def _on_user_changed(self, name: str) -> None:
+        """Start a new chat under the selected organization label.
+
+        The open conversation keeps its original owner; changing the
+        selector must never quietly move someone else's existing work.
+        """
+        if name == (self.settings.app.active_user or ""):
+            return
+        self.settings.app.active_user = name
+        save_app_config(self.settings.app)
+        workspace_name = self.workspace_selector.current_workspace() or None
+        # A workspace supplies its configured profile during startup. With
+        # no workspace there is no such fallback, so preserve the active
+        # profile explicitly instead of restarting into "No profile given".
+        profile_name = None if workspace_name else self.profile_selector.current_profile() or None
+        self._restart_session(
+            workspace_name=workspace_name,
+            profile_name=profile_name,
+            resume_conversation_id=None,
+        )
+
     def _on_workspace_changed(self, name: str) -> None:
         answer = QMessageBox.question(
             self,
@@ -1210,6 +1240,9 @@ class MainWindow(QMainWindow):
         store = ConversationStore()
         try:
             self.sidebar.set_conversations(store.list_conversations())
+            self.user_selector.set_users(
+                store.known_users(), current=self.settings.app.active_user
+            )
         finally:
             store.close()
 

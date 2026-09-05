@@ -30,6 +30,38 @@ from aida.ui.qt._qt import (
 NO_WORKSPACE_LABEL = "(no workspace)"
 
 
+class UserSelector(QWidget):
+    """Who (or what) new conversations are labelled with.
+
+    Editable on purpose: names are not registered anywhere — one exists
+    because a conversation used it — so typing is how the first
+    conversation for a new person or project is created.
+    """
+
+    user_changed = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(QLabel("User:", self))
+        self._combo = QComboBox(self)
+        self._combo.setEditable(True)
+        self._combo.currentTextChanged.connect(self.user_changed.emit)
+        layout.addWidget(self._combo)
+
+    def set_users(self, names: list[str], *, current: str | None = None) -> None:
+        self._combo.blockSignals(True)
+        self._combo.clear()
+        self._combo.addItem("")
+        self._combo.addItems(names)
+        self._combo.setCurrentText(current or "")
+        self._combo.blockSignals(False)
+
+    def current_user(self) -> str:
+        return self._combo.currentText()
+
+
 class WorkspaceSelector(QWidget):
     """A dropdown of configured workspace names, plus an explicit
     "(no workspace)" option — switching triggers ``workspace_changed`` with

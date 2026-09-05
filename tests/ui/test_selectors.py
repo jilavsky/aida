@@ -9,6 +9,7 @@ from aida.ui.qt.selectors import (
     FolderDisplay,
     McpQuickPanel,
     ProfileSelector,
+    UserSelector,
     WorkspaceSelector,
 )
 
@@ -37,6 +38,35 @@ def test_workspace_selector_emits_signal_on_change(qapp):
 
     selector._combo.setCurrentText(NO_WORKSPACE_LABEL)
     assert changes == ["use-pyirena", ""]
+
+
+def test_user_selector_is_editable_and_has_a_blank_first_entry(qapp):
+    selector = UserSelector()
+    selector.set_users(["Alice", "Bob"])
+    assert selector._combo.isEditable()
+    assert selector._combo.itemText(0) == ""
+    assert selector.current_user() == ""
+
+
+def test_user_selector_sets_known_or_new_current_user(qapp):
+    selector = UserSelector()
+    selector.set_users(["Alice", "Bob"], current="Bob")
+    assert selector.current_user() == "Bob"
+
+    selector.set_users(["Alice", "Bob"], current="New project")
+    assert selector.current_user() == "New project"
+
+
+def test_user_selector_emits_blank_and_named_changes(qapp):
+    selector = UserSelector()
+    selector.set_users(["Alice"], current="Alice")
+    changes = []
+    selector.user_changed.connect(changes.append)
+
+    selector._combo.setCurrentText("")
+    selector._combo.setCurrentText("New project")
+
+    assert changes == ["", "New project"]
 
 
 def test_profile_selector_set_and_get_current(qapp):
