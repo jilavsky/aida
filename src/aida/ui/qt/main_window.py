@@ -343,6 +343,10 @@ class MainWindow(QMainWindow):
         open_records_action.triggered.connect(self._on_open_records_folder)
         file_menu.addAction(open_records_action)
 
+        open_attachments_action = QAction("Open Conversation Folder", self)
+        open_attachments_action.triggered.connect(self._on_open_conversation_folder)
+        file_menu.addAction(open_attachments_action)
+
         # Bug report: "Agents seem to be saving temporary files ... in
         # random places" — this is the one well-known scratch folder every
         # MCP server subprocess now gets launched in (aida.core.session,
@@ -391,6 +395,23 @@ class MainWindow(QMainWindow):
 
     def _on_open_records_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(ensure_records_dir(self.settings.app.records_dir))))
+
+    def _on_open_conversation_folder(self) -> None:
+        """Open the attachment folder for the current conversation.
+
+        This deliberately uses the recorder's pure lookup and does not
+        create an empty folder for a conversation with no attachments.
+        """
+        session = self.bridge.session
+        recorder = session.recorder if session is not None else None
+        if recorder is None:
+            self.statusBar().showMessage("No conversation open yet.", 5000)
+            return
+        directory = recorder.attachments_dir()
+        if not directory.is_dir():
+            self.statusBar().showMessage("Nothing has been attached to this conversation.", 5000)
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
 
     def _on_open_scratch_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(ensure_scratch_dir(self.settings.app.scratch_dir))))
@@ -856,11 +877,17 @@ class MainWindow(QMainWindow):
         # with read_file is not copied anywhere (aida.documents.attachments
         # explains why). Failed reads are excluded: there is nothing worth
         # keeping a copy of, and the message already says so.
+        kept = [path for path in attachments if path not in failures]
         self.bridge.send(
             outgoing,
             images=images,
-            attachment_paths=[p for p in attachments if p not in failures],
+            attachment_paths=kept,
         )
+        if kept:
+            names = ", ".join(Path(path).name for path in kept)
+            self.statusBar().showMessage(
+                f"Attached {names} — copied into this conversation's folder", 6000
+            )
 
     def _queue_message_for_running_turn(self, text: str) -> None:
         """Send pressed while a turn is running: hand the text to that turn

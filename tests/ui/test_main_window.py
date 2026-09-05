@@ -1371,6 +1371,7 @@ def test_menu_bar_has_file_and_help_menus(qapp, loop_thread, aida_home: Path, re
         file_actions = [a.text() for a in file_menu.actions()]
         assert "Open Config Folder" in file_actions
         assert "Open Records Folder" in file_actions
+        assert "Open Conversation Folder" in file_actions
 
         help_menu = next(a.menu() for a in window.menuBar().actions() if a.text().replace("&", "") == "Help")
         help_actions = [a.text() for a in help_menu.actions()]
@@ -1433,6 +1434,65 @@ def test_open_scratch_folder_opens_the_scratch_dir(qapp, loop_thread, aida_home:
         # this compares via Path rather than a raw string.
         assert len(opened) == 1
         assert Path(opened[0]) == default_scratch_dir()
+    finally:
+        window.close()
+
+
+def test_open_conversation_folder_with_no_session_shows_status(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    session = window.bridge.session
+    try:
+        window.bridge.session = None
+        window._on_open_conversation_folder()
+        assert window.statusBar().currentMessage() == "No conversation open yet."
+    finally:
+        window.bridge.session = session
+        window.close()
+
+
+def test_open_conversation_folder_without_attachments_does_not_create_it(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        directory = window.bridge.session.recorder.attachments_dir()
+        assert not directory.exists()
+        window._on_open_conversation_folder()
+        assert window.statusBar().currentMessage() == "Nothing has been attached to this conversation."
+        assert not directory.exists()
+    finally:
+        window.close()
+
+
+def test_open_conversation_folder_opens_the_existing_attachment_directory(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    note = tmp_path / "notes.txt"
+    note.write_text("beamline notes", encoding="utf-8")
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        recorder = window.bridge.session.recorder
+        window.input_box.add_attachment(str(note))
+        window.input_box.set_text("keep this")
+        window.input_box._send_button.click()
+        assert pump_until(qapp, lambda: recorder.attachments_dir().is_dir())
+        opened = []
+        monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+
+        window._on_open_conversation_folder()
+
+        assert [Path(path) for path in opened] == [recorder.attachments_dir()]
     finally:
         window.close()
 
@@ -1604,6 +1664,9 @@ def test_send_with_attachment_includes_file_content_in_the_message(
         window.input_box.add_attachment(str(note))
         window.input_box.set_text("please summarize")
         window.input_box._send_button.click()
+        assert window.statusBar().currentMessage() == (
+            "Attached notes.txt — copied into this conversation's folder"
+        )
 
         assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
 
