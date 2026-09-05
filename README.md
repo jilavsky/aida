@@ -1,6 +1,6 @@
 # AIDA — AI Data Assistant
 
-> **Status: beta (0.1.0b4).** Everything described below works today and is
+> **Status: beta (0.1.0b5).** Everything described below works today and is
 > in daily use. Config formats and CLI commands are stable enough to build
 > on; breaking changes before 1.0 will be called out in
 > [`CHANGELOG.md`](CHANGELOG.md). Bug reports and rough edges are exactly

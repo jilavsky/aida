@@ -16,6 +16,10 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+##  [0.1.0b5] - 2026-09-05
+
+setup for automatic link to pypi. Rerelease of b04. 
+
 ## [0.1.0b4] - 2026-09-05
 
 Conversation organization, attached-document handling, figure tools, and an

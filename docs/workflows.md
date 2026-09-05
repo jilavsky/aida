@@ -1,6 +1,6 @@
 # Automation: `aida run`, workflows, and schedules
 
-> **Status: beta (0.1.0b4), Phase 10.** Implemented on top of the same
+> **Status: beta (0.1.0b5), Phase 10.** Implemented on top of the same
 > session engine every interactive chat uses — a headless run or a
 > scheduled job is not a separate code path, it's a different *driver* of
 > `start_session`/`ChatSession.send`. See

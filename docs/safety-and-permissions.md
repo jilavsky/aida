@@ -1,6 +1,6 @@
 # Safety and permissions
 
-> **Status: beta (0.1.0b4).** Phases 1–10 are implemented and in daily use.
+> **Status: beta (0.1.0b5).** Phases 1–10 are implemented and in daily use.
 > Config formats and CLI commands are stable enough to build on; anything
 > that has to change before 1.0 will be called out in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`PLAN.md`](../PLAN.md) for what is

@@ -3,7 +3,7 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 0.1.0b4 (beta), reconciled 2026-09-04.** Phases 1–10's automation
+**Status: 0.1.0b5 (beta), reconciled 2026-09-04.** Phases 1–10's automation
 half are implemented, tested (1,700+ tests, three OSes) and in daily use.
 This file holds **only what is not done** — anything ticked here has been
 moved to `planning/COMPLETED.md`, and anything shipped is dated in
@@ -50,7 +50,7 @@ gets a dated note appended there; error messages say *which* layer failed.
 
 Nothing here is speculative work; it is what a beta is for.
 
-- [ ] Publish `aida-workbench` 0.1.0b4 to PyPI and verify
+- [ ] Publish `aida-workbench` 0.1.0b5 to PyPI and verify
       `pip install "aida-workbench[gui,docs]"` → working `aida-gui` on a
       clean macOS, Windows, and Linux machine.
 - [ ] First outside users installing from PyPI, with issues triaged into this
