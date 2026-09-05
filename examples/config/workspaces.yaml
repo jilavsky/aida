@@ -29,3 +29,33 @@ workspaces:
       - review-checklist
     system_prompt: null
     safety: confirm
+
+  # Shared-beamline examples: the workspace selects capabilities; the
+  # toolbar's user label supplies the per-person {user} path segment.
+  usaxs-user:
+    profile: argo-claude
+    source_folders:
+      - "/share1/USAXS_data"
+    target_folder: "~/Documents/Aida/usaxs-user"
+    saved_scripts_dir: "~/Documents/Aida/usaxs-user/saved_scripts/{user}"
+    mcp_group: pyirena-analysis
+    skills:
+      - saxs-basics
+      - pyirena-usage
+    system_prompt: "prompts/usaxs-user.md"
+    safety: confirm
+
+  usaxs-staff:
+    profile: argo-claude
+    source_folders:
+      - "/share1/USAXS_data"
+    target_folder: "~/Documents/Aida/usaxs-staff"
+    saved_scripts_dir: "~/Documents/Aida/usaxs-staff/saved_scripts/{user}"
+    python_interpreter: "~/miniconda3/envs/aievaluator/bin/python"
+    scripting_enabled: true
+    mcp_group: pyirena-analysis
+    skills:
+      - saxs-basics
+      - pyirena-usage
+    system_prompt: "prompts/usaxs-staff.md"
+    safety: relaxed

@@ -41,6 +41,7 @@ def test_workspace_form_seeds_fields_when_editing(qapp, aida_home: Path):
         system_prompt="You are a SAXS expert.",
         safety="confirm",
         scripting_enabled=False,
+        use_ocr=True,
         python_interpreter="/usr/bin/python3",
         command_allowlist=["git status"],
         script_timeout_seconds=180.0,
@@ -55,6 +56,7 @@ def test_workspace_form_seeds_fields_when_editing(qapp, aida_home: Path):
     assert dialog._mcp_group_combo.currentText() == "analysis"
     assert dialog._system_prompt_edit.toPlainText() == "You are a SAXS expert."
     assert not dialog._scripting_checkbox.isChecked()
+    assert dialog._use_ocr_checkbox.isChecked()
     assert dialog._interpreter_edit.text() == "/usr/bin/python3"
     assert dialog._command_allowlist_edit.toPlainText() == "git status"
     assert dialog._script_timeout_spin.value() == 180
@@ -84,6 +86,20 @@ def test_workspace_form_script_timeout_round_trips_into_result_config(qapp, aida
 
     config = dialog.result_config()
     assert config.script_timeout_seconds == 600.0
+
+
+def test_workspace_form_ocr_setting_round_trips_through_edit(qapp, aida_home: Path):
+    settings = _settings_with_a_profile(aida_home)
+    workspace = WorkspaceConfig(name="papers", use_ocr=True)
+    dialog = WorkspaceFormDialog(
+        settings=settings, skills_dir=aida_home / "skills", workspace=workspace
+    )
+
+    assert dialog._use_ocr_checkbox.isChecked()
+    assert dialog.result_config().use_ocr is True
+
+    dialog._use_ocr_checkbox.setChecked(False)
+    assert dialog.result_config().use_ocr is False
 
 
 def test_workspace_form_result_config_reflects_edited_fields(qapp, aida_home: Path):
@@ -335,3 +351,12 @@ def test_workspace_details_list_the_quick_tasks(qapp, aida_home: Path):
     dialog._workspace_list.setCurrentRow(0)
 
     assert "quick_tasks: Reduce data" in dialog._details_label.text()
+
+
+def test_workspace_details_show_document_ocr_setting(qapp, aida_home: Path):
+    settings = _settings_with_a_profile(aida_home)
+    settings.workspaces.workspaces["papers"] = WorkspaceConfig(name="papers", use_ocr=True)
+    dialog = WorkspaceManagementDialog(settings, aida_home / "skills")
+    dialog._workspace_list.setCurrentRow(0)
+
+    assert "use_ocr: True" in dialog._details_label.text()

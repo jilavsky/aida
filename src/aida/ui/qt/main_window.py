@@ -24,6 +24,7 @@ from aida import __version__ as AIDA_VERSION
 from aida.coding.runner import DEFAULT_RUN_TIMEOUT_SECONDS
 from aida.config.logging_setup import configure_logging, get_logger
 from aida.config.paths import config_dir, ensure_records_dir, ensure_scratch_dir, skills_dir
+from aida.config.secrets import set_secret
 from aida.config.settings import (
     QuickTask,
     Settings,
@@ -36,6 +37,7 @@ from aida.config.settings import (
 from aida.core.confirmation import REMEMBERABLE_ACTIONS, ConfirmAnswer
 from aida.core.cost import estimate_cost_usd
 from aida.core.events import ContextTrimmed
+from aida.documents.ocr.mistral import SECRET_REF as OCR_SECRET_REF
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
 from aida.persistence.store import ArtifactRecord, ConversationStore
 from aida.providers.base import ImageRef
@@ -1714,6 +1716,9 @@ class MainWindow(QMainWindow):
             return
         previous_safety_mode = self.settings.app.default_safety_mode
         self.settings.app = dialog.updated_app_config()
+        ocr_key = dialog.ocr_api_key()
+        if ocr_key:
+            set_secret(OCR_SECRET_REF, ocr_key)
         # U3: the global default gets the same one-time relaxed-mode
         # warning a workspace's own safety field already shows on the
         # CLI/GUI workspace editor (relaxed_mode_warning_if_newly_enabled)

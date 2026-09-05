@@ -950,6 +950,53 @@ def test_settings_dialog_max_iterations_applies_to_the_running_session(
         window.close()
 
 
+def test_settings_dialog_empty_ocr_key_leaves_secret_unchanged(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        monkeypatch.setattr(
+            "aida.ui.qt.settings_dialog.SettingsDialog.exec",
+            lambda self: QDialog.DialogCode.Accepted,
+        )
+        saved = []
+        monkeypatch.setattr("aida.ui.qt.main_window.set_secret", lambda *args: saved.append(args))
+
+        window.open_settings_dialog()
+
+        assert saved == []
+    finally:
+        window.close()
+
+
+def test_settings_dialog_saves_a_nonempty_ocr_key(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    from aida.documents.ocr.mistral import SECRET_REF
+
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        def _fake_exec(self):
+            self._ocr_api_key_edit.setText("mistral-key")
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr("aida.ui.qt.settings_dialog.SettingsDialog.exec", _fake_exec)
+        saved = []
+        monkeypatch.setattr("aida.ui.qt.main_window.set_secret", lambda *args: saved.append(args))
+
+        window.open_settings_dialog()
+
+        assert saved == [(SECRET_REF, "mistral-key")]
+    finally:
+        window.close()
+
+
 def test_settings_dialog_warns_when_global_default_safety_becomes_relaxed(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):

@@ -375,12 +375,14 @@ genuine `.md` attachment is still listed.
   an `aida doctor` check that only *reports*, and `aida conversations gc`
   that removes after asking. A diagnostic command never deletes.
 
-### Left for later
+### GUI and documentation follow-up, 2026-09-05
 
-- **Telling the user where it went** (B5) — status-bar line, an **Open
-  Conversation Folder** menu item. Qt could not be run in the session that
-  did this work (`libEGL` missing), and these are GUI-only.
-- `docs/documents.md`. Held with the GUI copy so the two land together.
+The attachment copy is now visible in the GUI: sending names the kept files
+in the status bar, and **File → Open Conversation Folder** opens the current
+conversation's attachment directory. The lookup deliberately does not
+create a directory or database record for an attachment-free conversation;
+it reports that there is nothing to open. `docs/documents.md` documents the
+layout, deletion/GC lifecycle, figure tools, and OCR behavior.
 
 
 ---
@@ -465,8 +467,9 @@ truncating a push of twelve anonymous ones.
 
 Shipped: 18 new tests (HTTP stubbed throughout — no network in CI), full
 non-GUI suite green (1322 passed), ruff clean. The Settings and Workspace
-dialog surfaces are the only part left, and they are specified in
-`gui_implementation_guide.md` §4.
+dialog surfaces followed on 2026-09-05: Settings has a write-only key field
+and Clear key action, and the workspace form round-trips and displays
+`use_ocr`.
 
 **Transport** (`documents/ocr/mistral.py`): three REST calls, `httpx` only,
 declared as the new `ocr` extra. No `mistralai` SDK — three endpoints do

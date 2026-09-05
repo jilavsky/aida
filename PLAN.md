@@ -98,16 +98,15 @@ step-by-step in [`planning/multiuser_plan.md`](planning/multiuser_plan.md).
 §1.5**, because a DB column can be added at any time but a folder layout
 cannot be changed once users have files in it. See `multiuser_plan.md` §0.
 
-**Core layer shipped 2026-09-05** — schema, path resolution, stamping and
-the CLI surface, with 44 new tests. What remains is the GUI, which needs an
-environment where the Qt suite actually runs. Detail in `multiuser_plan.md`
-§7.
+**Core and GUI organization layers shipped 2026-09-05** — schema, path
+resolution, stamping, CLI controls, toolbar user picker, and sidebar
+filtering with its *All users* escape hatch. Detail in
+`multiuser_plan.md` §7.
 
-- [ ] The GUI half — user picker, sidebar filtering with its *All users*
-      escape hatch, and per-user `user_context` — is specified commit by
-      commit in
-      [`planning/gui_implementation_guide.md`](planning/gui_implementation_guide.md)
-      and tracked as one item in §1.5.
+- [ ] Per-user `user_context` remains: store a mapping by user, resolve it
+      at session start, and retain the existing flat value as the fallback.
+      This was part of `multiuser_plan.md` step 5, but not part of the
+      scoped GUI implementation guide.
 
 ### 1.4 Verification owed (cannot be done from a sandbox)
 
@@ -140,17 +139,6 @@ unambiguous is done and archived in `planning/COMPLETED.md` §7; what is
 left below either needs a real UX decision, needs domain knowledge only
 the user can supply, or is a read-through rather than a mechanical edit.
 
-- [ ] **GUI work with a Qt environment.** Four commits, fully specified
-      in [`planning/gui_implementation_guide.md`](planning/gui_implementation_guide.md):
-      sidebar filtering (user + workspace, with its *All users* escape
-      hatch in the same commit), the toolbar user picker, the
-      attachment status line and **Open Conversation Folder**, and the
-      Settings/Workspace surfaces for the OCR key and `use_ocr`. Every
-      non-GUI half is built and tested; these were held back because the
-      sessions that did the rest could not run Qt.
-- [ ] **`docs/organizing-conversations.md` and `docs/documents.md`**, plus
-      `{user}` in the shipped `usaxs-user`/`usaxs-staff` examples. Held
-      until the GUI lands so they do not describe a half-built interface.
 - [ ] **Enforce `ruff format` in CI** (external review, P3). `ruff check`
       passes and is gated; `ruff format --check .` currently reports
       **128 files would be reformatted, 97 already formatted**. Two commits,

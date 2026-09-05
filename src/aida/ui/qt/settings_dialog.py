@@ -7,8 +7,8 @@ editing ``config.yaml``: ``default_safety_mode``, the global
 framing every session's system message opens with, see
 ``aida.core.context.build_identity_context_block``.
 
-Never calls ``exec()`` from anywhere in ``aida.ui.qt`` itself and never
-touches ``aida.config`` I/O directly — it's constructed from an
+Never calls ``exec()`` from anywhere in ``aida.ui.qt`` itself. It only
+touches secret storage for the explicit "Clear key" action; otherwise it is constructed from an
 ``AppConfig`` snapshot, exposes the edited values back out via plain
 getters, and the caller (``main_window``) decides whether/how to persist
 them (``save_app_config``) and whether to call ``exec()`` for real or, in a
@@ -19,14 +19,18 @@ from __future__ import annotations
 
 import dataclasses
 
+from aida.config.secrets import delete_secret
 from aida.config.settings import AppConfig, ProviderProfile
+from aida.documents.ocr.mistral import SECRET_REF
 from aida.ui.qt._qt import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QListWidget,
     QPlainTextEdit,
@@ -166,6 +170,35 @@ class SettingsDialog(QDialog):
         )
         form.addRow("Scheduler: run anyway after:", self._scheduler_max_defer_spin)
 
+        ocr_group = QGroupBox("Document OCR", self)
+        ocr_layout = QVBoxLayout(ocr_group)
+        key_help = QLabel(
+            'Get a free API key from <a href="https://console.mistral.ai/api-keys">'
+            "console.mistral.ai/api-keys</a>. The free tier covers roughly 10 documents / "
+            "50 MB at a time — enough for occasional use.",
+            ocr_group,
+        )
+        key_help.setOpenExternalLinks(True)
+        key_help.setWordWrap(True)
+        ocr_layout.addWidget(key_help)
+        consent = QLabel(
+            "Documents you ask about are uploaded to Mistral. AIDA asks before each one. "
+            "Enable it per workspace in Workspaces…",
+            ocr_group,
+        )
+        consent.setWordWrap(True)
+        ocr_layout.addWidget(consent)
+        key_row = QHBoxLayout()
+        self._ocr_api_key_edit = QLineEdit(ocr_group)
+        self._ocr_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._ocr_api_key_edit.setPlaceholderText("(unchanged)")
+        key_row.addWidget(self._ocr_api_key_edit)
+        self._clear_ocr_key_button = QPushButton("Clear key", ocr_group)
+        self._clear_ocr_key_button.clicked.connect(self._on_clear_ocr_key)
+        key_row.addWidget(self._clear_ocr_key_button)
+        ocr_layout.addLayout(key_row)
+        form.addRow(ocr_group)
+
         layout.addLayout(form)
 
         self._profiles_list = QListWidget(self)
@@ -186,6 +219,10 @@ class SettingsDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(self, "Scratchpad Folder", self._scratch_dir_edit.text())
         if folder:
             self._scratch_dir_edit.setText(folder)
+
+    def _on_clear_ocr_key(self) -> None:
+        delete_secret(SECRET_REF)
+        self._ocr_api_key_edit.clear()
 
     # --- edited values ---------------------------------------------------
 
@@ -230,6 +267,9 @@ class SettingsDialog(QDialog):
 
     def scheduler_max_defer_seconds(self) -> int:
         return self._scheduler_max_defer_spin.value() * 60
+
+    def ocr_api_key(self) -> str:
+        return self._ocr_api_key_edit.text().strip()
 
     def updated_app_config(self) -> AppConfig:
         """A copy of the ``AppConfig`` this dialog was opened with, with

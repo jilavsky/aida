@@ -179,6 +179,18 @@ class WorkspaceFormDialog(QDialog):
         self._scripting_checkbox.setChecked(workspace.scripting_enabled if workspace else True)
         form.addRow("Scripting:", self._scripting_checkbox)
 
+        self._use_ocr_checkbox = QCheckBox(
+            "Use Mistral OCR for figures in attached documents", self
+        )
+        self._use_ocr_checkbox.setChecked(workspace.use_ocr if workspace else False)
+        self._use_ocr_checkbox.setToolTip(
+            "Uploads attached documents to Mistral to read their figures. Off by default. "
+            "Per workspace because the answer differs: a manuals workspace can have it on "
+            "while one used to review unpublished manuscripts keeps it off. You are still "
+            "asked before each document is sent."
+        )
+        form.addRow("Document OCR:", self._use_ocr_checkbox)
+
         interpreter_row = QHBoxLayout()
         self._interpreter_edit = QLineEdit(workspace.python_interpreter if workspace else "", self)
         self._interpreter_edit.setPlaceholderText("(default: the interpreter AIDA itself runs under)")
@@ -287,6 +299,7 @@ class WorkspaceFormDialog(QDialog):
             ],
             python_interpreter=self._interpreter_edit.text().strip() or None,
             scripting_enabled=self._scripting_checkbox.isChecked(),
+            use_ocr=self._use_ocr_checkbox.isChecked(),
             script_timeout_seconds=float(self._script_timeout_spin.value()),
             # Not editable in this form — preserved, not reset:
             quick_tasks=list(original.quick_tasks) if original else [],
@@ -308,6 +321,7 @@ def _workspace_detail_lines(workspace: WorkspaceConfig, validation: WorkspaceVal
         f"knowledge_bases: {', '.join(workspace.knowledge_bases) or '(none)'}",
         f"safety: {workspace.safety}",
         f"scripting_enabled: {workspace.scripting_enabled}",
+        f"use_ocr: {workspace.use_ocr}",
         f"python_interpreter: {workspace.python_interpreter or '(default)'}",
         f"command_allowlist: {', '.join(workspace.command_allowlist) or '(none)'}",
         f"script_timeout_seconds: {workspace.script_timeout_seconds:g}",

@@ -20,6 +20,8 @@ commented example config files, see [`examples/config/`](../examples/config/).
 | [`safety-and-permissions.md`](safety-and-permissions.md) | What AIDA is allowed to read/write/run without asking, and what always asks |
 | [`mcp-servers.md`](mcp-servers.md) | Adding MCP servers (pyIrena, bait_mcp, web search, ...), groups, per-tool permissions |
 | [`context-and-limits.md`](context-and-limits.md) | The model's context window, what fills it, compaction, and the fullness indicator |
+| [`organizing-conversations.md`](organizing-conversations.md) | User/project labels, sidebar filtering, and `{user}` paths |
+| [`documents.md`](documents.md) | Attachment storage and cleanup, figure tools, and optional Mistral OCR |
 | [`coding-and-scripting.md`](coding-and-scripting.md) | Letting the agent run Python/shell commands, code templates, the Code Editor |
 | [`knowledge-bases.md`](knowledge-bases.md) | RAG: indexing your own documents so the agent can search them |
 | [`gui-overview.md`](gui-overview.md) | A spatial tour of the desktop app — what's where |

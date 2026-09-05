@@ -310,15 +310,25 @@ by an `active_user` left in `config.yaml`). The listing's user column
 appears only once something in the DB uses it, so a single-user install's
 output is byte-for-byte unchanged.
 
-### Not done, and why
+### GUI and documentation follow-up, 2026-09-05
 
-The GUI (§3 step 3, §3 step 5). Qt could not be run in the session that did
-this work — `libEGL` is missing from that container — and the sidebar
-filter is precisely the change that should not be written untested: a
-filter shipped without its **Show all** escape makes hidden work read as
-lost work. `AppConfig.active_user` is already honoured by the GUI through
-`resolve_active_user`, so setting it in `config.yaml` labels conversations
-today; only the picker and the filtering are missing.
+The GUI was completed in an environment where all 521 baseline Qt tests
+passed. The toolbar now has an editable `UserSelector`; changing it saves
+`AppConfig.active_user` and starts a new chat without re-labelling the open
+one. The sidebar has an **All users** escape hatch, keeps NULL-user legacy
+history visible under named filters, and searches the visible workspace and
+user fields as well as the title. `docs/organizing-conversations.md` and the
+`usaxs-user` / `usaxs-staff` examples document the finished surface.
+
+One code-driven departure from the GUI guide: when no workspace is active,
+the user switch explicitly preserves the current profile. `start_session`
+does not fall back to `AppConfig.last_profile_name`; passing
+`profile_name=None` in that state opens the no-profile startup failure path.
+A workspace-backed switch still lets the workspace choose its configured
+profile as planned.
+
+Step 5, per-user personal context, remains separate work; it was described
+in this plan but was not included in `gui_implementation_guide.md`.
 
 **The attachment store (`documents_implementation.md` Phase B) is now
 unblocked** — the records-dir layout is settled and `{user}` expansion

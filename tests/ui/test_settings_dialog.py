@@ -5,6 +5,7 @@ values back directly, per this module's own docstring."""
 from __future__ import annotations
 
 from aida.config.settings import AppConfig, ProviderProfile
+from aida.documents.ocr.mistral import SECRET_REF
 from aida.ui.qt.settings_dialog import SettingsDialog
 
 
@@ -296,3 +297,28 @@ def test_scheduler_timings_accept_the_disabling_zero(qapp, aida_home):
     updated = dialog.updated_app_config()
     assert updated.scheduler_quiet_period_seconds == 0
     assert updated.scheduler_max_defer_seconds == 0
+
+
+# --- Mistral document OCR key -----------------------------------------------
+
+
+def test_ocr_key_is_write_only_and_not_part_of_app_config(qapp):
+    dialog = SettingsDialog(AppConfig())
+    assert dialog.ocr_api_key() == ""
+    assert dialog._ocr_api_key_edit.placeholderText() == "(unchanged)"
+
+    dialog._ocr_api_key_edit.setText("secret-value")
+    assert dialog.ocr_api_key() == "secret-value"
+    assert not hasattr(dialog.updated_app_config(), "ocr_api_key")
+
+
+def test_clear_ocr_key_deletes_the_secret_and_clears_the_field(qapp, monkeypatch):
+    deleted = []
+    monkeypatch.setattr("aida.ui.qt.settings_dialog.delete_secret", deleted.append)
+    dialog = SettingsDialog(AppConfig())
+    dialog._ocr_api_key_edit.setText("will-not-be-saved")
+
+    dialog._clear_ocr_key_button.click()
+
+    assert deleted == [SECRET_REF]
+    assert dialog.ocr_api_key() == ""

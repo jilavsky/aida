@@ -41,7 +41,10 @@ decision revised), unrelated to what shipped when. Entries below link to
   answer differs: a workspace for reading vendor manuals can have it on
   while one used to review unpublished manuscripts keeps it off. Needs the
   new `ocr` extra (`pip install "aida-workbench[ocr]"` — just `httpx`, no
-  vendor SDK) and an API key, stored the same way as a provider key.
+  vendor SDK) and an API key, stored the same way as a provider key. The
+  key now has a write-only **Document OCR** field (and Clear key action) in
+  Settings, while the Workspaces dialog exposes and reviews each
+  workspace's `use_ocr` switch.
 
   **Documents are uploaded to a third-party service, and AIDA asks before
   each one** — with "Allow for this chat" available, so working through a
@@ -104,7 +107,9 @@ decision revised), unrelated to what shipped when. Entries below link to
   latent bug that already applied to the `figures/` sidecar and is fixed
   for both. As a backstop, `aida doctor` reports attachment folders whose
   conversation is gone, and a new `aida conversations gc` removes them
-  after asking.
+  after asking. The GUI now confirms accepted attachment names in the
+  status bar and provides **File → Open Conversation Folder** without
+  creating empty folders for chats that have no attachments.
 
 - **Conversations can carry a `user` label** — an organization axis for a
   shared beamline machine (where the buckets are people) or a laptop with
@@ -127,10 +132,12 @@ decision revised), unrelated to what shipped when. Entries below link to
   `jan-ilavsky`, no active user → `default`) before anything reads those
   folders — so each bucket's transcripts and scripts land in their own
   place. Resuming a conversation never re-labels it: it belongs to
-  whoever created it, even if a different name is active now. The GUI
-  picker and sidebar filtering are still to come; the label is set through
-  `config.yaml` or the CLI meanwhile. See
-  [`planning/multiuser_plan.md`](planning/multiuser_plan.md).
+  whoever created it, even if a different name is active now. The GUI now
+  has an editable toolbar user picker; changing it starts a new chat. The
+  sidebar can filter by user while always keeping unlabelled legacy chats
+  visible and providing an **All users** escape hatch, and its text search
+  now matches workspace and user as well as title. See
+  [docs/organizing-conversations.md](docs/organizing-conversations.md).
 
 ### Fixed
 
