@@ -141,7 +141,9 @@ def test_renaming_onto_an_existing_name_asks_before_merging(qapp, tmp_path: Path
         monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Jan", True))
         asked = []
         monkeypatch.setattr(
-            QMessageBox, "question", lambda *a, **k: asked.append(a) or QMessageBox.StandardButton.No
+            QMessageBox,
+            "question",
+            lambda *a, **k: asked.append(a) or QMessageBox.StandardButton.No,
         )
 
         dialog._on_rename()

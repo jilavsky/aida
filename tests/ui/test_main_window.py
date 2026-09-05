@@ -49,7 +49,9 @@ MOCK_SERVER_PATH = Path(__file__).resolve().parents[1] / "mock_mcp_server.py"
 
 def _settings_with_profile(name: str = "mock-profile") -> Settings:
     settings = load_settings()
-    settings.providers.profiles[name] = ProviderProfile(name=name, kind="openai_compat", model="mock-model")
+    settings.providers.profiles[name] = ProviderProfile(
+        name=name, kind="openai_compat", model="mock-model"
+    )
     return settings
 
 
@@ -70,16 +72,25 @@ def _make_window(qapp, loop_thread, settings, monkeypatch, script, **start_kwarg
     # race.
     assert pump_until(
         qapp,
-        lambda: window.statusBar().currentMessage().startswith("Ready")
-        or window.statusBar().currentMessage() == "Startup failed",
+        lambda: (
+            window.statusBar().currentMessage().startswith("Ready")
+            or window.statusBar().currentMessage() == "Startup failed"
+        ),
     )
     return window
 
 
-def test_session_starts_and_completes_a_turn(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_session_starts_and_completes_a_turn(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hello from mock")], profile_name="mock-profile"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hello from mock")],
+        profile_name="mock-profile",
     )
     try:
         assert window.bridge.session is not None
@@ -92,7 +103,9 @@ def test_session_starts_and_completes_a_turn(qapp, loop_thread, aida_home: Path,
         # back off) are two separate signals emitted moments apart — on a
         # slower runner, waiting on widget_count alone could observe
         # is_busy still True for one more event-loop turn. Wait for both.
-        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2 and not window.input_box.is_busy)
+        assert pump_until(
+            qapp, lambda: window.chat_panel.widget_count >= 2 and not window.input_box.is_busy
+        )
         assert isinstance(window.chat_panel.widget_at(0), MessageBubble)
         assert window.chat_panel.widget_at(0).text == "hi there"
         assert window.chat_panel.widget_at(1).text == "hello from mock"
@@ -114,9 +127,13 @@ def test_profile_selector_shows_the_actual_active_profile_once_ready(
     sort *after* another one alphabetically would have shown the bug even
     for a brand-new (non-resumed) session."""
     settings = _settings_with_profile("z-profile")
-    settings.providers.profiles["a-profile"] = ProviderProfile(name="a-profile", kind="openai_compat", model="m")
+    settings.providers.profiles["a-profile"] = ProviderProfile(
+        name="a-profile", kind="openai_compat", model="m"
+    )
 
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="z-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="z-profile"
+    )
     try:
         assert window.bridge.session.profile_name == "z-profile"
         assert window.profile_selector.current_profile() == "z-profile"
@@ -146,7 +163,12 @@ def test_workspace_selector_shows_the_actual_active_workspace_once_ready(
     )
 
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hi")],
+        workspace_name="use-pyirena",
     )
     try:
         assert window.bridge.session.recorder.workspace_name == "use-pyirena"
@@ -165,28 +187,43 @@ def test_flagship_demo_tool_call_produces_inline_image(
     settings.mcp = McpConfig(
         servers={
             "mock-mcp": McpServerConfig(
-                name="mock-mcp", command=sys.executable, args=[str(MOCK_SERVER_PATH)], groups=["analysis"]
+                name="mock-mcp",
+                command=sys.executable,
+                args=[str(MOCK_SERVER_PATH)],
+                groups=["analysis"],
             )
         }
     )
     settings.workspaces = WorkspacesConfig(
         workspaces={
-            "use-pyirena": WorkspaceConfig(name="use-pyirena", profile="mock-profile", mcp_group="analysis")
+            "use-pyirena": WorkspaceConfig(
+                name="use-pyirena", profile="mock-profile", mcp_group="analysis"
+            )
         }
     )
 
     script = [
-        MockTurn(text="let me get that plot", tool_calls=[MockToolCall(name="mock-mcp__get_image", id="call_1")]),
+        MockTurn(
+            text="let me get that plot",
+            tool_calls=[MockToolCall(name="mock-mcp__get_image", id="call_1")],
+        ),
         MockTurn(text="here is the plot"),
     ]
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, script, workspace_name="use-pyirena")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, script, workspace_name="use-pyirena"
+    )
     try:
         window.input_box.set_text("plot dataset X")
         window.input_box._send_button.click()
 
-        assert pump_until(qapp, lambda: any(
-            isinstance(window.chat_panel.widget_at(i), InlineImageWidget) for i in range(window.chat_panel.widget_count)
-        ), timeout=10.0)
+        assert pump_until(
+            qapp,
+            lambda: any(
+                isinstance(window.chat_panel.widget_at(i), InlineImageWidget)
+                for i in range(window.chat_panel.widget_count)
+            ),
+            timeout=10.0,
+        )
 
         image_widgets = [
             window.chat_panel.widget_at(i)
@@ -218,8 +255,10 @@ def test_user_selector_updates_config_and_stamps_the_restarted_conversation(
 
         assert pump_until(
             qapp,
-            lambda: window.bridge.session is not None
-            and window.bridge.session.recorder.conversation_id != first_conversation_id,
+            lambda: (
+                window.bridge.session is not None
+                and window.bridge.session.recorder.conversation_id != first_conversation_id
+            ),
         )
         assert settings.app.active_user == "Alice"
         assert window.bridge.session.recorder.user == "Alice"
@@ -227,10 +266,17 @@ def test_user_selector_updates_config_and_stamps_the_restarted_conversation(
         window.close()
 
 
-def test_resume_conversation_loads_prior_history(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_resume_conversation_loads_prior_history(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
     first = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="first reply")], profile_name="mock-profile"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="first reply")],
+        profile_name="mock-profile",
     )
     conv_id = first.bridge.session.recorder.conversation_id
     first.input_box.set_text("remember this")
@@ -239,11 +285,18 @@ def test_resume_conversation_loads_prior_history(qapp, loop_thread, aida_home: P
     first.close()
 
     resumed = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="second reply")], resume_conversation_id=conv_id
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="second reply")],
+        resume_conversation_id=conv_id,
     )
     try:
         assert resumed.bridge.session.recorder.conversation_id == conv_id
-        texts = [resumed.chat_panel.widget_at(i).text for i in range(resumed.chat_panel.widget_count)]
+        texts = [
+            resumed.chat_panel.widget_at(i).text for i in range(resumed.chat_panel.widget_count)
+        ]
         assert "remember this" in texts
         assert "first reply" in texts
     finally:
@@ -260,10 +313,17 @@ def test_resume_uses_the_currently_selected_profile_not_the_conversations_origin
     fallback), silently ignoring whatever the toolbar dropdown currently
     shows."""
     settings = _settings_with_profile("profile-a")
-    settings.providers.profiles["profile-b"] = ProviderProfile(name="profile-b", kind="openai_compat", model="model-b")
+    settings.providers.profiles["profile-b"] = ProviderProfile(
+        name="profile-b", kind="openai_compat", model="model-b"
+    )
 
     first = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="first reply")], profile_name="profile-a"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="first reply")],
+        profile_name="profile-a",
     )
     conv_id = first.bridge.session.recorder.conversation_id
     first.input_box.set_text("remember this")
@@ -272,14 +332,23 @@ def test_resume_uses_the_currently_selected_profile_not_the_conversations_origin
     first.close()
 
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="second reply")], profile_name="profile-b"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="second reply")],
+        profile_name="profile-b",
     )
     try:
         assert window.profile_selector.current_profile() == "profile-b"
 
         window._on_resume_requested(conv_id)
         assert pump_until(
-            qapp, lambda: window.bridge.session is not None and window.bridge.session.recorder.conversation_id == conv_id
+            qapp,
+            lambda: (
+                window.bridge.session is not None
+                and window.bridge.session.recorder.conversation_id == conv_id
+            ),
         )
         assert window.bridge.session.profile_name == "profile-b"
     finally:
@@ -301,30 +370,50 @@ def test_resume_conversation_redisplays_prior_image_artifact(
     settings.mcp = McpConfig(
         servers={
             "mock-mcp": McpServerConfig(
-                name="mock-mcp", command=sys.executable, args=[str(MOCK_SERVER_PATH)], groups=["analysis"]
+                name="mock-mcp",
+                command=sys.executable,
+                args=[str(MOCK_SERVER_PATH)],
+                groups=["analysis"],
             )
         }
     )
     settings.workspaces = WorkspacesConfig(
         workspaces={
-            "use-pyirena": WorkspaceConfig(name="use-pyirena", profile="mock-profile", mcp_group="analysis")
+            "use-pyirena": WorkspaceConfig(
+                name="use-pyirena", profile="mock-profile", mcp_group="analysis"
+            )
         }
     )
     script = [
-        MockTurn(text="let me get that plot", tool_calls=[MockToolCall(name="mock-mcp__get_image", id="call_1")]),
+        MockTurn(
+            text="let me get that plot",
+            tool_calls=[MockToolCall(name="mock-mcp__get_image", id="call_1")],
+        ),
         MockTurn(text="here is the plot"),
     ]
-    first = _make_window(qapp, loop_thread, settings, monkeypatch, script, workspace_name="use-pyirena")
+    first = _make_window(
+        qapp, loop_thread, settings, monkeypatch, script, workspace_name="use-pyirena"
+    )
     conv_id = first.bridge.session.recorder.conversation_id
     first.input_box.set_text("plot dataset X")
     first.input_box._send_button.click()
-    assert pump_until(qapp, lambda: any(
-        isinstance(first.chat_panel.widget_at(i), InlineImageWidget) for i in range(first.chat_panel.widget_count)
-    ), timeout=10.0)
+    assert pump_until(
+        qapp,
+        lambda: any(
+            isinstance(first.chat_panel.widget_at(i), InlineImageWidget)
+            for i in range(first.chat_panel.widget_count)
+        ),
+        timeout=10.0,
+    )
     first.close()
 
     resumed = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="unused")], resume_conversation_id=conv_id
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="unused")],
+        resume_conversation_id=conv_id,
     )
     try:
         image_widgets = [
@@ -366,7 +455,12 @@ def test_folder_display_shows_workspace_folders_and_save_persists_changes(
         }
     )
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hi")],
+        workspace_name="use-pyirena",
     )
     try:
         assert window.folder_display.source_folders == [str(source_dir)]
@@ -395,12 +489,20 @@ def test_folder_display_shows_and_saves_sidecar_folder_name(
     settings.workspaces = WorkspacesConfig(
         workspaces={
             "use-pyirena": WorkspaceConfig(
-                name="use-pyirena", profile="mock-profile", mcp_group="none", sidecar_folder_name="figures"
+                name="use-pyirena",
+                profile="mock-profile",
+                mcp_group="none",
+                sidecar_folder_name="figures",
             )
         }
     )
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hi")],
+        workspace_name="use-pyirena",
     )
     try:
         assert window.folder_display.sidecar_folder_name == "figures"
@@ -437,7 +539,12 @@ def test_folder_display_shows_and_saves_command_allowlist_and_interpreter(
         }
     )
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hi")],
+        workspace_name="use-pyirena",
     )
     try:
         assert window.folder_display.command_allowlist == ["git status"]
@@ -482,7 +589,12 @@ def test_quick_tasks_panel_shows_workspace_tasks_and_edits_persist(
         }
     )
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hi")],
+        workspace_name="use-pyirena",
     )
     try:
         assert window.quick_tasks_panel.count == 1
@@ -492,7 +604,10 @@ def test_quick_tasks_panel_shows_workspace_tasks_and_edits_persist(
         from aida.ui.qt.quick_tasks_panel import QuickTaskData
 
         window.quick_tasks_panel.tasks_changed.emit(
-            [QuickTaskData(name="Reduce data", text="Reduce today's USAXS runs."), QuickTaskData(name="Fit Guinier", text="Fit a Guinier region.")]
+            [
+                QuickTaskData(name="Reduce data", text="Reduce today's USAXS runs."),
+                QuickTaskData(name="Fit Guinier", text="Fit a Guinier region."),
+            ]
         )
 
         saved = get_workspace(window.settings, "use-pyirena")
@@ -509,7 +624,9 @@ def test_quick_tasks_panel_empty_and_disabled_with_no_active_workspace(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         assert window.quick_tasks_panel.count == 0
         assert not window.quick_tasks_panel.isEnabled()
@@ -517,7 +634,9 @@ def test_quick_tasks_panel_empty_and_disabled_with_no_active_workspace(
         window.close()
 
 
-def test_quick_task_selected_fills_the_input_box(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_quick_task_selected_fills_the_input_box(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
     settings.workspaces = WorkspacesConfig(
         workspaces={
@@ -530,7 +649,12 @@ def test_quick_task_selected_fills_the_input_box(qapp, loop_thread, aida_home: P
         }
     )
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hi")],
+        workspace_name="use-pyirena",
     )
     try:
         assert window.input_box.text() == ""
@@ -547,21 +671,32 @@ def test_quick_task_selected_with_a_draft_asks_before_replacing(
     input box must not silently discard it."""
     settings = _settings_with_profile()
     settings.workspaces = WorkspacesConfig(
-        workspaces={"use-pyirena": WorkspaceConfig(name="use-pyirena", profile="mock-profile", mcp_group="none")}
+        workspaces={
+            "use-pyirena": WorkspaceConfig(
+                name="use-pyirena", profile="mock-profile", mcp_group="none"
+            )
+        }
     )
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hi")],
+        workspace_name="use-pyirena",
     )
     try:
         window.input_box.set_text("a draft the user was mid-typing")
         monkeypatch.setattr(
-            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.No
+            "aida.ui.qt.main_window.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.No,
         )
         window.quick_tasks_panel.task_selected.emit("Reduce today's USAXS runs.")
         assert window.input_box.text() == "a draft the user was mid-typing"
 
         monkeypatch.setattr(
-            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+            "aida.ui.qt.main_window.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.Yes,
         )
         window.quick_tasks_panel.task_selected.emit("Reduce today's USAXS runs.")
         assert window.input_box.text() == "Reduce today's USAXS runs."
@@ -614,8 +749,12 @@ def test_delete_many_requested_removes_all_from_sidebar_and_db(
 
         store = ConversationStore()
         try:
-            other_id = store.create_conversation(timestamp="2026-08-23T00:00:00", workspace_name=None, profile_name=None)
-            store.append_message(other_id, Message(role="user", content="hi"), timestamp="2026-08-23T00:00:01")
+            other_id = store.create_conversation(
+                timestamp="2026-08-23T00:00:00", workspace_name=None, profile_name=None
+            )
+            store.append_message(
+                other_id, Message(role="user", content="hi"), timestamp="2026-08-23T00:00:01"
+            )
         finally:
             store.close()
         window._refresh_conversations_sidebar()
@@ -670,13 +809,16 @@ def test_new_chat_on_an_untouched_conversation_deletes_it(
     try:
         first_conv_id = window.bridge.session.recorder.conversation_id
         monkeypatch.setattr(
-            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+            "aida.ui.qt.main_window.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.Yes,
         )
         window._on_new_chat_requested()
         assert pump_until(
             qapp,
-            lambda: window.bridge.session is not None
-            and window.bridge.session.recorder.conversation_id != first_conv_id,
+            lambda: (
+                window.bridge.session is not None
+                and window.bridge.session.recorder.conversation_id != first_conv_id
+            ),
         )
 
         store = ConversationStore()
@@ -693,19 +835,28 @@ def test_workspace_switch_on_an_untouched_conversation_deletes_it(
 ):
     settings = _settings_with_profile()
     settings.workspaces = WorkspacesConfig(
-        workspaces={"plain-chat": WorkspaceConfig(name="plain-chat", profile="mock-profile", mcp_group="none")}
+        workspaces={
+            "plain-chat": WorkspaceConfig(
+                name="plain-chat", profile="mock-profile", mcp_group="none"
+            )
+        }
     )
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         first_conv_id = window.bridge.session.recorder.conversation_id
         monkeypatch.setattr(
-            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+            "aida.ui.qt.main_window.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.Yes,
         )
         window._on_workspace_changed("plain-chat")
         assert pump_until(
             qapp,
-            lambda: window.bridge.session is not None
-            and window.bridge.session.recorder.conversation_id != first_conv_id,
+            lambda: (
+                window.bridge.session is not None
+                and window.bridge.session.recorder.conversation_id != first_conv_id
+            ),
         )
 
         store = ConversationStore()
@@ -784,7 +935,9 @@ def test_mcp_panel_start_requested_calls_bridge_start_mcp_server(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         calls = []
         monkeypatch.setattr(window.bridge, "start_mcp_server", lambda name: calls.append(name))
@@ -798,7 +951,9 @@ def test_mcp_panel_stop_requested_calls_bridge_stop_mcp_server(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         calls = []
         monkeypatch.setattr(window.bridge, "stop_mcp_server", lambda name: calls.append(name))
@@ -812,7 +967,9 @@ def test_mcp_server_status_changed_refreshes_the_quick_panel(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         refreshed = []
         monkeypatch.setattr(window, "_refresh_mcp_panel", lambda: refreshed.append(True))
@@ -829,7 +986,9 @@ def test_mcp_server_action_failed_warns_and_refreshes_the_quick_panel(
     that isn't real — refreshing re-reads McpManager.running_server_names,
     which snaps a just-ticked-but-failed checkbox back to unchecked."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         warned = []
         monkeypatch.setattr(QMessageBox, "warning", lambda *a, **kw: warned.append(a[2:]))
@@ -852,11 +1011,17 @@ def test_checking_a_box_in_the_quick_panel_really_starts_the_server(
     the flagship-demo test above."""
     settings = _settings_with_profile()
     settings.mcp = McpConfig(
-        servers={"mock-mcp": McpServerConfig(name="mock-mcp", command=sys.executable, args=[str(MOCK_SERVER_PATH)])}
+        servers={
+            "mock-mcp": McpServerConfig(
+                name="mock-mcp", command=sys.executable, args=[str(MOCK_SERVER_PATH)]
+            )
+        }
     )
     # No active workspace/mcp_group, so nothing auto-starts — the checkbox
     # is the only thing that can start this server.
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window._refresh_mcp_panel()
         assert "mock-mcp" not in window.mcp_panel.enabled_servers()
@@ -864,8 +1029,10 @@ def test_checking_a_box_in_the_quick_panel_really_starts_the_server(
         window.mcp_panel._checkboxes["mock-mcp"].setChecked(True)
         assert pump_until(
             qapp,
-            lambda: window.bridge.mcp_manager is not None
-            and "mock-mcp" in window.bridge.mcp_manager.running_server_names,
+            lambda: (
+                window.bridge.mcp_manager is not None
+                and "mock-mcp" in window.bridge.mcp_manager.running_server_names
+            ),
             timeout=10.0,
         )
         assert pump_until(qapp, lambda: "mock-mcp" in window.mcp_panel.enabled_servers())
@@ -873,8 +1040,10 @@ def test_checking_a_box_in_the_quick_panel_really_starts_the_server(
         window.mcp_panel._checkboxes["mock-mcp"].setChecked(False)
         assert pump_until(
             qapp,
-            lambda: window.bridge.mcp_manager is not None
-            and "mock-mcp" not in window.bridge.mcp_manager.running_server_names,
+            lambda: (
+                window.bridge.mcp_manager is not None
+                and "mock-mcp" not in window.bridge.mcp_manager.running_server_names
+            ),
             timeout=10.0,
         )
         assert pump_until(qapp, lambda: "mock-mcp" not in window.mcp_panel.enabled_servers())
@@ -993,6 +1162,7 @@ def test_settings_dialog_saves_a_nonempty_ocr_key(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
     )
     try:
+
         def _fake_exec(self):
             self._ocr_api_key_edit.setText("mistral-key")
             return QDialog.DialogCode.Accepted
@@ -1016,7 +1186,9 @@ def test_settings_dialog_warns_when_global_default_safety_becomes_relaxed(
     already shows (relaxed_mode_warning_if_newly_enabled)."""
     settings = _settings_with_profile()
     settings.app.default_safety_mode = "confirm"
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
 
         def _fake_exec(self):
@@ -1025,7 +1197,9 @@ def test_settings_dialog_warns_when_global_default_safety_becomes_relaxed(
 
         monkeypatch.setattr("aida.ui.qt.settings_dialog.SettingsDialog.exec", _fake_exec)
         warned = []
-        monkeypatch.setattr("aida.ui.qt.main_window.QMessageBox.warning", lambda *a, **k: warned.append(True))
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.warning", lambda *a, **k: warned.append(True)
+        )
         window.open_settings_dialog()
 
         assert warned == [True]
@@ -1038,7 +1212,9 @@ def test_settings_dialog_does_not_warn_when_default_safety_stays_confirm(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
 
         def _fake_exec(self):
@@ -1046,7 +1222,9 @@ def test_settings_dialog_does_not_warn_when_default_safety_stays_confirm(
 
         monkeypatch.setattr("aida.ui.qt.settings_dialog.SettingsDialog.exec", _fake_exec)
         warned = []
-        monkeypatch.setattr("aida.ui.qt.main_window.QMessageBox.warning", lambda *a, **k: warned.append(True))
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.warning", lambda *a, **k: warned.append(True)
+        )
         window.open_settings_dialog()
 
         assert warned == []
@@ -1061,7 +1239,9 @@ def test_open_profiles_dialog_refreshes_the_profile_selector(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
 
         def _fake_exec(self):
@@ -1082,7 +1262,9 @@ def test_open_workspace_management_dialog_refreshes_the_workspace_selector(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
 
         def _fake_exec(self):
@@ -1114,7 +1296,9 @@ def test_open_code_editor_dialog_uses_workspace_saved_scripts_dir_and_interprete
             )
         }
     )
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="ws1")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="ws1"
+    )
     try:
         captured = {}
 
@@ -1193,7 +1377,11 @@ def test_clicking_open_in_code_editor_on_a_generated_py_file_opens_it(
     settings.workspaces = WorkspacesConfig(
         workspaces={
             "use-ws": WorkspaceConfig(
-                name="use-ws", profile="mock-profile", mcp_group="none", target_folder=str(target_dir), safety="relaxed"
+                name="use-ws",
+                profile="mock-profile",
+                mcp_group="none",
+                target_folder=str(target_dir),
+                safety="relaxed",
             )
         }
     )
@@ -1244,7 +1432,9 @@ def test_clicking_open_in_code_editor_on_a_generated_py_file_opens_it(
         window.close()
 
 
-def test_window_state_persisted_on_close(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_window_state_persisted_on_close(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
     window = _make_window(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
@@ -1264,7 +1454,11 @@ def test_workspace_switch_confirmed_starts_new_session(
 ):
     settings = _settings_with_profile()
     settings.workspaces = WorkspacesConfig(
-        workspaces={"plain-chat": WorkspaceConfig(name="plain-chat", profile="mock-profile", mcp_group="none")}
+        workspaces={
+            "plain-chat": WorkspaceConfig(
+                name="plain-chat", profile="mock-profile", mcp_group="none"
+            )
+        }
     )
     window = _make_window(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
@@ -1272,10 +1466,17 @@ def test_workspace_switch_confirmed_starts_new_session(
     try:
         first_conv_id = window.bridge.session.recorder.conversation_id
         monkeypatch.setattr(
-            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+            "aida.ui.qt.main_window.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.Yes,
         )
         window._on_workspace_changed("plain-chat")
-        assert pump_until(qapp, lambda: window.bridge.session is not None and window.bridge.session.recorder.conversation_id != first_conv_id)
+        assert pump_until(
+            qapp,
+            lambda: (
+                window.bridge.session is not None
+                and window.bridge.session.recorder.conversation_id != first_conv_id
+            ),
+        )
         assert window.bridge.session.recorder.workspace_name == "plain-chat"
         assert window.chat_panel.widget_count == 0  # cleared for the new conversation
     finally:
@@ -1287,7 +1488,11 @@ def test_workspace_switch_declined_keeps_current_session(
 ):
     settings = _settings_with_profile()
     settings.workspaces = WorkspacesConfig(
-        workspaces={"plain-chat": WorkspaceConfig(name="plain-chat", profile="mock-profile", mcp_group="none")}
+        workspaces={
+            "plain-chat": WorkspaceConfig(
+                name="plain-chat", profile="mock-profile", mcp_group="none"
+            )
+        }
     )
     window = _make_window(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
@@ -1295,7 +1500,8 @@ def test_workspace_switch_declined_keeps_current_session(
     try:
         conv_id = window.bridge.session.recorder.conversation_id
         monkeypatch.setattr(
-            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.No
+            "aida.ui.qt.main_window.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.No,
         )
         window._on_workspace_changed("plain-chat")
         qapp.processEvents()
@@ -1312,7 +1518,11 @@ def test_new_chat_confirmed_starts_a_fresh_conversation_same_workspace_and_profi
     history from prior chat.\""""
     settings = _settings_with_profile()
     settings.workspaces = WorkspacesConfig(
-        workspaces={"plain-chat": WorkspaceConfig(name="plain-chat", profile="mock-profile", mcp_group="none")}
+        workspaces={
+            "plain-chat": WorkspaceConfig(
+                name="plain-chat", profile="mock-profile", mcp_group="none"
+            )
+        }
     )
     window = _make_window(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="plain-chat"
@@ -1324,13 +1534,16 @@ def test_new_chat_confirmed_starts_a_fresh_conversation_same_workspace_and_profi
         assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
 
         monkeypatch.setattr(
-            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+            "aida.ui.qt.main_window.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.Yes,
         )
         window._on_new_chat_requested()
         assert pump_until(
             qapp,
-            lambda: window.bridge.session is not None
-            and window.bridge.session.recorder.conversation_id != first_conv_id,
+            lambda: (
+                window.bridge.session is not None
+                and window.bridge.session.recorder.conversation_id != first_conv_id
+            ),
         )
         assert window.bridge.session.recorder.workspace_name == "plain-chat"
         assert window.chat_panel.widget_count == 0  # reset, not carried over
@@ -1344,7 +1557,9 @@ def test_new_chat_confirmed_starts_a_fresh_conversation_same_workspace_and_profi
         window.close()
 
 
-def test_new_chat_declined_keeps_current_session(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_new_chat_declined_keeps_current_session(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
     window = _make_window(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
@@ -1352,7 +1567,8 @@ def test_new_chat_declined_keeps_current_session(qapp, loop_thread, aida_home: P
     try:
         conv_id = window.bridge.session.recorder.conversation_id
         monkeypatch.setattr(
-            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.No
+            "aida.ui.qt.main_window.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.No,
         )
         window._on_new_chat_requested()
         qapp.processEvents()
@@ -1382,7 +1598,8 @@ def test_restart_session_shows_busy_cursor_while_shutting_down_the_old_bridge(
 
         monkeypatch.setattr(window.bridge, "shutdown", _spy_shutdown)
         monkeypatch.setattr(
-            "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.Yes
+            "aida.ui.qt.main_window.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.Yes,
         )
         window._on_new_chat_requested()
 
@@ -1398,8 +1615,12 @@ def test_refresh_profile_selector_passes_capability_notes_as_tooltips(
 ):
     """U7 paper cut: "capability_notes is stored but shown nowhere"."""
     settings = _settings_with_profile("mock-profile")
-    settings.providers.profiles["mock-profile"].capability_notes = "small local model — prefer lean MCP groups"
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    settings.providers.profiles[
+        "mock-profile"
+    ].capability_notes = "small local model — prefer lean MCP groups"
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         index = window.profile_selector._combo.findText("mock-profile")
         assert (
@@ -1413,25 +1634,33 @@ def test_refresh_profile_selector_passes_capability_notes_as_tooltips(
 # --- U7: File/Help menu bar --------------------------------------------------
 
 
-def test_menu_bar_has_file_and_help_menus(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_menu_bar_has_file_and_help_menus(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     """U7 paper cut: "A menu bar (File/Help) with 'Open config folder',
     'Open records folder', 'Documentation', 'About' — cheap discoverability
     for exactly the folders users otherwise have to find by hand." The app
     previously had no menu bar at all."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         menu_titles = [action.text().replace("&", "") for action in window.menuBar().actions()]
         assert "File" in menu_titles
         assert "Help" in menu_titles
 
-        file_menu = next(a.menu() for a in window.menuBar().actions() if a.text().replace("&", "") == "File")
+        file_menu = next(
+            a.menu() for a in window.menuBar().actions() if a.text().replace("&", "") == "File"
+        )
         file_actions = [a.text() for a in file_menu.actions()]
         assert "Open Config Folder" in file_actions
         assert "Open Records Folder" in file_actions
         assert "Open Conversation Folder" in file_actions
 
-        help_menu = next(a.menu() for a in window.menuBar().actions() if a.text().replace("&", "") == "Help")
+        help_menu = next(
+            a.menu() for a in window.menuBar().actions() if a.text().replace("&", "") == "Help"
+        )
         help_actions = [a.text() for a in help_menu.actions()]
         assert "Documentation" in help_actions
         assert "About AIDA" in help_actions
@@ -1439,14 +1668,20 @@ def test_menu_bar_has_file_and_help_menus(qapp, loop_thread, aida_home: Path, re
         window.close()
 
 
-def test_open_config_folder_opens_the_config_dir(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_open_config_folder_opens_the_config_dir(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     from aida.config.paths import config_dir
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         opened = []
-        monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+        monkeypatch.setattr(
+            QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile())
+        )
         window._on_open_config_folder()
         # Compared via Path rather than a raw string: on Windows, Qt's
         # QUrl round-trip through fromLocalFile()/toLocalFile() has been
@@ -1459,14 +1694,20 @@ def test_open_config_folder_opens_the_config_dir(qapp, loop_thread, aida_home: P
         window.close()
 
 
-def test_open_records_folder_opens_the_records_dir(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_open_records_folder_opens_the_records_dir(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     from aida.config.paths import default_records_dir
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         opened = []
-        monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+        monkeypatch.setattr(
+            QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile())
+        )
         window._on_open_records_folder()
         # See test_open_config_folder_opens_the_config_dir's comment on why
         # this compares via Path rather than a raw string.
@@ -1476,17 +1717,23 @@ def test_open_records_folder_opens_the_records_dir(qapp, loop_thread, aida_home:
         window.close()
 
 
-def test_open_scratch_folder_opens_the_scratch_dir(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_open_scratch_folder_opens_the_scratch_dir(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     """Bug report: "Agents seem to be saving temporary files ... in random
     places" — the File-menu button that opens the one well-known scratch
     folder, mirroring test_open_records_folder_opens_the_records_dir."""
     from aida.config.paths import default_scratch_dir
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         opened = []
-        monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+        monkeypatch.setattr(
+            QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile())
+        )
         window._on_open_scratch_folder()
         # See test_open_config_folder_opens_the_config_dir's comment on why
         # this compares via Path rather than a raw string.
@@ -1524,7 +1771,9 @@ def test_open_conversation_folder_without_attachments_does_not_create_it(
         directory = window.bridge.session.recorder.attachments_dir()
         assert not directory.exists()
         window._on_open_conversation_folder()
-        assert window.statusBar().currentMessage() == "Nothing has been attached to this conversation."
+        assert (
+            window.statusBar().currentMessage() == "Nothing has been attached to this conversation."
+        )
         assert not directory.exists()
     finally:
         window.close()
@@ -1546,7 +1795,9 @@ def test_open_conversation_folder_opens_the_existing_attachment_directory(
         window.input_box._send_button.click()
         assert pump_until(qapp, lambda: recorder.attachments_dir().is_dir())
         opened = []
-        monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+        monkeypatch.setattr(
+            QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile())
+        )
 
         window._on_open_conversation_folder()
 
@@ -1555,9 +1806,13 @@ def test_open_conversation_folder_opens_the_existing_attachment_directory(
         window.close()
 
 
-def test_open_documentation_opens_the_project_url(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_open_documentation_opens_the_project_url(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         opened = []
         monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
@@ -1571,11 +1826,15 @@ def test_open_documentation_opens_the_project_url(qapp, loop_thread, aida_home: 
         window.close()
 
 
-def test_show_about_displays_the_version(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_show_about_displays_the_version(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     from aida import __version__
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         shown = []
         monkeypatch.setattr(QMessageBox, "about", lambda *a, **kw: shown.append(a[2]))
@@ -1655,17 +1914,23 @@ def test_safety_confirmation_shows_modal_and_approving_lets_write_through(
         seen_prompts.append(request.detail)
         return ConfirmAnswer.ALLOW_ONCE
 
-    monkeypatch.setattr("aida.ui.qt.main_window.MainWindow._ask_confirmation", _fake_ask_confirmation)
+    monkeypatch.setattr(
+        "aida.ui.qt.main_window.MainWindow._ask_confirmation", _fake_ask_confirmation
+    )
 
     script = [
         MockTurn(
             tool_calls=[
-                MockToolCall(name="write_file", id="call_1", arguments={"path": str(target), "content": "hi"})
+                MockToolCall(
+                    name="write_file", id="call_1", arguments={"path": str(target), "content": "hi"}
+                )
             ]
         ),
         MockTurn(text="done"),
     ]
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, script, profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, script, profile_name="mock-profile"
+    )
     try:
         window.input_box.set_text("write it")
         window.input_box._send_button.click()
@@ -1682,18 +1947,23 @@ def test_safety_confirmation_declining_blocks_the_write(
     target = tmp_path / "note.txt"
     settings = _settings_with_profile()
     monkeypatch.setattr(
-        "aida.ui.qt.main_window.MainWindow._ask_confirmation", lambda self, request: ConfirmAnswer.DENY
+        "aida.ui.qt.main_window.MainWindow._ask_confirmation",
+        lambda self, request: ConfirmAnswer.DENY,
     )
 
     script = [
         MockTurn(
             tool_calls=[
-                MockToolCall(name="write_file", id="call_1", arguments={"path": str(target), "content": "hi"})
+                MockToolCall(
+                    name="write_file", id="call_1", arguments={"path": str(target), "content": "hi"}
+                )
             ]
         ),
         MockTurn(text="declined"),
     ]
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, script, profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, script, profile_name="mock-profile"
+    )
     try:
         # Waiting on turn_finished directly (rather than input_box.is_busy)
         # avoids a race: is_busy starts out False too, so a pump_until poll
@@ -1721,7 +1991,14 @@ def test_send_with_attachment_includes_file_content_in_the_message(
     note.write_text("the sample was annealed at 400C", encoding="utf-8")
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="got it")], profile_name="mock-profile")
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="got it")],
+        profile_name="mock-profile",
+    )
     try:
         window.input_box.add_attachment(str(note))
         window.input_box.set_text("please summarize")
@@ -1759,7 +2036,14 @@ def test_send_with_large_attachment_is_not_truncated_below_the_interactive_cap(
     note.write_text(text, encoding="utf-8")
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="got it")], profile_name="mock-profile")
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="got it")],
+        profile_name="mock-profile",
+    )
     try:
         window.input_box.add_attachment(str(note))
         window.input_box.set_text("please summarize")
@@ -1782,7 +2066,14 @@ def test_send_with_attachment_and_no_text_still_sends_the_file_content(
     note.write_text("q range: 0.01 to 0.5", encoding="utf-8")
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="got it")], profile_name="mock-profile")
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="got it")],
+        profile_name="mock-profile",
+    )
     try:
         window.input_box.add_attachment(str(note))
         # No typed text at all — attach-and-send with an empty box. The
@@ -1802,14 +2093,20 @@ def test_folder_drop_with_active_workspace_offers_to_add_source_folder(
 ):
     settings = _settings_with_profile()
     settings.workspaces = WorkspacesConfig(
-        workspaces={"use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", mcp_group="none")}
+        workspaces={
+            "use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", mcp_group="none")
+        }
     )
     prompts = []
     monkeypatch.setattr(
         "aida.ui.qt.main_window.QMessageBox.question",
-        lambda self, title, text, *a, **kw: (prompts.append(text), QMessageBox.StandardButton.Yes)[1],
+        lambda self, title, text, *a, **kw: (prompts.append(text), QMessageBox.StandardButton.Yes)[
+            1
+        ],
     )
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-ws")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-ws"
+    )
     try:
         new_folder = str(tmp_path / "extra")
         (tmp_path / "extra").mkdir()
@@ -1826,12 +2123,17 @@ def test_folder_drop_declined_does_not_add(
 ):
     settings = _settings_with_profile()
     settings.workspaces = WorkspacesConfig(
-        workspaces={"use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", mcp_group="none")}
+        workspaces={
+            "use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", mcp_group="none")
+        }
     )
     monkeypatch.setattr(
-        "aida.ui.qt.main_window.QMessageBox.question", lambda *a, **kw: QMessageBox.StandardButton.No
+        "aida.ui.qt.main_window.QMessageBox.question",
+        lambda *a, **kw: QMessageBox.StandardButton.No,
     )
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-ws")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-ws"
+    )
     try:
         new_folder = str(tmp_path / "extra")
         window.input_box.folder_dropped.emit(new_folder)
@@ -1844,7 +2146,9 @@ def test_folder_drop_with_no_active_workspace_shows_status_message(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window.input_box.folder_dropped.emit(str(tmp_path))
         assert "workspace" in window.statusBar().currentMessage().lower()
@@ -1859,7 +2163,9 @@ def test_context_trimmed_event_shows_in_the_status_bar(
     ContextTrimmed now surfaces in the same low-key status-bar channel
     already used for "Ready — profile" / "Saved folders to workspace X"."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window._on_event_received(ContextTrimmed(dropped_turns=5, estimated_tokens=1234))
         message = window.statusBar().currentMessage()
@@ -1876,10 +2182,14 @@ def test_context_trimmed_summarized_event_shows_compacted_wording(
     "the model still remembers a summary" is a materially different
     outcome from "these turns are just gone"."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window._on_event_received(
-            ContextTrimmed(dropped_turns=5, estimated_tokens=1234, summarized=True, summary_tokens=90)
+            ContextTrimmed(
+                dropped_turns=5, estimated_tokens=1234, summarized=True, summary_tokens=90
+            )
         )
         message = window.statusBar().currentMessage()
         assert "compacted" in message.lower()
@@ -1895,7 +2205,9 @@ def test_context_label_shows_fullness_after_session_ready(
     """planning/context_management.md §3.5: a separate "Context: Nk / Mk
     (P%)" label, distinct from the ever-growing "Session total:" one."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         assert window._context_label.text().startswith("Context:")
     finally:
@@ -1934,7 +2246,7 @@ def test_compact_conversation_action_triggers_bridge_and_updates_status(
 def test_write_markdown_report_shows_as_file_artifact_card(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
 ):
-    """"Generated documents appear as file cards" (PLAN.md Phase 6): a
+    """ "Generated documents appear as file cards" (PLAN.md Phase 6): a
     write_markdown_report tool call is just another FileArtifactCreated
     event, so it rides the same ChatBridge.event_received ->
     ChatPanel.handle_event -> FileArtifactCard plumbing Phase 5 already
@@ -1948,7 +2260,11 @@ def test_write_markdown_report_shows_as_file_artifact_card(
     settings.workspaces = WorkspacesConfig(
         workspaces={
             "use-ws": WorkspaceConfig(
-                name="use-ws", profile="mock-profile", mcp_group="none", target_folder=str(target_dir), safety="relaxed"
+                name="use-ws",
+                profile="mock-profile",
+                mcp_group="none",
+                target_folder=str(target_dir),
+                safety="relaxed",
             )
         }
     )
@@ -1958,7 +2274,11 @@ def test_write_markdown_report_shows_as_file_artifact_card(
                 MockToolCall(
                     name="write_markdown_report",
                     id="call_1",
-                    arguments={"path": str(target_dir / "report.md"), "title": "Report", "body": "Findings."},
+                    arguments={
+                        "path": str(target_dir / "report.md"),
+                        "title": "Report",
+                        "body": "Findings.",
+                    },
                 )
             ]
         ),
@@ -2024,7 +2344,9 @@ def test_startup_failure_with_no_profiles_shows_onboarding_instead(
 
     monkeypatch.setattr("aida.ui.qt.main_window.OnboardingDialog", _FakeOnboardingDialog)
     critical_calls = []
-    monkeypatch.setattr("aida.ui.qt.main_window.QMessageBox.critical", lambda *a, **kw: critical_calls.append(True))
+    monkeypatch.setattr(
+        "aida.ui.qt.main_window.QMessageBox.critical", lambda *a, **kw: critical_calls.append(True)
+    )
     window = MainWindow(settings, loop_thread, start_kwargs={})
     try:
         assert pump_until(qapp, lambda: window.statusBar().currentMessage() == "Startup failed")
@@ -2043,7 +2365,9 @@ def test_startup_failure_with_no_profiles_shows_onboarding_instead(
 
 # Smallest possible valid PNG (1x1), same fixture used in
 # tests/test_provider_translation.py's vision tests.
-_TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+_TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 def test_send_with_image_attachment_records_an_image_ref_on_the_sent_message(
@@ -2057,7 +2381,14 @@ def test_send_with_image_attachment_records_an_image_ref_on_the_sent_message(
     image_path.write_bytes(base64.b64decode(_TINY_PNG_B64))
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="got it")], profile_name="mock-profile")
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="got it")],
+        profile_name="mock-profile",
+    )
     try:
         window.input_box.add_attachment(str(image_path))
         window.input_box.set_text("what is this?")
@@ -2086,7 +2417,14 @@ def test_send_with_non_image_attachment_records_no_image_ref(
     note.write_text("the sample was annealed at 400C", encoding="utf-8")
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="got it")], profile_name="mock-profile")
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="got it")],
+        profile_name="mock-profile",
+    )
     try:
         window.input_box.add_attachment(str(note))
         window.input_box.set_text("please summarize")
@@ -2114,7 +2452,9 @@ def test_quick_tasks_panel_starts_disabled_before_a_session_is_ready(
     assert panel.isEnabled()  # the widget itself has no opinion...
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         # ...the window is what gates it on having a workspace to save to.
         assert not window.quick_tasks_panel.isEnabled()
@@ -2128,7 +2468,9 @@ def test_quick_task_edit_without_a_workspace_says_so_instead_of_dropping_it(
     from aida.ui.qt.quick_tasks_panel import QuickTaskData
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window._current_workspace_config = None
 
@@ -2151,7 +2493,9 @@ def test_usage_labels_refresh_while_a_turn_is_running(
     showed pre-turn numbers the whole way through — even though
     ChatSession accumulates them per model round trip."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         session = window.bridge.session
         assert session is not None
@@ -2174,7 +2518,9 @@ def test_usage_refresh_polls_only_while_a_turn_is_in_flight(
 ):
     """Idle totals cannot change, so the poll must not outlive the turn."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         assert not window._usage_refresh_timer.isActive()
 
@@ -2193,7 +2539,9 @@ def test_usage_refresh_stops_itself_when_the_session_is_gone(
     """A bridge retired mid-turn never emits turn_finished, so the tick has
     to be able to stand itself down."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window._on_turn_started()
         window.bridge.session = None
@@ -2223,7 +2571,12 @@ def test_notes_panel_shows_workspace_notes_and_edits_persist(
         }
     )
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hi")],
+        workspace_name="use-pyirena",
     )
     try:
         assert window.notes_panel.notes() == "check run 42"
@@ -2231,7 +2584,9 @@ def test_notes_panel_shows_workspace_notes_and_edits_persist(
 
         window.notes_panel.notes_changed.emit("check run 42\nand re-fit run 43")
 
-        assert get_workspace(window.settings, "use-pyirena").notes == "check run 42\nand re-fit run 43"
+        assert (
+            get_workspace(window.settings, "use-pyirena").notes == "check run 42\nand re-fit run 43"
+        )
         reloaded = get_workspace(load_settings(), "use-pyirena")
         assert reloaded.notes == "check run 42\nand re-fit run 43"
     finally:
@@ -2242,7 +2597,9 @@ def test_notes_panel_empty_and_disabled_with_no_active_workspace(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         assert window.notes_panel.notes() == ""
         assert not window.notes_panel.isEnabled()
@@ -2257,10 +2614,19 @@ def test_closing_the_window_saves_a_note_typed_a_moment_earlier(
     flush rather than drop it."""
     settings = _settings_with_profile()
     settings.workspaces = WorkspacesConfig(
-        workspaces={"use-pyirena": WorkspaceConfig(name="use-pyirena", profile="mock-profile", mcp_group="none")}
+        workspaces={
+            "use-pyirena": WorkspaceConfig(
+                name="use-pyirena", profile="mock-profile", mcp_group="none"
+            )
+        }
     )
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-pyirena"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="hi")],
+        workspace_name="use-pyirena",
     )
     window.notes_panel._edit.setPlainText("do not lose this")
     assert window.notes_panel.has_unsaved_edit
@@ -2279,7 +2645,9 @@ def test_session_panels_collapse_and_the_state_is_remembered(
     """User request: "we could make the different subwindows in the right
     panel collapsible... open only if user wants to change the content"."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         section = window._sections["Quick Tasks"]
         assert not section.is_collapsed
@@ -2298,7 +2666,9 @@ def test_collapsed_panels_reopen_collapsed(
 ):
     settings = _settings_with_profile()
     settings.app.collapsed_panels = ["MCP Servers", "Workspace Notes"]
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         assert window._sections["MCP Servers"].is_collapsed
         assert window._sections["Workspace Notes"].is_collapsed
@@ -2316,10 +2686,14 @@ def test_send_while_a_turn_is_running_queues_instead_of_starting_a_turn(
     """User request: "when agent is working, user has no chance for input to
     the process... so I can tell agent what I forgot"."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         queued: list[str] = []
-        monkeypatch.setattr(window.bridge, "queue_user_message", lambda text: queued.append(text) or True)
+        monkeypatch.setattr(
+            window.bridge, "queue_user_message", lambda text: queued.append(text) or True
+        )
         monkeypatch.setattr(type(window.bridge), "is_busy", property(lambda self: True))
         sent: list[str] = []
         monkeypatch.setattr(window.bridge, "send", lambda text, **kw: sent.append(text))
@@ -2338,9 +2712,13 @@ def test_a_queued_message_the_turn_never_reached_comes_back(
     """Text accepted by the queue but never delivered must reappear in the
     input box, not vanish."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
-        monkeypatch.setattr(window.bridge, "take_undelivered_messages", lambda: ["what about run 43"])
+        monkeypatch.setattr(
+            window.bridge, "take_undelivered_messages", lambda: ["what about run 43"]
+        )
 
         window._on_turn_finished()
 
@@ -2363,7 +2741,12 @@ def test_profile_selector_and_compaction_are_disabled_while_a_turn_runs(
     """
     settings = _settings_with_profile()
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="done")], profile_name="mock-profile"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="done")],
+        profile_name="mock-profile",
     )
     try:
         assert window.profile_selector.isEnabled()
@@ -2390,7 +2773,12 @@ def test_bridge_refuses_a_profile_switch_while_busy(
         name="other", kind="openai_compat", model="mock-model"
     )
     window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="done")], profile_name="mock-profile"
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="done")],
+        profile_name="mock-profile",
     )
     # MainWindow is connected to profile_switch_failed and answers it with a
     # modal QMessageBox — which blocks forever under the offscreen platform.
@@ -2417,9 +2805,13 @@ def test_bridge_refuses_a_profile_switch_while_busy(
 # --- Phase 10: scheduler wiring -------------------------------------------
 
 
-def test_main_window_starts_a_scheduler_bridge(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_main_window_starts_a_scheduler_bridge(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         assert window.scheduler_bridge is not None
         assert window.scheduler_bridge._future is not None  # start() was called
@@ -2434,7 +2826,9 @@ def test_schedule_run_finished_ok_refreshes_sidebar_without_a_failure_badge(
     from aida.providers.base import Message
 
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         store = ConversationStore()
         conv_id = store.create_conversation(timestamp="2026-09-02T00:00:00", origin="schedule")
@@ -2442,7 +2836,9 @@ def test_schedule_run_finished_ok_refreshes_sidebar_without_a_failure_badge(
         # message (the workflow's own prompt) — set_conversations filters
         # out message-less rows (see its own docstring), so an empty one
         # would never show up in the sidebar regardless of this handler.
-        store.append_message(conv_id, Message(role="user", content="go"), timestamp="2026-09-02T00:00:01")
+        store.append_message(
+            conv_id, Message(role="user", content="go"), timestamp="2026-09-02T00:00:01"
+        )
         store.close()
 
         window._on_schedule_run_finished("nightly", True, conv_id, "")
@@ -2458,7 +2854,9 @@ def test_schedule_run_finished_failure_shows_the_failure_badge(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window._on_schedule_run_finished("nightly", False, "", "boom")
 
@@ -2477,7 +2875,9 @@ def test_clicking_the_failure_badge_opens_schedules_and_clears_the_count(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window._on_schedule_run_finished("nightly", False, "", "boom")
         assert window._schedule_failures_button.isVisibleTo(window)
@@ -2505,7 +2905,9 @@ def test_open_schedule_management_dialog_passes_the_scheduler_bridge(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         opened = {}
 
@@ -2524,9 +2926,13 @@ def test_open_schedule_management_dialog_passes_the_scheduler_bridge(
         window.close()
 
 
-def test_close_event_stops_the_scheduler_bridge(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_close_event_stops_the_scheduler_bridge(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     window.close()
     assert window.scheduler_bridge._future is None
 
@@ -2534,9 +2940,13 @@ def test_close_event_stops_the_scheduler_bridge(qapp, loop_thread, aida_home: Pa
 # --- Phase 10: workflow authoring wiring ----------------------------------
 
 
-def test_open_workflow_management_dialog_opens(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_open_workflow_management_dialog_opens(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         opened = {}
 
@@ -2544,7 +2954,9 @@ def test_open_workflow_management_dialog_opens(qapp, loop_thread, aida_home: Pat
             opened["dialog"] = self
             return QDialog.DialogCode.Accepted
 
-        monkeypatch.setattr("aida.ui.qt.workflow_management_dialog.WorkflowManagementDialog.exec", _fake_exec)
+        monkeypatch.setattr(
+            "aida.ui.qt.workflow_management_dialog.WorkflowManagementDialog.exec", _fake_exec
+        )
         window.open_workflow_management_dialog()
 
         assert "dialog" in opened
@@ -2555,7 +2967,9 @@ def test_open_workflow_management_dialog_opens(qapp, loop_thread, aida_home: Pat
 def test_save_conversation_as_workflow_with_no_session_shows_info(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    window = MainWindow(load_settings(), loop_thread)  # no start_kwargs => bridge.session stays None
+    window = MainWindow(
+        load_settings(), loop_thread
+    )  # no start_kwargs => bridge.session stays None
     try:
         informed = []
         monkeypatch.setattr(
@@ -2572,7 +2986,9 @@ def test_save_conversation_as_workflow_with_no_user_messages_shows_info(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         assert pump_until(qapp, lambda: window.bridge.session is not None)
         informed = []
@@ -2617,8 +3033,12 @@ def test_save_conversation_as_workflow_derives_steps_from_user_messages(
         def _capturing_init(self, *, settings, workflow=None, is_edit=None, parent=None):
             captured_draft["workflow"] = workflow
             captured_draft["is_edit"] = is_edit
-            original_init(self, settings=settings, workflow=workflow, is_edit=is_edit, parent=parent)
-            self._name_edit.setText("from-chat")  # the draft's own name is blank; fill it in like a user would
+            original_init(
+                self, settings=settings, workflow=workflow, is_edit=is_edit, parent=parent
+            )
+            self._name_edit.setText(
+                "from-chat"
+            )  # the draft's own name is blank; fill it in like a user would
 
         monkeypatch.setattr(WorkflowFormDialog, "__init__", _capturing_init)
         monkeypatch.setattr(WorkflowFormDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
@@ -2629,7 +3049,10 @@ def test_save_conversation_as_workflow_derives_steps_from_user_messages(
         assert captured_draft["is_edit"] is False
         assert [s.prompt for s in draft.steps] == ["first prompt", "second prompt"]
         assert "from-chat" in list_workflow_names()
-        assert [s.prompt for s in load_workflow("from-chat").steps] == ["first prompt", "second prompt"]
+        assert [s.prompt for s in load_workflow("from-chat").steps] == [
+            "first prompt",
+            "second prompt",
+        ]
     finally:
         window.close()
 
@@ -2637,9 +3060,13 @@ def test_save_conversation_as_workflow_derives_steps_from_user_messages(
 # --- Phase 10: deferring scheduled jobs to the user ------------------------
 
 
-def test_typing_marks_activity_and_unsent_text(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_typing_marks_activity_and_unsent_text(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         activity = window.scheduler_bridge.activity
         activity.last_activity_monotonic -= 10_000
@@ -2656,9 +3083,13 @@ def test_typing_marks_activity_and_unsent_text(qapp, loop_thread, aida_home: Pat
         window.close()
 
 
-def test_clearing_the_input_box_clears_unsent_text(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_clearing_the_input_box_clears_unsent_text(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window.input_box.set_text("something")
         qapp.processEvents()
@@ -2671,9 +3102,13 @@ def test_clearing_the_input_box_clears_unsent_text(qapp, loop_thread, aida_home:
         window.close()
 
 
-def test_turn_start_and_finish_track_turn_in_flight(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_turn_start_and_finish_track_turn_in_flight(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         assert pump_until(qapp, lambda: window.bridge.session is not None)
         assert window.scheduler_bridge.activity.turn_in_flight is False
@@ -2691,7 +3126,9 @@ def test_pending_badge_appears_and_clears_from_the_snapshot(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window._on_schedule_deferred_changed({"nightly": "waiting 240s for you to finish"})
         assert window._schedule_pending_button.isVisibleTo(window)
@@ -2711,7 +3148,9 @@ def test_schedule_run_started_reports_in_the_status_bar(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         window._on_schedule_run_started("nightly")
         assert "nightly" in window.statusBar().currentMessage()
@@ -2719,10 +3158,14 @@ def test_schedule_run_started_reports_in_the_status_bar(
         window.close()
 
 
-def test_quiet_period_comes_from_settings(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_quiet_period_comes_from_settings(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = _settings_with_profile()
     settings.app.scheduler_quiet_period_seconds = 42
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         assert window.scheduler_bridge.activity.quiet_period_seconds == 42
     finally:
@@ -2736,12 +3179,16 @@ def test_retiring_a_bridge_mid_turn_clears_turn_in_flight(
     nothing else would ever clear the flag — and the scheduler would
     defer every job forever."""
     settings = _settings_with_profile()
-    window = _make_window(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile")
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
     try:
         assert pump_until(qapp, lambda: window.bridge.session is not None)
         window.scheduler_bridge.activity.turn_in_flight = True
 
-        window._restart_session(workspace_name=None, profile_name="mock-profile", resume_conversation_id=None)
+        window._restart_session(
+            workspace_name=None, profile_name="mock-profile", resume_conversation_id=None
+        )
 
         assert window.scheduler_bridge.activity.turn_in_flight is False
     finally:
@@ -2773,8 +3220,10 @@ def test_manage_users_new_name_switches_like_the_toolbar_box_does(
 
         assert pump_until(
             qapp,
-            lambda: window.bridge.session is not None
-            and window.bridge.session.recorder.conversation_id != first_conversation_id,
+            lambda: (
+                window.bridge.session is not None
+                and window.bridge.session.recorder.conversation_id != first_conversation_id
+            ),
         )
         assert settings.app.active_user == "Jan"
         assert window.bridge.session.recorder.user == "Jan"

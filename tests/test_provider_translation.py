@@ -91,7 +91,9 @@ def test_process_openai_chunk_text_streaming():
     events = []
 
     def chunk(**kw):
-        return ChatCompletionChunk(id="1", created=0, model="x", object="chat.completion.chunk", **kw)
+        return ChatCompletionChunk(
+            id="1", created=0, model="x", object="chat.completion.chunk", **kw
+        )
 
     events += process_openai_chunk(
         chunk(choices=[Choice(index=0, delta=ChoiceDelta(content="Hello "), finish_reason=None)]),
@@ -139,7 +141,9 @@ def test_process_openai_chunk_tool_call_accumulates_streamed_arguments():
     events = []
 
     def chunk(**kw):
-        return ChatCompletionChunk(id="2", created=0, model="x", object="chat.completion.chunk", **kw)
+        return ChatCompletionChunk(
+            id="2", created=0, model="x", object="chat.completion.chunk", **kw
+        )
 
     tc1 = ChoiceDeltaToolCall(
         index=0,
@@ -151,7 +155,9 @@ def test_process_openai_chunk_tool_call_accumulates_streamed_arguments():
         chunk(choices=[Choice(index=0, delta=ChoiceDelta(tool_calls=[tc1]), finish_reason=None)]),
         state,
     )
-    tc2 = ChoiceDeltaToolCall(index=0, function=ChoiceDeltaToolCallFunction(arguments='{"tz": "utc"}'))
+    tc2 = ChoiceDeltaToolCall(
+        index=0, function=ChoiceDeltaToolCallFunction(arguments='{"tz": "utc"}')
+    )
     events += process_openai_chunk(
         chunk(choices=[Choice(index=0, delta=ChoiceDelta(tool_calls=[tc2]), finish_reason=None)]),
         state,
@@ -196,7 +202,12 @@ def test_to_anthropic_params_assistant_tool_call():
     _system, out = to_anthropic_params(messages)
     content = out[0]["content"]
     assert content[0] == {"type": "text", "text": "checking..."}
-    assert content[1] == {"type": "tool_use", "id": "toolu_1", "name": "get_time", "input": {"tz": "utc"}}
+    assert content[1] == {
+        "type": "tool_use",
+        "id": "toolu_1",
+        "name": "get_time",
+        "input": {"tz": "utc"},
+    }
 
 
 def test_to_anthropic_params_tool_result():
@@ -217,7 +228,9 @@ def test_to_anthropic_tools_shape():
 
     schema = ToolSchema(name="get_time", description="Get time", parameters={"type": "object"})
     out = to_anthropic_tools([schema])
-    assert out == [{"name": "get_time", "description": "Get time", "input_schema": {"type": "object"}}]
+    assert out == [
+        {"name": "get_time", "description": "Get time", "input_schema": {"type": "object"}}
+    ]
 
 
 def test_process_anthropic_event_text_streaming():
@@ -254,24 +267,34 @@ def test_process_anthropic_event_text_streaming():
         type="message",
         usage=Usage(input_tokens=10, output_tokens=0),
     )
-    events += process_anthropic_event(RawMessageStartEvent(type="message_start", message=msg), state)
     events += process_anthropic_event(
-        RawContentBlockStartEvent(type="content_block_start", index=0, content_block=TextBlock(type="text", text="")),
-        state,
+        RawMessageStartEvent(type="message_start", message=msg), state
     )
     events += process_anthropic_event(
-        RawContentBlockDeltaEvent(
-            type="content_block_delta", index=0, delta=AnthropicTextDelta(type="text_delta", text="Hello ")
+        RawContentBlockStartEvent(
+            type="content_block_start", index=0, content_block=TextBlock(type="text", text="")
         ),
         state,
     )
     events += process_anthropic_event(
         RawContentBlockDeltaEvent(
-            type="content_block_delta", index=0, delta=AnthropicTextDelta(type="text_delta", text="world")
+            type="content_block_delta",
+            index=0,
+            delta=AnthropicTextDelta(type="text_delta", text="Hello "),
         ),
         state,
     )
-    events += process_anthropic_event(RawContentBlockStopEvent(type="content_block_stop", index=0), state)
+    events += process_anthropic_event(
+        RawContentBlockDeltaEvent(
+            type="content_block_delta",
+            index=0,
+            delta=AnthropicTextDelta(type="text_delta", text="world"),
+        ),
+        state,
+    )
+    events += process_anthropic_event(
+        RawContentBlockStopEvent(type="content_block_stop", index=0), state
+    )
 
     from anthropic.types import MessageDeltaUsage
 
@@ -329,18 +352,24 @@ def test_process_anthropic_event_tool_use_accumulates_partial_json():
         type="message",
         usage=Usage(input_tokens=3, output_tokens=0),
     )
-    events += process_anthropic_event(RawMessageStartEvent(type="message_start", message=msg), state)
+    events += process_anthropic_event(
+        RawMessageStartEvent(type="message_start", message=msg), state
+    )
     events += process_anthropic_event(
         RawContentBlockStartEvent(
             type="content_block_start",
             index=0,
-            content_block=ToolUseBlock(type="tool_use", id="toolu_1", name="get_current_time", input={}),
+            content_block=ToolUseBlock(
+                type="tool_use", id="toolu_1", name="get_current_time", input={}
+            ),
         ),
         state,
     )
     events += process_anthropic_event(
         RawContentBlockDeltaEvent(
-            type="content_block_delta", index=0, delta=InputJSONDelta(type="input_json_delta", partial_json='{"tz"')
+            type="content_block_delta",
+            index=0,
+            delta=InputJSONDelta(type="input_json_delta", partial_json='{"tz"'),
         ),
         state,
     )
@@ -352,7 +381,9 @@ def test_process_anthropic_event_tool_use_accumulates_partial_json():
         ),
         state,
     )
-    events += process_anthropic_event(RawContentBlockStopEvent(type="content_block_stop", index=0), state)
+    events += process_anthropic_event(
+        RawContentBlockStopEvent(type="content_block_stop", index=0), state
+    )
     events += process_anthropic_event(
         RawMessageDeltaEvent(
             type="message_delta",
@@ -498,7 +529,11 @@ def test_to_anthropic_params_attaches_image_blocks_for_user_message(tmp_path):
 
     png_path = _write_tiny_png(tmp_path)
     messages = [
-        Message(role="user", content="what is this?", images=[ImageRef(path=png_path, mime_type="image/png")])
+        Message(
+            role="user",
+            content="what is this?",
+            images=[ImageRef(path=png_path, mime_type="image/png")],
+        )
     ]
 
     _system, out = to_anthropic_params(messages, supports_vision=True)
@@ -516,7 +551,11 @@ def test_to_anthropic_params_only_attaches_pixels_for_the_most_recent_images(tmp
     png_path = _write_tiny_png(tmp_path)
     # One more image-bearing message than the cap allows.
     messages = [
-        Message(role="user", content=f"image {i}", images=[ImageRef(path=png_path, mime_type="image/png")])
+        Message(
+            role="user",
+            content=f"image {i}",
+            images=[ImageRef(path=png_path, mime_type="image/png")],
+        )
         for i in range(MAX_ATTACHED_IMAGES + 1)
     ]
 
@@ -553,7 +592,11 @@ def test_to_openai_messages_attaches_image_url_parts_for_user_message_when_visio
 
     png_path = _write_tiny_png(tmp_path)
     messages = [
-        Message(role="user", content="what is this?", images=[ImageRef(path=png_path, mime_type="image/png")])
+        Message(
+            role="user",
+            content="what is this?",
+            images=[ImageRef(path=png_path, mime_type="image/png")],
+        )
     ]
 
     out = to_openai_messages(messages, supports_vision=True)
@@ -590,7 +633,11 @@ def test_to_openai_messages_omits_image_parts_when_vision_disabled(tmp_path):
 
     png_path = _write_tiny_png(tmp_path)
     messages = [
-        Message(role="user", content="what is this?", images=[ImageRef(path=png_path, mime_type="image/png")])
+        Message(
+            role="user",
+            content="what is this?",
+            images=[ImageRef(path=png_path, mime_type="image/png")],
+        )
     ]
 
     out = to_openai_messages(messages, supports_vision=False)
@@ -644,7 +691,9 @@ def test_select_images_within_cap_splits_a_partially_included_message():
     from aida.providers.vision import select_images_within_cap
 
     messages = [
-        Message(role="user", content="old", images=[ImageRef(path="a.png"), ImageRef(path="b.png")]),
+        Message(
+            role="user", content="old", images=[ImageRef(path="a.png"), ImageRef(path="b.png")]
+        ),
         Message(role="user", content="new", images=[ImageRef(path="c.png")]),
     ]
 
@@ -741,7 +790,12 @@ def test_process_anthropic_event_captures_cache_token_usage():
         role="assistant",
         stop_reason=None,
         type="message",
-        usage=Usage(input_tokens=100, output_tokens=0, cache_creation_input_tokens=50, cache_read_input_tokens=200),
+        usage=Usage(
+            input_tokens=100,
+            output_tokens=0,
+            cache_creation_input_tokens=50,
+            cache_read_input_tokens=200,
+        ),
     )
     events = process_anthropic_event(RawMessageStartEvent(type="message_start", message=msg), state)
     events += process_anthropic_event(RawMessageStopEvent(type="message_stop"), state)
@@ -771,10 +825,16 @@ def test_finalize_stream_terminates_a_turn_that_never_sent_a_finish_reason():
     state = _StreamState(message_id="m1")
 
     def chunk(**kw):
-        return ChatCompletionChunk(id="1", created=0, model="x", object="chat.completion.chunk", **kw)
+        return ChatCompletionChunk(
+            id="1", created=0, model="x", object="chat.completion.chunk", **kw
+        )
 
     process_openai_chunk(
-        chunk(choices=[Choice(index=0, delta=ChoiceDelta(content="partial answer"), finish_reason=None)]),
+        chunk(
+            choices=[
+                Choice(index=0, delta=ChoiceDelta(content="partial answer"), finish_reason=None)
+            ]
+        ),
         state,
     )
 

@@ -8,7 +8,9 @@ import time
 from collections.abc import Callable
 
 
-def pump_until(qapp, predicate: Callable[[], bool], timeout: float = 15.0, interval: float = 0.01) -> bool:
+def pump_until(
+    qapp, predicate: Callable[[], bool], timeout: float = 15.0, interval: float = 0.01
+) -> bool:
     """Process Qt events (including queued cross-thread signal delivery)
     until ``predicate()`` is true or ``timeout`` seconds pass. Returns
     whether ``predicate()`` ended up true. This project has no pytest-qt

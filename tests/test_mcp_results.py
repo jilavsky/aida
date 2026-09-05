@@ -20,7 +20,9 @@ RAW_BLOB_BYTES = b"arbitrary-blob-bytes"
 
 
 def _result(*blocks: types.ContentBlock, structured=None, is_error=False) -> types.CallToolResult:
-    return types.CallToolResult(content=list(blocks), structuredContent=structured, isError=is_error)
+    return types.CallToolResult(
+        content=list(blocks), structuredContent=structured, isError=is_error
+    )
 
 
 def test_text_content_becomes_text_artifact():
@@ -194,7 +196,9 @@ def test_fastmcp_result_wrapper_around_a_non_object_is_also_recognized_as_duplic
     """FastMCP wraps a tool returning a non-object as
     ``{"result": <value>}`` in structuredContent while the text block holds
     the bare value — still the same information, twice."""
-    result = _result(types.TextContent(type="text", text="[1, 2, 3]"), structured={"result": [1, 2, 3]})
+    result = _result(
+        types.TextContent(type="text", text="[1, 2, 3]"), structured={"result": [1, 2, 3]}
+    )
 
     artifacts = convert_result(result)
 

@@ -59,7 +59,9 @@ class CollapsibleSection(QWidget):
         self._header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._header.setArrowType(Qt.ArrowType.DownArrow)
         self._header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._header.setStyleSheet("QToolButton { border: none; font-weight: bold; padding: 4px 2px; }")
+        self._header.setStyleSheet(
+            "QToolButton { border: none; font-weight: bold; padding: 4px 2px; }"
+        )
         self._header.clicked.connect(self._on_header_clicked)
         layout.addWidget(self._header)
 

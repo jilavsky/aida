@@ -51,7 +51,9 @@ def build_embeddings_provider(profile: EmbeddingProfile) -> EmbeddingsProvider:
     api_key = get_secret(profile.secret_ref) if profile.secret_ref else None
 
     if profile.kind == "openai_compat":
-        return OpenAICompatEmbeddings(model=profile.model, base_url=profile.base_url, api_key=api_key)
+        return OpenAICompatEmbeddings(
+            model=profile.model, base_url=profile.base_url, api_key=api_key
+        )
 
     raise UnknownProviderKindError(
         f"embedding profile {profile.name!r} has unknown kind {profile.kind!r} (expected 'openai_compat')"
@@ -107,7 +109,9 @@ async def validate_profile(
 
     if reachable:
         return ProfileValidation(
-            name=profile.name, ok=True, detail=f"reachable ({profile.kind}, model={profile.model or 'unset'})"
+            name=profile.name,
+            ok=True,
+            detail=f"reachable ({profile.kind}, model={profile.model or 'unset'})",
         )
     return ProfileValidation(
         name=profile.name,
@@ -143,7 +147,9 @@ async def validate_embedding_profile(
 
     if reachable:
         return ProfileValidation(
-            name=profile.name, ok=True, detail=f"reachable ({profile.kind}, model={profile.model or 'unset'})"
+            name=profile.name,
+            ok=True,
+            detail=f"reachable ({profile.kind}, model={profile.model or 'unset'})",
         )
     return ProfileValidation(
         name=profile.name,

@@ -217,7 +217,9 @@ def test_migration_4_adds_the_user_column_to_an_existing_v3_database(tmp_path: P
     conn = connect(db)
     try:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
-        row = conn.execute('SELECT title, "user" FROM conversations WHERE id = ?', ("old1",)).fetchone()
+        row = conn.execute(
+            'SELECT title, "user" FROM conversations WHERE id = ?', ("old1",)
+        ).fetchone()
         assert row["title"] == "From before users existed"
         assert row["user"] is None
     finally:
@@ -309,9 +311,9 @@ def test_rename_user_moves_every_conversation(tmp_path: Path):
     try:
         moved = store.rename_user("jan", "Jan Ilavsky", timestamp="2026-01-05")
         assert moved == 1
-        assert [c.title for c in store.list_conversations("Jan Ilavsky", include_unowned=False)] == [
-            "Jan's fits"
-        ]
+        assert [
+            c.title for c in store.list_conversations("Jan Ilavsky", include_unowned=False)
+        ] == ["Jan's fits"]
         assert store.list_conversations("jan", include_unowned=False) == []
     finally:
         store.close()
@@ -333,7 +335,7 @@ def test_renaming_onto_an_existing_name_merges(tmp_path: Path):
 
 
 def test_renaming_to_empty_clears_the_label_without_deleting_anything(tmp_path: Path):
-    """"Remove this user" means remove the *label*. Their conversations
+    """ "Remove this user" means remove the *label*. Their conversations
     stay and become visible to everyone — deleting work is a different,
     louder operation."""
     store, _ = _store_with_conversations(tmp_path)
@@ -343,7 +345,11 @@ def test_renaming_to_empty_clears_the_label_without_deleting_anything(tmp_path: 
         assert len(store.list_conversations()) == 3
         assert "jan" not in store.known_users()
         # NULL now, so it shows for everyone — same as pre-migration rows.
-        assert [c.title for c in store.list_conversations("eva")] == ["Eva's scans", "Jan's fits", "Before users"]
+        assert [c.title for c in store.list_conversations("eva")] == [
+            "Eva's scans",
+            "Jan's fits",
+            "Before users",
+        ]
     finally:
         store.close()
 

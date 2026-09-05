@@ -134,7 +134,14 @@ def replace_file_chunks(
     conn.executemany(
         "INSERT INTO chunks (source_path, heading, chunk_index, mtime, text, embedding) VALUES (?, ?, ?, ?, ?, ?)",
         [
-            (source_path, chunk.heading, chunk.chunk_index, mtime, chunk.text, pack_embedding(vector))
+            (
+                source_path,
+                chunk.heading,
+                chunk.chunk_index,
+                mtime,
+                chunk.text,
+                pack_embedding(vector),
+            )
             for chunk, vector in chunks_with_embeddings
         ],
     )
@@ -153,7 +160,9 @@ def indexed_source_mtimes(conn: sqlite3.Connection) -> dict[str, float]:
     """``{source_path: mtime}`` for every distinct file currently indexed —
     what ``aida.knowledge.rag.ingest``'s incremental-update pass diffs
     against the folder's real files."""
-    rows = conn.execute("SELECT source_path, MAX(mtime) AS mtime FROM chunks GROUP BY source_path").fetchall()
+    rows = conn.execute(
+        "SELECT source_path, MAX(mtime) AS mtime FROM chunks GROUP BY source_path"
+    ).fetchall()
     return {row["source_path"]: row["mtime"] for row in rows}
 
 
@@ -163,7 +172,9 @@ def all_chunks(conn: sqlite3.Connection) -> list[StoredChunk]:
     (hundreds to low thousands of chunks per knowledge base); a knowledge
     base that grows far beyond that is a documented follow-up, not handled
     here (see planning/phase08_rag.md)."""
-    rows = conn.execute("SELECT source_path, heading, chunk_index, text, embedding FROM chunks").fetchall()
+    rows = conn.execute(
+        "SELECT source_path, heading, chunk_index, text, embedding FROM chunks"
+    ).fetchall()
     return [
         StoredChunk(
             source_path=row["source_path"],

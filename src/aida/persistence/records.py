@@ -64,9 +64,12 @@ def record_file_path(records_dir: Path, conversation_id: str, title: str | None)
 
 
 def _role_heading(role: str) -> str:
-    return {"user": "User", "assistant": "Assistant", "tool": "Tool result", "system": "System"}.get(
-        role, role.title()
-    )
+    return {
+        "user": "User",
+        "assistant": "Assistant",
+        "tool": "Tool result",
+        "system": "System",
+    }.get(role, role.title())
 
 
 def render_transcript(

@@ -192,7 +192,8 @@ def test_provider_profile_rejects_a_badly_typed_sampling_field():
     from aida.config.settings import ProviderProfile
 
     profile = ProviderProfile.from_dict(
-        "argo-claude", {"kind": "anthropic", "model": "claude-sonnet", "max_tokens": "lots", "temperature": {}}
+        "argo-claude",
+        {"kind": "anthropic", "model": "claude-sonnet", "max_tokens": "lots", "temperature": {}},
     )
     assert profile.max_tokens is None
     assert profile.temperature is None
@@ -500,7 +501,9 @@ def test_workspace_knowledge_bases_roundtrip(aida_home: Path):
 
     cfg = WorkspacesConfig(
         workspaces={
-            "beamline-help": WorkspaceConfig(name="beamline-help", knowledge_bases=["usaxs-docs", "pyirena-docs"])
+            "beamline-help": WorkspaceConfig(
+                name="beamline-help", knowledge_bases=["usaxs-docs", "pyirena-docs"]
+            )
         }
     )
     save_workspaces_config(cfg, aida_home)
@@ -631,7 +634,7 @@ def test_app_config_coerces_a_quoted_number():
 
 
 def test_app_config_falls_back_to_the_default_for_an_uncoercible_value():
-    """"Old configs must always load" applies to a *wrong* config too: warn
+    """ "Old configs must always load" applies to a *wrong* config too: warn
     and use the default rather than refusing to start."""
     config = AppConfig.from_dict({"max_agent_iterations": "lots", "log_level": "DEBUG"})
     assert config.max_agent_iterations == AppConfig().max_agent_iterations
@@ -721,8 +724,12 @@ def test_workspace_quick_tasks_roundtrip(aida_home: Path):
             "usaxs": WorkspaceConfig(
                 name="usaxs",
                 quick_tasks=[
-                    QuickTask(name="Reduce today's data", text="Reduce and plot today's USAXS runs."),
-                    QuickTask(name="Fit Guinier", text="Fit a Guinier region to the selected dataset."),
+                    QuickTask(
+                        name="Reduce today's data", text="Reduce and plot today's USAXS runs."
+                    ),
+                    QuickTask(
+                        name="Fit Guinier", text="Fit a Guinier region to the selected dataset."
+                    ),
                 ],
             )
         }
@@ -818,7 +825,9 @@ def test_schedule_entry_every_field_roundtrip(aida_home: Path):
         save_schedules_config,
     )
 
-    cfg = SchedulesConfig(schedules={"often": ScheduleEntry(name="often", workflow="w", every="4h")})
+    cfg = SchedulesConfig(
+        schedules={"often": ScheduleEntry(name="often", workflow="w", every="4h")}
+    )
     save_schedules_config(cfg, aida_home)
     loaded = load_schedules_config(aida_home)
     assert loaded.schedules["often"].every == "4h"

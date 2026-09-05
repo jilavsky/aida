@@ -58,7 +58,9 @@ def _assert_valid_png(data: bytes) -> None:
 async def test_keystone_mcp_image_round_trip(tmp_path):
     artifacts_dir = tmp_path / "artifacts"
     store = ArtifactStore(base_dir=artifacts_dir)
-    server_config = McpServerConfig(name="mock-mcp", command=sys.executable, args=[str(MOCK_SERVER_PATH)])
+    server_config = McpServerConfig(
+        name="mock-mcp", command=sys.executable, args=[str(MOCK_SERVER_PATH)]
+    )
     manager = McpManager([server_config], artifact_store=store)
 
     try:
@@ -96,11 +98,7 @@ async def test_keystone_mcp_image_round_trip(tmp_path):
         _assert_valid_png(on_disk)
 
         # 3. The store's own bookkeeping agrees.
-        saved_artifact = next(
-            a
-            for a in store.list_metadata()
-            if a.id == created.artifact_id
-        )
+        saved_artifact = next(a for a in store.list_metadata() if a.id == created.artifact_id)
         assert saved_artifact.kind == "ImageArtifact"
         assert saved_artifact.path == created.path
 
@@ -121,7 +119,10 @@ async def test_keystone_mcp_image_round_trip(tmp_path):
 
         # 6. The turn completed normally and the loop kept going after the
         #    tool call, exactly as a real chat session would.
-        assert any(isinstance(e, TextFinished) and e.text == "here is the plot you asked for" for e in events)
+        assert any(
+            isinstance(e, TextFinished) and e.text == "here is the plot you asked for"
+            for e in events
+        )
         assert any(isinstance(e, MessageFinished) for e in events)
     finally:
         await manager.aclose()
@@ -133,7 +134,9 @@ async def test_keystone_artifact_type_is_real_image_artifact_not_text(tmp_path):
     MCP tool function directly returns a ToolResult whose artifacts list
     contains a genuine ImageArtifact instance — not a string anywhere."""
     store = ArtifactStore(base_dir=tmp_path / "artifacts")
-    server_config = McpServerConfig(name="mock-mcp", command=sys.executable, args=[str(MOCK_SERVER_PATH)])
+    server_config = McpServerConfig(
+        name="mock-mcp", command=sys.executable, args=[str(MOCK_SERVER_PATH)]
+    )
     manager = McpManager([server_config], artifact_store=store)
     try:
         tools = await manager.start_all()

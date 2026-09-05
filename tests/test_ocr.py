@@ -92,12 +92,16 @@ class _StubClient:
 
 
 def _ocr_payload(markdown: str | None = None):
-    body = markdown if markdown is not None else (
-        "Some body text in reading order.\n"
-        "\n"
-        "![img-0.jpeg](img-0.jpeg)\n"
-        "\n"
-        "Figure 1. SAXS patterns of the annealed film\n"
+    body = (
+        markdown
+        if markdown is not None
+        else (
+            "Some body text in reading order.\n"
+            "\n"
+            "![img-0.jpeg](img-0.jpeg)\n"
+            "\n"
+            "Figure 1. SAXS patterns of the annealed film\n"
+        )
     )
     return {
         "pages": [
@@ -332,7 +336,7 @@ class _ModelsClient:
 
 
 def test_verify_api_key_reports_the_ocr_model_and_uploads_nothing():
-    """"Is my key working?" has to be answerable without sending a
+    """ "Is my key working?" has to be answerable without sending a
     document — otherwise the only way to test the setup is to perform the
     exact action the user is being careful about."""
     client = _ModelsClient()
@@ -403,7 +407,9 @@ def test_figures_names_a_missing_key_rather_than_failing_silently(tmp_path: Path
     assert "no API key" in out
 
 
-def test_figures_surfaces_an_ocr_failure_instead_of_burying_it_in_a_log(tmp_path: Path, monkeypatch):
+def test_figures_surfaces_an_ocr_failure_instead_of_burying_it_in_a_log(
+    tmp_path: Path, monkeypatch
+):
     """The whole reason the command exists: this string used to go to a log
     file nobody was watching, and the only symptom was figures quietly a
     bit worse than expected."""

@@ -121,7 +121,9 @@ def _coerce_bool(source: str, field_name: str, value: Any, *, default: bool) -> 
     try:
         return _strict_bool(value)
     except (TypeError, ValueError) as exc:
-        _logger.warning("%s: %s=%r ignored (%s); using %r instead", source, field_name, value, exc, default)
+        _logger.warning(
+            "%s: %s=%r ignored (%s); using %r instead", source, field_name, value, exc, default
+        )
         return default
 
 
@@ -141,12 +143,16 @@ def _coerce_positive_number(
     if value is None:
         return default
     if isinstance(value, bool):  # bool is an int subclass; never a timeout
-        _logger.warning("%s: %s=%r is not a number; using %r instead", source, field_name, value, default)
+        _logger.warning(
+            "%s: %s=%r is not a number; using %r instead", source, field_name, value, default
+        )
         return default
     try:
         coerced = kind(value)
     except (TypeError, ValueError):
-        _logger.warning("%s: %s=%r is not a number; using %r instead", source, field_name, value, default)
+        _logger.warning(
+            "%s: %s=%r is not a number; using %r instead", source, field_name, value, default
+        )
         return default
     if coerced <= 0:
         _logger.warning(
@@ -230,8 +236,12 @@ def _coerce_optional_number(source: str, field_name: str, value: Any, *, kind: t
     something like a hand-quoted ``max_tokens: "4096"``."""
     if value is None:
         return None
-    if isinstance(kind, type) and kind is int and isinstance(value, bool):  # bool is an int subclass
-        _logger.warning("%s: ignoring %s=%r — expected a number, got a boolean", source, field_name, value)
+    if (
+        isinstance(kind, type) and kind is int and isinstance(value, bool)
+    ):  # bool is an int subclass
+        _logger.warning(
+            "%s: ignoring %s=%r — expected a number, got a boolean", source, field_name, value
+        )
         return None
     try:
         return kind(value)
@@ -417,7 +427,9 @@ class AppConfig:
                 filtered.pop("max_context_tokens"),
             )
         if "assistant_name" in filtered and not filtered["assistant_name"].strip():
-            _logger.warning("config.yaml: assistant_name must not be blank; using the default instead")
+            _logger.warning(
+                "config.yaml: assistant_name must not be blank; using the default instead"
+            )
             filtered.pop("assistant_name")
         # Both scheduler timings accept 0 (quiet period 0 = never wait for
         # idleness; cap 0 = never waive the quiet period) but neither is
@@ -443,7 +455,10 @@ class AppConfig:
         # that would then be free to drift apart.
         from aida.workspace.safety import SAFETY_MODES
 
-        if "default_safety_mode" in filtered and filtered["default_safety_mode"] not in SAFETY_MODES:
+        if (
+            "default_safety_mode" in filtered
+            and filtered["default_safety_mode"] not in SAFETY_MODES
+        ):
             _logger.warning(
                 "config.yaml: unknown default_safety_mode %r (expected %s); using 'confirm' instead",
                 filtered["default_safety_mode"],
@@ -600,15 +615,21 @@ class ProviderProfile:
             model=data.get("model", ""),
             secret_ref=data.get("secret_ref"),
             capability_notes=data.get("capability_notes", ""),
-            max_tokens=_coerce_optional_number(source, "max_tokens", data.get("max_tokens"), kind=int),
-            temperature=_coerce_optional_number(source, "temperature", data.get("temperature"), kind=float),
+            max_tokens=_coerce_optional_number(
+                source, "max_tokens", data.get("max_tokens"), kind=int
+            ),
+            temperature=_coerce_optional_number(
+                source, "temperature", data.get("temperature"), kind=float
+            ),
             usd_per_m_input=_coerce_optional_number(
                 source, "usd_per_m_input", data.get("usd_per_m_input"), kind=float
             ),
             usd_per_m_output=_coerce_optional_number(
                 source, "usd_per_m_output", data.get("usd_per_m_output"), kind=float
             ),
-            supports_vision=_coerce_bool(source, "supports_vision", data.get("supports_vision"), default=False),
+            supports_vision=_coerce_bool(
+                source, "supports_vision", data.get("supports_vision"), default=False
+            ),
             context_window=_coerce_optional_number(
                 source, "context_window", data.get("context_window"), kind=int
             ),
@@ -697,7 +718,9 @@ class ProvidersConfig:
         return {
             "config_version": self.config_version,
             "profiles": {name: p.to_dict() for name, p in self.profiles.items()},
-            "embedding_profiles": {name: p.to_dict() for name, p in self.embedding_profiles.items()},
+            "embedding_profiles": {
+                name: p.to_dict() for name, p in self.embedding_profiles.items()
+            },
         }
 
 
@@ -745,7 +768,9 @@ def _coerce_quick_tasks(source: str, value: Any) -> list[QuickTask]:
     tasks: list[QuickTask] = []
     for item in value:
         if not isinstance(item, dict) or not item.get("name") or not item.get("text"):
-            _logger.warning("%s: skipping malformed quick_tasks entry %r (need 'name' and 'text')", source, item)
+            _logger.warning(
+                "%s: skipping malformed quick_tasks entry %r (need 'name' and 'text')", source, item
+            )
             continue
         tasks.append(QuickTask.from_dict(item))
     return tasks
@@ -834,8 +859,12 @@ class WorkspaceConfig:
             skills=_coerce_str_list(source, "skills", data.get("skills")),
             system_prompt=data.get("system_prompt"),
             safety=_coerce_safety_mode(source, data.get("safety")),
-            knowledge_bases=_coerce_str_list(source, "knowledge_bases", data.get("knowledge_bases")),
-            command_allowlist=_coerce_str_list(source, "command_allowlist", data.get("command_allowlist")),
+            knowledge_bases=_coerce_str_list(
+                source, "knowledge_bases", data.get("knowledge_bases")
+            ),
+            command_allowlist=_coerce_str_list(
+                source, "command_allowlist", data.get("command_allowlist")
+            ),
             python_interpreter=data.get("python_interpreter"),
             scripting_enabled=_coerce_bool(
                 source, "scripting_enabled", data.get("scripting_enabled"), default=True
@@ -913,7 +942,15 @@ class WorkspacesConfig:
 
 #: Keys ``McpServerConfig`` models explicitly — everything else in a raw
 #: server dict is preserved verbatim in ``extra`` rather than discarded.
-_KNOWN_SERVER_KEYS = {"command", "args", "env", "groups", "skills", "disabled_tools", "confirm_tools"}
+_KNOWN_SERVER_KEYS = {
+    "command",
+    "args",
+    "env",
+    "groups",
+    "skills",
+    "disabled_tools",
+    "confirm_tools",
+}
 
 
 @dataclass
@@ -1041,7 +1078,9 @@ class KnowledgeBaseConfig:
         return cls(
             name=name,
             source_folders=_coerce_str_list(
-                f"knowledge.yaml (knowledge base {name!r})", "source_folders", data.get("source_folders")
+                f"knowledge.yaml (knowledge base {name!r})",
+                "source_folders",
+                data.get("source_folders"),
             ),
             embedding_profile=data.get("embedding_profile"),
             chunk_size=data.get("chunk_size", 1000),
@@ -1167,7 +1206,9 @@ class WorkflowConfig:
             profile=data.get("profile"),
             mcp_group=data.get("mcp_group"),
             vars=vars_,
-            preapproved_tools=_coerce_str_list(source, "preapproved_tools", data.get("preapproved_tools")),
+            preapproved_tools=_coerce_str_list(
+                source, "preapproved_tools", data.get("preapproved_tools")
+            ),
             steps=_coerce_workflow_steps(source, data.get("steps")),
         )
 
@@ -1232,8 +1273,12 @@ class ScheduleEntry:
             every=data.get("every"),
             trigger=str(data.get("trigger") or "in-app"),
             vars=vars_,
-            preapproved_tools=_coerce_str_list(source, "preapproved_tools", data.get("preapproved_tools")),
-            yes_in_allowed=_coerce_bool(source, "yes_in_allowed", data.get("yes_in_allowed"), default=False),
+            preapproved_tools=_coerce_str_list(
+                source, "preapproved_tools", data.get("preapproved_tools")
+            ),
+            yes_in_allowed=_coerce_bool(
+                source, "yes_in_allowed", data.get("yes_in_allowed"), default=False
+            ),
             enabled=_coerce_bool(source, "enabled", data.get("enabled"), default=True),
         )
 
@@ -1296,9 +1341,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
     partial one. Same directory matters so the replace is a same-filesystem
     rename, not a cross-filesystem copy."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
-    )
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
@@ -1470,5 +1513,10 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         save_schedules_config(schedules, base)
 
     return Settings(
-        app=app, providers=providers, workspaces=workspaces, mcp=mcp, knowledge=knowledge, schedules=schedules
+        app=app,
+        providers=providers,
+        workspaces=workspaces,
+        mcp=mcp,
+        knowledge=knowledge,
+        schedules=schedules,
     )

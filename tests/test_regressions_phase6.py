@@ -49,10 +49,16 @@ def test_delete_conversation_keeps_files_outside_aidas_own_artifact_store(tmp_pa
     aida_owned = artifact_store.save_image(ImageArtifact(data=b"plot", mime_type="image/png"))
     store.append_artifact_from_object(conv, aida_owned, call_id="c1", timestamp=T)
     store.append_artifact_from_object(
-        conv, ImageArtifact(data=b"", mime_type="image/png", path=str(user_source)), call_id="c2", timestamp=T
+        conv,
+        ImageArtifact(data=b"", mime_type="image/png", path=str(user_source)),
+        call_id="c2",
+        timestamp=T,
     )
     store.append_artifact_from_object(
-        conv, FileArtifact(path=str(user_report), mime_type="text/markdown"), call_id="c3", timestamp=T
+        conv,
+        FileArtifact(path=str(user_report), mime_type="text/markdown"),
+        call_id="c3",
+        timestamp=T,
     )
 
     result = delete_conversation(
@@ -83,12 +89,17 @@ def test_delete_conversation_is_not_fooled_by_a_symlink_into_the_store(tmp_path:
 
     conv = store.create_conversation(timestamp=T)
     store.append_artifact_from_object(
-        conv, ImageArtifact(data=b"", mime_type="image/png", path=str(link)), call_id="c1", timestamp=T
+        conv,
+        ImageArtifact(data=b"", mime_type="image/png", path=str(link)),
+        call_id="c1",
+        timestamp=T,
     )
 
     delete_conversation(store, conv, records_dir=tmp_path / "records", artifacts_dir=owned_dir)
 
-    assert real_file.exists(), "a symlink under the artifacts dir must not authorize deleting its target"
+    assert real_file.exists(), (
+        "a symlink under the artifacts dir must not authorize deleting its target"
+    )
     store.close()
 
 
@@ -223,8 +234,12 @@ def test_copy_to_target_keeps_both_when_content_differs(tmp_path: Path):
     store = ArtifactStore(base_dir=tmp_path / "artifacts")
     target = tmp_path / "sidecar"
 
-    a = store.save_image(ImageArtifact(data=b"figure-a", mime_type="image/png", filename="plot.png"))
-    b = store.save_image(ImageArtifact(data=b"figure-b", mime_type="image/png", filename="plot.png"))
+    a = store.save_image(
+        ImageArtifact(data=b"figure-a", mime_type="image/png", filename="plot.png")
+    )
+    b = store.save_image(
+        ImageArtifact(data=b"figure-b", mime_type="image/png", filename="plot.png")
+    )
     # Force the collision at the *target* even though the store already
     # uniquified the sources. Path.replace() (not .rename()) because the
     # destination already exists here (it's `a`'s own stored file) —
@@ -249,8 +264,12 @@ def test_transcript_links_point_at_the_real_sidecar_filenames(tmp_path: Path):
     records_dir = tmp_path / "records"
     conv = store.create_conversation(timestamp=T, sidecar_dirname="figures")
 
-    a = artifact_store.save_image(ImageArtifact(data=b"aaa", mime_type="image/png", filename="plot.png"))
-    b = artifact_store.save_image(ImageArtifact(data=b"bbb", mime_type="image/png", filename="plot.png"))
+    a = artifact_store.save_image(
+        ImageArtifact(data=b"aaa", mime_type="image/png", filename="plot.png")
+    )
+    b = artifact_store.save_image(
+        ImageArtifact(data=b"bbb", mime_type="image/png", filename="plot.png")
+    )
     Path(b.path).rename(Path(b.path).parent / "plot.png_tmp")
     # Path.replace(), not .rename(): the destination (a's own "plot.png")
     # already exists — see test_copy_to_target_keeps_both_when_content_differs's
@@ -262,7 +281,9 @@ def test_transcript_links_point_at_the_real_sidecar_filenames(tmp_path: Path):
     for artifact, call in ((a, "c1"), (b, "c2")):
         store.append_artifact_from_object(conv, artifact, call_id=call, timestamp=T)
         store.append_message(
-            conv, Message(role="tool", content="[image]", tool_call_id=call, name="plot"), timestamp=T
+            conv,
+            Message(role="tool", content="[image]", tool_call_id=call, name="plot"),
+            timestamp=T,
         )
 
     path = record_file_path(records_dir, conv, None)
@@ -281,7 +302,11 @@ def test_transcript_links_point_at_the_real_sidecar_filenames(tmp_path: Path):
 
     text = path.read_text(encoding="utf-8")
     sidecar = records_dir / "figures" / conv[:8]
-    linked = [line.split("(")[-1].rstrip(")").split("/")[-1] for line in text.splitlines() if line.startswith("![")]
+    linked = [
+        line.split("(")[-1].rstrip(")").split("/")[-1]
+        for line in text.splitlines()
+        if line.startswith("![")
+    ]
     assert len(linked) == 2
     for name in linked:
         assert (sidecar / name).exists(), f"transcript links {name} but no such file was copied"

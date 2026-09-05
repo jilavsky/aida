@@ -22,7 +22,9 @@ from aida.workspace.workspaces import WorkspaceConfig
 
 def _settings_with_a_profile(aida_home: Path):
     settings = load_settings()
-    settings.providers.profiles["mock-profile"] = ProviderProfile(name="mock-profile", kind="openai_compat", model="mock-model")
+    settings.providers.profiles["mock-profile"] = ProviderProfile(
+        name="mock-profile", kind="openai_compat", model="mock-model"
+    )
     return settings
 
 
@@ -46,7 +48,9 @@ def test_workspace_form_seeds_fields_when_editing(qapp, aida_home: Path):
         command_allowlist=["git status"],
         script_timeout_seconds=180.0,
     )
-    dialog = WorkspaceFormDialog(settings=settings, skills_dir=aida_home / "skills", workspace=workspace)
+    dialog = WorkspaceFormDialog(
+        settings=settings, skills_dir=aida_home / "skills", workspace=workspace
+    )
 
     assert dialog._name_edit.isReadOnly()
     assert dialog._name_edit.text() == "pyirena"
@@ -160,10 +164,16 @@ def test_workspace_form_checked_skills_and_kbs_round_trip(qapp, aida_home: Path)
 def test_workspace_form_shows_mcp_groups_from_settings(qapp, aida_home: Path):
     settings = _settings_with_a_profile(aida_home)
     settings.mcp = McpConfig(
-        servers={"pyirena-mcp": McpServerConfig(name="pyirena-mcp", command="/opt/x", groups=["analysis"])}
+        servers={
+            "pyirena-mcp": McpServerConfig(
+                name="pyirena-mcp", command="/opt/x", groups=["analysis"]
+            )
+        }
     )
     dialog = WorkspaceFormDialog(settings=settings, skills_dir=aida_home / "skills")
-    group_names = [dialog._mcp_group_combo.itemText(i) for i in range(dialog._mcp_group_combo.count())]
+    group_names = [
+        dialog._mcp_group_combo.itemText(i) for i in range(dialog._mcp_group_combo.count())
+    ]
     assert "analysis" in group_names
 
 
@@ -176,14 +186,20 @@ def test_workspace_form_rejects_a_blank_name(qapp, aida_home: Path, monkeypatch)
     assert warned == [True]
 
 
-def test_workspace_form_warns_when_relaxed_mode_is_newly_enabled(qapp, aida_home: Path, monkeypatch):
+def test_workspace_form_warns_when_relaxed_mode_is_newly_enabled(
+    qapp, aida_home: Path, monkeypatch
+):
     settings = _settings_with_a_profile(aida_home)
     dialog = WorkspaceFormDialog(settings=settings, skills_dir=aida_home / "skills")
     dialog._name_edit.setText("ws")
     dialog._safety_combo.setCurrentText("relaxed")
 
     warned = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: (warned.append(True), QMessageBox.StandardButton.Cancel)[1])
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *a, **k: (warned.append(True), QMessageBox.StandardButton.Cancel)[1],
+    )
     dialog._on_accept()
 
     assert warned == [True]
@@ -193,7 +209,9 @@ def test_workspace_form_warns_when_relaxed_mode_is_newly_enabled(qapp, aida_home
 def test_workspace_form_does_not_warn_when_already_relaxed(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_a_profile(aida_home)
     workspace = WorkspaceConfig(name="ws", safety="relaxed")
-    dialog = WorkspaceFormDialog(settings=settings, skills_dir=aida_home / "skills", workspace=workspace)
+    dialog = WorkspaceFormDialog(
+        settings=settings, skills_dir=aida_home / "skills", workspace=workspace
+    )
 
     warned = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(True))
@@ -228,7 +246,9 @@ def test_add_workspace_persists_to_settings_and_disk(qapp, aida_home: Path, monk
     form._name_edit.setText("pyirena")
     form._profile_combo.setCurrentText("mock-profile")
     form._target_folder_edit.setText("/data/out")
-    monkeypatch.setattr("aida.ui.qt.workspace_management_dialog.WorkspaceFormDialog", lambda **kw: form)
+    monkeypatch.setattr(
+        "aida.ui.qt.workspace_management_dialog.WorkspaceFormDialog", lambda **kw: form
+    )
     monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
 
     dialog._on_add()
@@ -246,7 +266,9 @@ def test_add_workspace_rejects_a_duplicate_name(qapp, aida_home: Path, monkeypat
 
     form = WorkspaceFormDialog(settings=settings, skills_dir=aida_home / "skills")
     form._name_edit.setText("pyirena")
-    monkeypatch.setattr("aida.ui.qt.workspace_management_dialog.WorkspaceFormDialog", lambda **kw: form)
+    monkeypatch.setattr(
+        "aida.ui.qt.workspace_management_dialog.WorkspaceFormDialog", lambda **kw: form
+    )
     monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
     warned = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(True))
@@ -284,13 +306,17 @@ def test_remove_workspace_cancelled_keeps_it(qapp, aida_home: Path, monkeypatch)
 
 def test_detail_panel_shows_validation_warnings(qapp, aida_home: Path):
     settings = _settings_with_a_profile(aida_home)
-    settings.workspaces.workspaces["pyirena"] = WorkspaceConfig(name="pyirena", source_folders=["/no/such/folder"])
+    settings.workspaces.workspaces["pyirena"] = WorkspaceConfig(
+        name="pyirena", source_folders=["/no/such/folder"]
+    )
     dialog = WorkspaceManagementDialog(settings, aida_home / "skills")
     dialog._workspace_list.setCurrentRow(0)
     assert "source folder not currently reachable" in dialog._details_label.text()
 
 
-def test_editing_a_workspace_keeps_fields_the_form_does_not_show(qapp, aida_home: Path, monkeypatch):
+def test_editing_a_workspace_keeps_fields_the_form_does_not_show(
+    qapp, aida_home: Path, monkeypatch
+):
     """Bug report: "I can add Quick tasks into workspace, but these seem to
     disappear." The form rebuilt the whole WorkspaceConfig from its own
     widgets, so pressing OK in the Workspaces… dialog reset every field it
@@ -313,7 +339,9 @@ def test_editing_a_workspace_keeps_fields_the_form_does_not_show(qapp, aida_home
         workspace=settings.workspaces.workspaces["pyirena"],
     )
     form._target_folder_edit.setText("/data/elsewhere")  # the edit the user actually made
-    monkeypatch.setattr("aida.ui.qt.workspace_management_dialog.WorkspaceFormDialog", lambda **kw: form)
+    monkeypatch.setattr(
+        "aida.ui.qt.workspace_management_dialog.WorkspaceFormDialog", lambda **kw: form
+    )
     monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
 
     dialog._on_edit()
@@ -333,7 +361,9 @@ def test_adding_a_workspace_starts_with_no_quick_tasks(qapp, aida_home: Path, mo
 
     form = WorkspaceFormDialog(settings=settings, skills_dir=aida_home / "skills")
     form._name_edit.setText("fresh")
-    monkeypatch.setattr("aida.ui.qt.workspace_management_dialog.WorkspaceFormDialog", lambda **kw: form)
+    monkeypatch.setattr(
+        "aida.ui.qt.workspace_management_dialog.WorkspaceFormDialog", lambda **kw: form
+    )
     monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
 
     dialog._on_add()
@@ -345,7 +375,8 @@ def test_workspace_details_list_the_quick_tasks(qapp, aida_home: Path):
     """So "are my quick tasks actually stored?" is answerable from the GUI."""
     settings = _settings_with_a_profile(aida_home)
     settings.workspaces.workspaces["pyirena"] = WorkspaceConfig(
-        name="pyirena", quick_tasks=[QuickTask(name="Reduce data", text="Reduce today's USAXS runs.")]
+        name="pyirena",
+        quick_tasks=[QuickTask(name="Reduce data", text="Reduce today's USAXS runs.")],
     )
     dialog = WorkspaceManagementDialog(settings, aida_home / "skills")
     dialog._workspace_list.setCurrentRow(0)

@@ -26,7 +26,16 @@ from pathlib import Path
 SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "aida"
 QT_SHIM_PATH = SRC_ROOT / "ui" / "qt" / "_qt.py"
 
-CORE_PACKAGES = ("core", "providers", "persistence", "artifacts", "mcp", "workspace", "cli", "config")
+CORE_PACKAGES = (
+    "core",
+    "providers",
+    "persistence",
+    "artifacts",
+    "mcp",
+    "workspace",
+    "cli",
+    "config",
+)
 
 
 def _imported_top_level_modules(tree: ast.AST) -> set[str]:
@@ -106,9 +115,13 @@ def test_main_gui_imports_ui_lazily_inside_a_function_not_at_module_level():
     assert not any(m == "aida.ui" or m.startswith("aida.ui.") for m in module_level)
 
     main_gui = next(
-        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "main_gui"
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "main_gui"
     )
     imports_inside = {
-        node.module for node in ast.walk(main_gui) if isinstance(node, ast.ImportFrom) and node.module
+        node.module
+        for node in ast.walk(main_gui)
+        if isinstance(node, ast.ImportFrom) and node.module
     }
     assert "aida.ui.qt.app" in imports_inside

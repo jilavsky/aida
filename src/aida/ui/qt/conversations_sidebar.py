@@ -80,7 +80,7 @@ def _row_label(summary: ConversationSummary) -> str:
 
 
 class CleanupDialog(QDialog):
-    """"Older than N days" picker — a static-method convenience
+    """ "Older than N days" picker — a static-method convenience
     (``get_cutoff_days``) mirrors Qt's own ``QInputDialog.getInt`` pattern:
     construct, ask, tear down, all in one call for the common case, while
     the class itself stays directly testable (no ``exec()`` needed) for
@@ -98,7 +98,9 @@ class CleanupDialog(QDialog):
         form.addRow("Delete conversations older than (days):", self._days_spin)
         layout.addLayout(form)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -344,7 +346,9 @@ class ConversationsSidebar(QWidget):
         if not conv_id:
             return
         current_title = self._titles_by_row[row] if 0 <= row < len(self._titles_by_row) else ""
-        new_title, ok = QInputDialog.getText(self, "Rename Conversation", "Title:", text=current_title)
+        new_title, ok = QInputDialog.getText(
+            self, "Rename Conversation", "Title:", text=current_title
+        )
         new_title = new_title.strip()
         if ok and new_title:
             self.rename_requested.emit(conv_id, new_title)

@@ -58,7 +58,11 @@ def cmd_figures(args: argparse.Namespace) -> int:
 
     settings = load_settings()
     use_ocr, why = _resolve_use_ocr(args, settings)
-    assets = Path(args.assets_dir).expanduser() if args.assets_dir else path.with_name(path.stem + ".assets")
+    assets = (
+        Path(args.assets_dir).expanduser()
+        if args.assets_dir
+        else path.with_name(path.stem + ".assets")
+    )
 
     backend = "builtin"
     note = ""
@@ -142,10 +146,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     figures.add_argument("file", help="Path to a PDF")
     figures.add_argument("--workspace", default="", help="Use this workspace's use_ocr setting")
-    figures.add_argument("--ocr", action="store_true", help="Force OCR on, whatever the workspace says")
+    figures.add_argument(
+        "--ocr", action="store_true", help="Force OCR on, whatever the workspace says"
+    )
     figures.add_argument("--no-ocr", action="store_true", help="Force the built-in extractor")
     figures.add_argument("--yes", action="store_true", help="Skip the upload confirmation")
-    figures.add_argument("--assets-dir", default="", help="Where to write images (default: beside the file)")
+    figures.add_argument(
+        "--assets-dir", default="", help="Where to write images (default: beside the file)"
+    )
     figures.add_argument("--json", action="store_true", help="Machine-readable output")
 
     sub.add_parser("verify-ocr", help="Check the OCR API key against the service (uploads nothing)")

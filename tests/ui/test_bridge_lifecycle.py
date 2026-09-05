@@ -27,7 +27,9 @@ from tests.ui._qt_test_utils import pump_until
 
 def _settings_with_profile(name: str = "mock-profile") -> Settings:
     settings = load_settings()
-    settings.providers.profiles[name] = ProviderProfile(name=name, kind="openai_compat", model="mock-model")
+    settings.providers.profiles[name] = ProviderProfile(
+        name=name, kind="openai_compat", model="mock-model"
+    )
     return settings
 
 
@@ -36,12 +38,16 @@ def _ready_window(qapp, loop_thread, monkeypatch, **start_kwargs) -> MainWindow:
     with an undelivered queued signal has it delivered by the *next* test's
     ``processEvents()`` — which is how an unrelated startup failure ended up
     opening a modal dialog inside another test and hanging the run."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     window = MainWindow(_settings_with_profile(), loop_thread, start_kwargs=start_kwargs)
     assert pump_until(
         qapp,
-        lambda: window.statusBar().currentMessage().startswith("Ready")
-        or window.statusBar().currentMessage() == "Startup failed",
+        lambda: (
+            window.statusBar().currentMessage().startswith("Ready")
+            or window.statusBar().currentMessage() == "Startup failed"
+        ),
     )
     return window
 
@@ -87,7 +93,9 @@ def test_shutdown_closes_a_session_that_was_still_starting(
         session.aclose = recording_aclose
         return session, mcp_manager
 
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr(bridge_module, "start_session", slow_start)
 
     settings = _settings_with_profile()
@@ -99,9 +107,13 @@ def test_shutdown_closes_a_session_that_was_still_starting(
     loop_thread.loop.call_soon_threadsafe(release.set)
     bridge.shutdown(timeout=10.0)
 
-    assert bridge.session is not None, "the start did complete — the point is that it got closed anyway"
+    assert bridge.session is not None, (
+        "the start did complete — the point is that it got closed anyway"
+    )
     assert bridge._closed is True
-    assert closed == ["session"], "a session finished after shutdown() must still be closed, not leaked"
+    assert closed == ["session"], (
+        "a session finished after shutdown() must still be closed, not leaked"
+    )
 
 
 def test_a_superseded_bridge_cannot_drive_the_window(
@@ -119,7 +131,9 @@ def test_a_superseded_bridge_cannot_drive_the_window(
         monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: dialogs.append("critical"))
         monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: dialogs.append("warning"))
 
-        window._restart_session(workspace_name=None, profile_name="mock-profile", resume_conversation_id=None)
+        window._restart_session(
+            workspace_name=None, profile_name="mock-profile", resume_conversation_id=None
+        )
         assert window.bridge is not old_bridge
 
         # Emitting on the retired bridge must reach nothing: no crash, no
@@ -138,10 +152,14 @@ def test_a_superseded_bridge_cannot_drive_the_window(
         qapp.processEvents()
 
 
-def test_shutdown_is_idempotent(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_shutdown_is_idempotent(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     """``_restart_session`` shuts a bridge down, and ``closeEvent`` may shut
     the same one down again — the second call must not double-close."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     bridge = ChatBridge(loop_thread)
     bridge.start(_settings_with_profile(), profile_name="mock-profile")
     bridge.shutdown(timeout=10.0)
@@ -168,7 +186,9 @@ def test_a_retired_bridge_cannot_render_into_the_new_chat_panel(
     window = _ready_window(qapp, loop_thread, monkeypatch, profile_name="mock-profile")
     try:
         old_bridge = window.bridge
-        window._restart_session(workspace_name=None, profile_name="mock-profile", resume_conversation_id=None)
+        window._restart_session(
+            workspace_name=None, profile_name="mock-profile", resume_conversation_id=None
+        )
         assert pump_until(qapp, lambda: window.statusBar().currentMessage().startswith("Ready"))
         assert window.chat_panel.widget_count == 0
 
@@ -176,7 +196,9 @@ def test_a_retired_bridge_cannot_render_into_the_new_chat_panel(
         old_bridge.event_received.emit(TextFinished(message_id="stale", text="ghost text"))
         qapp.processEvents()
 
-        assert window.chat_panel.widget_count == 0, "a retired bridge painted into the live chat panel"
+        assert window.chat_panel.widget_count == 0, (
+            "a retired bridge painted into the live chat panel"
+        )
     finally:
         window.bridge.shutdown()
         window.close()
@@ -189,7 +211,9 @@ def test_a_retired_bridge_cannot_flip_the_new_input_boxs_busy_state(
     window = _ready_window(qapp, loop_thread, monkeypatch, profile_name="mock-profile")
     try:
         old_bridge = window.bridge
-        window._restart_session(workspace_name=None, profile_name="mock-profile", resume_conversation_id=None)
+        window._restart_session(
+            workspace_name=None, profile_name="mock-profile", resume_conversation_id=None
+        )
         assert pump_until(qapp, lambda: window.statusBar().currentMessage().startswith("Ready"))
 
         old_bridge.turn_started.emit()
@@ -199,7 +223,9 @@ def test_a_retired_bridge_cannot_flip_the_new_input_boxs_busy_state(
         window.input_box.set_busy(True)
         old_bridge.turn_finished.emit()
         qapp.processEvents()
-        assert window.input_box.is_busy is True, "a retired bridge cleared the live input box's busy state"
+        assert window.input_box.is_busy is True, (
+            "a retired bridge cleared the live input box's busy state"
+        )
     finally:
         window.input_box.set_busy(False)
         window.bridge.shutdown()
@@ -240,7 +266,12 @@ def test_shutdown_cancels_and_waits_for_an_in_flight_turn(
         "aida.core.session.build_provider",
         lambda profile: MockProvider(
             [
-                MockTurn(tool_calls=[MockToolCall(name="slow", id="c1"), MockToolCall(name="slow", id="c2")]),
+                MockTurn(
+                    tool_calls=[
+                        MockToolCall(name="slow", id="c1"),
+                        MockToolCall(name="slow", id="c2"),
+                    ]
+                ),
                 MockTurn(text="done"),
             ]
         ),
@@ -285,6 +316,8 @@ def test_shutdown_cancels_and_waits_for_an_in_flight_turn(
     assert len(events) == events_before, "a closing bridge kept emitting events"
     # The turn unwound through its normal cancel path, so every announced
     # tool call still has a matching result (see aida.core.agent).
-    announced = {tc.id for m in bridge.session.messages if m.role == "assistant" for tc in m.tool_calls}
+    announced = {
+        tc.id for m in bridge.session.messages if m.role == "assistant" for tc in m.tool_calls
+    }
     answered = {m.tool_call_id for m in bridge.session.messages if m.role == "tool"}
     assert announced == answered

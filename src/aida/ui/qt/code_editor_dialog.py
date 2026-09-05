@@ -139,7 +139,9 @@ class CodeEditorDialog(QDialog):
         forcing a round trip through some other editor just to get code
         into this one. Mirrors _on_save_as's own file-dialog pattern."""
         default_dir = self._saved_scripts_dir or str(Path.home())
-        path_str, _selected_filter = QFileDialog.getOpenFileName(self, "Open Script", default_dir, "Python Files (*.py)")
+        path_str, _selected_filter = QFileDialog.getOpenFileName(
+            self, "Open Script", default_dir, "Python Files (*.py)"
+        )
         if not path_str:
             return
         path = Path(path_str)
@@ -155,7 +157,9 @@ class CodeEditorDialog(QDialog):
 
     def _on_save_as(self) -> None:
         default_dir = self._saved_scripts_dir or str(Path.home())
-        path_str, _selected_filter = QFileDialog.getSaveFileName(self, "Save Script", default_dir, "Python Files (*.py)")
+        path_str, _selected_filter = QFileDialog.getSaveFileName(
+            self, "Save Script", default_dir, "Python Files (*.py)"
+        )
         if not path_str:
             return
         self._write_to(Path(path_str))

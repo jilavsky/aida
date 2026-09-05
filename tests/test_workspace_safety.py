@@ -411,16 +411,23 @@ async def test_run_script_outside_allowed_folders_always_confirms(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_execute_relaxed_mode_inside_allowed_and_allowlisted_needs_no_confirmation(tmp_path: Path):
+async def test_execute_relaxed_mode_inside_allowed_and_allowlisted_needs_no_confirmation(
+    tmp_path: Path,
+):
     guard = SafetyGuard(
-        allowed_roots=[tmp_path], mode="relaxed", confirm_callback=deny_all, command_allowlist=CommandAllowlist(["git status"])
+        allowed_roots=[tmp_path],
+        mode="relaxed",
+        confirm_callback=deny_all,
+        command_allowlist=CommandAllowlist(["git status"]),
     )
     cwd = await guard.authorize_execute("git status", tmp_path)
     assert cwd == tmp_path.resolve()
 
 
 @pytest.mark.asyncio
-async def test_execute_confirm_mode_inside_allowed_and_allowlisted_asks_and_honors_approval(tmp_path: Path):
+async def test_execute_confirm_mode_inside_allowed_and_allowlisted_asks_and_honors_approval(
+    tmp_path: Path,
+):
     guard = SafetyGuard(
         allowed_roots=[tmp_path],
         mode="confirm",
@@ -432,9 +439,14 @@ async def test_execute_confirm_mode_inside_allowed_and_allowlisted_asks_and_hono
 
 
 @pytest.mark.asyncio
-async def test_execute_confirm_mode_inside_allowed_and_allowlisted_raises_when_declined(tmp_path: Path):
+async def test_execute_confirm_mode_inside_allowed_and_allowlisted_raises_when_declined(
+    tmp_path: Path,
+):
     guard = SafetyGuard(
-        allowed_roots=[tmp_path], mode="confirm", confirm_callback=deny_all, command_allowlist=CommandAllowlist(["git status"])
+        allowed_roots=[tmp_path],
+        mode="confirm",
+        confirm_callback=deny_all,
+        command_allowlist=CommandAllowlist(["git status"]),
     )
     with pytest.raises(ConfirmationDenied):
         await guard.authorize_execute("git status", tmp_path)
@@ -458,7 +470,9 @@ async def test_execute_outside_allowed_folders_always_confirms_even_in_relaxed_m
 
 @pytest.mark.asyncio
 async def test_execute_not_allowlisted_always_confirms_even_in_relaxed_mode(tmp_path: Path):
-    guard = SafetyGuard(allowed_roots=[tmp_path], mode="relaxed", confirm_callback=deny_all)  # empty allowlist
+    guard = SafetyGuard(
+        allowed_roots=[tmp_path], mode="relaxed", confirm_callback=deny_all
+    )  # empty allowlist
     with pytest.raises(ConfirmationDenied):
         await guard.authorize_execute("rm -rf /", tmp_path)
 
@@ -536,7 +550,9 @@ async def test_authorize_execute_remember_scope_is_cwd(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_run_script_and_execute_use_distinct_actions_even_with_the_same_folder(tmp_path: Path):
+async def test_run_script_and_execute_use_distinct_actions_even_with_the_same_folder(
+    tmp_path: Path,
+):
     """Regression: authorize_run_script and authorize_execute used to both
     say action="execute". RememberingConfirm's cache key is
     (action, remember_scope), so if a script's folder and a command's cwd
@@ -555,4 +571,6 @@ async def test_run_script_and_execute_use_distinct_actions_even_with_the_same_fo
     actions = {r.action for r in seen}
     assert actions == {"run_script", "execute"}
     scopes = {r.remember_scope for r in seen}
-    assert scopes == {str(tmp_path.resolve())}, "both requests share the same folder scope, by design"
+    assert scopes == {str(tmp_path.resolve())}, (
+        "both requests share the same folder scope, by design"
+    )

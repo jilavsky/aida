@@ -15,7 +15,10 @@ import re
 from aida.ui.qt._qt import QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QTextDocument
 
 _KEYWORD_RE = re.compile(r"\b(" + "|".join(keyword.kwlist) + r")\b")
-_STRING_RE = re.compile(r"(\"\"\".*?\"\"\"|'''.*?'''|\"[^\"\\\n]*(?:\\.[^\"\\\n]*)*\"|'[^'\\\n]*(?:\\.[^'\\\n]*)*')", re.DOTALL)
+_STRING_RE = re.compile(
+    r"(\"\"\".*?\"\"\"|'''.*?'''|\"[^\"\\\n]*(?:\\.[^\"\\\n]*)*\"|'[^'\\\n]*(?:\\.[^'\\\n]*)*')",
+    re.DOTALL,
+)
 _COMMENT_RE = re.compile(r"#[^\n]*")
 _NUMBER_RE = re.compile(r"\b\d+(\.\d+)?\b")
 _DEF_CLASS_RE = re.compile(r"\b(def|class)\s+(\w+)")

@@ -94,7 +94,9 @@ async def test_anthropic_provider_complete_caches_system_and_tools():
 
 
 @pytest.mark.asyncio
-async def test_anthropic_provider_complete_attaches_image_pixels_only_when_supports_vision(tmp_path):
+async def test_anthropic_provider_complete_attaches_image_pixels_only_when_supports_vision(
+    tmp_path,
+):
     import base64
 
     from aida.providers.base import CompletionSettings, ImageRef, Message
@@ -115,7 +117,9 @@ async def test_anthropic_provider_complete_attaches_image_pixels_only_when_suppo
 
     provider._client.messages.create = fake_create
 
-    messages = [Message(role="user", content="what is this?", images=[ImageRef(path=str(png_path))])]
+    messages = [
+        Message(role="user", content="what is this?", images=[ImageRef(path=str(png_path))])
+    ]
 
     # Vision disabled (the default) -> plain text content, no image block.
     [e async for e in provider.complete(messages, [], CompletionSettings(model="claude-x"))]
@@ -155,7 +159,9 @@ async def test_openai_compat_provider_complete_threads_supports_vision(tmp_path)
 
     provider._client.chat.completions.create = fake_create
 
-    messages = [Message(role="user", content="what is this?", images=[ImageRef(path=str(png_path))])]
+    messages = [
+        Message(role="user", content="what is this?", images=[ImageRef(path=str(png_path))])
+    ]
 
     [
         e

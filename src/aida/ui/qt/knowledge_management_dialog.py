@@ -114,7 +114,9 @@ class KnowledgeBaseFormDialog(QDialog):
 
         layout.addLayout(form)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -130,7 +132,11 @@ class KnowledgeBaseFormDialog(QDialog):
             QMessageBox.warning(self, "Name Required", "A knowledge base needs a name.")
             return
         if not self._profile_combo.currentText():
-            QMessageBox.warning(self, "Embedding Profile Required", "Configure an embedding profile first (Providers… dialog).")
+            QMessageBox.warning(
+                self,
+                "Embedding Profile Required",
+                "Configure an embedding profile first (Providers… dialog).",
+            )
             return
         self.accept()
 
@@ -142,7 +148,9 @@ class KnowledgeBaseFormDialog(QDialog):
         # holds a plain path — the "Details" panel and knowledge.yaml both
         # show something a user recognizes, not a raw URI.
         source_folders = [
-            normalize_source_folder(line) for line in self._folders_edit.toPlainText().splitlines() if line.strip()
+            normalize_source_folder(line)
+            for line in self._folders_edit.toPlainText().splitlines()
+            if line.strip()
         ]
         return KnowledgeBaseConfig(
             name=self._name_edit.text().strip(),
@@ -286,12 +294,16 @@ class KnowledgeManagementDialog(QDialog):
                 ProfilesDialog(self._settings, self._bridge, self).exec()
             if not self._embedding_profile_names():
                 return
-        dialog = KnowledgeBaseFormDialog(embedding_profile_names=self._embedding_profile_names(), parent=self)
+        dialog = KnowledgeBaseFormDialog(
+            embedding_profile_names=self._embedding_profile_names(), parent=self
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         config = dialog.result_config()
         if config.name in self._configs():
-            QMessageBox.warning(self, "Already Exists", f"A knowledge base named {config.name!r} already exists.")
+            QMessageBox.warning(
+                self, "Already Exists", f"A knowledge base named {config.name!r} already exists."
+            )
             return
         self._settings.knowledge.knowledge_bases[config.name] = config
         save_knowledge_config(self._settings.knowledge)
@@ -302,7 +314,9 @@ class KnowledgeManagementDialog(QDialog):
         kb = self._configs().get(name) if name else None
         if kb is None:
             return
-        dialog = KnowledgeBaseFormDialog(kb=kb, embedding_profile_names=self._embedding_profile_names(), parent=self)
+        dialog = KnowledgeBaseFormDialog(
+            kb=kb, embedding_profile_names=self._embedding_profile_names(), parent=self
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         updated = dialog.result_config()
@@ -326,7 +340,9 @@ class KnowledgeManagementDialog(QDialog):
             "Yes — remove it and delete its index file from disk.\n"
             "No — remove it from configuration but keep the index file "
             f"({knowledge_db_path(name)}) in case you re-add it later.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
         if answer == QMessageBox.StandardButton.Cancel:
@@ -345,12 +361,17 @@ class KnowledgeManagementDialog(QDialog):
         if kb is None or self._bridge is None:
             return
         if not kb.embedding_profile:
-            QMessageBox.warning(self, "No Embedding Profile", f"Knowledge base {kb.name!r} has no embedding_profile configured.")
+            QMessageBox.warning(
+                self,
+                "No Embedding Profile",
+                f"Knowledge base {kb.name!r} has no embedding_profile configured.",
+            )
             return
         profile = self._settings.providers.embedding_profiles.get(kb.embedding_profile)
         if profile is None:
             QMessageBox.warning(
-                self, "Unknown Embedding Profile",
+                self,
+                "Unknown Embedding Profile",
                 f"Knowledge base {kb.name!r} references unknown embedding profile {kb.embedding_profile!r}.",
             )
             return

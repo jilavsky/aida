@@ -51,9 +51,13 @@ def _confirm(**kwargs):
 
 @pytest.mark.asyncio
 async def test_run_workflow_single_step_succeeds(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     settings = _settings()
-    workflow = WorkflowConfig(name="w", workspace="use-ws", steps=[WorkflowStep(prompt="Do the thing.")])
+    workflow = WorkflowConfig(
+        name="w", workspace="use-ws", steps=[WorkflowStep(prompt="Do the thing.")]
+    )
 
     result = await run_workflow(
         settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
@@ -67,7 +71,9 @@ async def test_run_workflow_single_step_succeeds(monkeypatch, aida_home: Path, r
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_resolves_placeholders_from_workflow_vars(monkeypatch, aida_home: Path, records_home: Path):
+async def test_run_workflow_resolves_placeholders_from_workflow_vars(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     provider = MockProvider([MockTurn(text="done")])
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
     settings = _settings()
@@ -78,15 +84,21 @@ async def test_run_workflow_resolves_placeholders_from_workflow_vars(monkeypatch
         steps=[WorkflowStep(prompt="Reduce scans in {folder}.")],
     )
 
-    result = await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow")
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
 
     assert result.ok is True
     assert result.steps[0].prompt == "Reduce scans in /data/default."
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_var_override_wins_over_workflow_default(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+async def test_run_workflow_var_override_wins_over_workflow_default(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     settings = _settings()
     workflow = WorkflowConfig(
         name="w",
@@ -107,12 +119,18 @@ async def test_run_workflow_var_override_wins_over_workflow_default(monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_missing_var_raises_before_any_session_work(aida_home: Path, records_home: Path):
+async def test_run_workflow_missing_var_raises_before_any_session_work(
+    aida_home: Path, records_home: Path
+):
     settings = _settings()
-    workflow = WorkflowConfig(name="w", workspace="use-ws", steps=[WorkflowStep(prompt="Reduce {folder}.")])
+    workflow = WorkflowConfig(
+        name="w", workspace="use-ws", steps=[WorkflowStep(prompt="Reduce {folder}.")]
+    )
 
     with pytest.raises(WorkflowConfigError, match="folder"):
-        await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow")
+        await run_workflow(
+            settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+        )
 
 
 def test_render_step_prompt_missing_var_names_it():
@@ -121,29 +139,44 @@ def test_render_step_prompt_missing_var_names_it():
 
 
 def test_render_step_prompt_substitutes_present_var():
-    assert render_step_prompt(WorkflowStep(prompt="Reduce {folder}."), {"folder": "/x"}) == "Reduce /x."
+    assert (
+        render_step_prompt(WorkflowStep(prompt="Reduce {folder}."), {"folder": "/x"})
+        == "Reduce /x."
+    )
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_unknown_workspace_raises_config_error(aida_home: Path, records_home: Path):
+async def test_run_workflow_unknown_workspace_raises_config_error(
+    aida_home: Path, records_home: Path
+):
     settings = _settings()
-    workflow = WorkflowConfig(name="w", workspace="does-not-exist", steps=[WorkflowStep(prompt="hi")])
+    workflow = WorkflowConfig(
+        name="w", workspace="does-not-exist", steps=[WorkflowStep(prompt="hi")]
+    )
 
     with pytest.raises(WorkflowConfigError):
-        await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow")
+        await run_workflow(
+            settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+        )
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_no_workspace_configured_raises_config_error(aida_home: Path, records_home: Path):
+async def test_run_workflow_no_workspace_configured_raises_config_error(
+    aida_home: Path, records_home: Path
+):
     settings = _settings()
     workflow = WorkflowConfig(name="w", workspace="", steps=[WorkflowStep(prompt="hi")])
 
     with pytest.raises(WorkflowConfigError, match="workspace"):
-        await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow")
+        await run_workflow(
+            settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+        )
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_stops_at_first_agent_error(monkeypatch, aida_home: Path, records_home: Path):
+async def test_run_workflow_stops_at_first_agent_error(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     provider = MockProvider([MockTurn(error="boom"), MockTurn(text="should not be reached")])
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
     settings = _settings()
@@ -153,7 +186,9 @@ async def test_run_workflow_stops_at_first_agent_error(monkeypatch, aida_home: P
         steps=[WorkflowStep(prompt="step 1"), WorkflowStep(prompt="step 2")],
     )
 
-    result = await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow")
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
 
     assert result.ok is False
     assert len(result.steps) == 1  # step 2 never ran
@@ -170,70 +205,100 @@ async def test_run_workflow_records_tool_calls(monkeypatch, aida_home: Path, rec
     )
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
     settings = _settings()
-    workflow = WorkflowConfig(name="w", workspace="use-ws", steps=[WorkflowStep(prompt="what time is it?")])
+    workflow = WorkflowConfig(
+        name="w", workspace="use-ws", steps=[WorkflowStep(prompt="what time is it?")]
+    )
 
-    result = await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow")
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
 
     assert result.ok is True
     assert result.steps[0].tool_calls == [{"tool_name": "get_current_time", "is_error": False}]
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_expect_files_satisfied(monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path):
+async def test_run_workflow_expect_files_satisfied(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
     target = tmp_path / "target"
     target.mkdir()
     (target / "plot.png").write_bytes(b"fake")
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     settings = _settings(target_folder=str(target))
     workflow = WorkflowConfig(
         name="w", workspace="use-ws", steps=[WorkflowStep(prompt="plot it", expect_files=["*.png"])]
     )
 
-    result = await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow")
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
 
     assert result.ok is True
     assert result.steps[0].missing_expect_files == []
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_expect_files_unmet_fails_the_step(monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path):
+async def test_run_workflow_expect_files_unmet_fails_the_step(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
     target = tmp_path / "target"
     target.mkdir()
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     settings = _settings(target_folder=str(target))
     workflow = WorkflowConfig(
         name="w", workspace="use-ws", steps=[WorkflowStep(prompt="plot it", expect_files=["*.png"])]
     )
 
-    result = await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow")
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
 
     assert result.ok is False
     assert result.steps[0].missing_expect_files == ["*.png"]
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_expect_files_with_no_target_folder_always_fails(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+async def test_run_workflow_expect_files_with_no_target_folder_always_fails(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     settings = _settings(target_folder=None)
     workflow = WorkflowConfig(
         name="w", workspace="use-ws", steps=[WorkflowStep(prompt="plot it", expect_files=["*.png"])]
     )
 
-    result = await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow")
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
 
     assert result.ok is False
     assert result.manifest_path is None  # nowhere to put it without a target folder
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_writes_a_manifest_next_to_target_folder(monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path):
+async def test_run_workflow_writes_a_manifest_next_to_target_folder(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
     target = tmp_path / "target"
     target.mkdir()
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     settings = _settings(target_folder=str(target))
-    workflow = WorkflowConfig(name="daily-report", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    workflow = WorkflowConfig(
+        name="daily-report", workspace="use-ws", steps=[WorkflowStep(prompt="go")]
+    )
 
-    result = await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="schedule")
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="schedule"
+    )
 
     assert result.manifest_path is not None
     manifest_path = Path(result.manifest_path)
@@ -248,7 +313,9 @@ async def test_run_workflow_writes_a_manifest_next_to_target_folder(monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_run_workflow_closes_session_even_when_a_step_fails(monkeypatch, aida_home: Path, records_home: Path):
+async def test_run_workflow_closes_session_even_when_a_step_fails(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     """Regression guard for the exact class of bug the external review
     flagged elsewhere (P1 findings, 59a4b92): a failure mid-run must not
     leave the session/MCP manager open."""
@@ -263,7 +330,9 @@ async def test_run_workflow_closes_session_even_when_a_step_fails(monkeypatch, a
     settings = _settings()
     workflow = WorkflowConfig(name="w", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
 
-    result = await run_workflow(settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow")
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
 
     assert result.ok is False
     assert closed == [True]

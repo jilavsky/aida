@@ -96,7 +96,9 @@ class SchedulerBridge(QObject):
     def _emit_deferred_changed(self, deferred: dict[str, str]) -> None:
         self.deferred_changed.emit(deferred)
 
-    def _emit_finished(self, name: str, ok: bool, conversation_id: str | None, error: str | None) -> None:
+    def _emit_finished(
+        self, name: str, ok: bool, conversation_id: str | None, error: str | None
+    ) -> None:
         self.run_finished.emit(name, ok, conversation_id or "", error or "")
 
     def run_now(self, name: str, entry: ScheduleEntry, settings: Settings) -> None:

@@ -77,7 +77,9 @@ def test_delete_conversation_leaves_no_orphan_record_or_sidecar(tmp_path: Path):
     art = artifact_store.save_image(ImageArtifact(data=b"pngbytes", mime_type="image/png"))
     store.append_artifact_from_object(conv_id, art, call_id="call_1", timestamp=T_NEW)
     store.append_message(
-        conv_id, Message(role="tool", content="[image]", tool_call_id="call_1", name="get_image"), timestamp=T_NEW
+        conv_id,
+        Message(role="tool", content="[image]", tool_call_id="call_1", name="get_image"),
+        timestamp=T_NEW,
     )
 
     path = record_file_path(records_dir, conv_id, None)
@@ -122,7 +124,9 @@ def test_delete_conversation_does_not_affect_other_conversations_files(tmp_path:
     store.append_artifact_from_object(conv_a, art_a, call_id="call_a", timestamp=T_NEW)
     store.append_artifact_from_object(conv_b, art_b, call_id="call_b", timestamp=T_NEW)
 
-    delete_conversation(store, conv_a, records_dir=records_dir, artifacts_dir=tmp_path / "aida-artifacts")
+    delete_conversation(
+        store, conv_a, records_dir=records_dir, artifacts_dir=tmp_path / "aida-artifacts"
+    )
 
     assert not Path(art_a.path).exists()
     assert Path(art_b.path).exists()

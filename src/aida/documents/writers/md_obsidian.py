@@ -75,7 +75,9 @@ def markdown_image_link(image_path: Path, *, relative_to: Path, alt_text: str = 
     document) and absolute otherwise (defensive fallback, not expected in
     practice given this module always copies into a sidecar under the same
     target folder first)."""
-    rel = image_path.relative_to(relative_to) if _is_relative(image_path, relative_to) else image_path
+    rel = (
+        image_path.relative_to(relative_to) if _is_relative(image_path, relative_to) else image_path
+    )
     return f"![{alt_text}]({rel.as_posix()})"
 
 
@@ -118,7 +120,9 @@ def write_markdown_document(
         if img is None:
             return match.group(0)
         referenced.add(artifact_id)
-        return markdown_image_link(copied[artifact_id], relative_to=target_dir, alt_text=img.alt_text or img.artifact.id)
+        return markdown_image_link(
+            copied[artifact_id], relative_to=target_dir, alt_text=img.alt_text or img.artifact.id
+        )
 
     if body:
         lines.append(_IMAGE_PLACEHOLDER_RE.sub(_substitute, body) if images else body)
@@ -128,7 +132,11 @@ def write_markdown_document(
         if img.artifact.id in referenced:
             continue
         copied_path = copied[img.artifact.id]
-        lines.append(markdown_image_link(copied_path, relative_to=target_dir, alt_text=img.alt_text or img.artifact.id))
+        lines.append(
+            markdown_image_link(
+                copied_path, relative_to=target_dir, alt_text=img.alt_text or img.artifact.id
+            )
+        )
         lines.append("")
 
     destination = unique_destination(target_dir / f"{filename_stem}.md")
@@ -136,4 +144,9 @@ def write_markdown_document(
     return destination
 
 
-__all__ = ["ImageToEmbed", "copy_images_to_sidecar", "markdown_image_link", "write_markdown_document"]
+__all__ = [
+    "ImageToEmbed",
+    "copy_images_to_sidecar",
+    "markdown_image_link",
+    "write_markdown_document",
+]

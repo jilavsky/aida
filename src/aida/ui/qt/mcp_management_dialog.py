@@ -175,7 +175,9 @@ class ServerFormDialog(QDialog):
         self._args_edit.setPlaceholderText("One argument per line, e.g.\n--stdio")
         form.addRow("Args:", self._args_edit)
 
-        self._raw_env_text = "\n".join(f"{k}={v}" for k, v in (server.env if server else {}).items())
+        self._raw_env_text = "\n".join(
+            f"{k}={v}" for k, v in (server.env if server else {}).items()
+        )
         self._env_edit = QPlainTextEdit(self._raw_env_text, self)
         self._env_edit.setPlaceholderText("KEY=VALUE, one per line")
         form.addRow("Env:", self._env_edit)
@@ -203,7 +205,9 @@ class ServerFormDialog(QDialog):
             item = QListWidgetItem(name, self._groups_list)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(
-                Qt.CheckState.Checked if server and name in server.groups else Qt.CheckState.Unchecked
+                Qt.CheckState.Checked
+                if server and name in server.groups
+                else Qt.CheckState.Unchecked
             )
         form.addRow("Groups:", self._groups_list)
         add_group_row = QHBoxLayout()
@@ -220,13 +224,17 @@ class ServerFormDialog(QDialog):
             item = QListWidgetItem(info.name, self._skills_list)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(
-                Qt.CheckState.Checked if server and info.name in server.skills else Qt.CheckState.Unchecked
+                Qt.CheckState.Checked
+                if server and info.name in server.skills
+                else Qt.CheckState.Unchecked
             )
         form.addRow("Skills:", self._skills_list)
 
         layout.addLayout(form)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -235,7 +243,9 @@ class ServerFormDialog(QDialog):
         if checked:
             self._raw_env_text = self._env_edit.toPlainText()
             masked = "\n".join(
-                f"{line.split('=', 1)[0]}=***" for line in self._raw_env_text.splitlines() if line.strip()
+                f"{line.split('=', 1)[0]}=***"
+                for line in self._raw_env_text.splitlines()
+                if line.strip()
             )
             self._env_edit.setPlainText(masked)
             self._env_edit.setReadOnly(True)
@@ -244,20 +254,28 @@ class ServerFormDialog(QDialog):
             self._env_edit.setReadOnly(False)
 
     def _on_store_secret_in_keychain(self) -> None:
-        current_text = self._raw_env_text if self._hide_values_checkbox.isChecked() else self._env_edit.toPlainText()
+        current_text = (
+            self._raw_env_text
+            if self._hide_values_checkbox.isChecked()
+            else self._env_edit.toPlainText()
+        )
         env = _parse_kv_lines(current_text)
         if not env:
             QMessageBox.information(self, "No Env Vars", "Add an env var (KEY=VALUE) first.")
             return
 
-        key, ok = QInputDialog.getItem(self, "Store in Keychain", "Env var:", list(env.keys()), editable=False)
+        key, ok = QInputDialog.getItem(
+            self, "Store in Keychain", "Env var:", list(env.keys()), editable=False
+        )
         if not ok or not key:
             return
 
         current_value = env[key]
         already_ref = current_value.startswith(("keyring:", "secret:"))
         default_name = f"{self._name_edit.text().strip() or 'mcp'}_{key}".lower()
-        secret_name, ok = QInputDialog.getText(self, "Secret Name", "Store under this name in the OS keychain:", text=default_name)
+        secret_name, ok = QInputDialog.getText(
+            self, "Secret Name", "Store under this name in the OS keychain:", text=default_name
+        )
         secret_name = secret_name.strip()
         if not ok or not secret_name:
             return
@@ -278,7 +296,9 @@ class ServerFormDialog(QDialog):
             self._on_hide_toggled(True)  # refresh the masked view from the new _raw_env_text
         else:
             self._env_edit.setPlainText(self._raw_env_text)
-        QMessageBox.information(self, "Stored", f"{key} now references keyring secret {secret_name!r}.")
+        QMessageBox.information(
+            self, "Stored", f"{key} now references keyring secret {secret_name!r}."
+        )
 
     def _on_add_group(self) -> None:
         name = self._new_group_edit.text().strip()
@@ -308,14 +328,20 @@ class ServerFormDialog(QDialog):
         self.accept()
 
     def env_dict(self) -> dict[str, str]:
-        text = self._raw_env_text if self._hide_values_checkbox.isChecked() else self._env_edit.toPlainText()
+        text = (
+            self._raw_env_text
+            if self._hide_values_checkbox.isChecked()
+            else self._env_edit.toPlainText()
+        )
         return _parse_kv_lines(text)
 
     def result_config(self) -> McpServerConfig:
         return McpServerConfig(
             name=self._name_edit.text().strip(),
             command=self._command_edit.text().strip(),
-            args=[line.strip() for line in self._args_edit.toPlainText().splitlines() if line.strip()],
+            args=[
+                line.strip() for line in self._args_edit.toPlainText().splitlines() if line.strip()
+            ],
             env=self.env_dict(),
             groups=self._checked_items(self._groups_list),
             skills=self._checked_items(self._skills_list),
@@ -408,7 +434,9 @@ class _AddGroupDialog(QDialog):
             QMessageBox.warning(self, "Name Required", "A group needs a name.")
             return
         if not self.selected_servers():
-            QMessageBox.warning(self, "No Servers Selected", "Check at least one server to add to the group.")
+            QMessageBox.warning(
+                self, "No Servers Selected", "Check at least one server to add to the group."
+            )
             return
         self.accept()
 
@@ -501,7 +529,9 @@ class GroupsDialog(QDialog):
     def _on_add(self) -> None:
         if not self._mcp_config.servers:
             QMessageBox.information(
-                self, "No Servers Configured", "Add an MCP server first — a group needs at least one member."
+                self,
+                "No Servers Configured",
+                "Add an MCP server first — a group needs at least one member.",
             )
             return
         dialog = _AddGroupDialog(self._mcp_config, self)
@@ -676,7 +706,9 @@ class SkillsBrowserDialog(QDialog):
 class _ToolPermissionRow(QWidget):
     """One tool's enable/confirm checkboxes in the Tools tab."""
 
-    def __init__(self, tool_name: str, *, disabled: bool, confirm: bool, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, tool_name: str, *, disabled: bool, confirm: bool, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.tool_name = tool_name
         layout = QHBoxLayout(self)
@@ -694,7 +726,9 @@ class _ToolPermissionRow(QWidget):
 
 
 class McpManagementDialog(QDialog):
-    def __init__(self, settings: Settings, bridge, skills_dir: Path, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, settings: Settings, bridge, skills_dir: Path, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("MCP Servers")
         self.resize(760, 520)
@@ -880,11 +914,19 @@ class McpManagementDialog(QDialog):
 
     def _refresh_tools_tab(self, server: McpServerConfig) -> None:
         self._clear_tool_rows()
-        known_names = sorted(set(self._live_tool_names(server.name)) | set(server.disabled_tools) | set(server.confirm_tools))
+        known_names = sorted(
+            set(self._live_tool_names(server.name))
+            | set(server.disabled_tools)
+            | set(server.confirm_tools)
+        )
         if not known_names:
-            hint = QLabel("Start or Test Connection to discover this server's tools.", self._tools_container)
+            hint = QLabel(
+                "Start or Test Connection to discover this server's tools.", self._tools_container
+            )
             self._tools_layout.insertWidget(self._tools_layout.count() - 1, hint)
-            self._tool_rows.append(hint)  # reused as a "row" purely so _clear_tool_rows tears it down too
+            self._tool_rows.append(
+                hint
+            )  # reused as a "row" purely so _clear_tool_rows tears it down too
             return
         for tool_name in known_names:
             row = _ToolPermissionRow(
@@ -912,12 +954,16 @@ class McpManagementDialog(QDialog):
     # --- server actions --------------------------------------------------
 
     def _on_add(self) -> None:
-        dialog = ServerFormDialog(mcp_config=self._settings.mcp, skills_dir=self._skills_dir, parent=self)
+        dialog = ServerFormDialog(
+            mcp_config=self._settings.mcp, skills_dir=self._skills_dir, parent=self
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         config = dialog.result_config()
         if config.name in self._configs():
-            QMessageBox.warning(self, "Already Exists", f"A server named {config.name!r} already exists.")
+            QMessageBox.warning(
+                self, "Already Exists", f"A server named {config.name!r} already exists."
+            )
             return
         self._settings.mcp.servers[config.name] = config
         save_mcp_config(self._settings.mcp)
@@ -1038,7 +1084,9 @@ class McpManagementDialog(QDialog):
         than guessing a path the user never named."""
         session = getattr(self._bridge, "session", None) if self._bridge is not None else None
         workspace_name = getattr(getattr(session, "recorder", None), "workspace_name", None)
-        workspace = self._settings.workspaces.workspaces.get(workspace_name) if workspace_name else None
+        workspace = (
+            self._settings.workspaces.workspaces.get(workspace_name) if workspace_name else None
+        )
         if workspace and workspace.source_folders:
             return workspace.source_folders[0]
         return None
@@ -1048,7 +1096,9 @@ class McpManagementDialog(QDialog):
         server = self._configs().get(name) if name else None
         if server is None:
             return
-        dialog = ServerFormDialog(mcp_config=self._settings.mcp, server=server, skills_dir=self._skills_dir, parent=self)
+        dialog = ServerFormDialog(
+            mcp_config=self._settings.mcp, server=server, skills_dir=self._skills_dir, parent=self
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         updated = dialog.result_config()
@@ -1123,8 +1173,16 @@ class McpManagementDialog(QDialog):
         server = self._configs().get(name) if name else None
         if server is None:
             return
-        disabled = [row.tool_name for row in self._tool_rows if isinstance(row, _ToolPermissionRow) and not row.enabled_checkbox.isChecked()]
-        confirm = [row.tool_name for row in self._tool_rows if isinstance(row, _ToolPermissionRow) and row.confirm_checkbox.isChecked()]
+        disabled = [
+            row.tool_name
+            for row in self._tool_rows
+            if isinstance(row, _ToolPermissionRow) and not row.enabled_checkbox.isChecked()
+        ]
+        confirm = [
+            row.tool_name
+            for row in self._tool_rows
+            if isinstance(row, _ToolPermissionRow) and row.confirm_checkbox.isChecked()
+        ]
         updated = McpServerConfig(
             name=server.name,
             command=server.command,
@@ -1153,7 +1211,9 @@ class McpManagementDialog(QDialog):
         self._refresh_detail()
 
     def _on_import(self) -> None:
-        path_str, _filter = QFileDialog.getOpenFileName(self, "Import mcp.json", "", "JSON (*.json)")
+        path_str, _filter = QFileDialog.getOpenFileName(
+            self, "Import mcp.json", "", "JSON (*.json)"
+        )
         if not path_str:
             return
         try:
@@ -1188,7 +1248,12 @@ class McpManagementDialog(QDialog):
         self._refresh_server_list()
 
     def _on_groups(self) -> None:
-        dialog = GroupsDialog(self._settings.mcp, on_changed=self._refresh_server_list, bridge=self._bridge, parent=self)
+        dialog = GroupsDialog(
+            self._settings.mcp,
+            on_changed=self._refresh_server_list,
+            bridge=self._bridge,
+            parent=self,
+        )
         dialog.exec()
 
     def _on_skills(self) -> None:
@@ -1211,10 +1276,20 @@ class McpManagementDialog(QDialog):
 
     def _on_connection_tested(self, name: str, result: ConnectionTestResult) -> None:
         if result.ok:
-            QMessageBox.information(self, "Connection OK", f"{name}: {result.tool_count} tool(s), {result.elapsed_seconds:.2f}s")
+            QMessageBox.information(
+                self,
+                "Connection OK",
+                f"{name}: {result.tool_count} tool(s), {result.elapsed_seconds:.2f}s",
+            )
         else:
             QMessageBox.warning(self, "Connection Failed", f"{name}: {result.error}")
         self._refresh_detail()
 
 
-__all__ = ["GroupsDialog", "McpManagementDialog", "RawResultDialog", "ServerFormDialog", "SkillsBrowserDialog"]
+__all__ = [
+    "GroupsDialog",
+    "McpManagementDialog",
+    "RawResultDialog",
+    "ServerFormDialog",
+    "SkillsBrowserDialog",
+]

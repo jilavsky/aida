@@ -117,7 +117,11 @@ def _check_secrets_non_interactive(settings: Settings | None) -> list[CheckResul
         var_name = env_var_name(profile.secret_ref)
         if os.environ.get(var_name) is not None:
             results.append(
-                CheckResult(f"secret_headless:{profile.name}", True, f"set via ${var_name} — safe for unattended use")
+                CheckResult(
+                    f"secret_headless:{profile.name}",
+                    True,
+                    f"set via ${var_name} — safe for unattended use",
+                )
             )
             continue
         found = get_secret(profile.secret_ref) is not None
@@ -309,9 +313,7 @@ def _check_pyirena_mcp(settings: Settings | None) -> CheckResult:
     if configured and candidates:
         version = pyirena_version(candidates[0])
         suffix = f" (pyIrena {version} found on this machine)" if version else ""
-        return CheckResult(
-            "pyirena_mcp", True, f"configured as {', '.join(configured)}{suffix}"
-        )
+        return CheckResult("pyirena_mcp", True, f"configured as {', '.join(configured)}{suffix}")
     if configured:
         return CheckResult(
             "pyirena_mcp",
@@ -326,7 +328,7 @@ def _check_pyirena_mcp(settings: Settings | None) -> CheckResult:
             "pyirena_mcp",
             True,
             f"installed{suffix} at {candidates[0].command} but NOT configured in AIDA — "
-            "add it with `aida mcp add-pyirena` (or the MCP dialog's \"Add pyIrena…\" button)",
+            'add it with `aida mcp add-pyirena` (or the MCP dialog\'s "Add pyIrena…" button)',
         )
     return CheckResult(
         "pyirena_mcp",
@@ -353,7 +355,9 @@ def _check_context_windows(settings: Settings | None) -> CheckResult:
         return CheckResult("context_windows", True, "no provider profiles configured yet")
 
     unset = sorted(name for name, profile in profiles.items() if profile.context_window is None)
-    configured = {name: profile.context_window for name, profile in profiles.items() if profile.context_window}
+    configured = {
+        name: profile.context_window for name, profile in profiles.items() if profile.context_window
+    }
 
     notes = []
     if unset:
@@ -370,7 +374,9 @@ def _check_context_windows(settings: Settings | None) -> CheckResult:
                 "still falling back to that global default could be using a real window smaller than it"
             )
     if not notes:
-        return CheckResult("context_windows", True, "every profile has an explicit context_window set")
+        return CheckResult(
+            "context_windows", True, "every profile has an explicit context_window set"
+        )
     return CheckResult("context_windows", True, "; ".join(notes))
 
 
@@ -398,7 +404,9 @@ def _check_max_tokens_vs_context_window(settings: Settings | None) -> CheckResul
         return CheckResult("max_tokens_vs_context_window", True, "skipped — config failed to load")
     profiles = settings.providers.profiles
     if not profiles:
-        return CheckResult("max_tokens_vs_context_window", True, "no provider profiles configured yet")
+        return CheckResult(
+            "max_tokens_vs_context_window", True, "no provider profiles configured yet"
+        )
 
     bad = []
     for name, profile in profiles.items():
@@ -414,7 +422,9 @@ def _check_max_tokens_vs_context_window(settings: Settings | None) -> CheckResul
             )
     if not bad:
         return CheckResult(
-            "max_tokens_vs_context_window", True, "no profile's max_tokens crowds out its context_window"
+            "max_tokens_vs_context_window",
+            True,
+            "no profile's max_tokens crowds out its context_window",
         )
     return CheckResult("max_tokens_vs_context_window", False, "; ".join(bad))
 

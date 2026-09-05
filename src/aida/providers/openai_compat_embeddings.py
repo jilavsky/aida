@@ -22,7 +22,9 @@ class OpenAICompatEmbeddings(EmbeddingsProvider):
 
     layer_name = "embeddings"
 
-    def __init__(self, *, model: str, base_url: str | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self, *, model: str, base_url: str | None = None, api_key: str | None = None
+    ) -> None:
         self.model = model
         # Same "SDK requires a non-empty api_key even for endpoints that
         # ignore it" reasoning as OpenAICompatProvider.

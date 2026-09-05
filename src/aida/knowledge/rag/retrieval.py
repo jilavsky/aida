@@ -74,7 +74,9 @@ class ActiveKnowledgeBase:
     score_threshold: float = DEFAULT_SCORE_THRESHOLD
 
 
-async def retrieve_from_active_kb(kb: ActiveKnowledgeBase, query_text: str) -> list[RetrievedPassage]:
+async def retrieve_from_active_kb(
+    kb: ActiveKnowledgeBase, query_text: str
+) -> list[RetrievedPassage]:
     """Convenience wrapper over ``retrieve()`` for an already-resolved
     ``ActiveKnowledgeBase`` — what ``ChatSession.send()`` actually calls,
     once per active knowledge base, per turn."""
@@ -117,7 +119,9 @@ async def retrieve(
 
     scored = [
         RetrievedPassage(
-            text=chunk.text, source_path=chunk.source_path, heading=chunk.heading,
+            text=chunk.text,
+            source_path=chunk.source_path,
+            heading=chunk.heading,
             score=_cosine(query_vector, chunk.embedding),
         )
         for chunk in chunks

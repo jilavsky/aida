@@ -162,7 +162,11 @@ class ProfileSelector(QWidget):
         layout.addWidget(self._combo)
 
     def set_profiles(
-        self, names: list[str], *, current: str | None = None, capability_notes: dict[str, str] | None = None
+        self,
+        names: list[str],
+        *,
+        current: str | None = None,
+        capability_notes: dict[str, str] | None = None,
     ) -> None:
         """``capability_notes`` (U7 paper cut: "capability_notes is stored
         but shown nowhere") sets each entry's tooltip to its profile's
@@ -291,7 +295,9 @@ class FolderDisplay(QGroupBox):
         sidecar_row.addWidget(self._sidecar_edit)
         layout.addLayout(sidecar_row)
 
-        layout.addWidget(QLabel("Allowed commands (run_command needs no confirmation for these):", self))
+        layout.addWidget(
+            QLabel("Allowed commands (run_command needs no confirmation for these):", self)
+        )
         self._command_label = QLabel("(none)", self)  # shown only when the list is empty
         layout.addWidget(self._command_label)
         self._command_rows_layout = QVBoxLayout()
@@ -308,7 +314,9 @@ class FolderDisplay(QGroupBox):
         interpreter_row = QHBoxLayout()
         interpreter_row.addWidget(QLabel("Python interpreter:", self))
         self._interpreter_edit = QLineEdit(self)
-        self._interpreter_edit.setPlaceholderText("(default: the interpreter AIDA itself runs under)")
+        self._interpreter_edit.setPlaceholderText(
+            "(default: the interpreter AIDA itself runs under)"
+        )
         self._interpreter_edit.editingFinished.connect(self._on_interpreter_edited)
         interpreter_row.addWidget(self._interpreter_edit, stretch=1)
         browse_interpreter_button = QPushButton("Browse…", self)
@@ -321,7 +329,11 @@ class FolderDisplay(QGroupBox):
         layout.addWidget(self._save_button)
 
     def set_folders(
-        self, *, source_folders: list[str], target_folder: str | None, sidecar_folder_name: str | None = None
+        self,
+        *,
+        source_folders: list[str],
+        target_folder: str | None,
+        sidecar_folder_name: str | None = None,
     ) -> None:
         self._source_folders = list(source_folders)
         self._target_folder = target_folder
@@ -432,7 +444,9 @@ class FolderDisplay(QGroupBox):
         self.command_allowlist_changed.emit(self._command_patterns)
 
     def _on_browse_interpreter(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(self, "Python Interpreter", self._interpreter_edit.text())
+        path, _filter = QFileDialog.getOpenFileName(
+            self, "Python Interpreter", self._interpreter_edit.text()
+        )
         if not path:
             return
         self._interpreter_edit.setText(path)
@@ -487,7 +501,9 @@ class McpQuickPanel(QGroupBox):
         self._manage_button.clicked.connect(self.manage_requested)
         self._layout.addWidget(self._manage_button)
 
-    def set_servers(self, server_names: list[str], *, enabled: list[str], group_name: str | None) -> None:
+    def set_servers(
+        self, server_names: list[str], *, enabled: list[str], group_name: str | None
+    ) -> None:
         """``enabled`` is which servers are *actually running right now*
         (``aida.mcp.manager.McpManager.running_server_names``), not merely
         which ones the workspace's ``mcp_group`` would resolve to — the

@@ -65,7 +65,8 @@ def test_on_open_loads_the_chosen_file(qapp, monkeypatch, tmp_path: Path):
     script.write_text("print('opened')", encoding="utf-8")
     dialog = CodeEditorDialog(initial_text="blank editor")
     monkeypatch.setattr(
-        "aida.ui.qt.code_editor_dialog.QFileDialog.getOpenFileName", lambda *a, **kw: (str(script), "")
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getOpenFileName",
+        lambda *a, **kw: (str(script), ""),
     )
     dialog._on_open()
     assert dialog.text() == "print('opened')"
@@ -75,7 +76,9 @@ def test_on_open_loads_the_chosen_file(qapp, monkeypatch, tmp_path: Path):
 
 def test_on_open_cancelled_leaves_the_editor_unchanged(qapp, monkeypatch):
     dialog = CodeEditorDialog(initial_text="unchanged")
-    monkeypatch.setattr("aida.ui.qt.code_editor_dialog.QFileDialog.getOpenFileName", lambda *a, **kw: ("", ""))
+    monkeypatch.setattr(
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getOpenFileName", lambda *a, **kw: ("", "")
+    )
     dialog._on_open()
     assert dialog.text() == "unchanged"
     assert dialog.current_path is None
@@ -85,7 +88,8 @@ def test_save_with_no_path_falls_back_to_save_as(qapp, monkeypatch, tmp_path: Pa
     dialog = CodeEditorDialog(initial_text="print(1)", saved_scripts_dir=str(tmp_path))
     target = tmp_path / "script.py"
     monkeypatch.setattr(
-        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName", lambda *a, **kw: (str(target), "")
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName",
+        lambda *a, **kw: (str(target), ""),
     )
     dialog._on_save()
     assert target.read_text(encoding="utf-8") == "print(1)"
@@ -94,7 +98,9 @@ def test_save_with_no_path_falls_back_to_save_as(qapp, monkeypatch, tmp_path: Pa
 
 def test_save_as_cancelled_does_not_write(qapp, monkeypatch, tmp_path: Path):
     dialog = CodeEditorDialog(initial_text="print(1)", saved_scripts_dir=str(tmp_path))
-    monkeypatch.setattr("aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName", lambda *a, **kw: ("", ""))
+    monkeypatch.setattr(
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName", lambda *a, **kw: ("", "")
+    )
     dialog._on_save_as()
     assert dialog.current_path is None
     assert list(tmp_path.iterdir()) == []
@@ -104,7 +110,8 @@ def test_save_after_save_as_writes_to_the_same_path(qapp, monkeypatch, tmp_path:
     dialog = CodeEditorDialog(initial_text="v1", saved_scripts_dir=str(tmp_path))
     target = tmp_path / "script.py"
     monkeypatch.setattr(
-        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName", lambda *a, **kw: (str(target), "")
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName",
+        lambda *a, **kw: (str(target), ""),
     )
     dialog._on_save_as()
     dialog.set_text("v2")
@@ -118,7 +125,9 @@ def test_run_with_no_bridge_is_a_safe_noop(qapp, tmp_path: Path):
     assert dialog.output_text() == ""
 
 
-def test_run_uses_the_configured_workspace_timeout_not_the_hardcoded_default(qapp, tmp_path: Path, monkeypatch):
+def test_run_uses_the_configured_workspace_timeout_not_the_hardcoded_default(
+    qapp, tmp_path: Path, monkeypatch
+):
     """B5: previously always passed DEFAULT_RUN_TIMEOUT_SECONDS (30s) to
     bridge.run_script regardless of what the active workspace configured —
     the "Run" button ignored the same script_timeout_seconds a
@@ -135,10 +144,14 @@ def test_run_uses_the_configured_workspace_timeout_not_the_hardcoded_default(qap
 
     bridge = _FakeBridge()
     dialog = CodeEditorDialog(
-        initial_text="print(1)", saved_scripts_dir=str(tmp_path), bridge=bridge, script_timeout_seconds=180.0
+        initial_text="print(1)",
+        saved_scripts_dir=str(tmp_path),
+        bridge=bridge,
+        script_timeout_seconds=180.0,
     )
     monkeypatch.setattr(
-        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName", lambda *a, **kw: (str(tmp_path / "s.py"), "")
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName",
+        lambda *a, **kw: (str(tmp_path / "s.py"), ""),
     )
     dialog._on_run()
     assert bridge.calls[0]["timeout"] == 180.0
@@ -148,9 +161,12 @@ def test_run_saves_first_then_shows_output(qapp, loop_thread, tmp_path: Path, mo
     bridge = ChatBridge(loop_thread)
     target = tmp_path / "script.py"
     monkeypatch.setattr(
-        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName", lambda *a, **kw: (str(target), "")
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName",
+        lambda *a, **kw: (str(target), ""),
     )
-    dialog = CodeEditorDialog(initial_text="print('hello from run')", saved_scripts_dir=str(tmp_path), bridge=bridge)
+    dialog = CodeEditorDialog(
+        initial_text="print('hello from run')", saved_scripts_dir=str(tmp_path), bridge=bridge
+    )
 
     dialog._on_run()
     assert target.exists()  # saved before running
@@ -168,9 +184,12 @@ def test_kill_terminates_a_sleeping_script(qapp, loop_thread, tmp_path: Path, mo
     bridge = ChatBridge(loop_thread)
     target = tmp_path / "sleep.py"
     monkeypatch.setattr(
-        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName", lambda *a, **kw: (str(target), "")
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName",
+        lambda *a, **kw: (str(target), ""),
     )
-    dialog = CodeEditorDialog(initial_text="import time; time.sleep(3)", saved_scripts_dir=str(tmp_path), bridge=bridge)
+    dialog = CodeEditorDialog(
+        initial_text="import time; time.sleep(3)", saved_scripts_dir=str(tmp_path), bridge=bridge
+    )
 
     dialog._on_run()
     assert pump_until(qapp, lambda: dialog._kill_button.isEnabled(), timeout=5.0)
@@ -189,8 +208,11 @@ def test_done_disconnects_bridge_signals(qapp, loop_thread, tmp_path: Path, monk
     # (calling a method on a since-deleted C++ QPlainTextEdit) or double-fire.
     target = tmp_path / "script.py"
     monkeypatch.setattr(
-        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName", lambda *a, **kw: (str(target), "")
+        "aida.ui.qt.code_editor_dialog.QFileDialog.getSaveFileName",
+        lambda *a, **kw: (str(target), ""),
     )
-    dialog2 = CodeEditorDialog(initial_text="print(1)", saved_scripts_dir=str(tmp_path), bridge=bridge)
+    dialog2 = CodeEditorDialog(
+        initial_text="print(1)", saved_scripts_dir=str(tmp_path), bridge=bridge
+    )
     dialog2._on_run()
     assert pump_until(qapp, lambda: dialog2.output_text() != "", timeout=10.0)

@@ -116,7 +116,7 @@ class UserActivityState:
         self.last_activity_monotonic = time.monotonic()
 
     def note_activity(self) -> None:
-        """"The user is still working" — resets the quiet period."""
+        """ "The user is still working" — resets the quiet period."""
         self.last_activity_monotonic = time.monotonic()
 
     def should_defer(self) -> DeferralRequest | None:
@@ -197,7 +197,14 @@ async def run_due_schedules(
                 ran.append(name)
                 if on_run_started is not None:
                     on_run_started(name)
-                await _fire(name, entry, effective_settings, now=now, run_store=run_store, on_run_finished=on_run_finished)
+                await _fire(
+                    name,
+                    entry,
+                    effective_settings,
+                    now=now,
+                    run_store=run_store,
+                    on_run_finished=on_run_finished,
+                )
         finally:
             run_store.close()
     return ran
@@ -216,8 +223,12 @@ async def _fire(
     try:
         workflow = load_workflow(entry.workflow)
     except FileNotFoundError as exc:
-        logger.warning("schedule %r references workflow %r, which doesn't exist: %s", name, entry.workflow, exc)
-        run_store.record_run(schedule_name=name, fired_at=fired_at, status="config_error", error=str(exc))
+        logger.warning(
+            "schedule %r references workflow %r, which doesn't exist: %s", name, entry.workflow, exc
+        )
+        run_store.record_run(
+            schedule_name=name, fired_at=fired_at, status="config_error", error=str(exc)
+        )
         if on_run_finished is not None:
             on_run_finished(name, False, None, str(exc))
         return
@@ -236,7 +247,9 @@ async def _fire(
         )
     except WorkflowConfigError as exc:
         logger.warning("schedule %r failed to start: %s", name, exc)
-        run_store.record_run(schedule_name=name, fired_at=fired_at, status="config_error", error=str(exc))
+        run_store.record_run(
+            schedule_name=name, fired_at=fired_at, status="config_error", error=str(exc)
+        )
         if on_run_finished is not None:
             on_run_finished(name, False, None, str(exc))
         return
@@ -281,7 +294,12 @@ async def fire_schedule_now(
         run_store = ScheduleRunStore()
         try:
             await _fire(
-                name, entry, settings, now=datetime.now(), run_store=run_store, on_run_finished=on_run_finished
+                name,
+                entry,
+                settings,
+                now=datetime.now(),
+                run_store=run_store,
+                on_run_finished=on_run_finished,
             )
         finally:
             run_store.close()

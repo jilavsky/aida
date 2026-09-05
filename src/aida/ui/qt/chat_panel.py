@@ -190,7 +190,9 @@ class MessageBubble(QFrame):
     #: selection.
     code_editor_requested = Signal(str)
 
-    def __init__(self, role: str, parent: QWidget | None = None, *, timestamp: str | None = None) -> None:
+    def __init__(
+        self, role: str, parent: QWidget | None = None, *, timestamp: str | None = None
+    ) -> None:
         super().__init__(parent)
         self.role = role
         self._raw_text = ""
@@ -360,7 +362,9 @@ class ErrorBanner(QFrame):
     are a feature" (PLAN.md): the layer name is always visible, never just
     a bare message."""
 
-    def __init__(self, *, layer: str, message: str, detail: str | None = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, *, layer: str, message: str, detail: str | None = None, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.layer = layer
         self.message = message
@@ -515,7 +519,9 @@ class ChatPanel(QWidget):
             self._current_assistant_bubble = None
         elif name == "TextDelta":
             if self._current_assistant_bubble is None:
-                self._current_assistant_bubble = MessageBubble("assistant", self._content, timestamp=_now_str())
+                self._current_assistant_bubble = MessageBubble(
+                    "assistant", self._content, timestamp=_now_str()
+                )
                 self._relay_code_editor_requests(self._current_assistant_bubble)
                 self._append_widget(self._current_assistant_bubble)
             self._current_assistant_bubble.append_delta(event.text)
@@ -536,7 +542,10 @@ class ChatPanel(QWidget):
             self._current_assistant_bubble = None
         elif name == "ToolCallStarted":
             row = ToolCallRow(
-                call_id=event.call_id, tool_name=event.tool_name, arguments=event.arguments, parent=self._content
+                call_id=event.call_id,
+                tool_name=event.tool_name,
+                arguments=event.arguments,
+                parent=self._content,
             )
             self._tool_rows[event.call_id] = row
             self._append_widget(row)
@@ -547,12 +556,18 @@ class ChatPanel(QWidget):
         elif name == "ImageArtifactCreated":
             if event.path:
                 widget = InlineImageWidget(
-                    path=event.path, artifact_id=event.artifact_id, mime_type=event.mime_type, parent=self._content
+                    path=event.path,
+                    artifact_id=event.artifact_id,
+                    mime_type=event.mime_type,
+                    parent=self._content,
                 )
                 self._append_widget(widget)
         elif name == "FileArtifactCreated":
             widget = FileArtifactCard(
-                path=event.path, artifact_id=event.artifact_id, mime_type=event.mime_type, parent=self._content
+                path=event.path,
+                artifact_id=event.artifact_id,
+                mime_type=event.mime_type,
+                parent=self._content,
             )
             self._relay_file_card_requests(widget)
             self._append_widget(widget)
@@ -569,9 +584,15 @@ class ChatPanel(QWidget):
             # _current_assistant_bubble to None — see _last_assistant_bubble's
             # docstring). A tool-call-only round has no bubble to attach to;
             # its tokens still count toward MainWindow's running-total label.
-            if self._last_assistant_bubble is not None and event.output_tokens and event.duration_seconds:
+            if (
+                self._last_assistant_bubble is not None
+                and event.output_tokens
+                and event.duration_seconds
+            ):
                 rate = event.output_tokens / event.duration_seconds
-                meta = f"{event.output_tokens} tok · {event.duration_seconds:.1f}s · {rate:.1f} tok/s"
+                meta = (
+                    f"{event.output_tokens} tok · {event.duration_seconds:.1f}s · {rate:.1f} tok/s"
+                )
                 # B3: cache_read_input_tokens is "the savings are visible"
                 # — only ever nonzero for a caching provider (Anthropic)
                 # with caching actually hitting, so a non-caching turn's
@@ -589,7 +610,9 @@ class ChatPanel(QWidget):
             bubble = self.add_user_message(event.text)
             bubble.append_meta("sent while the agent was working")
         elif name == "AgentError":
-            banner = ErrorBanner(layer=event.layer, message=event.message, detail=event.detail, parent=self._content)
+            banner = ErrorBanner(
+                layer=event.layer, message=event.message, detail=event.detail, parent=self._content
+            )
             self._append_widget(banner)
 
     def load_history(
@@ -669,11 +692,17 @@ class ChatPanel(QWidget):
             return None
         if record.kind == "ImageArtifact":
             return InlineImageWidget(
-                path=record.path, artifact_id=record.id, mime_type=record.mime_type or "image/png", parent=self._content
+                path=record.path,
+                artifact_id=record.id,
+                mime_type=record.mime_type or "image/png",
+                parent=self._content,
             )
         if record.kind == "FileArtifact":
             card = FileArtifactCard(
-                path=record.path, artifact_id=record.id, mime_type=record.mime_type, parent=self._content
+                path=record.path,
+                artifact_id=record.id,
+                mime_type=record.mime_type,
+                parent=self._content,
             )
             self._relay_file_card_requests(card)
             return card

@@ -90,7 +90,9 @@ class IngestResult:
 def _extract_text(path: Path) -> str:
     """Flatten a file's ``read_document()`` artifacts into one text blob
     for chunking."""
-    artifacts = read_document(path, max_chars=_INGEST_MAX_CHARS, max_pdf_pages=_INGEST_MAX_PDF_PAGES)
+    artifacts = read_document(
+        path, max_chars=_INGEST_MAX_CHARS, max_pdf_pages=_INGEST_MAX_PDF_PAGES
+    )
     parts: list[str] = []
     for artifact in artifacts:
         if isinstance(artifact, TextArtifact):
@@ -211,7 +213,9 @@ def _discover_files(source_folders: list[str]) -> tuple[list[Path], list[Path]]:
         except OSError:
             continue  # a subfolder lost access mid-walk — reported via missing_folders, not raised here
         files.extend(
-            path for path in candidates if path.is_file() and path.suffix.lower() in INGESTIBLE_SUFFIXES
+            path
+            for path in candidates
+            if path.is_file() and path.suffix.lower() in INGESTIBLE_SUFFIXES
         )
         enumerated_roots.append(root)
     return files, enumerated_roots
@@ -245,7 +249,11 @@ async def _embed_in_batches(
 
 
 async def _ingest_file(
-    conn: sqlite3.Connection, path: Path, *, kb: KnowledgeBaseConfig, embeddings_provider: EmbeddingsProvider
+    conn: sqlite3.Connection,
+    path: Path,
+    *,
+    kb: KnowledgeBaseConfig,
+    embeddings_provider: EmbeddingsProvider,
 ) -> int:
     """Chunk, embed, and store one file. Returns the chunk count written.
     Raises on an unreadable file (an ``OSError``, a document-reader-
@@ -274,7 +282,11 @@ async def _ingest_file(
 
 
 async def _run_ingest(
-    conn: sqlite3.Connection, kb: KnowledgeBaseConfig, embeddings_provider: EmbeddingsProvider, *, force: bool
+    conn: sqlite3.Connection,
+    kb: KnowledgeBaseConfig,
+    embeddings_provider: EmbeddingsProvider,
+    *,
+    force: bool,
 ) -> IngestResult:
     result = IngestResult()
     result.missing_folders = _missing_source_folders(kb.source_folders)

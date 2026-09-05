@@ -98,7 +98,10 @@ class _InputTextEdit(QPlainTextEdit):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt override
         is_enter = event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
-        if is_enter and not (event.modifiers() & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier)):
+        if is_enter and not (
+            event.modifiers()
+            & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier)
+        ):
             self.submit_requested.emit()
             return
         super().keyPressEvent(event)

@@ -48,6 +48,7 @@ def normalize_chunk_params(chunk_size: int, overlap: int) -> tuple[int, int]:
     overlap = max(0, min(int(overlap), chunk_size - 1))
     return chunk_size, overlap
 
+
 _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 
 
@@ -149,4 +150,10 @@ def chunk_markdown(
     return chunks
 
 
-__all__ = ["Chunk", "DEFAULT_CHUNK_OVERLAP", "DEFAULT_CHUNK_SIZE", "chunk_markdown", "chunk_plain_text"]
+__all__ = [
+    "Chunk",
+    "DEFAULT_CHUNK_OVERLAP",
+    "DEFAULT_CHUNK_SIZE",
+    "chunk_markdown",
+    "chunk_plain_text",
+]

@@ -109,14 +109,20 @@ def test_handles_anyof_union_schema():
 
 
 def test_coerces_a_quoted_array_to_match_an_array_schema():
-    schema = {"type": "object", "properties": {"tags": {"type": "array", "items": {"type": "string"}}}}
+    schema = {
+        "type": "object",
+        "properties": {"tags": {"type": "array", "items": {"type": "string"}}},
+    }
     fixed, notes = coerce_arguments({"tags": '["a", "b"]'}, schema)
     assert fixed == {"tags": ["a", "b"]}
     assert notes
 
 
 def test_recurses_into_a_correctly_typed_array_to_fix_mis_typed_items():
-    schema = {"type": "object", "properties": {"depths": {"type": "array", "items": {"type": "number"}}}}
+    schema = {
+        "type": "object",
+        "properties": {"depths": {"type": "array", "items": {"type": "number"}}},
+    }
     fixed, notes = coerce_arguments({"depths": ["1", 2, "3"]}, schema)
     assert fixed == {"depths": [1, 2, 3]}
     assert len(notes) == 1  # one note per top-level argument, joined internally

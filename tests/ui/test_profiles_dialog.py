@@ -170,7 +170,9 @@ def test_provider_profile_form_rejects_a_blank_name(qapp, monkeypatch):
 
 
 def test_embedding_profile_form_seeds_fields_when_editing(qapp):
-    profile = EmbeddingProfile(name="local-embed", kind="openai_compat", model="nomic-embed", base_url="http://x")
+    profile = EmbeddingProfile(
+        name="local-embed", kind="openai_compat", model="nomic-embed", base_url="http://x"
+    )
     dialog = EmbeddingProfileFormDialog(profile=profile)
     assert dialog._name_edit.isReadOnly()
     assert dialog._model_edit.text() == "nomic-embed"
@@ -192,7 +194,9 @@ def test_embedding_profile_form_result_profile(qapp):
 
 def test_dialog_lists_configured_provider_profiles(qapp, aida_home):
     settings = load_settings()
-    settings.providers.profiles["argo-claude"] = ProviderProfile(name="argo-claude", kind="anthropic", model="claude-x")
+    settings.providers.profiles["argo-claude"] = ProviderProfile(
+        name="argo-claude", kind="anthropic", model="claude-x"
+    )
     dialog = ProfilesDialog(settings, None)
     assert dialog._provider_list.count() == 1
     assert "argo-claude" in dialog._provider_list.item(0).text()
@@ -213,7 +217,9 @@ def test_add_provider_profile_persists_to_settings_and_disk(qapp, aida_home, mon
     form._name_edit.setText("argo-claude")
     form._kind_combo.setCurrentText("anthropic")
     form._model_edit.setText("claude-sonnet")
-    monkeypatch.setattr(ProviderProfileFormDialog, "exec", lambda self: 1)  # QDialog.DialogCode.Accepted
+    monkeypatch.setattr(
+        ProviderProfileFormDialog, "exec", lambda self: 1
+    )  # QDialog.DialogCode.Accepted
     monkeypatch.setattr("aida.ui.qt.profiles_dialog.ProviderProfileFormDialog", lambda **kw: form)
 
     dialog._on_add_provider()
@@ -246,7 +252,9 @@ def test_add_provider_profile_with_secret_value_writes_to_keychain(qapp, aida_ho
 
 def test_add_provider_profile_rejects_a_duplicate_name(qapp, aida_home, monkeypatch):
     settings = load_settings()
-    settings.providers.profiles["argo-claude"] = ProviderProfile(name="argo-claude", kind="anthropic")
+    settings.providers.profiles["argo-claude"] = ProviderProfile(
+        name="argo-claude", kind="anthropic"
+    )
     dialog = ProfilesDialog(settings, None)
 
     form = ProviderProfileFormDialog()
@@ -264,7 +272,9 @@ def test_add_provider_profile_rejects_a_duplicate_name(qapp, aida_home, monkeypa
 
 def test_remove_provider_profile_deletes_it(qapp, aida_home, monkeypatch):
     settings = load_settings()
-    settings.providers.profiles["argo-claude"] = ProviderProfile(name="argo-claude", kind="anthropic")
+    settings.providers.profiles["argo-claude"] = ProviderProfile(
+        name="argo-claude", kind="anthropic"
+    )
     dialog = ProfilesDialog(settings, None)
     dialog._provider_list.setCurrentRow(0)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
@@ -309,7 +319,9 @@ def test_remove_embedding_profile_deletes_it(qapp, aida_home, monkeypatch):
 
 def test_test_provider_calls_bridge_validate(qapp, loop_thread, aida_home):
     settings = load_settings()
-    settings.providers.profiles["argo-claude"] = ProviderProfile(name="argo-claude", kind="anthropic")
+    settings.providers.profiles["argo-claude"] = ProviderProfile(
+        name="argo-claude", kind="anthropic"
+    )
 
     bridge = ChatBridge(loop_thread)
     calls = []
@@ -339,12 +351,16 @@ def test_test_embedding_calls_bridge_validate(qapp, loop_thread, aida_home):
 
 def test_profile_validated_shows_information_dialog_on_success(qapp, aida_home, monkeypatch):
     settings = load_settings()
-    settings.providers.profiles["argo-claude"] = ProviderProfile(name="argo-claude", kind="anthropic")
+    settings.providers.profiles["argo-claude"] = ProviderProfile(
+        name="argo-claude", kind="anthropic"
+    )
     dialog = ProfilesDialog(settings, None)
 
     shown = []
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(True))
-    dialog._on_profile_validated("argo-claude", ProfileValidation(name="argo-claude", ok=True, detail="reachable"))
+    dialog._on_profile_validated(
+        "argo-claude", ProfileValidation(name="argo-claude", ok=True, detail="reachable")
+    )
     assert shown == [True]
 
 
@@ -354,5 +370,7 @@ def test_profile_validated_shows_warning_dialog_on_failure(qapp, aida_home, monk
 
     warned = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(True))
-    dialog._on_profile_validated("argo-claude", ProfileValidation(name="argo-claude", ok=False, detail="not reachable"))
+    dialog._on_profile_validated(
+        "argo-claude", ProfileValidation(name="argo-claude", ok=False, detail="not reachable")
+    )
     assert warned == [True]

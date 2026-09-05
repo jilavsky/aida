@@ -65,7 +65,9 @@ def _effective_timeout(arguments: dict[str, Any], workspace: WorkspaceConfig) ->
     return min(requested, workspace.script_timeout_seconds)
 
 
-def default_coding_tools(guard: SafetyGuard, *, workspace: WorkspaceConfig | None) -> dict[str, NativeTool]:
+def default_coding_tools(
+    guard: SafetyGuard, *, workspace: WorkspaceConfig | None
+) -> dict[str, NativeTool]:
     """Empty for ``workspace=None`` (no folders configured, nothing to run
     in) or ``workspace.scripting_enabled=False`` — same "lazy, only if
     configured" philosophy as MCP servers and knowledge bases."""
@@ -82,9 +84,15 @@ def default_coding_tools(guard: SafetyGuard, *, workspace: WorkspaceConfig | Non
         await guard.authorize_run_script(candidate)
         timeout = _effective_timeout(arguments, workspace)
         result = await _run_python_script(
-            candidate, args, interpreter=workspace.python_interpreter, cwd=candidate.parent, timeout=timeout
+            candidate,
+            args,
+            interpreter=workspace.python_interpreter,
+            cwd=candidate.parent,
+            timeout=timeout,
         )
-        return ToolResult(content=_format_run_result(result), is_error=result.timed_out or result.returncode != 0)
+        return ToolResult(
+            content=_format_run_result(result), is_error=result.timed_out or result.returncode != 0
+        )
 
     @_tool
     async def run_command(arguments: dict[str, Any]) -> ToolResult:
@@ -102,7 +110,9 @@ def default_coding_tools(guard: SafetyGuard, *, workspace: WorkspaceConfig | Non
             return ToolResult(content=f"Could not parse command {command!r}: {exc}", is_error=True)
         timeout = _effective_timeout(arguments, workspace)
         result = await run_subprocess(argv, cwd=cwd, timeout=timeout)
-        return ToolResult(content=_format_run_result(result), is_error=result.timed_out or result.returncode != 0)
+        return ToolResult(
+            content=_format_run_result(result), is_error=result.timed_out or result.returncode != 0
+        )
 
     tools = [
         NativeTool(
@@ -142,7 +152,10 @@ def default_coding_tools(guard: SafetyGuard, *, workspace: WorkspaceConfig | Non
                 parameters={
                     "type": "object",
                     "properties": {
-                        "command": {"type": "string", "description": "The full command line to run."},
+                        "command": {
+                            "type": "string",
+                            "description": "The full command line to run.",
+                        },
                         "cwd": {
                             "type": "string",
                             "description": "Working directory (defaults to the workspace's target/source folder).",

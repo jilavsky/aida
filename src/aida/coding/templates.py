@@ -51,7 +51,11 @@ def templates_context_text(templates: list[Template]) -> str:
     when a workspace has nothing to report."""
     if not templates:
         return ""
-    lines = ["# Available code templates", "", "Follow these templates when generating instrument functions:"]
+    lines = [
+        "# Available code templates",
+        "",
+        "Follow these templates when generating instrument functions:",
+    ]
     for template in templates:
         docstring = template.docstring or "(no docstring)"
         lines.append(f"- **{template.name}**: {docstring}")

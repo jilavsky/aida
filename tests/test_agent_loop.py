@@ -30,7 +30,9 @@ async def _get_current_time(_args):
 
 
 TIME_TOOL = NativeTool(
-    schema=ToolSchema(name="get_current_time", description="Get time", parameters={"type": "object"}),
+    schema=ToolSchema(
+        name="get_current_time", description="Get time", parameters={"type": "object"}
+    ),
     func=_get_current_time,
 )
 
@@ -58,7 +60,10 @@ async def test_simple_text_reply_streams_in_order():
 async def test_tool_round_trip_end_to_end():
     provider = MockProvider(
         [
-            MockTurn(text="checking the time", tool_calls=[MockToolCall(name="get_current_time", id="call_1")]),
+            MockTurn(
+                text="checking the time",
+                tool_calls=[MockToolCall(name="get_current_time", id="call_1")],
+            ),
             MockTurn(text="It is 2026-08-18T00:00:00Z."),
         ]
     )
@@ -407,7 +412,10 @@ async def test_tool_dispatch_logs_call_and_result_at_debug(caplog):
     caplog.set_level(logging.DEBUG, logger="aida.agent")
     provider = MockProvider(
         [
-            MockTurn(text="checking the time", tool_calls=[MockToolCall(name="get_current_time", id="call_1")]),
+            MockTurn(
+                text="checking the time",
+                tool_calls=[MockToolCall(name="get_current_time", id="call_1")],
+            ),
             MockTurn(text="it's time"),
         ]
     )
@@ -428,7 +436,10 @@ async def test_unknown_tool_call_logs_a_warning(caplog):
     caplog.set_level(logging.WARNING, logger="aida.agent")
     provider = MockProvider(
         [
-            MockTurn(text="calling ghost tool", tool_calls=[MockToolCall(name="does_not_exist", id="call_1")]),
+            MockTurn(
+                text="calling ghost tool",
+                tool_calls=[MockToolCall(name="does_not_exist", id="call_1")],
+            ),
             MockTurn(text="done"),
         ]
     )
@@ -509,7 +520,14 @@ async def test_cancel_mid_tool_call_emits_a_result_event_for_each_cancelled_call
         func=_tool,
     )
     provider = MockProvider(
-        [MockTurn(tool_calls=[MockToolCall(name="track", id="c1"), MockToolCall(name="track", id="c2")])]
+        [
+            MockTurn(
+                tool_calls=[
+                    MockToolCall(name="track", id="c1"),
+                    MockToolCall(name="track", id="c2"),
+                ]
+            )
+        ]
     )
     loop = AgentLoop(provider, _settings(), tools={"track": tool})
     messages = [Message(role="user", content="hi")]
@@ -539,7 +557,14 @@ async def test_history_after_cancelled_turn_still_translates_for_anthropic():
         func=_tool,
     )
     provider = MockProvider(
-        [MockTurn(tool_calls=[MockToolCall(name="track", id="c1"), MockToolCall(name="track", id="c2")])]
+        [
+            MockTurn(
+                tool_calls=[
+                    MockToolCall(name="track", id="c1"),
+                    MockToolCall(name="track", id="c2"),
+                ]
+            )
+        ]
     )
     loop = AgentLoop(provider, _settings(), tools={"track": tool})
     messages = [Message(role="user", content="hi")]
@@ -608,7 +633,12 @@ async def test_queued_message_is_not_delivered_mid_tool_call():
     conversation both providers reject."""
     provider = MockProvider(
         [
-            MockTurn(tool_calls=[MockToolCall(name="get_current_time", id="c1"), MockToolCall(name="get_current_time", id="c2")]),
+            MockTurn(
+                tool_calls=[
+                    MockToolCall(name="get_current_time", id="c1"),
+                    MockToolCall(name="get_current_time", id="c2"),
+                ]
+            ),
             MockTurn(text="done"),
         ]
     )

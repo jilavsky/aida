@@ -23,7 +23,9 @@ def test_inline_image_widget_loads_real_pixmap(qapp, tmp_path: Path):
 
 
 def test_inline_image_widget_invalid_path_is_not_valid(qapp, tmp_path: Path):
-    widget = InlineImageWidget(path=str(tmp_path / "does-not-exist.png"), artifact_id="a1", mime_type="image/png")
+    widget = InlineImageWidget(
+        path=str(tmp_path / "does-not-exist.png"), artifact_id="a1", mime_type="image/png"
+    )
     assert not widget.is_valid_image
 
 

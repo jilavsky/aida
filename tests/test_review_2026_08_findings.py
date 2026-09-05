@@ -138,7 +138,10 @@ def test_quoted_timeout_becomes_a_number():
 
 @pytest.mark.parametrize("bad", [0, -5, "nonsense"])
 def test_nonsensical_timeout_falls_back_to_the_default(bad):
-    assert WorkspaceConfig.from_dict("w", {"script_timeout_seconds": bad}).script_timeout_seconds == 30.0
+    assert (
+        WorkspaceConfig.from_dict("w", {"script_timeout_seconds": bad}).script_timeout_seconds
+        == 30.0
+    )
 
 
 def test_unknown_workspace_safety_mode_is_stored_as_confirm():
@@ -196,7 +199,9 @@ async def test_search_text_stops_reading_once_the_cap_is_reached(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_a_slow_write_is_reported_as_still_running_not_as_a_failure(tmp_path: Path, monkeypatch):
+async def test_a_slow_write_is_reported_as_still_running_not_as_a_failure(
+    tmp_path: Path, monkeypatch
+):
     """A mutation that outlives its deadline has NOT been cancelled —
     ``asyncio.wait_for`` cancels the await, never the worker thread. Calling
     that a timeout told the model the write had failed while it was still
@@ -372,7 +377,10 @@ def test_user_attached_images_survive_a_reload(tmp_path: Path, aida_home: Path):
     it could no longer see."""
     store = ConversationStore(tmp_path / "aida.db")
     conversation_id = store.create_conversation(
-        workspace_name=None, profile_name="p", sidecar_dirname="figures", timestamp="2026-01-01T00:00:00Z"
+        workspace_name=None,
+        profile_name="p",
+        sidecar_dirname="figures",
+        timestamp="2026-01-01T00:00:00Z",
     )
     image = tmp_path / "figure.png"
     image.write_bytes(b"pngbytes")
@@ -427,7 +435,9 @@ def test_recorder_copies_an_attachment_into_the_conversations_own_store(
     assert stored_path.exists()
 
 
-def test_a_tool_produced_image_is_not_recorded_twice(tmp_path: Path, aida_home: Path, records_home: Path):
+def test_a_tool_produced_image_is_not_recorded_twice(
+    tmp_path: Path, aida_home: Path, records_home: Path
+):
     """Tool images already persist as ImageArtifact rows; recording
     ``Message.images`` indiscriminately would duplicate every plot."""
     from aida.artifacts.store import ArtifactStore
@@ -445,7 +455,13 @@ def test_a_tool_produced_image_is_not_recorded_twice(tmp_path: Path, aida_home: 
         sidecar_dirname="figures",
     )
     recorder.record_message(
-        Message(role="tool", content="[image]", tool_call_id="c1", name="plot", images=[ImageRef(path=str(image))])
+        Message(
+            role="tool",
+            content="[image]",
+            tool_call_id="c1",
+            name="plot",
+            images=[ImageRef(path=str(image))],
+        )
     )
 
     records = store.load_artifacts(recorder.conversation_id)

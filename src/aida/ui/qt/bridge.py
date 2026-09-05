@@ -68,7 +68,12 @@ from aida.ui.qt._qt import QObject, QThread, Signal
 
 logger = get_logger("ui.bridge")
 
-_STARTUP_ERRORS = (UnknownProfileError, UnknownWorkspaceError, UnknownMcpServerError, ConversationNotFoundError)
+_STARTUP_ERRORS = (
+    UnknownProfileError,
+    UnknownWorkspaceError,
+    UnknownMcpServerError,
+    ConversationNotFoundError,
+)
 
 
 class AsyncLoopThread(QThread):
@@ -109,7 +114,9 @@ class AsyncLoopThread(QThread):
             if pending:
                 with contextlib.suppress(TimeoutError):
                     self.loop.run_until_complete(
-                        asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=2.0)
+                        asyncio.wait_for(
+                            asyncio.gather(*pending, return_exceptions=True), timeout=2.0
+                        )
                     )
             self.loop.close()
 
@@ -156,7 +163,9 @@ class ChatBridge(QObject):
     # calling future.set_result(...) — see
     # ChatBridge._confirm_interactive's docstring for why a plain Future
     # (not a Qt signal-based reply) is what bridges the two threads here.
-    confirmation_requested = Signal(object, object)  # (ConfirmationRequest, concurrent.futures.Future[ConfirmAnswer])
+    confirmation_requested = Signal(
+        object, object
+    )  # (ConfirmationRequest, concurrent.futures.Future[ConfirmAnswer])
     # Phase 7: MCP management dialog live-control signals. A single
     # "changed"/"failed" pair per action rather than one signal per verb
     # (start/stop/restart/register/unregister) — the dialog just refreshes
@@ -453,7 +462,7 @@ class ChatBridge(QObject):
     # --- manual compaction (PLAN.md §1.3 / context_management.md §3.4) ----
 
     def compact_context(self) -> None:
-        """"Compact Conversation" menu action — GUI parity with the CLI's
+        """ "Compact Conversation" menu action — GUI parity with the CLI's
         ``/compact``: summarize everything but the most recent few turns
         right now, regardless of whether the budget is currently exceeded.
 
@@ -582,11 +591,13 @@ class ChatBridge(QObject):
     # --- provider/embedding profile validation (U2 management dialog) ------
 
     def validate_provider_profile(self, profile: ProviderProfile) -> None:
-        """"Test" button for one ``ProviderProfile`` — pings the real
+        """ "Test" button for one ``ProviderProfile`` — pings the real
         endpoint (see ``aida.providers.profiles.validate_profile``'s
         docstring for what that means per provider kind) on the background
         loop, never blocking the Qt thread."""
-        asyncio.run_coroutine_threadsafe(self._validate_provider_profile(profile), self._loop_thread.loop)
+        asyncio.run_coroutine_threadsafe(
+            self._validate_provider_profile(profile), self._loop_thread.loop
+        )
 
     async def _validate_provider_profile(self, profile: ProviderProfile) -> None:
         result = await validate_profile(profile)
@@ -604,20 +615,30 @@ class ChatBridge(QObject):
 
     # --- knowledge base build/update (Phase 8 management dialog) -----------
 
-    def rebuild_knowledge_base(self, kb: KnowledgeBaseConfig, embedding_profile: EmbeddingProfile) -> None:
+    def rebuild_knowledge_base(
+        self, kb: KnowledgeBaseConfig, embedding_profile: EmbeddingProfile
+    ) -> None:
         """Full re-ingest of ``kb``: every discovered file is re-chunked and
         re-embedded. Takes the configs directly (not a name to look up)
         the same way ``register_mcp_server`` does — the dialog already has
         them from ``settings``, and this keeps the bridge from needing to
         hold a ``Settings`` reference of its own."""
-        asyncio.run_coroutine_threadsafe(self._run_kb_ingest(kb, embedding_profile, rebuild=True), self._loop_thread.loop)
+        asyncio.run_coroutine_threadsafe(
+            self._run_kb_ingest(kb, embedding_profile, rebuild=True), self._loop_thread.loop
+        )
 
-    def update_knowledge_base(self, kb: KnowledgeBaseConfig, embedding_profile: EmbeddingProfile) -> None:
+    def update_knowledge_base(
+        self, kb: KnowledgeBaseConfig, embedding_profile: EmbeddingProfile
+    ) -> None:
         """Incremental re-ingest of ``kb``: only files changed since the
         last build/update are re-embedded."""
-        asyncio.run_coroutine_threadsafe(self._run_kb_ingest(kb, embedding_profile, rebuild=False), self._loop_thread.loop)
+        asyncio.run_coroutine_threadsafe(
+            self._run_kb_ingest(kb, embedding_profile, rebuild=False), self._loop_thread.loop
+        )
 
-    async def _run_kb_ingest(self, kb: KnowledgeBaseConfig, embedding_profile: EmbeddingProfile, *, rebuild: bool) -> None:
+    async def _run_kb_ingest(
+        self, kb: KnowledgeBaseConfig, embedding_profile: EmbeddingProfile, *, rebuild: bool
+    ) -> None:
         try:
             embeddings_provider = build_embeddings_provider(embedding_profile)
         except UnknownProviderKindError as exc:
@@ -649,7 +670,8 @@ class ChatBridge(QObject):
         blocks the Qt thread — same "schedule via run_coroutine_threadsafe,
         report back via a signal" shape as ``rebuild_knowledge_base``."""
         asyncio.run_coroutine_threadsafe(
-            self._run_script(path, args, interpreter=interpreter, cwd=cwd, timeout=timeout), self._loop_thread.loop
+            self._run_script(path, args, interpreter=interpreter, cwd=cwd, timeout=timeout),
+            self._loop_thread.loop,
         )
 
     def cancel_script_run(self) -> None:
@@ -679,7 +701,12 @@ class ChatBridge(QObject):
 
         try:
             result = await run_python_script(
-                path, args, interpreter=interpreter, cwd=cwd, timeout=timeout, on_started=_on_started
+                path,
+                args,
+                interpreter=interpreter,
+                cwd=cwd,
+                timeout=timeout,
+                on_started=_on_started,
             )
         except OSError as exc:
             self.script_run_failed.emit(str(exc))

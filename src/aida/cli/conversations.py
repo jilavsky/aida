@@ -86,7 +86,9 @@ def cmd_list(args: argparse.Namespace) -> int:
         summaries = store.list_conversations(active_user or None)
         if not summaries:
             if active_user:
-                print(f"No conversations for user {active_user!r} yet (--all-users to see every one).")
+                print(
+                    f"No conversations for user {active_user!r} yet (--all-users to see every one)."
+                )
                 return 0
             print("No conversations yet.")
             return 0
@@ -307,21 +309,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     resume = sub.add_parser("resume", help="Resume a conversation in an interactive chat session")
-    resume.add_argument("id", help="Conversation id, or an unambiguous prefix (e.g. the first 8 chars)")
-    resume.add_argument("--profile", default="", help="Override the profile stored with this conversation")
-    resume.add_argument("--workspace", default="", help="Override the workspace stored with this conversation")
+    resume.add_argument(
+        "id", help="Conversation id, or an unambiguous prefix (e.g. the first 8 chars)"
+    )
+    resume.add_argument(
+        "--profile", default="", help="Override the profile stored with this conversation"
+    )
+    resume.add_argument(
+        "--workspace", default="", help="Override the workspace stored with this conversation"
+    )
     resume.add_argument("--skills", default="", help="Comma-separated skill names to add")
     resume.add_argument(
-        "--mcp-group", default="", help="Named MCP server group to enable (overrides the stored workspace's group)"
+        "--mcp-group",
+        default="",
+        help="Named MCP server group to enable (overrides the stored workspace's group)",
     )
-    resume.add_argument("--mcp", default="", help="Comma-separated MCP server names to enable directly")
+    resume.add_argument(
+        "--mcp", default="", help="Comma-separated MCP server names to enable directly"
+    )
 
     gc = sub.add_parser(
         "gc", help="Remove attachment folders left behind by conversations that no longer exist"
     )
     gc.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
 
-    delete = sub.add_parser("delete", help="Delete a conversation: DB rows, artifact files, and its Markdown record")
+    delete = sub.add_parser(
+        "delete", help="Delete a conversation: DB rows, artifact files, and its Markdown record"
+    )
     delete.add_argument("id", help="Conversation id, or an unambiguous prefix")
     delete.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
 
@@ -329,7 +343,9 @@ def _build_parser() -> argparse.ArgumentParser:
     rename.add_argument("id", help="Conversation id, or an unambiguous prefix")
     rename.add_argument("title", help="New title")
 
-    export = sub.add_parser("export", help="Re-export a conversation's Markdown transcript on demand")
+    export = sub.add_parser(
+        "export", help="Re-export a conversation's Markdown transcript on demand"
+    )
     export.add_argument("id", help="Conversation id, or an unambiguous prefix")
 
     return parser

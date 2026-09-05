@@ -50,7 +50,10 @@ def _settings_with_mock_mcp() -> Settings:
     settings.mcp = McpConfig(
         servers={
             "mock-mcp": McpServerConfig(
-                name="mock-mcp", command=sys.executable, args=[str(MOCK_SERVER_PATH)], groups=["analysis"]
+                name="mock-mcp",
+                command=sys.executable,
+                args=[str(MOCK_SERVER_PATH)],
+                groups=["analysis"],
             )
         }
     )
@@ -72,13 +75,18 @@ async def test_kill_mid_turn_then_resume_continues_sensibly_with_image_artifact(
     IN_FLIGHT_TEXT = "here is the plot you asked for and a full write-up that never finishes"
     provider_before_kill = MockProvider(
         [
-            MockTurn(text="let me get that plot", tool_calls=[MockToolCall(name="mock-mcp__get_image", id="call_1")]),
+            MockTurn(
+                text="let me get that plot",
+                tool_calls=[MockToolCall(name="mock-mcp__get_image", id="call_1")],
+            ),
             MockTurn(text=IN_FLIGHT_TEXT),
         ]
     )
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider_before_kill)
 
-    session, mcp_manager = await start_session(settings, profile_name="mock-profile", mcp_names=["mock-mcp"])
+    session, mcp_manager = await start_session(
+        settings, profile_name="mock-profile", mcp_names=["mock-mcp"]
+    )
     conv_id = session.recorder.conversation_id
     try:
         events_seen = []
@@ -129,7 +137,9 @@ async def test_kill_mid_turn_then_resume_continues_sensibly_with_image_artifact(
         assert "plot dataset X" in contents
         assert not any(IN_FLIGHT_TEXT in (c or "") for c in contents)
         assert not any("here is the plot you asked for" in (c or "") for c in contents)
-        tool_msg = next(m for m in resumed_session.messages if m.role == "tool" and m.tool_call_id == "call_1")
+        tool_msg = next(
+            m for m in resumed_session.messages if m.role == "tool" and m.tool_call_id == "call_1"
+        )
         assert "image/png" in tool_msg.content
 
         # 2. The image artifact itself still resolves to real bytes on disk
@@ -178,7 +188,9 @@ async def test_two_workspaces_load_different_provider_mcp_skills_environments(
     path (not just aida.workspace.workspaces in isolation)."""
     skills_dir = aida_home / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
-    (skills_dir / "saxs-basics.md").write_text("SAXS is small-angle X-ray scattering.", encoding="utf-8")
+    (skills_dir / "saxs-basics.md").write_text(
+        "SAXS is small-angle X-ray scattering.", encoding="utf-8"
+    )
     from aida.config import paths as paths_module
 
     monkeypatch.setattr(paths_module, "skills_dir", lambda: skills_dir)
@@ -198,11 +210,15 @@ async def test_two_workspaces_load_different_provider_mcp_skills_environments(
                 skills=["saxs-basics"],
                 system_prompt="You are a SAXS analysis assistant.",
             ),
-            "plain-chat": WorkspaceConfig(name="plain-chat", profile="plain-profile", mcp_group="none", skills=[]),
+            "plain-chat": WorkspaceConfig(
+                name="plain-chat", profile="plain-profile", mcp_group="none", skills=[]
+            ),
         }
     )
 
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")])
+    )
 
     session_a, mcp_a = await start_session(settings, workspace_name="use-pyirena")
     session_b, mcp_b = await start_session(settings, workspace_name="plain-chat")
@@ -215,8 +231,10 @@ async def test_two_workspaces_load_different_provider_mcp_skills_environments(
         assert "mock-mcp__get_image" not in session_b.tools
 
         assert "small-angle X-ray scattering" in session_a.messages[0].content
-        assert session_b.messages == [] or session_b.messages[0].role != "system" or (
-            "small-angle X-ray scattering" not in session_b.messages[0].content
+        assert (
+            session_b.messages == []
+            or session_b.messages[0].role != "system"
+            or ("small-angle X-ray scattering" not in session_b.messages[0].content)
         )
     finally:
         await session_a.aclose()

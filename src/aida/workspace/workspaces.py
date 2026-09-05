@@ -105,7 +105,10 @@ def validate_workspace(settings: Settings, workspace: WorkspaceConfig) -> Worksp
         # always exists, ``skills_dir()`` self-creates it; what's actually
         # missing is the specific skill file, so spell out exactly where
         # each one is expected so the user can drop it in and move on).
-        expected = ", ".join(f"{s} (expected {skills_dir() / f'{s}.md'} or {skills_dir() / s / 'SKILL.md'})" for s in missing_skills)
+        expected = ", ".join(
+            f"{s} (expected {skills_dir() / f'{s}.md'} or {skills_dir() / s / 'SKILL.md'})"
+            for s in missing_skills
+        )
         warnings.append(f"skill file(s) not found (will be skipped): {expected}")
 
     for folder in workspace.source_folders:
@@ -113,7 +116,9 @@ def validate_workspace(settings: Settings, workspace: WorkspaceConfig) -> Worksp
             warnings.append(f"source folder not currently reachable: {folder}")
 
     if workspace.target_folder and not Path(workspace.target_folder).expanduser().exists():
-        warnings.append(f"target folder doesn't exist yet (created on first write): {workspace.target_folder}")
+        warnings.append(
+            f"target folder doesn't exist yet (created on first write): {workspace.target_folder}"
+        )
 
     if workspace.safety not in SAFETY_MODES:
         # Says what will actually happen, not just that the value is odd.
@@ -128,7 +133,9 @@ def validate_workspace(settings: Settings, workspace: WorkspaceConfig) -> Worksp
             f"{' or '.join(repr(m) for m in SAFETY_MODES)}) — treated as 'confirm'"
         )
 
-    if workspace.system_prompt and _looks_like_system_prompt_file_reference(workspace.system_prompt):
+    if workspace.system_prompt and _looks_like_system_prompt_file_reference(
+        workspace.system_prompt
+    ):
         prompt_path = _system_prompt_file_path(workspace.system_prompt)
         if not prompt_path.is_file():
             warnings.append(
@@ -156,7 +163,9 @@ class WorkspaceEnvironment:
     safety: str
 
 
-def resolve_workspace_environment(settings: Settings, workspace: WorkspaceConfig) -> WorkspaceEnvironment:
+def resolve_workspace_environment(
+    settings: Settings, workspace: WorkspaceConfig
+) -> WorkspaceEnvironment:
     """Turn a ``WorkspaceConfig`` into the concrete pieces a chat session
     needs. Does not validate — call ``validate_workspace`` first if you want
     to warn the user about problems before acting on them."""
@@ -180,7 +189,9 @@ def list_workspace_names(settings: Settings) -> list[str]:
     return sorted(settings.workspaces.workspaces)
 
 
-def save_workspace(settings: Settings, workspace: WorkspaceConfig, *, base_dir: Path | None = None) -> None:
+def save_workspace(
+    settings: Settings, workspace: WorkspaceConfig, *, base_dir: Path | None = None
+) -> None:
     """Create or overwrite (``aida workspace new``/``edit`` are the same
     operation here — a name that already exists is simply replaced)."""
     settings.workspaces.workspaces[workspace.name] = workspace

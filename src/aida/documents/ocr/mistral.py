@@ -126,7 +126,9 @@ def verify_api_key(
             ) from exc
         client = httpx.Client(timeout=timeout)
     try:
-        response = client.get(f"{base_url}/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+        response = client.get(
+            f"{base_url}/v1/models", headers={"Authorization": f"Bearer {api_key}"}
+        )
         _raise_for_status(response, "key check")
         names = [m.get("id", "") for m in (response.json().get("data") or [])]
         ocr_models = [name for name in names if "ocr" in name.lower()]
@@ -235,9 +237,11 @@ def _raise_for_status(response, what: str) -> None:
     status = getattr(response, "status_code", 200)
     if status >= 400:
         # 401 and 429 are the two a user can actually act on, so name them.
-        hint = {401: " — check the API key", 403: " — check the API key", 429: " — rate limited"}.get(
-            status, ""
-        )
+        hint = {
+            401: " — check the API key",
+            403: " — check the API key",
+            429: " — rate limited",
+        }.get(status, "")
         raise MistralOcrError(f"{what} failed with HTTP {status}{hint}")
 
 
@@ -250,7 +254,11 @@ def _parse(payload: dict) -> OcrResult:
             if data:
                 images.append(OcrImage(id=str(image.get("id") or f"img-{len(images)}"), data=data))
         pages.append(
-            OcrPage(index=int(raw.get("index", len(pages))), markdown=raw.get("markdown") or "", images=images)
+            OcrPage(
+                index=int(raw.get("index", len(pages))),
+                markdown=raw.get("markdown") or "",
+                images=images,
+            )
         )
     if not pages:
         raise MistralOcrError("the OCR response contained no pages")

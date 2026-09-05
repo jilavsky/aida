@@ -208,7 +208,9 @@ class SafetyGuard:
         )
 
         if not inside:
-            logger.info("%s outside allowed folders, requesting confirmation: %s", action, candidate)
+            logger.info(
+                "%s outside allowed folders, requesting confirmation: %s", action, candidate
+            )
             approved = await self.confirm_callback(
                 ConfirmationRequest(
                     action=action,
@@ -218,7 +220,12 @@ class SafetyGuard:
                     remember_scope=remember_scope,
                 )
             )
-            logger.info("%s outside allowed folders %s: %s", action, "approved" if approved else "denied", candidate)
+            logger.info(
+                "%s outside allowed folders %s: %s",
+                action,
+                "approved" if approved else "denied",
+                candidate,
+            )
             if not approved:
                 raise ConfirmationDenied(f"{action} outside allowed folders declined: {candidate}")
             return candidate
@@ -233,7 +240,12 @@ class SafetyGuard:
                     remember_scope=remember_scope,
                 )
             )
-            logger.debug("%s inside allowed folders %s: %s", action, "approved" if approved else "denied", candidate)
+            logger.debug(
+                "%s inside allowed folders %s: %s",
+                action,
+                "approved" if approved else "denied",
+                candidate,
+            )
             if not approved:
                 raise ConfirmationDenied(f"{action} declined: {candidate}")
 
@@ -307,7 +319,9 @@ class SafetyGuard:
 
         if not inside or not allowlisted:
             reason = "outside the allowed folders" if not inside else "not on the command allowlist"
-            logger.info("execute %s, requesting confirmation: %r (cwd=%s)", reason, command, candidate)
+            logger.info(
+                "execute %s, requesting confirmation: %r (cwd=%s)", reason, command, candidate
+            )
             approved = await self.confirm_callback(
                 ConfirmationRequest(
                     action="execute",
@@ -367,7 +381,9 @@ RELAXED_MODE_WARNING = (
 )
 
 
-def relaxed_mode_warning_if_newly_enabled(previous_safety: str | None, new_safety: str) -> str | None:
+def relaxed_mode_warning_if_newly_enabled(
+    previous_safety: str | None, new_safety: str
+) -> str | None:
     """The "one-time clear warning when enabling relaxed mode" task item:
     returns the warning text the moment a workspace's mode actually
     *changes* to ``"relaxed"`` (including first creation with

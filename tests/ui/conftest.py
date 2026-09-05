@@ -24,7 +24,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-pyside6 = pytest.importorskip("PySide6", reason="PySide6 not installed — `pip install -e '.[gui]'` to run GUI tests")
+pyside6 = pytest.importorskip(
+    "PySide6", reason="PySide6 not installed — `pip install -e '.[gui]'` to run GUI tests"
+)
 
 from aida.ui.qt._qt import QApplication  # noqa: E402 (must follow the importorskip)
 

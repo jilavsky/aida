@@ -36,7 +36,9 @@ def _build_parser() -> argparse.ArgumentParser:
     set_parser = secret_sub.add_parser(
         "set", help="Store a secret for a provider profile (matches providers.yaml's secret_ref)"
     )
-    set_parser.add_argument("profile", help="Provider profile name — providers.yaml's secret_ref value")
+    set_parser.add_argument(
+        "profile", help="Provider profile name — providers.yaml's secret_ref value"
+    )
     set_parser.add_argument(
         "value",
         nargs="?",
@@ -76,7 +78,9 @@ def _secret_main(args: argparse.Namespace) -> int:
             return 1
         set_secret(args.profile, value)
         print(f"Stored a secret for profile {args.profile!r} in the OS keychain.")
-        print(f"Now set providers.yaml's matching profile's secret_ref to {args.profile!r} (a reference name, not the secret itself).")
+        print(
+            f"Now set providers.yaml's matching profile's secret_ref to {args.profile!r} (a reference name, not the secret itself)."
+        )
         return 0
     if args.secret_action == "get":
         # Deliberately doesn't print the value — this module's own

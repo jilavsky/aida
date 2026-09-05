@@ -31,7 +31,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
         elif self.path == "/big":
-            body = (b"x" * (DEFAULT_FETCH_MAX_CHARS * 10))
+            body = b"x" * (DEFAULT_FETCH_MAX_CHARS * 10)
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
         else:
@@ -84,7 +84,9 @@ async def _deny(_request: ConfirmationRequest) -> bool:
 
 
 def _guard(*, confirm=_approve) -> SafetyGuard:
-    return SafetyGuard(allowed_roots=[], confirm_callback=confirm, command_allowlist=CommandAllowlist.empty())
+    return SafetyGuard(
+        allowed_roots=[], confirm_callback=confirm, command_allowlist=CommandAllowlist.empty()
+    )
 
 
 async def _call(tools, name: str, **arguments):

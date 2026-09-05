@@ -89,7 +89,9 @@ def print_event(event: AgentEvent) -> None:
         # mid-sentence by max_tokens and, without this, there is no
         # indication of why (bug report: truncated replies are silent).
         if event.stop_reason == "length":
-            print("[notice] reply hit the max-tokens limit and was cut off — raise max_tokens in the profile settings")
+            print(
+                "[notice] reply hit the max-tokens limit and was cut off — raise max_tokens in the profile settings"
+            )
     elif isinstance(event, UsageInfo):
         # Bug report: "Can we get cost estimate... token use may be better
         # ... it is a black box." Printed unconditionally now (was
@@ -100,7 +102,9 @@ def print_event(event: AgentEvent) -> None:
         # appended only when a provider actually reports it (Anthropic with
         # caching active; always 0 otherwise), so a non-caching turn's line
         # is unchanged from before.
-        cache_note = f", {event.cache_read_input_tokens} cached" if event.cache_read_input_tokens else ""
+        cache_note = (
+            f", {event.cache_read_input_tokens} cached" if event.cache_read_input_tokens else ""
+        )
         if event.output_tokens and event.duration_seconds:
             rate = event.output_tokens / event.duration_seconds
             print(
@@ -123,7 +127,9 @@ def print_event(event: AgentEvent) -> None:
                 f"tokens (~{event.estimated_tokens} tokens now)"
             )
         else:
-            print(f"[context] trimmed {event.dropped_turns} old {turn_word} to fit budget (~{event.estimated_tokens} tokens now)")
+            print(
+                f"[context] trimmed {event.dropped_turns} old {turn_word} to fit budget (~{event.estimated_tokens} tokens now)"
+            )
     elif isinstance(event, SteeringMessageDelivered):
         # The CLI REPL reads one line at a time and cannot queue anything
         # mid-turn, so this only appears when something else drives the
@@ -287,7 +293,9 @@ async def _repl_loop(session: ChatSession) -> None:
         used, budget = session.context_fullness()
         if budget:
             pct = round(100 * used / budget)
-            print(f"[context] {used:,} / {budget:,} tokens ({pct}%) — /compact to summarize older turns")
+            print(
+                f"[context] {used:,} / {budget:,} tokens ({pct}%) — /compact to summarize older turns"
+            )
 
 
 def _build_parser() -> argparse.ArgumentParser:

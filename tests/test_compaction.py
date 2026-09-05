@@ -58,7 +58,9 @@ async def test_compact_now_summarizes_and_replaces_dropped_turns(
     assert event.dropped_turns > 0
     assert event.summary_tokens > 0
     assert len(session.messages) < before
-    summary_messages = [m for m in session.messages if "Summary of earlier conversation" in m.content]
+    summary_messages = [
+        m for m in session.messages if "Summary of earlier conversation" in m.content
+    ]
     assert len(summary_messages) == 1
     assert "Rg=32.4" in summary_messages[0].content
     await session.aclose()

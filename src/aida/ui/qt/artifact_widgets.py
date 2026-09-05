@@ -43,7 +43,7 @@ INLINE_MAX_WIDTH = 480
 
 
 def _reveal_in_file_manager(path: Path) -> None:
-    """"Reveal" == open the containing folder — the same thing every OS's
+    """ "Reveal" == open the containing folder — the same thing every OS's
     file manager understands via a plain ``file://`` URL; there's no
     cross-platform "select this specific file" API without a native shell
     call per OS, which is more than this phase needs."""
@@ -54,7 +54,9 @@ class FullSizeImageDialog(QDialog):
     """A plain, unscaled view of the image — what clicking an inline
     thumbnail opens."""
 
-    def __init__(self, pixmap: QPixmap, title: str = "Image", parent: QWidget | None = None) -> None:
+    def __init__(
+        self, pixmap: QPixmap, title: str = "Image", parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         layout = QVBoxLayout(self)
@@ -86,7 +88,9 @@ class InlineImageWidget(QFrame):
         layout = QVBoxLayout(self)
         self._image_label = QLabel(self)
         if not self._full_pixmap.isNull() and self._full_pixmap.width() > max_width:
-            scaled = self._full_pixmap.scaledToWidth(max_width, Qt.TransformationMode.SmoothTransformation)
+            scaled = self._full_pixmap.scaledToWidth(
+                max_width, Qt.TransformationMode.SmoothTransformation
+            )
         else:
             scaled = self._full_pixmap
         self._image_label.setPixmap(scaled)
@@ -151,7 +155,9 @@ class FileArtifactCard(QFrame):
     #: in-place (not just pre-filled text) so Save/Run act on the real file.
     open_in_code_editor_requested = Signal(str)
 
-    def __init__(self, *, path: str, artifact_id: str, mime_type: str | None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, *, path: str, artifact_id: str, mime_type: str | None, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.path = path
         self.artifact_id = artifact_id
@@ -173,7 +179,9 @@ class FileArtifactCard(QFrame):
         self._editor_button: QPushButton | None = None
         if Path(path).suffix in CODE_EDITOR_SUFFIXES:
             self._editor_button = QPushButton("Open in Code Editor", self)
-            self._editor_button.clicked.connect(lambda: self.open_in_code_editor_requested.emit(self.path))
+            self._editor_button.clicked.connect(
+                lambda: self.open_in_code_editor_requested.emit(self.path)
+            )
             layout.addWidget(self._editor_button)
 
         reveal_button = QPushButton("Reveal", self)

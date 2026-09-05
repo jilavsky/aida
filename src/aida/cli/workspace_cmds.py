@@ -44,7 +44,9 @@ def _print_workspace(ws: WorkspaceConfig) -> None:
     print(f"python_interpreter: {ws.python_interpreter or '(default: sys.executable)'}")
     print(f"scripting_enabled:  {ws.scripting_enabled}")
     print(f"templates_dir:      {ws.templates_dir or '(none)'}")
-    print(f"saved_scripts_dir:  {ws.saved_scripts_dir or '(default: <target_folder>/saved_scripts)'}")
+    print(
+        f"saved_scripts_dir:  {ws.saved_scripts_dir or '(default: <target_folder>/saved_scripts)'}"
+    )
 
 
 def _print_validation(settings: Settings, ws: WorkspaceConfig) -> None:
@@ -75,7 +77,9 @@ def cmd_show(args: argparse.Namespace) -> int:
     settings = load_settings()
     ws = get_workspace(settings, args.name)
     if ws is None:
-        print(f"Unknown workspace {args.name!r}. Configured: {', '.join(list_workspace_names(settings)) or '(none)'}")
+        print(
+            f"Unknown workspace {args.name!r}. Configured: {', '.join(list_workspace_names(settings)) or '(none)'}"
+        )
         return 1
     _print_workspace(ws)
     _print_validation(settings, ws)
@@ -176,7 +180,9 @@ def _add_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -> None:
     (fields default to ``None`` so an unset flag means "leave the field
     unchanged" — the two are distinguished by ``defaults``)."""
     profile_kwargs = {"default": "" if defaults else None}
-    parser.add_argument("--profile", help="Provider profile name from providers.yaml", **profile_kwargs)
+    parser.add_argument(
+        "--profile", help="Provider profile name from providers.yaml", **profile_kwargs
+    )
     parser.add_argument(
         "--source-folders",
         default="" if defaults else None,
@@ -191,14 +197,21 @@ def _add_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -> None:
         help="Subfolder name (under the records dir) for this workspace's image sidecar files",
     )
     parser.add_argument(
-        "--mcp-group", default="none" if defaults else None, help="Named MCP server group from mcp.json"
+        "--mcp-group",
+        default="none" if defaults else None,
+        help="Named MCP server group from mcp.json",
     )
-    parser.add_argument("--skills", default="" if defaults else None, help="Comma-separated skill names")
     parser.add_argument(
-        "--knowledge-bases", default="" if defaults else None,
+        "--skills", default="" if defaults else None, help="Comma-separated skill names"
+    )
+    parser.add_argument(
+        "--knowledge-bases",
+        default="" if defaults else None,
         help="Comma-separated knowledge base names from knowledge.yaml (Phase 8 RAG)",
     )
-    parser.add_argument("--system-prompt", default=None, help="Extra system prompt text for this workspace")
+    parser.add_argument(
+        "--system-prompt", default=None, help="Extra system prompt text for this workspace"
+    )
     parser.add_argument(
         "--safety",
         default="confirm" if defaults else None,
@@ -224,7 +237,9 @@ def _add_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -> None:
         help="Enable run_python_script/run_command for this workspace (Phase 9, default: enabled)",
     )
     parser.add_argument(
-        "--templates-dir", default=None, help="Folder of .py code templates for this workspace (Phase 9)"
+        "--templates-dir",
+        default=None,
+        help="Folder of .py code templates for this workspace (Phase 9)",
     )
     parser.add_argument(
         "--saved-scripts-dir",
@@ -239,14 +254,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("list", help="List all configured workspaces")
 
-    show = sub.add_parser("show", help="Show one workspace's full configuration and validation status")
+    show = sub.add_parser(
+        "show", help="Show one workspace's full configuration and validation status"
+    )
     show.add_argument("name")
 
     new = sub.add_parser("new", help="Create a new workspace")
     new.add_argument("name")
     _add_field_args(new, defaults=True)
 
-    edit = sub.add_parser("edit", help="Update fields of an existing workspace (unset flags are left as-is)")
+    edit = sub.add_parser(
+        "edit", help="Update fields of an existing workspace (unset flags are left as-is)"
+    )
     edit.add_argument("name")
     _add_field_args(edit, defaults=False)
 

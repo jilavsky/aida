@@ -232,7 +232,9 @@ def _format_retrieved_context(passages_by_kb: dict[str, list[RetrievedPassage]])
         for passage in passages:
             heading_suffix = f" — {passage.heading}" if passage.heading else ""
             lines.append("")
-            lines.append(f"### {Path(passage.source_path).name}{heading_suffix} (score {passage.score:.2f})")
+            lines.append(
+                f"### {Path(passage.source_path).name}{heading_suffix} (score {passage.score:.2f})"
+            )
             lines.append(passage.text)
     return "\n".join(lines)
 
@@ -264,7 +266,10 @@ class ChatSession:
         self.provider = build_provider(self.profile)
         self.completion_settings = _completion_settings_for_profile(self.profile)
         self.loop = AgentLoop(
-            self.provider, self.completion_settings, self.tools, max_iterations=settings.app.max_agent_iterations
+            self.provider,
+            self.completion_settings,
+            self.tools,
+            max_iterations=settings.app.max_agent_iterations,
         )
         self.recorder = recorder
         # Phase 8 (RAG): resolved once at session-start (start_session),
@@ -307,7 +312,9 @@ class ChatSession:
         # Repaired once here, on the way in — see
         # aida.core.context.repair_tool_call_pairing.
         history = repair_tool_call_pairing(list(initial_messages)) if initial_messages else []
-        self.messages: list[Message] = ([system_message] if system_message.content else []) + history
+        self.messages: list[Message] = (
+            [system_message] if system_message.content else []
+        ) + history
 
     @property
     def is_mutating(self) -> bool:
@@ -357,7 +364,10 @@ class ChatSession:
             # shouldn't silently discard a value the user just set in the
             # same session.
             new_loop = AgentLoop(
-                new_provider, new_completion_settings, self.tools, max_iterations=self.loop.max_iterations
+                new_provider,
+                new_completion_settings,
+                self.tools,
+                max_iterations=self.loop.max_iterations,
             )
 
             # Nothing below here can fail, so the swap is all-or-nothing.
@@ -376,7 +386,9 @@ class ChatSession:
             try:
                 await old_provider.aclose()
             except Exception as exc:  # noqa: BLE001 - see above
-                logger.warning("closing the previous provider after a profile switch failed: %s", exc)
+                logger.warning(
+                    "closing the previous provider after a profile switch failed: %s", exc
+                )
 
     def cancel(self) -> None:
         self.loop.cancel()
@@ -403,9 +415,13 @@ class ChatSession:
         if not context_window:
             return None
         reserved_output_tokens = (
-            self.profile.max_tokens if self.profile.max_tokens is not None else DEFAULT_RESERVED_OUTPUT_TOKENS
+            self.profile.max_tokens
+            if self.profile.max_tokens is not None
+            else DEFAULT_RESERVED_OUTPUT_TOKENS
         )
-        tool_schema_tokens = estimate_tool_schema_tokens([tool.schema for tool in self.tools.values()])
+        tool_schema_tokens = estimate_tool_schema_tokens(
+            [tool.schema for tool in self.tools.values()]
+        )
         return history_budget(
             context_window=context_window,
             reserved_output_tokens=reserved_output_tokens,
@@ -458,10 +474,14 @@ class ChatSession:
                 elif isinstance(event, AgentError):
                     for_error = f"{event.layer}: {event.message}"
             if for_error is not None:
-                logger.warning("context compaction failed, falling back to plain trim: %s", for_error)
+                logger.warning(
+                    "context compaction failed, falling back to plain trim: %s", for_error
+                )
                 return None
             if not summary_text.strip():
-                logger.warning("context compaction produced an empty summary, falling back to plain trim")
+                logger.warning(
+                    "context compaction produced an empty summary, falling back to plain trim"
+                )
                 return None
             return compaction_summary_message(summary_text)
         except Exception as exc:  # noqa: BLE001 - compaction failing must never fail the turn
@@ -711,13 +731,20 @@ class ChatSession:
                 yield RetrievalPerformed(
                     passages_by_kb={
                         kb_name: [
-                            {"text": p.text, "source_path": p.source_path, "heading": p.heading, "score": p.score}
+                            {
+                                "text": p.text,
+                                "source_path": p.source_path,
+                                "heading": p.heading,
+                                "score": p.score,
+                            }
                             for p in passages
                         ]
                         for kb_name, passages in passages_by_kb.items()
                     }
                 )
-                context_message = Message(role="user", content=_format_retrieved_context(passages_by_kb))
+                context_message = Message(
+                    role="user", content=_format_retrieved_context(passages_by_kb)
+                )
                 self.messages.append(context_message)
 
         try:
@@ -816,7 +843,7 @@ class ChatSession:
 
 
 def _ensure_workspace_folders(workspace: WorkspaceConfig) -> None:
-    """"Can we create the folders if they do not exist? I need to populate
+    """ "Can we create the folders if they do not exist? I need to populate
     them at some point" (bug report): source/target folders previously only
     ever *warned* when missing (``validate_workspace``) — a freshly-created
     workspace pointed at folders that don't exist yet made starting a
@@ -994,8 +1021,12 @@ async def _start_session(
         if resumed_summary is None:
             raise ConversationNotFoundError(f"no conversation with id {resume_conversation_id!r}")
 
-    effective_workspace_name = workspace_name or (resumed_summary.workspace_name if resumed_summary else None)
-    effective_profile_name = profile_name or (resumed_summary.profile_name if resumed_summary else None)
+    effective_workspace_name = workspace_name or (
+        resumed_summary.workspace_name if resumed_summary else None
+    )
+    effective_profile_name = profile_name or (
+        resumed_summary.profile_name if resumed_summary else None
+    )
     sidecar_dirname = resumed_summary.sidecar_dirname if resumed_summary else "figures"
 
     # B15: global (workspace-independent) identity/user framing — see
@@ -1039,7 +1070,9 @@ async def _start_session(
             print(f"[workspace] warning: {warning}")
             logger.warning("workspace %r: %s", workspace.name, warning)
         if not validation.ok:
-            raise UnknownProfileError(f"workspace {effective_workspace_name!r}: {validation.detail}")
+            raise UnknownProfileError(
+                f"workspace {effective_workspace_name!r}: {validation.detail}"
+            )
 
         env = resolve_workspace_environment(settings, workspace)
         if effective_profile_name is None:
@@ -1081,7 +1114,8 @@ async def _start_session(
         confirm_callback=confirm_callback,
         # Phase 9: union'd the same way allowed folders already are — a
         # workspace's own allowlist plus whatever's globally allowlisted.
-        command_allowlist=settings.app.command_allowlist + (workspace.command_allowlist if workspace else []),
+        command_allowlist=settings.app.command_allowlist
+        + (workspace.command_allowlist if workspace else []),
     )
 
     # Bug report: "Agent seems to have no understanding of Source and
@@ -1117,7 +1151,8 @@ async def _start_session(
     # telling it directly avoids the probe in the first place.
     coding_context = build_coding_context_block(
         python_interpreter=workspace.python_interpreter if workspace else None,
-        command_allowlist=settings.app.command_allowlist + (workspace.command_allowlist if workspace else []),
+        command_allowlist=settings.app.command_allowlist
+        + (workspace.command_allowlist if workspace else []),
         scripting_enabled=bool(workspace and workspace.scripting_enabled),
     )
     if coding_context:
@@ -1133,14 +1168,22 @@ async def _start_session(
     # than aborting the whole session — "warn, don't crash" matches every
     # other workspace-reference validation in this module.
     active_knowledge_bases: list[ActiveKnowledgeBase] = []
-    for kb_name in (workspace.knowledge_bases if workspace else []):
+    for kb_name in workspace.knowledge_bases if workspace else []:
         kb_config = settings.knowledge.knowledge_bases.get(kb_name)
         if kb_config is None:
-            print(f"[knowledge] warning: workspace references unknown knowledge base {kb_name!r} — skipping")
-            logger.warning("workspace %r references unknown knowledge base %r", effective_workspace_name, kb_name)
+            print(
+                f"[knowledge] warning: workspace references unknown knowledge base {kb_name!r} — skipping"
+            )
+            logger.warning(
+                "workspace %r references unknown knowledge base %r",
+                effective_workspace_name,
+                kb_name,
+            )
             continue
         if not kb_config.embedding_profile:
-            print(f"[knowledge] warning: knowledge base {kb_name!r} has no embedding_profile configured — skipping")
+            print(
+                f"[knowledge] warning: knowledge base {kb_name!r} has no embedding_profile configured — skipping"
+            )
             continue
         embedding_profile = settings.providers.embedding_profiles.get(kb_config.embedding_profile)
         if embedding_profile is None:
@@ -1169,7 +1212,9 @@ async def _start_session(
             )
         )
         print(f"[knowledge] {kb_name}: {kb_index.chunk_count(conn)} chunk(s) indexed")
-        logger.debug("knowledge base %r ready with %d chunk(s)", kb_name, kb_index.chunk_count(conn))
+        logger.debug(
+            "knowledge base %r ready with %d chunk(s)", kb_name, kb_index.chunk_count(conn)
+        )
 
     mcp_manager: McpManager | None = None
     tools = default_native_tools()
@@ -1188,7 +1233,10 @@ async def _start_session(
         # the feature actually reachable in a real session, not just in
         # McpManager's own unit tests.
         mcp_manager = McpManager(
-            mcp_servers, artifact_store=artifact_store, confirm_callback=confirm_callback, scratch_dir=scratch
+            mcp_servers,
+            artifact_store=artifact_store,
+            confirm_callback=confirm_callback,
+            scratch_dir=scratch,
         )
         # Registered *before* start_all, not after: these are real
         # subprocesses, and start_all isolates a per-server McpServerError
@@ -1258,7 +1306,9 @@ async def _start_session(
                 f"(Settings, or ${env_var_name(OCR_SECRET_REF)}) — falling back to the built-in "
                 f"figure extractor."
             )
-            logger.warning("workspace %r: use_ocr enabled but no %r secret", workspace.name, OCR_SECRET_REF)
+            logger.warning(
+                "workspace %r: use_ocr enabled but no %r secret", workspace.name, OCR_SECRET_REF
+            )
     tools.update(default_figure_tools(recorder.attachments_dir, ocr=ocr_backend))
 
     # No try/except here any more. `ChatSession.__init__` can fail in

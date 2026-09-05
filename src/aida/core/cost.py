@@ -29,8 +29,16 @@ def estimate_cost_usd(
     ``ProviderProfile.usd_per_m_input``/``usd_per_m_output`` — ``None``
     (unset on the profile, or no profile at hand) falls back to the fixed
     default rate, same as every call site before B2."""
-    input_rate = input_usd_per_million if input_usd_per_million is not None else DEFAULT_INPUT_USD_PER_MILLION
-    output_rate = output_usd_per_million if output_usd_per_million is not None else DEFAULT_OUTPUT_USD_PER_MILLION
+    input_rate = (
+        input_usd_per_million
+        if input_usd_per_million is not None
+        else DEFAULT_INPUT_USD_PER_MILLION
+    )
+    output_rate = (
+        output_usd_per_million
+        if output_usd_per_million is not None
+        else DEFAULT_OUTPUT_USD_PER_MILLION
+    )
     return input_tokens / 1_000_000 * input_rate + output_tokens / 1_000_000 * output_rate
 
 

@@ -25,7 +25,9 @@ def test_estimate_cost_usd_uses_a_profile_rate_override_when_given():
     """B2: a profile with its own usd_per_m_input/usd_per_m_output (e.g. a
     free local model at $0) must not be priced at the fixed cloud-model
     default rate."""
-    cost = estimate_cost_usd(1_000_000, 1_000_000, input_usd_per_million=0.0, output_usd_per_million=0.0)
+    cost = estimate_cost_usd(
+        1_000_000, 1_000_000, input_usd_per_million=0.0, output_usd_per_million=0.0
+    )
     assert cost == 0.0
 
 
@@ -37,5 +39,7 @@ def test_estimate_cost_usd_override_replaces_only_the_given_rate():
 def test_estimate_cost_usd_none_override_falls_back_to_default():
     """A profile that never set usd_per_m_input/usd_per_m_output (None,
     the field's default) must behave exactly as before B2."""
-    cost = estimate_cost_usd(1_000_000, 1_000_000, input_usd_per_million=None, output_usd_per_million=None)
+    cost = estimate_cost_usd(
+        1_000_000, 1_000_000, input_usd_per_million=None, output_usd_per_million=None
+    )
     assert cost == DEFAULT_INPUT_USD_PER_MILLION + DEFAULT_OUTPUT_USD_PER_MILLION

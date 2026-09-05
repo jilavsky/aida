@@ -33,7 +33,10 @@ def _settings() -> Settings:
 
 def test_run_prints_reply_and_exits_zero(monkeypatch, aida_home: Path, records_home: Path, capsys):
     monkeypatch.setattr("aida.cli.run.load_settings", _settings)
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hello there")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="hello there")]),
+    )
 
     code = main(["--workspace", "use-ws", "say hi"])
 
@@ -43,7 +46,10 @@ def test_run_prints_reply_and_exits_zero(monkeypatch, aida_home: Path, records_h
 
 def test_run_json_output_shape(monkeypatch, aida_home: Path, records_home: Path, capsys):
     monkeypatch.setattr("aida.cli.run.load_settings", _settings)
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hello there")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="hello there")]),
+    )
 
     code = main(["--workspace", "use-ws", "--json", "say hi"])
 
@@ -55,9 +61,14 @@ def test_run_json_output_shape(monkeypatch, aida_home: Path, records_home: Path,
     assert payload["conversation_id"]
 
 
-def test_run_reads_prompt_from_stdin_when_omitted(monkeypatch, aida_home: Path, records_home: Path, capsys):
+def test_run_reads_prompt_from_stdin_when_omitted(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
     monkeypatch.setattr("aida.cli.run.load_settings", _settings)
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="from stdin")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="from stdin")]),
+    )
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     monkeypatch.setattr("sys.stdin", __import__("io").StringIO("what time is it?"))
 
@@ -67,7 +78,9 @@ def test_run_reads_prompt_from_stdin_when_omitted(monkeypatch, aida_home: Path, 
     assert "from stdin" in capsys.readouterr().out
 
 
-def test_run_no_prompt_at_all_is_a_config_error(monkeypatch, aida_home: Path, records_home: Path, capsys):
+def test_run_no_prompt_at_all_is_a_config_error(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
     monkeypatch.setattr("aida.cli.run.load_settings", _settings)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
@@ -76,7 +89,9 @@ def test_run_no_prompt_at_all_is_a_config_error(monkeypatch, aida_home: Path, re
     assert code == EXIT_CONFIG_ERROR
 
 
-def test_run_unknown_workspace_is_a_config_error(monkeypatch, aida_home: Path, records_home: Path, capsys):
+def test_run_unknown_workspace_is_a_config_error(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
     monkeypatch.setattr("aida.cli.run.load_settings", _settings)
 
     code = main(["--workspace", "does-not-exist", "hi"])
@@ -85,9 +100,13 @@ def test_run_unknown_workspace_is_a_config_error(monkeypatch, aida_home: Path, r
     assert "does-not-exist" in capsys.readouterr().err
 
 
-def test_run_agent_error_exits_step_failed(monkeypatch, aida_home: Path, records_home: Path, capsys):
+def test_run_agent_error_exits_step_failed(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
     monkeypatch.setattr("aida.cli.run.load_settings", _settings)
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(error="boom")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(error="boom")])
+    )
 
     code = main(["--workspace", "use-ws", "hi"])
 
@@ -180,13 +199,17 @@ def test_run_preapprove_tool_approves_a_confirm_before_run_mcp_tool(
 
     settings = _settings()
     monkeypatch.setattr("aida.cli.run.load_settings", lambda: settings)
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
 
     captured: dict = {}
 
     def _capturing_build(*, yes_in_allowed, preapproved_tools=None):
         captured["preapproved_tools"] = preapproved_tools
-        return build_headless_confirm_callback(yes_in_allowed=yes_in_allowed, preapproved_tools=preapproved_tools)
+        return build_headless_confirm_callback(
+            yes_in_allowed=yes_in_allowed, preapproved_tools=preapproved_tools
+        )
 
     monkeypatch.setattr("aida.cli.run.build_headless_confirm_callback", _capturing_build)
 

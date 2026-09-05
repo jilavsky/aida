@@ -68,7 +68,9 @@ class ToolCallRow(QFrame):
     ``mark_finished()`` is called. The expand button reveals full
     arguments + result text."""
 
-    def __init__(self, *, call_id: str, tool_name: str, arguments: dict, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, *, call_id: str, tool_name: str, arguments: dict, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.call_id = call_id
         self.tool_name = tool_name

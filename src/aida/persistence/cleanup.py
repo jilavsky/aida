@@ -91,7 +91,9 @@ class DeletionResult:
     skipped_external_files: list[str] = field(default_factory=list)
 
 
-def list_conversations_by_age(store: ConversationStore, *, oldest_first: bool = True) -> list[ConversationSummary]:
+def list_conversations_by_age(
+    store: ConversationStore, *, oldest_first: bool = True
+) -> list[ConversationSummary]:
     """``ConversationStore.list_conversations`` is already newest-first;
     this just makes "oldest first" (the natural order for a cleanup UI)
     explicit and named."""
@@ -99,7 +101,9 @@ def list_conversations_by_age(store: ConversationStore, *, oldest_first: bool = 
     return list(reversed(conversations)) if oldest_first else conversations
 
 
-def list_conversations_older_than(store: ConversationStore, cutoff_iso: str) -> list[ConversationSummary]:
+def list_conversations_older_than(
+    store: ConversationStore, cutoff_iso: str
+) -> list[ConversationSummary]:
     """Conversations whose ``updated_at`` is older than ``cutoff_iso``
     (an ISO-8601 timestamp, e.g. from ``datetime.now(UTC).isoformat()`` minus
     an age threshold) — the "optional auto-cleanup age threshold" building

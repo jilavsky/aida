@@ -68,7 +68,12 @@ class QuickTaskEditDialog(QDialog):
     template needs both a short label and an often multi-line body."""
 
     def __init__(
-        self, parent: QWidget | None = None, *, name: str = "", text: str = "", title: str = "Add Quick Task"
+        self,
+        parent: QWidget | None = None,
+        *,
+        name: str = "",
+        text: str = "",
+        title: str = "Add Quick Task",
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -83,7 +88,9 @@ class QuickTaskEditDialog(QDialog):
         self._text_edit.setPlaceholderText("The prompt text to drop into the conversation…")
         layout.addWidget(self._text_edit)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -96,7 +103,11 @@ class QuickTaskEditDialog(QDialog):
 
     @staticmethod
     def get_task(
-        parent: QWidget | None = None, *, name: str = "", text: str = "", title: str = "Add Quick Task"
+        parent: QWidget | None = None,
+        *,
+        name: str = "",
+        text: str = "",
+        title: str = "Add Quick Task",
     ) -> tuple[str, str] | None:
         """Construct, ask, tear down — mirrors ``CleanupDialog.
         get_cutoff_days``'s convenience shape. Returns ``None`` on Cancel,
@@ -145,7 +156,9 @@ class QuickTasksPanel(QGroupBox):
 
     def _on_context_menu_requested(self, pos) -> None:
         item = self._list.itemAt(pos)
-        self._popup_context_menu(self._build_context_menu(item), self._list.viewport().mapToGlobal(pos))
+        self._popup_context_menu(
+            self._build_context_menu(item), self._list.viewport().mapToGlobal(pos)
+        )
 
     def _popup_context_menu(self, menu: QMenu, global_pos) -> None:
         """Split out purely so tests can monkeypatch this one call instead
@@ -185,7 +198,9 @@ class QuickTasksPanel(QGroupBox):
         if not (0 <= row < len(self._tasks)):
             return
         current = self._tasks[row]
-        result = QuickTaskEditDialog.get_task(self, name=current.name, text=current.text, title="Edit Quick Task")
+        result = QuickTaskEditDialog.get_task(
+            self, name=current.name, text=current.text, title="Edit Quick Task"
+        )
         if result is None:
             return
         name, text = result

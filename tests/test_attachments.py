@@ -172,7 +172,10 @@ def test_deletion_still_finds_attachments_after_the_records_dir_setting_changed(
     new_records = tmp_path / "records-elsewhere"
     new_records.mkdir()
     result = delete_conversation(
-        store, recorder.conversation_id, records_dir=new_records, artifacts_dir=tmp_path / "artifacts"
+        store,
+        recorder.conversation_id,
+        records_dir=new_records,
+        artifacts_dir=tmp_path / "artifacts",
     )
 
     assert result.deleted_attachments_dir is True
@@ -210,7 +213,9 @@ def test_attached_images_are_still_copied_and_still_deleted(tmp_path: Path):
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_bytes(TINY_PNG_BYTES)
 
-    recorder.record_message(Message(role="user", content="look", images=[ImageRef(path=str(source))]))
+    recorder.record_message(
+        Message(role="user", content="look", images=[ImageRef(path=str(source))])
+    )
     stored = Path(store.load_messages(recorder.conversation_id)[0].images[0].path)
     source.unlink()
     assert stored.exists() and stored != source
@@ -246,7 +251,8 @@ def test_migration_5_adds_the_path_columns_to_an_existing_v4_database(tmp_path: 
     try:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         row = conn.execute(
-            "SELECT title, attachments_path, sidecar_path FROM conversations WHERE id = ?", ("old1",)
+            "SELECT title, attachments_path, sidecar_path FROM conversations WHERE id = ?",
+            ("old1",),
         ).fetchone()
         assert row["title"] == "Before attachments"
         assert row["attachments_path"] is None

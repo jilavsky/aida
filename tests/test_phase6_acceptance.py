@@ -76,8 +76,12 @@ async def test_read_two_files_and_write_markdown_report_with_image(
                 MockTurn(
                     text="let me read both files",
                     tool_calls=[
-                        MockToolCall(name="read_file", id="call_a", arguments={"path": str(file_a)}),
-                        MockToolCall(name="read_file", id="call_b", arguments={"path": str(file_b)}),
+                        MockToolCall(
+                            name="read_file", id="call_a", arguments={"path": str(file_a)}
+                        ),
+                        MockToolCall(
+                            name="read_file", id="call_b", arguments={"path": str(file_b)}
+                        ),
                     ],
                 ),
                 MockTurn(
@@ -104,7 +108,9 @@ async def test_read_two_files_and_write_markdown_report_with_image(
     try:
         # Stand-in for an earlier MCP tool call's plot (see module docstring).
         session.recorder.artifact_store.save_image(
-            ImageArtifact(data=TINY_PNG_BYTES, id="seeded-image", mime_type="image/png", filename="plot.png")
+            ImageArtifact(
+                data=TINY_PNG_BYTES, id="seeded-image", mime_type="image/png", filename="plot.png"
+            )
         )
 
         events = [
@@ -181,7 +187,10 @@ async def test_write_outside_target_folder_is_denied_without_confirmation(
                         MockToolCall(
                             name="write_markdown_report",
                             id="call_write",
-                            arguments={"path": str(outside_dir / "leak.md"), "title": "Should Not Exist"},
+                            arguments={
+                                "path": str(outside_dir / "leak.md"),
+                                "title": "Should Not Exist",
+                            },
                         )
                     ]
                 ),
@@ -193,7 +202,9 @@ async def test_write_outside_target_folder_is_denied_without_confirmation(
     async def _deny(_request) -> bool:
         return False
 
-    session, mcp_manager = await start_session(settings, workspace_name="use-ws", confirm_callback=_deny)
+    session, mcp_manager = await start_session(
+        settings, workspace_name="use-ws", confirm_callback=_deny
+    )
     try:
         events = [e async for e in session.send("write a report to the outside folder")]
         tool_result = next(e for e in events if type(e).__name__ == "ToolCallFinished")

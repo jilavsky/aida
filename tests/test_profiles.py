@@ -18,7 +18,9 @@ from aida.providers.profiles import (
 
 def test_build_provider_openai_compat(monkeypatch):
     monkeypatch.setattr("aida.providers.profiles.get_secret", lambda name: None)
-    profile = ProviderProfile(name="ollama-local", kind="openai_compat", base_url="http://x", model="m")
+    profile = ProviderProfile(
+        name="ollama-local", kind="openai_compat", base_url="http://x", model="m"
+    )
     provider = build_provider(profile)
     assert isinstance(provider, OpenAICompatProvider)
     assert provider.model == "m"
@@ -26,7 +28,13 @@ def test_build_provider_openai_compat(monkeypatch):
 
 def test_build_provider_anthropic(monkeypatch):
     monkeypatch.setattr("aida.providers.profiles.get_secret", lambda name: "fake-secret")
-    profile = ProviderProfile(name="argo-claude", kind="anthropic", base_url="https://x", model="claude-x", secret_ref="argo-claude")
+    profile = ProviderProfile(
+        name="argo-claude",
+        kind="anthropic",
+        base_url="https://x",
+        model="claude-x",
+        secret_ref="argo-claude",
+    )
     provider = build_provider(profile)
     assert isinstance(provider, AnthropicProvider)
 
@@ -45,7 +53,9 @@ def test_build_provider_resolves_secret_via_get_secret(monkeypatch):
         return "resolved-secret"
 
     monkeypatch.setattr("aida.providers.profiles.get_secret", fake_get_secret)
-    profile = ProviderProfile(name="argo-claude", kind="anthropic", model="claude-x", secret_ref="argo-claude")
+    profile = ProviderProfile(
+        name="argo-claude", kind="anthropic", model="claude-x", secret_ref="argo-claude"
+    )
     build_provider(profile)
     assert seen["name"] == "argo-claude"
 
@@ -92,7 +102,9 @@ async def test_validate_profile_bad_kind_reports_not_raises():
 
 def test_build_embeddings_provider_openai_compat(monkeypatch):
     monkeypatch.setattr("aida.providers.profiles.get_secret", lambda name: None)
-    profile = EmbeddingProfile(name="argo-embed", base_url="http://x", model="text-embedding-3-small")
+    profile = EmbeddingProfile(
+        name="argo-embed", base_url="http://x", model="text-embedding-3-small"
+    )
     provider = build_embeddings_provider(profile)
     assert isinstance(provider, OpenAICompatEmbeddings)
     assert provider.model == "text-embedding-3-small"
@@ -112,7 +124,9 @@ def test_build_embeddings_provider_resolves_secret_via_get_secret(monkeypatch):
         return "resolved-secret"
 
     monkeypatch.setattr("aida.providers.profiles.get_secret", fake_get_secret)
-    profile = EmbeddingProfile(name="argo-embed", model="text-embedding-3-small", secret_ref="argo-claude")
+    profile = EmbeddingProfile(
+        name="argo-embed", model="text-embedding-3-small", secret_ref="argo-claude"
+    )
     build_embeddings_provider(profile)
     assert seen["name"] == "argo-claude"
 
@@ -126,7 +140,9 @@ async def test_validate_embedding_profile_ok(monkeypatch):
         async def aclose(self):
             pass
 
-    monkeypatch.setattr("aida.providers.profiles.build_embeddings_provider", lambda profile: _FakeProvider())
+    monkeypatch.setattr(
+        "aida.providers.profiles.build_embeddings_provider", lambda profile: _FakeProvider()
+    )
     profile = EmbeddingProfile(name="x", model="m")
 
     result = await validate_embedding_profile(profile)
@@ -143,7 +159,9 @@ async def test_validate_embedding_profile_unreachable(monkeypatch):
         async def aclose(self):
             pass
 
-    monkeypatch.setattr("aida.providers.profiles.build_embeddings_provider", lambda profile: _FakeProvider())
+    monkeypatch.setattr(
+        "aida.providers.profiles.build_embeddings_provider", lambda profile: _FakeProvider()
+    )
     profile = EmbeddingProfile(name="x", model="m", base_url="http://nowhere")
 
     result = await validate_embedding_profile(profile)

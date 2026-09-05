@@ -37,9 +37,13 @@ def _settings_with_workflow(aida_home: Path):
         name="mock-profile", kind="openai_compat", model="mock-model"
     )
     settings.workspaces = WorkspacesConfig(
-        workspaces={"use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", safety="relaxed")}
+        workspaces={
+            "use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", safety="relaxed")
+        }
     )
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
     return settings
 
 
@@ -140,7 +144,9 @@ def test_form_rejects_invalid_timing(qapp, monkeypatch):
 
 def test_dialog_lists_configured_schedules(qapp, aida_home: Path):
     settings = _settings_with_workflow(aida_home)
-    settings.schedules.schedules["nightly"] = ScheduleEntry(name="nightly", workflow="daily", at="07:00")
+    settings.schedules.schedules["nightly"] = ScheduleEntry(
+        name="nightly", workflow="daily", at="07:00"
+    )
     dialog = ScheduleManagementDialog(settings, None)
 
     assert dialog._schedule_list.count() == 1
@@ -156,7 +162,9 @@ def test_dialog_with_no_schedules_is_empty(qapp, aida_home: Path):
 
 def test_detail_panel_shows_last_run_never(qapp, aida_home: Path):
     settings = _settings_with_workflow(aida_home)
-    settings.schedules.schedules["nightly"] = ScheduleEntry(name="nightly", workflow="daily", at="07:00")
+    settings.schedules.schedules["nightly"] = ScheduleEntry(
+        name="nightly", workflow="daily", at="07:00"
+    )
     dialog = ScheduleManagementDialog(settings, None)
     dialog._schedule_list.setCurrentRow(0)
 
@@ -174,7 +182,9 @@ def test_add_schedule_persists_to_settings_and_disk(qapp, aida_home: Path, monke
     form._name_edit.setText("nightly")
     form._workflow_combo.setCurrentText("daily")
     form._timing_value_edit.setText("07:00")
-    monkeypatch.setattr("aida.ui.qt.schedule_management_dialog.ScheduleFormDialog", lambda **kw: form)
+    monkeypatch.setattr(
+        "aida.ui.qt.schedule_management_dialog.ScheduleFormDialog", lambda **kw: form
+    )
     monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
 
     dialog._on_add()
@@ -187,12 +197,16 @@ def test_add_schedule_persists_to_settings_and_disk(qapp, aida_home: Path, monke
 
 def test_add_schedule_rejects_a_duplicate_name(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_workflow(aida_home)
-    settings.schedules.schedules["nightly"] = ScheduleEntry(name="nightly", workflow="daily", at="07:00")
+    settings.schedules.schedules["nightly"] = ScheduleEntry(
+        name="nightly", workflow="daily", at="07:00"
+    )
     dialog = ScheduleManagementDialog(settings, None)
 
     form = ScheduleFormDialog(workflow_names=["daily"])
     form._name_edit.setText("nightly")
-    monkeypatch.setattr("aida.ui.qt.schedule_management_dialog.ScheduleFormDialog", lambda **kw: form)
+    monkeypatch.setattr(
+        "aida.ui.qt.schedule_management_dialog.ScheduleFormDialog", lambda **kw: form
+    )
     monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
     warned = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(True))
@@ -205,7 +219,9 @@ def test_add_schedule_rejects_a_duplicate_name(qapp, aida_home: Path, monkeypatc
 
 def test_enable_disable_roundtrip(qapp, aida_home: Path):
     settings = _settings_with_workflow(aida_home)
-    settings.schedules.schedules["nightly"] = ScheduleEntry(name="nightly", workflow="daily", at="07:00", enabled=True)
+    settings.schedules.schedules["nightly"] = ScheduleEntry(
+        name="nightly", workflow="daily", at="07:00", enabled=True
+    )
     dialog = ScheduleManagementDialog(settings, None)
     dialog._schedule_list.setCurrentRow(0)
 
@@ -219,7 +235,9 @@ def test_enable_disable_roundtrip(qapp, aida_home: Path):
 
 def test_remove_schedule_deletes_it(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_workflow(aida_home)
-    settings.schedules.schedules["nightly"] = ScheduleEntry(name="nightly", workflow="daily", at="07:00")
+    settings.schedules.schedules["nightly"] = ScheduleEntry(
+        name="nightly", workflow="daily", at="07:00"
+    )
     dialog = ScheduleManagementDialog(settings, None)
     dialog._schedule_list.setCurrentRow(0)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
@@ -232,7 +250,9 @@ def test_remove_schedule_deletes_it(qapp, aida_home: Path, monkeypatch):
 
 def test_remove_schedule_cancelled_keeps_it(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_workflow(aida_home)
-    settings.schedules.schedules["nightly"] = ScheduleEntry(name="nightly", workflow="daily", at="07:00")
+    settings.schedules.schedules["nightly"] = ScheduleEntry(
+        name="nightly", workflow="daily", at="07:00"
+    )
     dialog = ScheduleManagementDialog(settings, None)
     dialog._schedule_list.setCurrentRow(0)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
@@ -247,7 +267,9 @@ def test_remove_schedule_cancelled_keeps_it(qapp, aida_home: Path, monkeypatch):
 
 def test_run_now_with_no_bridge_warns_instead_of_crashing(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_workflow(aida_home)
-    settings.schedules.schedules["nightly"] = ScheduleEntry(name="nightly", workflow="daily", every="1h")
+    settings.schedules.schedules["nightly"] = ScheduleEntry(
+        name="nightly", workflow="daily", every="1h"
+    )
     dialog = ScheduleManagementDialog(settings, None)
     dialog._schedule_list.setCurrentRow(0)
     warned = []
@@ -261,16 +283,26 @@ def test_run_now_with_no_bridge_warns_instead_of_crashing(qapp, aida_home: Path,
 def test_run_now_fires_via_scheduler_bridge_and_refreshes_last_run(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     settings = _settings_with_workflow(aida_home)
-    settings.schedules.schedules["nightly"] = ScheduleEntry(name="nightly", workflow="daily", every="1h")
+    settings.schedules.schedules["nightly"] = ScheduleEntry(
+        name="nightly", workflow="daily", every="1h"
+    )
 
     scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
     dialog = ScheduleManagementDialog(settings, scheduler)
     dialog._schedule_list.setCurrentRow(0)
 
     dialog._on_run_now()
-    assert pump_until(qapp, lambda: "nightly" not in dialog._running_names and "never run" not in dialog._details_label.text())
+    assert pump_until(
+        qapp,
+        lambda: (
+            "nightly" not in dialog._running_names
+            and "never run" not in dialog._details_label.text()
+        ),
+    )
 
     assert "ok at" in dialog._details_label.text()
     scheduler.stop()

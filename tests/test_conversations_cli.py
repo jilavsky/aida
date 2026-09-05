@@ -132,7 +132,9 @@ def test_cmd_delete_with_yes_flag_skips_prompt(aida_home: Path, records_home: Pa
     store2.close()
 
 
-def test_cmd_delete_without_yes_prompts_and_aborts_on_no(aida_home: Path, records_home: Path, monkeypatch, capsys):
+def test_cmd_delete_without_yes_prompts_and_aborts_on_no(
+    aida_home: Path, records_home: Path, monkeypatch, capsys
+):
     store = _store(aida_home)
     conv_id = store.create_conversation(timestamp=T0)
     store.close()
@@ -199,7 +201,9 @@ async def test_resume_async_continues_conversation_with_stored_profile(
     store.append_message(conv_id, Message(role="user", content="earlier turn"), timestamp=T0)
     store.close()
 
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")])
+    )
     monkeypatch.setattr("builtins.input", lambda _prompt="": "/exit")  # end the REPL immediately
 
     rc = await _resume_async(
@@ -220,7 +224,9 @@ async def test_resume_async_continues_conversation_with_stored_profile(
 
 
 @pytest.mark.asyncio
-async def test_resume_async_unknown_conversation_reports_error(aida_home: Path, records_home: Path, capsys):
+async def test_resume_async_unknown_conversation_reports_error(
+    aida_home: Path, records_home: Path, capsys
+):
     # In practice cmd_resume's own resolve_conversation_id call filters bad
     # ids before _resume_async is ever reached; this confirms _resume_async
     # still fails closed (prints + returns 1, no traceback) if it somehow is.

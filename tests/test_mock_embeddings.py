@@ -15,7 +15,9 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 def test_hash_embed_is_deterministic():
-    assert hash_embed("Unified Fit models a SAXS curve") == hash_embed("Unified Fit models a SAXS curve")
+    assert hash_embed("Unified Fit models a SAXS curve") == hash_embed(
+        "Unified Fit models a SAXS curve"
+    )
 
 
 def test_hash_embed_is_unit_length():

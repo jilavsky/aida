@@ -81,7 +81,7 @@ class SettingsDialog(QDialog):
         self._user_context_edit = QPlainTextEdit(app_config.context_for_user(active_user), self)
         self._user_context_edit.setPlaceholderText(
             "Optional — a sentence or two the model always sees, e.g. "
-            "\"The user is Jan, a beamline scientist at APS.\""
+            '"The user is Jan, a beamline scientist at APS."'
         )
         if active_user:
             self._user_context_edit.setToolTip(
@@ -225,18 +225,24 @@ class SettingsDialog(QDialog):
         self._profiles_list.addItems(_profile_rows(profiles or {}))
         layout.addWidget(self._profiles_list)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
     def _on_browse_records_dir(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Records Folder", self._records_dir_edit.text())
+        folder = QFileDialog.getExistingDirectory(
+            self, "Records Folder", self._records_dir_edit.text()
+        )
         if folder:
             self._records_dir_edit.setText(folder)
 
     def _on_browse_scratch_dir(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Scratchpad Folder", self._scratch_dir_edit.text())
+        folder = QFileDialog.getExistingDirectory(
+            self, "Scratchpad Folder", self._scratch_dir_edit.text()
+        )
         if folder:
             self._scratch_dir_edit.setText(folder)
 
@@ -310,10 +316,18 @@ class SettingsDialog(QDialog):
         return self._default_safety_combo.currentText()
 
     def allowed_folders(self) -> list[str]:
-        return [line.strip() for line in self._allowed_folders_edit.toPlainText().splitlines() if line.strip()]
+        return [
+            line.strip()
+            for line in self._allowed_folders_edit.toPlainText().splitlines()
+            if line.strip()
+        ]
 
     def command_allowlist(self) -> list[str]:
-        return [line.strip() for line in self._command_allowlist_edit.toPlainText().splitlines() if line.strip()]
+        return [
+            line.strip()
+            for line in self._command_allowlist_edit.toPlainText().splitlines()
+            if line.strip()
+        ]
 
     def max_context_tokens(self) -> int:
         return self._max_context_tokens_spin.value()

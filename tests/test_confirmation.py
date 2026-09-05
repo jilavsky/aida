@@ -29,7 +29,9 @@ def _raw(answer: ConfirmAnswer):
 async def test_allow_once_does_not_get_remembered():
     raw, calls = _raw(ConfirmAnswer.ALLOW_ONCE)
     remembering = RememberingConfirm(raw)
-    request = ConfirmationRequest(action="write", path="/tmp/a.txt", detail="Write?", remember_scope="/tmp")
+    request = ConfirmationRequest(
+        action="write", path="/tmp/a.txt", detail="Write?", remember_scope="/tmp"
+    )
 
     assert await remembering(request) is True
     assert await remembering(request) is True
@@ -40,8 +42,12 @@ async def test_allow_once_does_not_get_remembered():
 async def test_allow_for_chat_is_remembered_for_same_action_and_scope():
     raw, calls = _raw(ConfirmAnswer.ALLOW_FOR_CHAT)
     remembering = RememberingConfirm(raw)
-    first = ConfirmationRequest(action="write", path="/tmp/a.txt", detail="Write a?", remember_scope="/tmp")
-    second = ConfirmationRequest(action="write", path="/tmp/b.txt", detail="Write b?", remember_scope="/tmp")
+    first = ConfirmationRequest(
+        action="write", path="/tmp/a.txt", detail="Write a?", remember_scope="/tmp"
+    )
+    second = ConfirmationRequest(
+        action="write", path="/tmp/b.txt", detail="Write b?", remember_scope="/tmp"
+    )
 
     assert await remembering(first) is True
     assert await remembering(second) is True
@@ -52,19 +58,27 @@ async def test_allow_for_chat_is_remembered_for_same_action_and_scope():
 async def test_remembered_approval_does_not_cover_a_different_action():
     raw, calls = _raw(ConfirmAnswer.ALLOW_FOR_CHAT)
     remembering = RememberingConfirm(raw)
-    write_request = ConfirmationRequest(action="write", path="/tmp/a.txt", detail="Write?", remember_scope="/tmp")
-    delete_request = ConfirmationRequest(action="delete", path="/tmp/a.txt", detail="Delete?", remember_scope="/tmp")
+    write_request = ConfirmationRequest(
+        action="write", path="/tmp/a.txt", detail="Write?", remember_scope="/tmp"
+    )
+    delete_request = ConfirmationRequest(
+        action="delete", path="/tmp/a.txt", detail="Delete?", remember_scope="/tmp"
+    )
 
     await remembering(write_request)
     await remembering(delete_request)
-    assert len(calls) == 2, "approving a write must not silently approve a delete in the same folder"
+    assert len(calls) == 2, (
+        "approving a write must not silently approve a delete in the same folder"
+    )
 
 
 @pytest.mark.asyncio
 async def test_remembered_approval_does_not_cover_a_different_scope():
     raw, calls = _raw(ConfirmAnswer.ALLOW_FOR_CHAT)
     remembering = RememberingConfirm(raw)
-    first = ConfirmationRequest(action="write", path="/tmp/a.txt", detail="Write?", remember_scope="/tmp")
+    first = ConfirmationRequest(
+        action="write", path="/tmp/a.txt", detail="Write?", remember_scope="/tmp"
+    )
     other_folder = ConfirmationRequest(
         action="write", path="/var/tmp/a.txt", detail="Write?", remember_scope="/var/tmp"
     )
@@ -78,7 +92,9 @@ async def test_remembered_approval_does_not_cover_a_different_scope():
 async def test_deny_is_not_remembered_and_returns_false():
     raw, calls = _raw(ConfirmAnswer.DENY)
     remembering = RememberingConfirm(raw)
-    request = ConfirmationRequest(action="write", path="/tmp/a.txt", detail="Write?", remember_scope="/tmp")
+    request = ConfirmationRequest(
+        action="write", path="/tmp/a.txt", detail="Write?", remember_scope="/tmp"
+    )
 
     assert await remembering(request) is False
     assert await remembering(request) is False
@@ -107,7 +123,10 @@ async def test_action_outside_the_allowlist_is_never_remembered_even_with_a_scop
     raw, calls = _raw(ConfirmAnswer.ALLOW_FOR_CHAT)
     remembering = RememberingConfirm(raw)
     request = ConfirmationRequest(
-        action="fetch_url", path="https://example.com", detail="Fetch?", remember_scope="https://example.com"
+        action="fetch_url",
+        path="https://example.com",
+        detail="Fetch?",
+        remember_scope="https://example.com",
     )
 
     await remembering(request)
@@ -125,7 +144,9 @@ async def test_raw_callback_returning_a_bool_raises_type_error():
         return False
 
     remembering = RememberingConfirm(_bad_raw)
-    request = ConfirmationRequest(action="write", path="/tmp/a.txt", detail="Write?", remember_scope="/tmp")
+    request = ConfirmationRequest(
+        action="write", path="/tmp/a.txt", detail="Write?", remember_scope="/tmp"
+    )
 
     with pytest.raises(TypeError):
         await remembering(request)

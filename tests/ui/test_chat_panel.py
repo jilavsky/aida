@@ -105,10 +105,14 @@ def test_clicking_open_in_editor_emits_the_first_code_blocks_content(qapp):
     panel = ChatPanel()
     panel.handle_event(TextStarted(message_id="m1"))
     panel.handle_event(
-        TextDelta(message_id="m1", text="```python\nprint('a')\n```\nand\n```python\nprint('b')\n```\n")
+        TextDelta(
+            message_id="m1", text="```python\nprint('a')\n```\nand\n```python\nprint('b')\n```\n"
+        )
     )
     panel.handle_event(
-        TextFinished(message_id="m1", text="```python\nprint('a')\n```\nand\n```python\nprint('b')\n```\n")
+        TextFinished(
+            message_id="m1", text="```python\nprint('a')\n```\nand\n```python\nprint('b')\n```\n"
+        )
     )
     bubble = panel.widget_at(0)
 
@@ -175,7 +179,9 @@ def test_tool_call_started_then_finished_updates_same_row(qapp):
     assert isinstance(row, ToolCallRow)
     assert row.is_error is None
 
-    panel.handle_event(ToolCallFinished(call_id="c1", tool_name="get_time", result="now", is_error=False))
+    panel.handle_event(
+        ToolCallFinished(call_id="c1", tool_name="get_time", result="now", is_error=False)
+    )
     assert panel.widget_count == 1  # same row updated, not a second widget
     assert row.is_error is False
 
@@ -194,13 +200,17 @@ def test_text_less_tool_call_turn_produces_no_empty_bubble(qapp):
     panel.handle_event(ToolCallStarted(call_id="c1", tool_name="get_time", arguments={}))
     panel.handle_event(TextFinished(message_id="m1", text=""))
     panel.handle_event(MessageFinished(message_id="m1", stop_reason="tool_calls"))
-    panel.handle_event(ToolCallFinished(call_id="c1", tool_name="get_time", result="now", is_error=False))
+    panel.handle_event(
+        ToolCallFinished(call_id="c1", tool_name="get_time", result="now", is_error=False)
+    )
 
     panel.handle_event(TextStarted(message_id="m2"))
     panel.handle_event(ToolCallStarted(call_id="c2", tool_name="get_date", arguments={}))
     panel.handle_event(TextFinished(message_id="m2", text=""))
     panel.handle_event(MessageFinished(message_id="m2", stop_reason="tool_calls"))
-    panel.handle_event(ToolCallFinished(call_id="c2", tool_name="get_date", result="today", is_error=False))
+    panel.handle_event(
+        ToolCallFinished(call_id="c2", tool_name="get_date", result="today", is_error=False)
+    )
 
     kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
     assert kinds == ["ToolCallRow", "ToolCallRow"]  # no MessageBubble at all
@@ -265,7 +275,9 @@ def test_image_artifact_created_adds_inline_image(qapp, tmp_path: Path):
 
     panel = ChatPanel()
     panel.handle_event(
-        ImageArtifactCreated(artifact_id="a1", call_id="c1", mime_type="image/png", path=str(png_path))
+        ImageArtifactCreated(
+            artifact_id="a1", call_id="c1", mime_type="image/png", path=str(png_path)
+        )
     )
     assert panel.widget_count == 1
     widget = panel.widget_at(0)
@@ -278,7 +290,11 @@ def test_file_artifact_created_adds_file_card(qapp, tmp_path: Path):
     file_path.write_text("# report", encoding="utf-8")
 
     panel = ChatPanel()
-    panel.handle_event(FileArtifactCreated(artifact_id="a1", call_id="c1", path=str(file_path), mime_type="text/markdown"))
+    panel.handle_event(
+        FileArtifactCreated(
+            artifact_id="a1", call_id="c1", path=str(file_path), mime_type="text/markdown"
+        )
+    )
     assert panel.widget_count == 1
     assert isinstance(panel.widget_at(0), FileArtifactCard)
 
@@ -293,7 +309,11 @@ def test_file_artifact_created_python_file_relays_open_in_code_editor(qapp, tmp_
     file_path.write_text("print('hi')", encoding="utf-8")
 
     panel = ChatPanel()
-    panel.handle_event(FileArtifactCreated(artifact_id="a1", call_id="c1", path=str(file_path), mime_type="text/x-python"))
+    panel.handle_event(
+        FileArtifactCreated(
+            artifact_id="a1", call_id="c1", path=str(file_path), mime_type="text/x-python"
+        )
+    )
     card = panel.widget_at(0)
 
     requested = []
@@ -328,8 +348,16 @@ def test_full_turn_with_tool_call_and_image_produces_expected_widget_sequence(qa
     panel.handle_event(TextFinished(message_id="m1", text="let me get that"))
     panel.handle_event(ToolCallStarted(call_id="c1", tool_name="mock-mcp.get_image", arguments={}))
     panel.handle_event(MessageFinished(message_id="m1", stop_reason="tool_calls"))
-    panel.handle_event(ToolCallFinished(call_id="c1", tool_name="mock-mcp.get_image", result="image/png", is_error=False))
-    panel.handle_event(ImageArtifactCreated(artifact_id="a1", call_id="c1", mime_type="image/png", path=str(png_path)))
+    panel.handle_event(
+        ToolCallFinished(
+            call_id="c1", tool_name="mock-mcp.get_image", result="image/png", is_error=False
+        )
+    )
+    panel.handle_event(
+        ImageArtifactCreated(
+            artifact_id="a1", call_id="c1", mime_type="image/png", path=str(png_path)
+        )
+    )
 
     panel.handle_event(TextStarted(message_id="m2"))
     panel.handle_event(TextDelta(message_id="m2", text="here it is"))
@@ -337,7 +365,13 @@ def test_full_turn_with_tool_call_and_image_produces_expected_widget_sequence(qa
     panel.handle_event(MessageFinished(message_id="m2", stop_reason="stop"))
 
     kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
-    assert kinds == ["MessageBubble", "MessageBubble", "ToolCallRow", "InlineImageWidget", "MessageBubble"]
+    assert kinds == [
+        "MessageBubble",
+        "MessageBubble",
+        "ToolCallRow",
+        "InlineImageWidget",
+        "MessageBubble",
+    ]
     assert panel.widget_at(1).text == "let me get that"
     assert panel.widget_at(4).text == "here it is"
 
@@ -372,9 +406,16 @@ def test_load_history_renders_resumed_tool_message_as_a_collapsed_row(qapp):
             Message(
                 role="assistant",
                 content="",
-                tool_calls=[ToolCall(id="call_1", name="get_current_time", arguments={"tz": "utc"})],
+                tool_calls=[
+                    ToolCall(id="call_1", name="get_current_time", arguments={"tz": "utc"})
+                ],
             ),
-            Message(role="tool", content="the time is now", tool_call_id="call_1", name="get_current_time"),
+            Message(
+                role="tool",
+                content="the time is now",
+                tool_call_id="call_1",
+                name="get_current_time",
+            ),
             Message(role="assistant", content="it's noon"),
         ]
     )
@@ -394,7 +435,9 @@ def test_load_history_tool_row_with_unmatched_call_id_gets_empty_arguments(qapp)
     this history (e.g. it was trimmed) must not raise — just show no
     recovered arguments."""
     panel = ChatPanel()
-    panel.load_history([Message(role="tool", content="ok", tool_call_id="call_missing", name="a_tool")])
+    panel.load_history(
+        [Message(role="tool", content="ok", tool_call_id="call_missing", name="a_tool")]
+    )
     row = panel.widget_at(0)
     assert row.arguments == {}
 
@@ -403,13 +446,21 @@ def test_load_history_interleaves_artifacts_at_their_recorded_seq(qapp, tmp_path
     png_path = tmp_path / "plot.png"
     png_path.write_bytes(TINY_PNG_BYTES)
     record = ArtifactRecord(
-        id="a1", conversation_id="c1", call_id="call_1", kind="ImageArtifact",
-        path=str(png_path), mime_type="image/png", created_at="2026-08-22T00:00:00", seq=2,
+        id="a1",
+        conversation_id="c1",
+        call_id="call_1",
+        kind="ImageArtifact",
+        path=str(png_path),
+        mime_type="image/png",
+        created_at="2026-08-22T00:00:00",
+        seq=2,
     )
     messages = [
         Message(role="user", content="plot it"),
         Message(
-            role="assistant", content="", tool_calls=[ToolCall(id="call_1", name="get_plot", arguments={})]
+            role="assistant",
+            content="",
+            tool_calls=[ToolCall(id="call_1", name="get_plot", arguments={})],
         ),
         Message(role="tool", content="[image]", tool_call_id="call_1", name="get_plot"),
         Message(role="assistant", content="here it is"),
@@ -425,11 +476,19 @@ def test_load_history_interleaves_artifacts_at_their_recorded_seq(qapp, tmp_path
 
 def test_load_history_artifact_with_a_missing_file_is_skipped(qapp, tmp_path: Path):
     record = ArtifactRecord(
-        id="a1", conversation_id="c1", call_id="call_1", kind="ImageArtifact",
-        path=str(tmp_path / "gone.png"), mime_type="image/png", created_at="2026-08-22T00:00:00", seq=0,
+        id="a1",
+        conversation_id="c1",
+        call_id="call_1",
+        kind="ImageArtifact",
+        path=str(tmp_path / "gone.png"),
+        mime_type="image/png",
+        created_at="2026-08-22T00:00:00",
+        seq=0,
     )
     panel = ChatPanel()
-    panel.load_history([Message(role="user", content="hi")], seqs=[0], artifacts_by_seq={0: [record]})
+    panel.load_history(
+        [Message(role="user", content="hi")], seqs=[0], artifacts_by_seq={0: [record]}
+    )
     assert panel.widget_count == 1  # just the user bubble — the missing-file artifact was skipped
 
 
@@ -438,7 +497,9 @@ def test_load_history_without_seqs_still_works_exactly_as_before(qapp):
     messages (every existing caller, and any test that predates U6) must
     see unchanged behavior."""
     panel = ChatPanel()
-    panel.load_history([Message(role="user", content="hi"), Message(role="assistant", content="hello!")])
+    panel.load_history(
+        [Message(role="user", content="hi"), Message(role="assistant", content="hello!")]
+    )
     assert panel.widget_count == 2
 
 
@@ -451,24 +512,39 @@ def test_artifact_widget_for_builds_the_right_widget_kind(qapp, tmp_path: Path):
 
     image_widget = panel.artifact_widget_for(
         ArtifactRecord(
-            id="a1", conversation_id="c1", call_id=None, kind="ImageArtifact",
-            path=str(image_path), mime_type="image/png", created_at="2026-08-22T00:00:00",
+            id="a1",
+            conversation_id="c1",
+            call_id=None,
+            kind="ImageArtifact",
+            path=str(image_path),
+            mime_type="image/png",
+            created_at="2026-08-22T00:00:00",
         )
     )
     assert isinstance(image_widget, InlineImageWidget)
 
     file_widget = panel.artifact_widget_for(
         ArtifactRecord(
-            id="a2", conversation_id="c1", call_id=None, kind="FileArtifact",
-            path=str(file_path), mime_type="text/markdown", created_at="2026-08-22T00:00:00",
+            id="a2",
+            conversation_id="c1",
+            call_id=None,
+            kind="FileArtifact",
+            path=str(file_path),
+            mime_type="text/markdown",
+            created_at="2026-08-22T00:00:00",
         )
     )
     assert isinstance(file_widget, FileArtifactCard)
 
     unknown_widget = panel.artifact_widget_for(
         ArtifactRecord(
-            id="a3", conversation_id="c1", call_id=None, kind="TextArtifact",
-            path=None, mime_type=None, created_at="2026-08-22T00:00:00",
+            id="a3",
+            conversation_id="c1",
+            call_id=None,
+            kind="TextArtifact",
+            path=None,
+            mime_type=None,
+            created_at="2026-08-22T00:00:00",
         )
     )
     assert unknown_widget is None
@@ -483,8 +559,13 @@ def test_artifact_widget_for_python_file_relays_open_in_code_editor(qapp, tmp_pa
 
     card = panel.artifact_widget_for(
         ArtifactRecord(
-            id="a1", conversation_id="c1", call_id=None, kind="FileArtifact",
-            path=str(file_path), mime_type="text/x-python", created_at="2026-08-22T00:00:00",
+            id="a1",
+            conversation_id="c1",
+            call_id=None,
+            kind="FileArtifact",
+            path=str(file_path),
+            mime_type="text/x-python",
+            created_at="2026-08-22T00:00:00",
         )
     )
 
@@ -500,7 +581,12 @@ def test_retrieval_performed_renders_a_retrieval_row(qapp):
         RetrievalPerformed(
             passages_by_kb={
                 "usaxs-docs": [
-                    {"text": "Unified Fit models a SAXS curve.", "source_path": "/docs/fit.md", "heading": "Fitting", "score": 0.82}
+                    {
+                        "text": "Unified Fit models a SAXS curve.",
+                        "source_path": "/docs/fit.md",
+                        "heading": "Fitting",
+                        "score": 0.82,
+                    }
                 ]
             }
         )
@@ -555,7 +641,9 @@ def test_streaming_deltas_are_coalesced_into_few_renders(qapp):
     for i in range(200):
         panel.handle_event(TextDelta(message_id="m1", text=f"token{i} "))
 
-    assert len(renders) <= 2, f"{len(renders)} renders for 200 deltas — deltas are not being coalesced"
+    assert len(renders) <= 2, (
+        f"{len(renders)} renders for 200 deltas — deltas are not being coalesced"
+    )
 
 
 def test_the_raw_text_is_always_current_even_before_a_render(qapp):

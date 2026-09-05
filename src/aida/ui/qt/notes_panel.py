@@ -40,7 +40,9 @@ from aida.ui.qt._qt import (
 #: Quiet period after the last keystroke before the notes are persisted.
 _SAVE_DEBOUNCE_MS = 1500
 
-_PLACEHOLDER = "Notes for this workspace — what to do next, what looked wrong, anything to come back to."
+_PLACEHOLDER = (
+    "Notes for this workspace — what to do next, what looked wrong, anything to come back to."
+)
 
 
 class NotesPanel(QGroupBox):

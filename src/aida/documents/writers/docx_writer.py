@@ -27,7 +27,9 @@ class DocxSection:
     rows: list[list[Any]] = field(default_factory=list)
 
 
-def write_docx_document(*, target_dir: Path, filename_stem: str, title: str, sections: list[DocxSection]) -> Path:
+def write_docx_document(
+    *, target_dir: Path, filename_stem: str, title: str, sections: list[DocxSection]
+) -> Path:
     """Writes a ``title`` (document heading, level 0) followed by
     ``sections`` in order to ``target_dir/filename_stem.docx``
     (collision-safe). Returns the final path."""

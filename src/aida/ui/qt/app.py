@@ -35,8 +35,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", default="", help="Provider profile name from providers.yaml")
     parser.add_argument("--workspace", default="", help="Named workspace from workspaces.yaml")
     parser.add_argument("--skills", default="", help="Comma-separated skill names to load")
-    parser.add_argument("--mcp-group", default="", help="Named MCP server group from mcp.json to enable")
-    parser.add_argument("--mcp", default="", help="Comma-separated MCP server names to enable directly")
+    parser.add_argument(
+        "--mcp-group", default="", help="Named MCP server group from mcp.json to enable"
+    )
+    parser.add_argument(
+        "--mcp", default="", help="Comma-separated MCP server names to enable directly"
+    )
     return parser
 
 

@@ -163,7 +163,11 @@ def _manifest_dict(
 
 
 def _write_manifest(
-    workflow: WorkflowConfig, target_folder: str | None, manifest: dict[str, Any], *, finished_at: str
+    workflow: WorkflowConfig,
+    target_folder: str | None,
+    manifest: dict[str, Any],
+    *,
+    finished_at: str,
 ) -> str | None:
     if not target_folder:
         return None
@@ -252,9 +256,16 @@ async def run_workflow(
 
     finished_at = datetime.now(UTC).isoformat()
     manifest = _manifest_dict(
-        workflow, resolved_vars=resolved_vars, origin=origin, started_at=started_at, finished_at=finished_at, result=result
+        workflow,
+        resolved_vars=resolved_vars,
+        origin=origin,
+        started_at=started_at,
+        finished_at=finished_at,
+        result=result,
     )
-    result.manifest_path = _write_manifest(workflow, target_folder, manifest, finished_at=finished_at)
+    result.manifest_path = _write_manifest(
+        workflow, target_folder, manifest, finished_at=finished_at
+    )
     return result
 
 

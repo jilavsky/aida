@@ -142,7 +142,9 @@ class MainWindow(QMainWindow):
         # once everything it can notify is in place.
         self._schedule_failure_count = 0
         self.scheduler_bridge = SchedulerBridge(loop_thread, parent=self)
-        self.scheduler_bridge.activity.quiet_period_seconds = settings.app.scheduler_quiet_period_seconds
+        self.scheduler_bridge.activity.quiet_period_seconds = (
+            settings.app.scheduler_quiet_period_seconds
+        )
         self.scheduler_bridge.run_started.connect(self._on_schedule_run_started)
         self.scheduler_bridge.run_finished.connect(self._on_schedule_run_finished)
         self.scheduler_bridge.deferred_changed.connect(self._on_schedule_deferred_changed)
@@ -438,7 +440,9 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(config_dir())))
 
     def _on_open_records_folder(self) -> None:
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(ensure_records_dir(self.settings.app.records_dir))))
+        QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(ensure_records_dir(self.settings.app.records_dir)))
+        )
 
     def _on_open_conversation_folder(self) -> None:
         """Open the attachment folder for the current conversation.
@@ -458,10 +462,12 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
 
     def _on_open_scratch_folder(self) -> None:
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(ensure_scratch_dir(self.settings.app.scratch_dir))))
+        QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(ensure_scratch_dir(self.settings.app.scratch_dir)))
+        )
 
     def _on_compact_requested(self) -> None:
-        """"Compact Conversation" File-menu action — see
+        """ "Compact Conversation" File-menu action — see
         ChatBridge.compact_context's docstring for why success reuses the
         normal event_received path (same status-bar/context-label handling
         as an automatic mid-turn compaction) while only the "nothing
@@ -510,12 +516,16 @@ class MainWindow(QMainWindow):
         self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
         self.sidebar.rename_requested.connect(self._on_rename_requested)
         self.chat_panel.code_editor_requested.connect(self._on_code_editor_requested)
-        self.chat_panel.open_in_code_editor_requested.connect(self._on_open_in_code_editor_requested)
+        self.chat_panel.open_in_code_editor_requested.connect(
+            self._on_open_in_code_editor_requested
+        )
         self.workspace_selector.workspace_changed.connect(self._on_workspace_changed)
         self.profile_selector.profile_changed.connect(self._on_profile_changed)
         self.folder_display.source_folders_changed.connect(self._on_source_folders_changed)
         self.folder_display.target_folder_changed.connect(self._on_target_folder_changed)
-        self.folder_display.sidecar_folder_name_changed.connect(self._on_sidecar_folder_name_changed)
+        self.folder_display.sidecar_folder_name_changed.connect(
+            self._on_sidecar_folder_name_changed
+        )
         self.folder_display.command_allowlist_changed.connect(self._on_command_allowlist_changed)
         self.folder_display.python_interpreter_changed.connect(self._on_python_interpreter_changed)
         self.folder_display.save_to_workspace_requested.connect(self._on_save_folders_to_workspace)
@@ -792,7 +802,7 @@ class MainWindow(QMainWindow):
         self._context_label.setText(f"Context: {used // 1000:,}k / {budget // 1000:,}k ({pct}%)")
 
     def _save_last_session_selection(self) -> None:
-        """"App does not seem to open with last set of settings": persists
+        """ "App does not seem to open with last set of settings": persists
         the now-active workspace/profile to ``AppConfig`` every time a
         session actually starts, so the *next* launch of ``aida-gui`` (with
         no --workspace/--profile flag — see ``aida.ui.qt.app.main``) reopens
@@ -870,11 +880,19 @@ class MainWindow(QMainWindow):
             # at a window with no active chat and no obvious next step.
             last_profile = self.settings.app.last_profile_name
             profile_name = (
-                last_profile if last_profile in self.settings.providers.profiles else sorted(self.settings.providers.profiles)[0]
+                last_profile
+                if last_profile in self.settings.providers.profiles
+                else sorted(self.settings.providers.profiles)[0]
             )
             last_workspace = self.settings.app.last_workspace_name
-            workspace_name = last_workspace if last_workspace in self.settings.workspaces.workspaces else None
-            self._restart_session(workspace_name=workspace_name, profile_name=profile_name, resume_conversation_id=None)
+            workspace_name = (
+                last_workspace if last_workspace in self.settings.workspaces.workspaces else None
+            )
+            self._restart_session(
+                workspace_name=workspace_name,
+                profile_name=profile_name,
+                resume_conversation_id=None,
+            )
 
     def _on_turn_failed(self, message: str) -> None:
         QMessageBox.warning(self, "Turn Failed", message)
@@ -928,12 +946,18 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001 - belt-and-suspenders: see _read_attachment_for_model's
             # docstring for the real bug this whole two-layer defense is
             # guarding against — a send must never silently vanish.
-            self._logger.error("unexpected error augmenting message with attachments %r: %s", attachments, exc)
-            QMessageBox.warning(self, "Attachment Not Sent", f"Could not prepare the message to send:\n\n{exc}")
+            self._logger.error(
+                "unexpected error augmenting message with attachments %r: %s", attachments, exc
+            )
+            QMessageBox.warning(
+                self, "Attachment Not Sent", f"Could not prepare the message to send:\n\n{exc}"
+            )
             return
         if failures:
             names = ", ".join(Path(p).name for p in failures)
-            self.statusBar().showMessage(f"Could not read attachment(s): {names} — see chat for details", 8000)
+            self.statusBar().showMessage(
+                f"Could not read attachment(s): {names} — see chat for details", 8000
+            )
         # `attachments` are the paths the person actually picked, which is
         # exactly the set that should be kept — a file the *agent* opens
         # with read_file is not copied anywhere (aida.documents.attachments
@@ -954,8 +978,10 @@ class MainWindow(QMainWindow):
             # outside: with the workspace switch on, the natural assumption
             # is that attaching a PDF uploads it.
             workspace = self._current_workspace_config
-            if workspace is not None and workspace.use_ocr and any(
-                path.lower().endswith(".pdf") for path in kept
+            if (
+                workspace is not None
+                and workspace.use_ocr
+                and any(path.lower().endswith(".pdf") for path in kept)
             ):
                 message += ". Ask about its figures to read them (OCR runs then, and asks first)"
             self.statusBar().showMessage(message, 8000)
@@ -1076,7 +1102,9 @@ class MainWindow(QMainWindow):
             artifacts = read_document(
                 path, max_chars=INTERACTIVE_MAX_CHARS, max_pdf_pages=INTERACTIVE_MAX_PDF_PAGES
             )
-            body = "\n\n".join(describe_for_model(a, max_chars=INTERACTIVE_MAX_CHARS) for a in artifacts)
+            body = "\n\n".join(
+                describe_for_model(a, max_chars=INTERACTIVE_MAX_CHARS) for a in artifacts
+            )
         except Exception as exc:  # noqa: BLE001 - see docstring: must never propagate past this method
             self._logger.warning("could not read attachment %s: %s", path, exc, exc_info=True)
             detail = str(exc)
@@ -1085,7 +1113,10 @@ class MainWindow(QMainWindow):
                     " — the optional 'docs' extra may not be installed; run "
                     'pip install -e ".[docs]" (or ".[dev,gui,docs]") in your AIDA environment'
                 )
-            return f"--- Attached file: {name} ---\n[could not read: {detail}]\n--- End of {name} ---", False
+            return (
+                f"--- Attached file: {name} ---\n[could not read: {detail}]\n--- End of {name} ---",
+                False,
+            )
         return f"--- Attached file: {name} ---\n{body}\n--- End of {name} ---", True
 
     def _on_folder_dropped(self, folder: str) -> None:
@@ -1123,7 +1154,8 @@ class MainWindow(QMainWindow):
             sidecar_folder_name=self._current_workspace_config.sidecar_folder_name,
         )
         self.statusBar().showMessage(
-            f"Added {folder} — click 'Save to Workspace', then switch/resume to apply it to this session", 8000
+            f"Added {folder} — click 'Save to Workspace', then switch/resume to apply it to this session",
+            8000,
         )
 
     # --- workspace / profile switching ------------------------------------
@@ -1161,7 +1193,9 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             self._refresh_workspace_selector()  # revert the dropdown to the current workspace
             return
-        self._restart_session(workspace_name=name or None, profile_name=None, resume_conversation_id=None)
+        self._restart_session(
+            workspace_name=name or None, profile_name=None, resume_conversation_id=None
+        )
 
     def _on_new_chat_requested(self) -> None:
         """Bug report: "How do I create a new chat within same Workspace?
@@ -1171,7 +1205,9 @@ class MainWindow(QMainWindow):
         workspace/profile to whatever is already active, instead of
         switching to a different one."""
         session = self.bridge.session
-        workspace_name = self._current_workspace_config.name if self._current_workspace_config else None
+        workspace_name = (
+            self._current_workspace_config.name if self._current_workspace_config else None
+        )
         profile_name = session.profile_name if session is not None else None
         answer = QMessageBox.question(
             self,
@@ -1182,7 +1218,9 @@ class MainWindow(QMainWindow):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self._restart_session(workspace_name=workspace_name, profile_name=profile_name, resume_conversation_id=None)
+        self._restart_session(
+            workspace_name=workspace_name, profile_name=profile_name, resume_conversation_id=None
+        )
 
     def _on_profile_changed(self, name: str) -> None:
         # aida.ui.qt.bridge.ChatBridge.switch_profile already does the
@@ -1217,7 +1255,11 @@ class MainWindow(QMainWindow):
         self._refresh_profile_selector()
 
     def _restart_session(
-        self, *, workspace_name: str | None, profile_name: str | None, resume_conversation_id: str | None
+        self,
+        *,
+        workspace_name: str | None,
+        profile_name: str | None,
+        resume_conversation_id: str | None,
     ) -> None:
         old_bridge = self.bridge
         # Waits for an in-flight start *and* cancels/awaits an in-flight
@@ -1409,7 +1451,9 @@ class MainWindow(QMainWindow):
         # selectors as authoritative for what they do.
         current_profile = self.profile_selector.current_profile()
         self._restart_session(
-            workspace_name=None, profile_name=current_profile or None, resume_conversation_id=conversation_id
+            workspace_name=None,
+            profile_name=current_profile or None,
+            resume_conversation_id=conversation_id,
         )
 
     def _on_delete_requested(self, conversation_id: str) -> None:
@@ -1477,9 +1521,13 @@ class MainWindow(QMainWindow):
         # lean MCP groups" hints the config format was designed for are
         # actually visible (also shown in the Settings dialog's read-only
         # profile list — see settings_dialog._profile_rows).
-        capability_notes = {name: p.capability_notes for name, p in self.settings.providers.profiles.items()}
+        capability_notes = {
+            name: p.capability_notes for name, p in self.settings.providers.profiles.items()
+        }
         self.profile_selector.set_profiles(
-            sorted(self.settings.providers.profiles), current=current, capability_notes=capability_notes
+            sorted(self.settings.providers.profiles),
+            current=current,
+            capability_notes=capability_notes,
         )
 
     def _refresh_mcp_panel(self) -> None:
@@ -1545,7 +1593,9 @@ class MainWindow(QMainWindow):
         in-memory copy of that ``WorkspaceConfig`` until explicitly saved."""
         session = self.bridge.session
         workspace_name = session.recorder.workspace_name if session and session.recorder else None
-        self._current_workspace_config = get_workspace(self.settings, workspace_name) if workspace_name else None
+        self._current_workspace_config = (
+            get_workspace(self.settings, workspace_name) if workspace_name else None
+        )
         if self._current_workspace_config is not None:
             self.folder_display.set_folders(
                 source_folders=self._current_workspace_config.source_folders,
@@ -1557,7 +1607,9 @@ class MainWindow(QMainWindow):
                 interpreter=self._current_workspace_config.python_interpreter,
             )
         else:
-            self.folder_display.set_folders(source_folders=[], target_folder=None, sidecar_folder_name="figures")
+            self.folder_display.set_folders(
+                source_folders=[], target_folder=None, sidecar_folder_name="figures"
+            )
             self.folder_display.set_commands(patterns=[], interpreter=None)
 
     def _on_source_folders_changed(self, folders: list[str]) -> None:
@@ -1585,7 +1637,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("No active workspace to save folders to", 5000)
             return
         save_workspace(self.settings, self._current_workspace_config)
-        self.statusBar().showMessage(f"Saved folders to workspace {self._current_workspace_config.name}", 5000)
+        self.statusBar().showMessage(
+            f"Saved folders to workspace {self._current_workspace_config.name}", 5000
+        )
 
     # --- quick tasks (B14) ---------------------------------------------------
 
@@ -1598,7 +1652,10 @@ class MainWindow(QMainWindow):
         nowhere to save a new one without an active workspace."""
         if self._current_workspace_config is not None:
             self.quick_tasks_panel.set_tasks(
-                [QuickTaskData(name=t.name, text=t.text) for t in self._current_workspace_config.quick_tasks]
+                [
+                    QuickTaskData(name=t.name, text=t.text)
+                    for t in self._current_workspace_config.quick_tasks
+                ]
             )
         else:
             self.quick_tasks_panel.set_tasks([])
@@ -1639,7 +1696,9 @@ class MainWindow(QMainWindow):
             )
             self._logger.warning("quick task edit discarded: no active workspace")
             return
-        self._current_workspace_config.quick_tasks = [QuickTask(name=t.name, text=t.text) for t in tasks]
+        self._current_workspace_config.quick_tasks = [
+            QuickTask(name=t.name, text=t.text) for t in tasks
+        ]
         save_workspace(self.settings, self._current_workspace_config)
         self._logger.info(
             "saved %d quick task(s) to workspace %s",
@@ -1675,7 +1734,9 @@ class MainWindow(QMainWindow):
         self._current_workspace_config.notes = text
         save_workspace(self.settings, self._current_workspace_config)
         self._logger.info(
-            "saved %d chars of notes to workspace %s", len(text), self._current_workspace_config.name
+            "saved %d chars of notes to workspace %s",
+            len(text),
+            self._current_workspace_config.name,
         )
 
     # --- collapsible session panels ------------------------------------------
@@ -1750,7 +1811,9 @@ class MainWindow(QMainWindow):
             return
         prompts = [m.content for m in session.messages if m.role == "user" and m.content.strip()]
         if not prompts:
-            QMessageBox.information(self, "Nothing to Save", "This conversation has no user messages yet.")
+            QMessageBox.information(
+                self, "Nothing to Save", "This conversation has no user messages yet."
+            )
             return
         workspace_name = session.recorder.workspace_name if session.recorder else None
         draft = WorkflowConfig(
@@ -1758,19 +1821,25 @@ class MainWindow(QMainWindow):
             workspace=workspace_name or "",
             steps=[WorkflowStep(prompt=text) for text in prompts],
         )
-        dialog = WorkflowFormDialog(settings=self.settings, workflow=draft, is_edit=False, parent=self)
+        dialog = WorkflowFormDialog(
+            settings=self.settings, workflow=draft, is_edit=False, parent=self
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         config = dialog.result_config()
         if config.name in list_workflow_names():
-            QMessageBox.warning(self, "Already Exists", f"A workflow named {config.name!r} already exists.")
+            QMessageBox.warning(
+                self, "Already Exists", f"A workflow named {config.name!r} already exists."
+            )
             return
         save_workflow(config)
         self.statusBar().showMessage(f"Saved workflow {config.name!r}", 8000)
 
     # --- code editor (Phase 9) -------------------------------------------------
 
-    def open_code_editor_dialog(self, *, initial_text: str = "", initial_path: str | None = None) -> None:
+    def open_code_editor_dialog(
+        self, *, initial_text: str = "", initial_path: str | None = None
+    ) -> None:
         """Opens blank from the toolbar action, pre-filled with a message's
         first code block via ``_on_code_editor_requested`` (a copy of its
         text, no file behind it), or — bug report: "code editor has no way
@@ -1787,7 +1856,9 @@ class MainWindow(QMainWindow):
             initial_path=initial_path,
             saved_scripts_dir=workspace.resolved_saved_scripts_dir() if workspace else None,
             python_interpreter=workspace.python_interpreter if workspace else None,
-            script_timeout_seconds=workspace.script_timeout_seconds if workspace else DEFAULT_RUN_TIMEOUT_SECONDS,
+            script_timeout_seconds=workspace.script_timeout_seconds
+            if workspace
+            else DEFAULT_RUN_TIMEOUT_SECONDS,
             bridge=self.bridge,
             parent=self,
         )
@@ -1923,10 +1994,14 @@ class MainWindow(QMainWindow):
         # CLI/GUI workspace editor (relaxed_mode_warning_if_newly_enabled)
         # — flipping the *default* every new workspace inherits deserves
         # the same heads-up as flipping one workspace's own setting.
-        warning = relaxed_mode_warning_if_newly_enabled(previous_safety_mode, self.settings.app.default_safety_mode)
+        warning = relaxed_mode_warning_if_newly_enabled(
+            previous_safety_mode, self.settings.app.default_safety_mode
+        )
         if warning:
             QMessageBox.warning(self, "Relaxed Mode", warning)
-        apply_font_size(QApplication.instance(), self.settings.app)  # takes effect immediately, no restart
+        apply_font_size(
+            QApplication.instance(), self.settings.app
+        )  # takes effect immediately, no restart
         # Bug report: the chat transcript's font stayed fixed while every
         # other panel picked up the new size immediately — see
         # ChatPanel.refresh_fonts' docstring for why the transcript needs
@@ -1948,7 +2023,9 @@ class MainWindow(QMainWindow):
         # Same "takes effect immediately" treatment: the scheduler reads
         # its quiet period from this live object every tick, so a changed
         # value applies to the very next one rather than at next launch.
-        self.scheduler_bridge.activity.quiet_period_seconds = self.settings.app.scheduler_quiet_period_seconds
+        self.scheduler_bridge.activity.quiet_period_seconds = (
+            self.settings.app.scheduler_quiet_period_seconds
+        )
         save_app_config(self.settings.app)
 
     # --- shutdown ----------------------------------------------------------

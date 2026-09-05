@@ -234,13 +234,21 @@ def _block_preview(block: Any) -> dict[str, Any]:
         }
 
     if block_type == "resource_link":
-        return {"type": "resource_link", "name": getattr(block, "name", None), "uri": str(getattr(block, "uri", ""))}
+        return {
+            "type": "resource_link",
+            "name": getattr(block, "name", None),
+            "uri": str(getattr(block, "uri", "")),
+        }
 
     if block_type == "resource":
         resource = getattr(block, "resource", None)
         text = getattr(resource, "text", None)
         if text is not None:
-            return {"type": "resource", "mime_type": getattr(resource, "mimeType", None), "text": text[:_PREVIEW_TEXT_CHARS]}
+            return {
+                "type": "resource",
+                "mime_type": getattr(resource, "mimeType", None),
+                "text": text[:_PREVIEW_TEXT_CHARS],
+            }
         blob = getattr(resource, "blob", None)
         return {
             "type": "resource",
@@ -338,7 +346,10 @@ class McpServerHandle:
         # quietly missing a credential it needs. Scratch TMPDIR/TEMP/TMP
         # defaults go first so the server config's own `env` (if it sets
         # any of these explicitly) always wins.
-        self._resolved_env = {**_scratch_env_defaults(self._cwd), **resolve_env_secrets(self.config.env)}
+        self._resolved_env = {
+            **_scratch_env_defaults(self._cwd),
+            **resolve_env_secrets(self.config.env),
+        }
 
         self._stop_event = asyncio.Event()
         self._start_error = None
@@ -480,15 +491,24 @@ class McpServerHandle:
                 timeout=self.call_timeout_seconds,
             )
         except TimeoutError as exc:
-            self._record_call(tool_name, time.monotonic() - start, is_error=True,
-                               error_message=f"timed out after {self.call_timeout_seconds}s", arguments=arguments)
+            self._record_call(
+                tool_name,
+                time.monotonic() - start,
+                is_error=True,
+                error_message=f"timed out after {self.call_timeout_seconds}s",
+                arguments=arguments,
+            )
             raise McpServerError(
                 f"mcp server {self.config.name!r} tool {tool_name!r} timed out "
                 f"after {self.call_timeout_seconds}s"
             ) from exc
         except Exception as exc:
             self._record_call(
-                tool_name, time.monotonic() - start, is_error=True, error_message=str(exc), arguments=arguments
+                tool_name,
+                time.monotonic() - start,
+                is_error=True,
+                error_message=str(exc),
+                arguments=arguments,
             )
             raise McpServerError(
                 f"mcp server {self.config.name!r} tool {tool_name!r} call failed: {exc}"

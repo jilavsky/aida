@@ -25,7 +25,9 @@ def _settings() -> Settings:
         name="mock-profile", kind="openai_compat", model="mock-model"
     )
     settings.workspaces = WorkspacesConfig(
-        workspaces={"use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", safety="relaxed")}
+        workspaces={
+            "use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", safety="relaxed")
+        }
     )
     return settings
 
@@ -37,7 +39,9 @@ def test_list_reports_no_workflows(aida_home: Path, records_home: Path, capsys):
 
 
 def test_list_shows_stored_workflow(aida_home: Path, records_home: Path, capsys):
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
     code = main(["list"])
     out = capsys.readouterr().out
     assert code == EXIT_OK
@@ -57,7 +61,10 @@ def test_show_known_workflow_prints_steps(aida_home: Path, records_home: Path, c
             name="daily",
             workspace="use-ws",
             description="a test workflow",
-            steps=[WorkflowStep(prompt="step one"), WorkflowStep(prompt="step two", expect_files=["*.png"])],
+            steps=[
+                WorkflowStep(prompt="step one"),
+                WorkflowStep(prompt="step two", expect_files=["*.png"]),
+            ],
         )
     )
     code = main(["show", "daily"])
@@ -71,7 +78,9 @@ def test_show_known_workflow_prints_steps(aida_home: Path, records_home: Path, c
 
 def test_validate_ok(aida_home: Path, records_home: Path, capsys, monkeypatch):
     monkeypatch.setattr("aida.cli.workflow_cmds.load_settings", _settings)
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
 
     code = main(["validate", "daily"])
 
@@ -79,9 +88,13 @@ def test_validate_ok(aida_home: Path, records_home: Path, capsys, monkeypatch):
     assert "OK" in capsys.readouterr().out
 
 
-def test_validate_reports_unknown_workspace(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_validate_reports_unknown_workspace(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workflow_cmds.load_settings", _settings)
-    save_workflow(WorkflowConfig(name="daily", workspace="does-not-exist", steps=[WorkflowStep(prompt="go")]))
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="does-not-exist", steps=[WorkflowStep(prompt="go")])
+    )
 
     code = main(["validate", "daily"])
 
@@ -91,7 +104,11 @@ def test_validate_reports_unknown_workspace(aida_home: Path, records_home: Path,
 
 def test_validate_reports_missing_var(aida_home: Path, records_home: Path, capsys, monkeypatch):
     monkeypatch.setattr("aida.cli.workflow_cmds.load_settings", _settings)
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go to {folder}")]))
+    save_workflow(
+        WorkflowConfig(
+            name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go to {folder}")]
+        )
+    )
 
     code = main(["validate", "daily"])
 
@@ -101,7 +118,11 @@ def test_validate_reports_missing_var(aida_home: Path, records_home: Path, capsy
 
 def test_validate_accepts_var_override(aida_home: Path, records_home: Path, capsys, monkeypatch):
     monkeypatch.setattr("aida.cli.workflow_cmds.load_settings", _settings)
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go to {folder}")]))
+    save_workflow(
+        WorkflowConfig(
+            name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go to {folder}")]
+        )
+    )
 
     code = main(["validate", "daily", "--var", "folder=/data"])
 
@@ -110,8 +131,12 @@ def test_validate_accepts_var_override(aida_home: Path, records_home: Path, caps
 
 def test_run_reports_success(aida_home: Path, records_home: Path, capsys, monkeypatch):
     monkeypatch.setattr("aida.cli.workflow_cmds.load_settings", _settings)
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
 
     code = main(["run", "daily", "--json"])
 
@@ -123,8 +148,12 @@ def test_run_reports_success(aida_home: Path, records_home: Path, capsys, monkey
 
 def test_run_reports_failure_exit_code(aida_home: Path, records_home: Path, capsys, monkeypatch):
     monkeypatch.setattr("aida.cli.workflow_cmds.load_settings", _settings)
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(error="boom")]))
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(error="boom")])
+    )
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
 
     code = main(["run", "daily", "--json"])
 
@@ -133,7 +162,9 @@ def test_run_reports_failure_exit_code(aida_home: Path, records_home: Path, caps
     assert payload["ok"] is False
 
 
-def test_run_missing_workflow_is_config_error(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_run_missing_workflow_is_config_error(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workflow_cmds.load_settings", _settings)
 
     code = main(["run", "does-not-exist"])
@@ -141,9 +172,13 @@ def test_run_missing_workflow_is_config_error(aida_home: Path, records_home: Pat
     assert code == EXIT_CONFIG_ERROR
 
 
-def test_run_bad_var_syntax_is_config_error(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_run_bad_var_syntax_is_config_error(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workflow_cmds.load_settings", _settings)
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
 
     code = main(["run", "daily", "--var", "not-a-kv-pair"])
 

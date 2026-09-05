@@ -34,7 +34,9 @@ def _settings(schedules: SchedulesConfig | None = None) -> Settings:
         name="mock-profile", kind="openai_compat", model="mock-model"
     )
     settings.workspaces = WorkspacesConfig(
-        workspaces={"use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", safety="relaxed")}
+        workspaces={
+            "use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", safety="relaxed")
+        }
     )
     if schedules is not None:
         settings.schedules = schedules
@@ -47,10 +49,14 @@ def _workflow(name: str = "daily") -> None:
 
 @pytest.mark.asyncio
 async def test_disabled_schedule_never_runs(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     _workflow()
     settings = _settings(
-        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1m", enabled=False)})
+        SchedulesConfig(
+            schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1m", enabled=False)}
+        )
     )
 
     ran = await run_due_schedules(settings, now=datetime(2026, 9, 2, 10, 0))
@@ -59,14 +65,22 @@ async def test_disabled_schedule_never_runs(monkeypatch, aida_home: Path, record
 
 
 @pytest.mark.asyncio
-async def test_never_fired_every_schedule_runs_immediately(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+async def test_never_fired_every_schedule_runs_immediately(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")})
+    )
 
     finished = []
     ran = await run_due_schedules(
-        settings, now=datetime(2026, 9, 2, 10, 0), on_run_finished=lambda *args: finished.append(args)
+        settings,
+        now=datetime(2026, 9, 2, 10, 0),
+        on_run_finished=lambda *args: finished.append(args),
     )
 
     assert ran == ["s"]
@@ -76,9 +90,13 @@ async def test_never_fired_every_schedule_runs_immediately(monkeypatch, aida_hom
 
 @pytest.mark.asyncio
 async def test_not_due_schedule_is_skipped(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="4h")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="4h")})
+    )
     now = datetime(2026, 9, 2, 10, 0)
 
     first = await run_due_schedules(settings, now=now)
@@ -90,9 +108,14 @@ async def test_not_due_schedule_is_skipped(monkeypatch, aida_home: Path, records
 
 @pytest.mark.asyncio
 async def test_catch_up_fires_once_not_repeatedly(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")] * 5))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="done")] * 5),
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="4h")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="4h")})
+    )
     now = datetime(2026, 9, 2, 10, 0)
 
     await run_due_schedules(settings, now=now)  # fires (never fired before)
@@ -103,9 +126,13 @@ async def test_catch_up_fires_once_not_repeatedly(monkeypatch, aida_home: Path, 
 
 
 @pytest.mark.asyncio
-async def test_malformed_at_every_is_skipped_without_crashing(monkeypatch, aida_home: Path, records_home: Path):
+async def test_malformed_at_every_is_skipped_without_crashing(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily")}))  # neither set
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily")})
+    )  # neither set
 
     ran = await run_due_schedules(settings, now=datetime(2026, 9, 2, 10, 0))
 
@@ -113,14 +140,20 @@ async def test_malformed_at_every_is_skipped_without_crashing(monkeypatch, aida_
 
 
 @pytest.mark.asyncio
-async def test_missing_workflow_records_config_error_and_calls_on_run_finished(aida_home: Path, records_home: Path):
+async def test_missing_workflow_records_config_error_and_calls_on_run_finished(
+    aida_home: Path, records_home: Path
+):
     settings = _settings(
-        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="does-not-exist", every="1h")})
+        SchedulesConfig(
+            schedules={"s": ScheduleEntry(name="s", workflow="does-not-exist", every="1h")}
+        )
     )
 
     finished = []
     ran = await run_due_schedules(
-        settings, now=datetime(2026, 9, 2, 10, 0), on_run_finished=lambda *args: finished.append(args)
+        settings,
+        now=datetime(2026, 9, 2, 10, 0),
+        on_run_finished=lambda *args: finished.append(args),
     )
 
     assert ran == ["s"]
@@ -135,14 +168,22 @@ async def test_missing_workflow_records_config_error_and_calls_on_run_finished(a
 
 
 @pytest.mark.asyncio
-async def test_workflow_agent_error_records_failed_status(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(error="boom")]))
+async def test_workflow_agent_error_records_failed_status(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(error="boom")])
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")})
+    )
 
     finished = []
     await run_due_schedules(
-        settings, now=datetime(2026, 9, 2, 10, 0), on_run_finished=lambda *args: finished.append(args)
+        settings,
+        now=datetime(2026, 9, 2, 10, 0),
+        on_run_finished=lambda *args: finished.append(args),
     )
 
     assert finished[0][1] is False
@@ -154,10 +195,16 @@ async def test_workflow_agent_error_records_failed_status(monkeypatch, aida_home
 
 
 @pytest.mark.asyncio
-async def test_on_run_started_called_before_on_run_finished(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+async def test_on_run_started_called_before_on_run_finished(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")})
+    )
 
     events = []
     await run_due_schedules(
@@ -171,10 +218,16 @@ async def test_on_run_started_called_before_on_run_finished(monkeypatch, aida_ho
 
 
 @pytest.mark.asyncio
-async def test_tick_skipped_entirely_when_lock_held_elsewhere(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+async def test_tick_skipped_entirely_when_lock_held_elsewhere(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")})
+    )
 
     from aida.config.paths import scheduler_lock_path
 
@@ -186,10 +239,16 @@ async def test_tick_skipped_entirely_when_lock_held_elsewhere(monkeypatch, aida_
 
 
 @pytest.mark.asyncio
-async def test_scheduler_loop_runs_a_tick_and_stops_on_stop_event(monkeypatch, aida_home: Path, records_home: Path):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+async def test_scheduler_loop_runs_a_tick_and_stops_on_stop_event(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")})
+    )
     monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", lambda: settings)
 
     stop_event = asyncio.Event()
@@ -200,7 +259,9 @@ async def test_scheduler_loop_runs_a_tick_and_stops_on_stop_event(monkeypatch, a
         stop_event.set()
 
     await asyncio.wait_for(
-        scheduler_loop(poll_interval_seconds=60, on_run_finished=_on_finished, stop_event=stop_event),
+        scheduler_loop(
+            poll_interval_seconds=60, on_run_finished=_on_finished, stop_event=stop_event
+        ),
         timeout=5.0,
     )
 
@@ -276,14 +337,20 @@ def test_user_activity_state_note_activity_resets_the_clock():
 
 
 @pytest.mark.asyncio
-async def test_due_schedule_is_deferred_not_skipped(monkeypatch, aida_home: Path, records_home: Path):
+async def test_due_schedule_is_deferred_not_skipped(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     """Deferral writes nothing to ScheduleRunStore, so the job stays due
     and runs at the first opportunity rather than being lost."""
     from aida.core.scheduler_runtime import DeferralRequest
 
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")})
+    )
     now = datetime(2026, 9, 2, 10, 0)
 
     deferred: dict[str, str] = {}
@@ -306,30 +373,44 @@ async def test_due_schedule_is_deferred_not_skipped(monkeypatch, aida_home: Path
 
 
 @pytest.mark.asyncio
-async def test_soft_deferral_is_waived_past_the_cap(monkeypatch, aida_home: Path, records_home: Path):
+async def test_soft_deferral_is_waived_past_the_cap(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     from aida.core.scheduler_runtime import DeferralRequest
 
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", at="07:00")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", at="07:00")})
+    )
     settings.app.scheduler_max_defer_seconds = 3600
 
     # Due since 07:00; it is now 09:00, so it has waited 2h — past the cap.
     ran = await run_due_schedules(
-        settings, now=datetime(2026, 9, 2, 9, 0), should_defer=lambda: DeferralRequest("you just typed something")
+        settings,
+        now=datetime(2026, 9, 2, 9, 0),
+        should_defer=lambda: DeferralRequest("you just typed something"),
     )
     assert ran == ["s"]
 
 
 @pytest.mark.asyncio
-async def test_hard_deferral_is_never_waived_past_the_cap(monkeypatch, aida_home: Path, records_home: Path):
+async def test_hard_deferral_is_never_waived_past_the_cap(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     """A live turn blocks a run at any age — starting a second session on
     top of a streaming one is the collision this all exists to prevent."""
     from aida.core.scheduler_runtime import DeferralRequest
 
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", at="07:00")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", at="07:00")})
+    )
     settings.app.scheduler_max_defer_seconds = 3600
 
     ran = await run_due_schedules(
@@ -344,9 +425,13 @@ async def test_hard_deferral_is_never_waived_past_the_cap(monkeypatch, aida_home
 async def test_cap_of_zero_defers_indefinitely(monkeypatch, aida_home: Path, records_home: Path):
     from aida.core.scheduler_runtime import DeferralRequest
 
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", at="07:00")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", at="07:00")})
+    )
     settings.app.scheduler_max_defer_seconds = 0  # never force
 
     ran = await run_due_schedules(
@@ -356,7 +441,9 @@ async def test_cap_of_zero_defers_indefinitely(monkeypatch, aida_home: Path, rec
 
 
 @pytest.mark.asyncio
-async def test_fire_schedule_now_is_refused_while_the_lock_is_held(aida_home: Path, records_home: Path):
+async def test_fire_schedule_now_is_refused_while_the_lock_is_held(
+    aida_home: Path, records_home: Path
+):
     """Run Now must not land on top of a scheduled run already going —
     the one overlap the cross-process lock exists to prevent."""
     from aida.config.paths import scheduler_lock_path
@@ -364,7 +451,9 @@ async def test_fire_schedule_now_is_refused_while_the_lock_is_held(aida_home: Pa
     from aida.core.scheduler_runtime import fire_schedule_now
 
     _workflow()
-    settings = _settings(SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")}))
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")})
+    )
     entry = settings.schedules.schedules["s"]
 
     finished = []

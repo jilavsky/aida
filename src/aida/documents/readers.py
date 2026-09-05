@@ -82,10 +82,36 @@ _TRUNCATION_NOTE = "\n... [truncated]"
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 _TEXT_SUFFIXES = {
-    ".txt", ".md", ".markdown", ".rst", ".log",
-    ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".c", ".h", ".cpp", ".hpp",
-    ".rs", ".go", ".rb", ".sh", ".bash", ".yaml", ".yml", ".toml", ".ini",
-    ".cfg", ".xml", ".html", ".htm", ".css", ".sql",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".rst",
+    ".log",
+    ".py",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".java",
+    ".c",
+    ".h",
+    ".cpp",
+    ".hpp",
+    ".rs",
+    ".go",
+    ".rb",
+    ".sh",
+    ".bash",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".xml",
+    ".html",
+    ".htm",
+    ".css",
+    ".sql",
 }
 
 #: Below this many non-whitespace characters *per page*, a PDF is treated as
@@ -124,7 +150,11 @@ def _count_embedded_media(path: Path) -> int:
         return 0
     try:
         with zipfile.ZipFile(path) as archive:
-            return sum(1 for name in archive.namelist() if name.startswith(prefix) and not name.endswith("/"))
+            return sum(
+                1
+                for name in archive.namelist()
+                if name.startswith(prefix) and not name.endswith("/")
+            )
     except (OSError, zipfile.BadZipFile):
         # Not fatal: the reader itself has already parsed this file, so a
         # failure here means only that the count is unavailable. Say
@@ -138,7 +168,9 @@ def _dropped_images_note(count: int) -> str:
     the module docstring). Empty string when there is nothing to say."""
     if count <= 0:
         return ""
-    subject = "1 embedded image, which was" if count == 1 else f"{count} embedded images, which were"
+    subject = (
+        "1 embedded image, which was" if count == 1 else f"{count} embedded images, which were"
+    )
     return (
         f"\n\n[This document contains {subject} not extracted — only its text "
         f"is shown above. If it was attached to this conversation, "
@@ -155,7 +187,9 @@ def _pdf_content_note(*, pages_read: int, text_chars: int, image_count: int) -> 
     if pages_read and text_chars < _SCANNED_TEXT_CHARS_PER_PAGE * pages_read:
         if image_count:
             pages = "1 page" if pages_read == 1 else f"{pages_read} pages"
-            images = "1 image, which was" if image_count == 1 else f"{image_count} images, which were"
+            images = (
+                "1 image, which was" if image_count == 1 else f"{image_count} images, which were"
+            )
             return (
                 f"\n\n[No usable text layer — this appears to be a scanned or "
                 f"image-only PDF. Its {pages} hold {images} not extracted. "
@@ -167,7 +201,6 @@ def _pdf_content_note(*, pages_read: int, text_chars: int, image_count: int) -> 
             "empty or damaged. Treat it as unread rather than blank.]"
         )
     return _dropped_images_note(image_count)
-
 
 
 class UnsupportedDocumentFormatError(Exception):
@@ -187,7 +220,9 @@ def _read_text_file(path: Path, *, max_chars: int) -> list[Artifact]:
     return [TextArtifact(text=_truncate(text, max_chars))]
 
 
-def _read_csv_file(path: Path, *, max_rows: int = DEFAULT_MAX_CSV_ROWS, **_ignored) -> list[Artifact]:
+def _read_csv_file(
+    path: Path, *, max_rows: int = DEFAULT_MAX_CSV_ROWS, **_ignored
+) -> list[Artifact]:
     with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
         reader = csv.reader(fh)
         rows = list(reader)
@@ -196,7 +231,9 @@ def _read_csv_file(path: Path, *, max_rows: int = DEFAULT_MAX_CSV_ROWS, **_ignor
     columns, data_rows = rows[0], rows[1:]
     truncated = data_rows[:max_rows]
     if len(data_rows) > max_rows:
-        truncated.append([f"... [{len(data_rows) - max_rows} more rows truncated]"] + [""] * (len(columns) - 1))
+        truncated.append(
+            [f"... [{len(data_rows) - max_rows} more rows truncated]"] + [""] * (len(columns) - 1)
+        )
     return [TableArtifact(columns=columns, rows=truncated)]
 
 
@@ -216,7 +253,9 @@ def _read_image_file(path: Path, **_ignored) -> list[Artifact]:
     return [ImageArtifact(data=b"", mime_type=mime_type, path=str(path), filename=path.name)]
 
 
-def _read_pdf_file(path: Path, *, max_chars: int, max_pdf_pages: int = DEFAULT_MAX_PDF_PAGES, **_ignored) -> list[Artifact]:
+def _read_pdf_file(
+    path: Path, *, max_chars: int, max_pdf_pages: int = DEFAULT_MAX_PDF_PAGES, **_ignored
+) -> list[Artifact]:
     import pymupdf
 
     parts: list[str] = []
@@ -244,7 +283,14 @@ def _read_pdf_file(path: Path, *, max_chars: int, max_pdf_pages: int = DEFAULT_M
     # Appended *after* truncation, deliberately: a note explaining what was
     # dropped is worthless if it is itself the thing that gets dropped. It
     # costs a few dozen characters over the budget in the worst case.
-    return [TextArtifact(text=body + _pdf_content_note(pages_read=pages_read, text_chars=text_chars, image_count=len(image_xrefs)))]
+    return [
+        TextArtifact(
+            text=body
+            + _pdf_content_note(
+                pages_read=pages_read, text_chars=text_chars, image_count=len(image_xrefs)
+            )
+        )
+    ]
 
 
 def _read_docx_file(path: Path, *, max_chars: int, **_ignored) -> list[Artifact]:
@@ -279,15 +325,27 @@ def _read_xlsx_file(
                 artifacts.append(TableArtifact(columns=[sheet_name], rows=[]))
                 continue
             header = [str(c) if c is not None else "" for c in all_rows[0]]
-            data_rows = [[("" if c is None else c) for c in row] for row in all_rows[1 : max_rows_per_sheet + 1]]
+            data_rows = [
+                [("" if c is None else c) for c in row]
+                for row in all_rows[1 : max_rows_per_sheet + 1]
+            ]
             if len(all_rows) - 1 > max_rows_per_sheet:
                 data_rows.append(
-                    [f"... [{len(all_rows) - 1 - max_rows_per_sheet} more rows truncated]"] + [""] * (len(header) - 1)
+                    [f"... [{len(all_rows) - 1 - max_rows_per_sheet} more rows truncated]"]
+                    + [""] * (len(header) - 1)
                 )
-            artifacts.append(TableArtifact(columns=[f"{sheet_name}: {c}" if header else sheet_name for c in header] or [sheet_name], rows=data_rows))
+            artifacts.append(
+                TableArtifact(
+                    columns=[f"{sheet_name}: {c}" if header else sheet_name for c in header]
+                    or [sheet_name],
+                    rows=data_rows,
+                )
+            )
         if len(workbook.sheetnames) > max_sheets:
             artifacts.append(
-                TextArtifact(text=f"... [{len(workbook.sheetnames) - max_sheets} more sheet(s) truncated]")
+                TextArtifact(
+                    text=f"... [{len(workbook.sheetnames) - max_sheets} more sheet(s) truncated]"
+                )
             )
         # Its own artifact rather than appended to a table's text: these are
         # TableArtifacts, whose whole point is that they are not flattened
@@ -306,7 +364,11 @@ def _read_pptx_file(path: Path, *, max_chars: int, **_ignored) -> list[Artifact]
     presentation = Presentation(str(path))
     parts: list[str] = []
     for index, slide in enumerate(presentation.slides):
-        texts = [shape.text_frame.text for shape in slide.shapes if shape.has_text_frame and shape.text_frame.text]
+        texts = [
+            shape.text_frame.text
+            for shape in slide.shapes
+            if shape.has_text_frame and shape.text_frame.text
+        ]
         parts.append(f"--- slide {index + 1} ---\n" + "\n".join(texts))
     body = _truncate("\n\n".join(parts), max_chars)
     return [TextArtifact(text=body + _dropped_images_note(_count_embedded_media(path)))]
@@ -324,7 +386,9 @@ _READERS: dict[str, Callable[..., list[Artifact]]] = {
 
 def is_supported(path: str | Path) -> bool:
     suffix = Path(path).suffix.lower()
-    return suffix in _READERS or suffix in _TEXT_SUFFIXES or suffix in _IMAGE_SUFFIXES or suffix == ""
+    return (
+        suffix in _READERS or suffix in _TEXT_SUFFIXES or suffix in _IMAGE_SUFFIXES or suffix == ""
+    )
 
 
 def is_image_path(path: str | Path) -> bool:
@@ -359,7 +423,11 @@ def read_document(
         return _read_image_file(p)
     if suffix in _READERS:
         return _READERS[suffix](
-            p, max_chars=max_chars, max_pdf_pages=max_pdf_pages, max_sheets=max_sheets, max_rows_per_sheet=max_rows_per_sheet
+            p,
+            max_chars=max_chars,
+            max_pdf_pages=max_pdf_pages,
+            max_sheets=max_sheets,
+            max_rows_per_sheet=max_rows_per_sheet,
         )
     if suffix in _TEXT_SUFFIXES or suffix == "":
         # No extension (README, Makefile, ...) is treated as plain text

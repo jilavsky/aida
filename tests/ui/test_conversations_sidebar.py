@@ -108,7 +108,8 @@ def test_delete_with_no_selection_is_a_noop(qapp, monkeypatch):
     sidebar.set_conversations([])
     called = []
     monkeypatch.setattr(
-        "aida.ui.qt.conversations_sidebar.QMessageBox.question", lambda *a, **kw: called.append(True)
+        "aida.ui.qt.conversations_sidebar.QMessageBox.question",
+        lambda *a, **kw: called.append(True),
     )
     sidebar._on_delete_clicked()
     assert called == []
@@ -164,7 +165,8 @@ def test_rename_with_no_selection_is_a_noop(qapp, monkeypatch):
     sidebar.set_conversations([])
     called = []
     monkeypatch.setattr(
-        "aida.ui.qt.conversations_sidebar.QInputDialog.getText", staticmethod(lambda *a, **kw: called.append(True))
+        "aida.ui.qt.conversations_sidebar.QInputDialog.getText",
+        staticmethod(lambda *a, **kw: called.append(True)),
     )
     sidebar._on_rename_clicked()
     assert called == []
@@ -186,7 +188,8 @@ def test_cleanup_dialog_accept_via_button_box(qapp):
 def test_cleanup_button_emits_cleanup_requested(qapp, monkeypatch):
     sidebar = ConversationsSidebar()
     monkeypatch.setattr(
-        "aida.ui.qt.conversations_sidebar.CleanupDialog.get_cutoff_days", staticmethod(lambda *a, **kw: 14)
+        "aida.ui.qt.conversations_sidebar.CleanupDialog.get_cutoff_days",
+        staticmethod(lambda *a, **kw: 14),
     )
     cleaned = []
     sidebar.cleanup_requested.connect(cleaned.append)
@@ -197,7 +200,8 @@ def test_cleanup_button_emits_cleanup_requested(qapp, monkeypatch):
 def test_cleanup_button_cancelled_does_not_emit(qapp, monkeypatch):
     sidebar = ConversationsSidebar()
     monkeypatch.setattr(
-        "aida.ui.qt.conversations_sidebar.CleanupDialog.get_cutoff_days", staticmethod(lambda *a, **kw: None)
+        "aida.ui.qt.conversations_sidebar.CleanupDialog.get_cutoff_days",
+        staticmethod(lambda *a, **kw: None),
     )
     cleaned = []
     sidebar.cleanup_requested.connect(cleaned.append)
@@ -233,7 +237,9 @@ def test_row_label_falls_back_to_the_raw_string_for_unparseable_timestamps(qapp)
 
 def test_search_filters_by_title_case_insensitively(qapp):
     sidebar = ConversationsSidebar()
-    sidebar.set_conversations([_summary("id1", title="USAXS beamtime notes"), _summary("id2", title="other chat")])
+    sidebar.set_conversations(
+        [_summary("id1", title="USAXS beamtime notes"), _summary("id2", title="other chat")]
+    )
     sidebar._search_edit.setText("usaxs")
     assert sidebar.count == 1
     assert sidebar._ids_by_row == ["id1"]
@@ -487,7 +493,13 @@ def test_refreshing_conversations_preserves_an_active_filter(qapp):
 
     # A refresh with a fresh set of summaries (e.g. after a rename) — the
     # filter text itself is untouched, so it must still apply.
-    sidebar.set_conversations([_summary("id1", title="alpha"), _summary("id2", title="beta"), _summary("id3", title="alpha two")])
+    sidebar.set_conversations(
+        [
+            _summary("id1", title="alpha"),
+            _summary("id2", title="beta"),
+            _summary("id3", title="alpha two"),
+        ]
+    )
     assert sidebar.count == 2
     assert sidebar._search_edit.text() == "alpha"
 

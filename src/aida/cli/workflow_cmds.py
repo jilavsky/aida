@@ -48,7 +48,9 @@ def cmd_list(_args: argparse.Namespace) -> int:
             workflow = load_workflow(name)
         except FileNotFoundError:
             continue  # deleted between the list and load calls
-        print(f"{name:<24} workspace={workflow.workspace or '(none)':<16} steps={len(workflow.steps)}")
+        print(
+            f"{name:<24} workspace={workflow.workspace or '(none)':<16} steps={len(workflow.steps)}"
+        )
     return EXIT_OK
 
 
@@ -210,7 +212,9 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="preapproved_tools",
         help="A namespaced MCP tool name to approve, in addition to the workflow's own preapproved_tools",
     )
-    run.add_argument("--json", action="store_true", help="Emit a machine-readable JSON result summary")
+    run.add_argument(
+        "--json", action="store_true", help="Emit a machine-readable JSON result summary"
+    )
 
     return parser
 

@@ -133,7 +133,9 @@ def find_pyirena_mcp() -> list[PyirenaMcpCandidate]:
         if key in seen:
             return
         seen.add(key)
-        candidates.append(PyirenaMcpCandidate(command=str(command), args=list(args or []), source=source))
+        candidates.append(
+            PyirenaMcpCandidate(command=str(command), args=list(args or []), source=source)
+        )
 
     own_bin = Path(sys.executable).parent / _SCRIPT_NAME
     own_script_found = own_bin.is_file()

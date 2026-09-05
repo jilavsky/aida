@@ -76,7 +76,9 @@ def test_step_form_rejects_blank_prompt(qapp, monkeypatch):
 def test_workflow_form_starts_with_seeded_steps(qapp, aida_home: Path):
     settings = _settings_with_workspace(aida_home)
     workflow = WorkflowConfig(
-        name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="step one"), WorkflowStep(prompt="step two")]
+        name="daily",
+        workspace="use-ws",
+        steps=[WorkflowStep(prompt="step one"), WorkflowStep(prompt="step two")],
     )
     dialog = WorkflowFormDialog(settings=settings, workflow=workflow)
     assert dialog._steps_list.count() == 2
@@ -89,7 +91,9 @@ def test_workflow_form_add_step_via_stub(qapp, aida_home: Path, monkeypatch):
 
     step_form = StepFormDialog()
     step_form._prompt_edit.setPlainText("new step")
-    monkeypatch.setattr("aida.ui.qt.workflow_management_dialog.StepFormDialog", lambda **kw: step_form)
+    monkeypatch.setattr(
+        "aida.ui.qt.workflow_management_dialog.StepFormDialog", lambda **kw: step_form
+    )
     monkeypatch.setattr(step_form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
 
     dialog._on_add_step()
@@ -100,7 +104,9 @@ def test_workflow_form_add_step_via_stub(qapp, aida_home: Path, monkeypatch):
 
 def test_workflow_form_remove_step(aida_home: Path):
     settings = load_settings()
-    dialog = WorkflowFormDialog(settings=settings, workflow=WorkflowConfig(name="w", steps=[WorkflowStep(prompt="a")]))
+    dialog = WorkflowFormDialog(
+        settings=settings, workflow=WorkflowConfig(name="w", steps=[WorkflowStep(prompt="a")])
+    )
     dialog._steps_list.setCurrentRow(0)
     dialog._on_remove_step()
     assert dialog._steps_list.count() == 0
@@ -207,7 +213,9 @@ def test_workflow_form_rejects_no_steps(qapp, aida_home: Path, monkeypatch):
 
 def test_dialog_lists_stored_workflows(qapp, aida_home: Path):
     settings = _settings_with_workspace(aida_home)
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
     dialog = WorkflowManagementDialog(settings)
     assert dialog._workflow_list.count() == 1
     assert dialog._workflow_list.item(0).text() == "daily"
@@ -223,7 +231,9 @@ def test_detail_panel_shows_steps(qapp, aida_home: Path):
     settings = _settings_with_workspace(aida_home)
     save_workflow(
         WorkflowConfig(
-            name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="reduce"), WorkflowStep(prompt="plot")]
+            name="daily",
+            workspace="use-ws",
+            steps=[WorkflowStep(prompt="reduce"), WorkflowStep(prompt="plot")],
         )
     )
     dialog = WorkflowManagementDialog(settings)
@@ -243,7 +253,9 @@ def test_add_workflow_persists_to_disk(qapp, aida_home: Path, monkeypatch):
     form._name_edit.setText("daily")
     form._workspace_combo.setCurrentText("use-ws")
     form._steps = [WorkflowStep(prompt="go")]
-    monkeypatch.setattr("aida.ui.qt.workflow_management_dialog.WorkflowFormDialog", lambda **kw: form)
+    monkeypatch.setattr(
+        "aida.ui.qt.workflow_management_dialog.WorkflowFormDialog", lambda **kw: form
+    )
     monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
 
     dialog._on_add()
@@ -256,14 +268,18 @@ def test_add_workflow_persists_to_disk(qapp, aida_home: Path, monkeypatch):
 
 def test_add_workflow_rejects_a_duplicate_name(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_workspace(aida_home)
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
     dialog = WorkflowManagementDialog(settings)
 
     form = WorkflowFormDialog(settings=settings)
     form._name_edit.setText("daily")
     form._workspace_combo.setCurrentText("use-ws")
     form._steps = [WorkflowStep(prompt="go")]
-    monkeypatch.setattr("aida.ui.qt.workflow_management_dialog.WorkflowFormDialog", lambda **kw: form)
+    monkeypatch.setattr(
+        "aida.ui.qt.workflow_management_dialog.WorkflowFormDialog", lambda **kw: form
+    )
     monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
     warned = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(True))
@@ -276,13 +292,17 @@ def test_add_workflow_rejects_a_duplicate_name(qapp, aida_home: Path, monkeypatc
 
 def test_edit_workflow_persists_changes(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_workspace(aida_home)
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
     dialog = WorkflowManagementDialog(settings)
     dialog._workflow_list.setCurrentRow(0)
 
     form = WorkflowFormDialog(settings=settings, workflow=load_workflow("daily"))
     form._description_edit.setText("updated")
-    monkeypatch.setattr("aida.ui.qt.workflow_management_dialog.WorkflowFormDialog", lambda **kw: form)
+    monkeypatch.setattr(
+        "aida.ui.qt.workflow_management_dialog.WorkflowFormDialog", lambda **kw: form
+    )
     monkeypatch.setattr(form.__class__, "exec", lambda self: QDialog.DialogCode.Accepted)
 
     dialog._on_edit()
@@ -292,7 +312,9 @@ def test_edit_workflow_persists_changes(qapp, aida_home: Path, monkeypatch):
 
 def test_remove_workflow_deletes_the_file(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_workspace(aida_home)
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
     dialog = WorkflowManagementDialog(settings)
     dialog._workflow_list.setCurrentRow(0)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
@@ -304,7 +326,9 @@ def test_remove_workflow_deletes_the_file(qapp, aida_home: Path, monkeypatch):
 
 def test_remove_workflow_cancelled_keeps_it(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_workspace(aida_home)
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
     dialog = WorkflowManagementDialog(settings)
     dialog._workflow_list.setCurrentRow(0)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)

@@ -135,7 +135,9 @@ def _coerce_value(value: Any, subschema: dict[str, Any], *, path: str) -> tuple[
     return value, None
 
 
-def _coerce_container(value: Any, subschema: dict[str, Any], *, path: str) -> tuple[Any, str | None]:
+def _coerce_container(
+    value: Any, subschema: dict[str, Any], *, path: str
+) -> tuple[Any, str | None]:
     if isinstance(value, dict) and isinstance(subschema.get("properties"), dict):
         properties = subschema["properties"]
         fixed = dict(value)
@@ -164,7 +166,9 @@ def _coerce_container(value: Any, subschema: dict[str, Any], *, path: str) -> tu
     return value, None
 
 
-def coerce_arguments(arguments: dict[str, Any], schema: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+def coerce_arguments(
+    arguments: dict[str, Any], schema: dict[str, Any]
+) -> tuple[dict[str, Any], list[str]]:
     """Best-effort repair of ``arguments`` (a tool call's arguments dict, as
     parsed from the model's own JSON) against ``schema`` (the tool's
     ``inputSchema``/``ToolSchema.parameters`` — JSON Schema shape,

@@ -57,7 +57,9 @@ def _mock_config(*, name: str = "mock-mcp", command: str | None = None) -> McpSe
 
 @asynccontextmanager
 async def _running_handle(**kwargs) -> AsyncIterator[McpServerHandle]:
-    h = McpServerHandle(_mock_config(), call_timeout_seconds=kwargs.pop("call_timeout_seconds", 5.0))
+    h = McpServerHandle(
+        _mock_config(), call_timeout_seconds=kwargs.pop("call_timeout_seconds", 5.0)
+    )
     try:
         await h.start()
         yield h
@@ -277,7 +279,7 @@ def test_resolve_env_secrets_resolves_keyring_prefix(monkeypatch):
 
 
 def test_resolve_env_secrets_resolves_secret_prefix(monkeypatch):
-    """"secret:" is accepted too — mirrors provider profiles' own
+    """ "secret:" is accepted too — mirrors provider profiles' own
     secret_ref terminology, rather than only the "keyring:" spelling."""
     _use_memory_backend(monkeypatch)
     secrets.set_secret("my-token", "sk-real-value")
@@ -444,7 +446,9 @@ def _quiet_server_config(name: str = "quiet-mcp") -> McpServerConfig:
 
 @pytest.mark.asyncio
 async def test_start_times_out_on_a_server_that_never_answers_initialize():
-    handle = McpServerHandle(_quiet_server_config(), startup_timeout_seconds=1.0, stop_timeout_seconds=2.0)
+    handle = McpServerHandle(
+        _quiet_server_config(), startup_timeout_seconds=1.0, stop_timeout_seconds=2.0
+    )
     try:
         with pytest.raises(McpServerError) as excinfo:
             await handle.start()
@@ -459,7 +463,9 @@ async def test_start_times_out_on_a_server_that_never_answers_initialize():
 async def test_stop_returns_after_a_startup_timeout():
     """stop() must stay callable — and *return* — after a wedged start, since
     that is exactly the path McpManager/ChatBridge take on the way out."""
-    handle = McpServerHandle(_quiet_server_config(), startup_timeout_seconds=1.0, stop_timeout_seconds=2.0)
+    handle = McpServerHandle(
+        _quiet_server_config(), startup_timeout_seconds=1.0, stop_timeout_seconds=2.0
+    )
     with pytest.raises(McpServerError):
         await handle.start()
 

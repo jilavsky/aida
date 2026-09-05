@@ -193,7 +193,11 @@ class McpManager:
         no ``instructions`` are simply omitted, not included as empty
         strings — ``aida.cli.chat.start_session`` folds each entry into the
         session's system context alongside skills text."""
-        return {name: handle.instructions for name, handle in self._handles.items() if handle.instructions}
+        return {
+            name: handle.instructions
+            for name, handle in self._handles.items()
+            if handle.instructions
+        }
 
     async def start_all(self) -> dict[str, NativeTool]:
         """Launch every enabled server and return namespaced ``NativeTool``s
@@ -214,7 +218,9 @@ class McpManager:
         first.
         """
 
-        async def _start_one(name: str, config: McpServerConfig) -> tuple[McpServerHandle, dict[str, NativeTool]] | None:
+        async def _start_one(
+            name: str, config: McpServerConfig
+        ) -> tuple[McpServerHandle, dict[str, NativeTool]] | None:
             handle = McpServerHandle(config, **self._handle_kwargs())
             try:
                 mcp_tools = await handle.start()
@@ -223,7 +229,9 @@ class McpManager:
                 return None
             return handle, self._tools_for(name, config, mcp_tools)
 
-        results = await asyncio.gather(*(_start_one(name, config) for name, config in self._configs.items()))
+        results = await asyncio.gather(
+            *(_start_one(name, config) for name, config in self._configs.items())
+        )
 
         tools: dict[str, NativeTool] = {}
         for name, result in zip(self._configs.keys(), results, strict=True):
@@ -333,7 +341,7 @@ class McpManager:
         self.start_errors.pop(name, None)
 
     async def test_connection(self, config: McpServerConfig) -> ConnectionTestResult:
-        """"Test connection" button: initialize + list tools, report
+        """ "Test connection" button: initialize + list tools, report
         timing. Reuses an already-running handle for the same name
         instantly (spinning up a second subprocess against a server that's
         already connected risks confusing a stdio server expecting one
@@ -341,14 +349,18 @@ class McpManager:
         purely to measure reachability, without registering it anywhere."""
         existing = self._handles.get(config.name)
         if existing is not None:
-            return ConnectionTestResult(ok=True, tool_count=len(existing.list_tools()), elapsed_seconds=0.0)
+            return ConnectionTestResult(
+                ok=True, tool_count=len(existing.list_tools()), elapsed_seconds=0.0
+            )
 
         handle = McpServerHandle(config, **self._handle_kwargs())
         start = time.monotonic()
         try:
             tools = await handle.start()
         except McpServerError as exc:
-            return ConnectionTestResult(ok=False, elapsed_seconds=time.monotonic() - start, error=str(exc))
+            return ConnectionTestResult(
+                ok=False, elapsed_seconds=time.monotonic() - start, error=str(exc)
+            )
         elapsed = time.monotonic() - start
         await handle.stop()
         return ConnectionTestResult(ok=True, tool_count=len(tools), elapsed_seconds=elapsed)
@@ -430,7 +442,9 @@ class McpManager:
                 # contract McpServerError gets a few lines down, so every
                 # path through this method returns rather than relying on
                 # AgentLoop's outer try/except to paper over an escape.
-                return ToolResult(content=f"{namespaced} declined by user (confirm-before-run)", is_error=True)
+                return ToolResult(
+                    content=f"{namespaced} declined by user (confirm-before-run)", is_error=True
+                )
 
         try:
             result = await handle.call_tool(tool_name, arguments)

@@ -89,7 +89,9 @@ def cmd_server_show(args: argparse.Namespace) -> int:
     settings = load_settings()
     server = _get_server(settings, args.name)
     if server is None:
-        print(f"Unknown MCP server {args.name!r}. Configured: {', '.join(sorted(settings.mcp.servers)) or '(none)'}")
+        print(
+            f"Unknown MCP server {args.name!r}. Configured: {', '.join(sorted(settings.mcp.servers)) or '(none)'}"
+        )
         return 1
     _print_server(server)
     return 0
@@ -192,11 +194,15 @@ def cmd_server_enable_tool(args: argparse.Namespace) -> int:
 
 
 def cmd_server_confirm_tool(args: argparse.Namespace) -> int:
-    return _toggle_tool(args, field="confirm_tools", add=True, verb="Marked confirm-before-run for tool")
+    return _toggle_tool(
+        args, field="confirm_tools", add=True, verb="Marked confirm-before-run for tool"
+    )
 
 
 def cmd_server_unconfirm_tool(args: argparse.Namespace) -> int:
-    return _toggle_tool(args, field="confirm_tools", add=False, verb="Cleared confirm-before-run for tool")
+    return _toggle_tool(
+        args, field="confirm_tools", add=False, verb="Cleared confirm-before-run for tool"
+    )
 
 
 # --- group subcommands -------------------------------------------------------
@@ -218,7 +224,9 @@ def cmd_group_add(args: argparse.Namespace) -> int:
     settings = load_settings()
     server_names = _split_csv(args.servers)
     if not server_names:
-        print("--servers must name at least one existing server — a group with zero members can't be created.")
+        print(
+            "--servers must name at least one existing server — a group with zero members can't be created."
+        )
         return 1
     unknown = [name for name in server_names if name not in settings.mcp.servers]
     if unknown:
@@ -227,7 +235,9 @@ def cmd_group_add(args: argparse.Namespace) -> int:
     updated = add_group(settings.mcp, args.name, server_names)
     save_mcp_config(settings.mcp)
     if updated == 0:
-        print(f"Group {args.name!r} already includes all of: {', '.join(server_names)} — nothing to do.")
+        print(
+            f"Group {args.name!r} already includes all of: {', '.join(server_names)} — nothing to do."
+        )
         return 0
     print(f"Added group {args.name!r} to {updated} of {len(server_names)} requested server(s).")
     return 0
@@ -278,7 +288,9 @@ def cmd_import(args: argparse.Namespace) -> int:
     print(f"  added:       {', '.join(result.added) or '(none)'}")
     print(f"  overwritten: {', '.join(result.overwritten) or '(none)'}")
     if result.skipped:
-        print(f"  skipped (already configured — pass --overwrite {','.join(result.skipped)} to replace):")
+        print(
+            f"  skipped (already configured — pass --overwrite {','.join(result.skipped)} to replace):"
+        )
         print(f"    {', '.join(result.skipped)}")
     return 0
 
@@ -303,17 +315,29 @@ def cmd_test(args: argparse.Namespace) -> int:
 
 
 def _add_server_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -> None:
-    parser.add_argument("--command", default="" if defaults else None, help="Executable to launch (stdio transport)")
     parser.add_argument(
-        "--arg", dest="args_list", action="append", default=None,
+        "--command", default="" if defaults else None, help="Executable to launch (stdio transport)"
+    )
+    parser.add_argument(
+        "--arg",
+        dest="args_list",
+        action="append",
+        default=None,
         help="One command-line argument, in order (repeatable, e.g. --arg --stdio)",
     )
     parser.add_argument(
-        "--env", dest="env_list", action="append", default=None,
+        "--env",
+        dest="env_list",
+        action="append",
+        default=None,
         help="KEY=VALUE environment variable (repeatable)",
     )
-    parser.add_argument("--groups", default="" if defaults else None, help="Comma-separated group names")
-    parser.add_argument("--skills", default="" if defaults else None, help="Comma-separated skill names")
+    parser.add_argument(
+        "--groups", default="" if defaults else None, help="Comma-separated group names"
+    )
+    parser.add_argument(
+        "--skills", default="" if defaults else None, help="Comma-separated skill names"
+    )
 
 
 def cmd_add_pyirena(args: argparse.Namespace) -> int:
@@ -353,7 +377,9 @@ def cmd_add_pyirena(args: argparse.Namespace) -> int:
 
     existing = _get_server(settings, args.name)
     if existing is not None and not args.force:
-        print(f"An MCP server named {args.name!r} is already configured (command: {existing.command}).")
+        print(
+            f"An MCP server named {args.name!r} is already configured (command: {existing.command})."
+        )
         print("Re-run with --force to replace it, or --name OTHER to add a second one.")
         return 1
 
@@ -427,7 +453,9 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument("name")
     _add_server_field_args(add, defaults=True)
 
-    edit = server_sub.add_parser("edit", help="Update fields of an existing server (unset flags are left as-is)")
+    edit = server_sub.add_parser(
+        "edit", help="Update fields of an existing server (unset flags are left as-is)"
+    )
     edit.add_argument("name")
     _add_server_field_args(edit, defaults=False)
 
@@ -438,39 +466,57 @@ def _build_parser() -> argparse.ArgumentParser:
     for sub_name, handler_desc in [
         ("disable-tool", "the model never sees this tool's schema"),
         ("enable-tool", "undo disable-tool"),
-        ("confirm-tool", "require approval before every call to this tool, even in a relaxed workspace"),
+        (
+            "confirm-tool",
+            "require approval before every call to this tool, even in a relaxed workspace",
+        ),
         ("unconfirm-tool", "undo confirm-tool"),
     ]:
         p = server_sub.add_parser(sub_name, help=handler_desc)
         p.add_argument("name", help="Server name")
         p.add_argument("tool", help="Tool name (unnamespaced — as the server itself calls it)")
 
-    group = sub.add_parser("group", help="Manage MCP server groups (derived from each server's own groups: list)")
+    group = sub.add_parser(
+        "group", help="Manage MCP server groups (derived from each server's own groups: list)"
+    )
     group_sub = group.add_subparsers(dest="group_subcommand", required=True)
     group_sub.add_parser("list", help="List every group and its member servers")
     group_add = group_sub.add_parser(
         "add", help="Create (or add members to) a group — a group with zero members can't exist"
     )
     group_add.add_argument("name")
-    group_add.add_argument("--servers", required=True, help="Comma-separated names of existing servers to add")
-    rename = group_sub.add_parser("rename", help="Rename a group across every server that references it")
+    group_add.add_argument(
+        "--servers", required=True, help="Comma-separated names of existing servers to add"
+    )
+    rename = group_sub.add_parser(
+        "rename", help="Rename a group across every server that references it"
+    )
     rename.add_argument("old")
     rename.add_argument("new")
-    delete = group_sub.add_parser("delete", help="Remove a group from every server that references it")
+    delete = group_sub.add_parser(
+        "delete", help="Remove a group from every server that references it"
+    )
     delete.add_argument("name")
 
     import_parser = sub.add_parser(
-        "import", help="Import servers from a standard mcp.json-shaped file (merge without clobbering)"
+        "import",
+        help="Import servers from a standard mcp.json-shaped file (merge without clobbering)",
     )
     import_parser.add_argument("path", help="Path to a mcp.json (or Claude Desktop config) file")
     import_parser.add_argument(
-        "--overwrite", default="", help="Comma-separated server names to replace on conflict (default: skip conflicts)"
+        "--overwrite",
+        default="",
+        help="Comma-separated server names to replace on conflict (default: skip conflicts)",
     )
 
-    test = sub.add_parser("test", help="Test-connect to one configured server: initialize + list tools, report timing")
+    test = sub.add_parser(
+        "test", help="Test-connect to one configured server: initialize + list tools, report timing"
+    )
     test.add_argument("name")
 
-    sub.add_parser("find-pyirena", help="Report where pyirena-mcp is installed, without changing anything")
+    sub.add_parser(
+        "find-pyirena", help="Report where pyirena-mcp is installed, without changing anything"
+    )
 
     add_pyirena = sub.add_parser(
         "add-pyirena", help="Find pyIrena's MCP server and configure it in one step"
@@ -486,7 +532,9 @@ def _build_parser() -> argparse.ArgumentParser:
     add_pyirena.add_argument("--name", default=DEFAULT_SERVER_NAME, help="Server name in mcp.json")
     add_pyirena.add_argument("--group", default=DEFAULT_GROUP, help="MCP group to put it in")
     add_pyirena.add_argument(
-        "--first", action="store_true", help="Accept the first candidate without asking when several are found"
+        "--first",
+        action="store_true",
+        help="Accept the first candidate without asking when several are found",
     )
     add_pyirena.add_argument(
         "--force", action="store_true", help="Replace an existing server config with the same name"

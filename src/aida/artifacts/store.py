@@ -145,7 +145,9 @@ class ArtifactStore:
         return dest
 
     def _record(self, artifact_id: str, kind: str, path: str | None, mime_type: str | None) -> None:
-        self._metadata.append(ArtifactMetadata(id=artifact_id, kind=kind, path=path, mime_type=mime_type))
+        self._metadata.append(
+            ArtifactMetadata(id=artifact_id, kind=kind, path=path, mime_type=mime_type)
+        )
 
     def list_metadata(self) -> list[ArtifactMetadata]:
         return list(self._metadata)

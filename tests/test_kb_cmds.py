@@ -41,11 +41,16 @@ def test_show_unknown(aida_home: Path, capsys):
 def test_add_persists_to_disk(aida_home: Path, capsys):
     rc = main(
         [
-            "add", "usaxs-docs",
-            "--source-folders", "/data/usaxs,/data/obsidian",
-            "--embedding-profile", "embed-profile",
-            "--chunk-size", "500",
-            "--chunk-overlap", "50",
+            "add",
+            "usaxs-docs",
+            "--source-folders",
+            "/data/usaxs,/data/obsidian",
+            "--embedding-profile",
+            "embed-profile",
+            "--chunk-size",
+            "500",
+            "--chunk-overlap",
+            "50",
         ]
     )
     assert rc == 0
@@ -77,7 +82,16 @@ def test_add_defaults_chunk_size_and_overlap(aida_home: Path):
 
 
 def test_show_known(aida_home: Path, capsys):
-    main(["add", "usaxs-docs", "--source-folders", "/data/usaxs", "--embedding-profile", "embed-profile"])
+    main(
+        [
+            "add",
+            "usaxs-docs",
+            "--source-folders",
+            "/data/usaxs",
+            "--embedding-profile",
+            "embed-profile",
+        ]
+    )
     rc = main(["show", "usaxs-docs"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -95,7 +109,18 @@ def test_edit_unknown(aida_home: Path, capsys):
 
 
 def test_edit_only_overwrites_passed_fields(aida_home: Path):
-    main(["add", "usaxs-docs", "--source-folders", "/old", "--embedding-profile", "profile-a", "--chunk-size", "800"])
+    main(
+        [
+            "add",
+            "usaxs-docs",
+            "--source-folders",
+            "/old",
+            "--embedding-profile",
+            "profile-a",
+            "--chunk-size",
+            "800",
+        ]
+    )
     main(["edit", "usaxs-docs", "--embedding-profile", "profile-b"])
 
     kb = load_knowledge_config(aida_home).knowledge_bases["usaxs-docs"]
@@ -163,7 +188,9 @@ def test_remove_with_delete_index_on_a_never_built_kb_does_not_raise(aida_home: 
 
 def _configure_embedding_profile(aida_home: Path, name: str = "embed-profile") -> None:
     settings = load_settings()
-    settings.providers.embedding_profiles[name] = EmbeddingProfile(name=name, kind="openai_compat", model="embed-model")
+    settings.providers.embedding_profiles[name] = EmbeddingProfile(
+        name=name, kind="openai_compat", model="embed-model"
+    )
     save_providers_config(settings.providers, aida_home)
 
 
@@ -201,12 +228,25 @@ def test_build_with_unknown_embedding_profile(aida_home: Path, capsys):
     assert "unknown embedding profile" in capsys.readouterr().out
 
 
-def test_build_ingests_the_corpus_and_reports_counts(monkeypatch, aida_home: Path, tmp_path: Path, capsys):
-    monkeypatch.setattr("aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings())
+def test_build_ingests_the_corpus_and_reports_counts(
+    monkeypatch, aida_home: Path, tmp_path: Path, capsys
+):
+    monkeypatch.setattr(
+        "aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
     _configure_embedding_profile(aida_home)
     corpus = _make_corpus(tmp_path)
 
-    main(["add", "usaxs-docs", "--source-folders", str(corpus), "--embedding-profile", "embed-profile"])
+    main(
+        [
+            "add",
+            "usaxs-docs",
+            "--source-folders",
+            str(corpus),
+            "--embedding-profile",
+            "embed-profile",
+        ]
+    )
     rc = main(["build", "usaxs-docs"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -219,11 +259,24 @@ def test_build_ingests_the_corpus_and_reports_counts(monkeypatch, aida_home: Pat
         conn.close()
 
 
-def test_update_only_reembeds_the_changed_file(monkeypatch, aida_home: Path, tmp_path: Path, capsys):
-    monkeypatch.setattr("aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings())
+def test_update_only_reembeds_the_changed_file(
+    monkeypatch, aida_home: Path, tmp_path: Path, capsys
+):
+    monkeypatch.setattr(
+        "aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
     _configure_embedding_profile(aida_home)
     corpus = _make_corpus(tmp_path)
-    main(["add", "usaxs-docs", "--source-folders", str(corpus), "--embedding-profile", "embed-profile"])
+    main(
+        [
+            "add",
+            "usaxs-docs",
+            "--source-folders",
+            str(corpus),
+            "--embedding-profile",
+            "embed-profile",
+        ]
+    )
     main(["build", "usaxs-docs"])
     capsys.readouterr()
 
@@ -235,10 +288,21 @@ def test_update_only_reembeds_the_changed_file(monkeypatch, aida_home: Path, tmp
 
 
 def test_list_shows_chunk_counts_after_build(monkeypatch, aida_home: Path, tmp_path: Path, capsys):
-    monkeypatch.setattr("aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings())
+    monkeypatch.setattr(
+        "aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
     _configure_embedding_profile(aida_home)
     corpus = _make_corpus(tmp_path)
-    main(["add", "usaxs-docs", "--source-folders", str(corpus), "--embedding-profile", "embed-profile"])
+    main(
+        [
+            "add",
+            "usaxs-docs",
+            "--source-folders",
+            str(corpus),
+            "--embedding-profile",
+            "embed-profile",
+        ]
+    )
     main(["build", "usaxs-docs"])
     capsys.readouterr()
 
@@ -250,10 +314,21 @@ def test_list_shows_chunk_counts_after_build(monkeypatch, aida_home: Path, tmp_p
 
 
 def test_query_returns_ranked_passages(monkeypatch, aida_home: Path, tmp_path: Path, capsys):
-    monkeypatch.setattr("aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings())
+    monkeypatch.setattr(
+        "aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
     _configure_embedding_profile(aida_home)
     corpus = _make_corpus(tmp_path)
-    main(["add", "usaxs-docs", "--source-folders", str(corpus), "--embedding-profile", "embed-profile"])
+    main(
+        [
+            "add",
+            "usaxs-docs",
+            "--source-folders",
+            str(corpus),
+            "--embedding-profile",
+            "embed-profile",
+        ]
+    )
     main(["build", "usaxs-docs"])
     capsys.readouterr()
 
@@ -265,7 +340,9 @@ def test_query_returns_ranked_passages(monkeypatch, aida_home: Path, tmp_path: P
 
 
 def test_query_on_empty_index_reports_no_passages(monkeypatch, aida_home: Path, capsys):
-    monkeypatch.setattr("aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings())
+    monkeypatch.setattr(
+        "aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
     _configure_embedding_profile(aida_home)
     main(["add", "usaxs-docs", "--embedding-profile", "embed-profile"])
 
@@ -289,12 +366,25 @@ def test_add_normalizes_a_file_uri_source_folder(aida_home: Path):
     assert kb.source_folders == ["/data/usaxs"]
 
 
-def test_build_warns_about_a_missing_source_folder(monkeypatch, aida_home: Path, tmp_path: Path, capsys):
-    monkeypatch.setattr("aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings())
+def test_build_warns_about_a_missing_source_folder(
+    monkeypatch, aida_home: Path, tmp_path: Path, capsys
+):
+    monkeypatch.setattr(
+        "aida.cli.kb_cmds.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
     _configure_embedding_profile(aida_home)
     missing = tmp_path / "does-not-exist"
 
-    main(["add", "usaxs-docs", "--source-folders", str(missing), "--embedding-profile", "embed-profile"])
+    main(
+        [
+            "add",
+            "usaxs-docs",
+            "--source-folders",
+            str(missing),
+            "--embedding-profile",
+            "embed-profile",
+        ]
+    )
     rc = main(["build", "usaxs-docs"])
     assert rc == 0
     out = capsys.readouterr().out

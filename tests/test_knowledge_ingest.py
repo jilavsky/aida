@@ -67,7 +67,9 @@ async def test_rebuild_ingests_a_single_file_source_entry(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_rebuild_reports_a_single_file_entry_with_a_non_ingestible_suffix_as_missing(tmp_path: Path):
+async def test_rebuild_reports_a_single_file_entry_with_a_non_ingestible_suffix_as_missing(
+    tmp_path: Path,
+):
     corpus = tmp_path / "corpus"
     corpus.mkdir()
     image = corpus / "diagram.png"
@@ -239,7 +241,9 @@ def test_normalize_source_folder_strips_leading_slash_from_windows_drive_uri():
     real absolute path instead of silently failing the same way the
     un-normalized URI did before this module existed."""
     assert normalize_source_folder("file:///C:/Users/jan/notes") == "C:/Users/jan/notes"
-    assert normalize_source_folder("file:///C:/Users/jan/USAXS%20notes") == "C:/Users/jan/USAXS notes"
+    assert (
+        normalize_source_folder("file:///C:/Users/jan/USAXS%20notes") == "C:/Users/jan/USAXS notes"
+    )
 
 
 def test_normalize_source_folder_never_silently_falls_back_to_the_cwd():
@@ -304,7 +308,9 @@ async def test_rebuild_with_one_good_and_one_missing_folder_ingests_the_good_one
     conn.close()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="chmod-based permission denial isn't meaningful on Windows")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="chmod-based permission denial isn't meaningful on Windows"
+)
 @pytest.mark.asyncio
 async def test_rebuild_reports_a_folder_it_cannot_actually_list(tmp_path: Path):
     """A folder can pass `is_dir()` while still being unreadable — the case

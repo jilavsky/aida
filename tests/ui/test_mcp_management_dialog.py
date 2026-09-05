@@ -39,7 +39,9 @@ MOCK_SERVER_PATH = Path(__file__).resolve().parents[1] / "mock_mcp_server.py"
 
 def _settings_with_profile(name: str = "mock-profile") -> Settings:
     settings = load_settings()
-    settings.providers.profiles[name] = ProviderProfile(name=name, kind="openai_compat", model="mock-model")
+    settings.providers.profiles[name] = ProviderProfile(
+        name=name, kind="openai_compat", model="mock-model"
+    )
     return settings
 
 
@@ -103,11 +105,17 @@ def test_edit_server_via_dialog_action(qapp, aida_home: Path):
     from aida.config.settings import load_mcp_config
 
     settings = load_settings()
-    settings.mcp = McpConfig(servers={"pyirena": McpServerConfig(name="pyirena", command="/old", groups=["a"])})
+    settings.mcp = McpConfig(
+        servers={"pyirena": McpServerConfig(name="pyirena", command="/old", groups=["a"])}
+    )
     dialog = McpManagementDialog(settings, None, aida_home / "skills")
     dialog._server_list.setCurrentRow(0)
 
-    form = ServerFormDialog(mcp_config=settings.mcp, server=settings.mcp.servers["pyirena"], skills_dir=aida_home / "skills")
+    form = ServerFormDialog(
+        mcp_config=settings.mcp,
+        server=settings.mcp.servers["pyirena"],
+        skills_dir=aida_home / "skills",
+    )
     assert form._name_edit.isReadOnly(), "name must not be changeable on edit"
     form._command_edit.setText("/new")
     updated = form.result_config()
@@ -125,7 +133,9 @@ def test_edit_server_via_dialog_action(qapp, aida_home: Path):
 # --- B6: "Store Value in Keychain" -------------------------------------
 
 
-def test_store_value_in_keychain_replaces_env_line_with_keyring_ref(qapp, aida_home: Path, monkeypatch):
+def test_store_value_in_keychain_replaces_env_line_with_keyring_ref(
+    qapp, aida_home: Path, monkeypatch
+):
     """The env editor's new button: pick which KEY, name a secret, confirm
     its value -> the real value goes into the OS keychain and the env text
     is rewritten to reference it, leaving other env lines untouched."""
@@ -146,7 +156,9 @@ def test_store_value_in_keychain_replaces_env_line_with_keyring_ref(qapp, aida_h
             ("pyirena-token", True) if title == "Secret Name" else ("sk-plaintext-value", True)
         ),
     )
-    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.QMessageBox.information", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.information", lambda *a, **k: None
+    )
 
     form._on_store_secret_in_keychain()
 
@@ -156,12 +168,15 @@ def test_store_value_in_keychain_replaces_env_line_with_keyring_ref(qapp, aida_h
     assert config.env["OTHER"] == "unchanged"
 
 
-def test_store_value_in_keychain_with_no_env_vars_is_a_safe_noop(qapp, aida_home: Path, monkeypatch):
+def test_store_value_in_keychain_with_no_env_vars_is_a_safe_noop(
+    qapp, aida_home: Path, monkeypatch
+):
     settings = load_settings()
     form = ServerFormDialog(mcp_config=settings.mcp, skills_dir=aida_home / "skills")
     informed = []
     monkeypatch.setattr(
-        "aida.ui.qt.mcp_management_dialog.QMessageBox.information", lambda *a, **k: informed.append(True)
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.information",
+        lambda *a, **k: informed.append(True),
     )
     form._on_store_secret_in_keychain()  # must not raise
     assert informed == [True]
@@ -202,8 +217,13 @@ def test_import_from_file_adds_new_server(qapp, aida_home: Path, tmp_path: Path,
     dialog = McpManagementDialog(settings, None, aida_home / "skills")
 
     config_file = tmp_path / "claude_desktop.json"
-    config_file.write_text('{"mcpServers": {"bait": {"command": "/opt/bait-mcp", "disabled": false}}}')
-    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.QFileDialog.getOpenFileName", lambda *a, **k: (str(config_file), ""))
+    config_file.write_text(
+        '{"mcpServers": {"bait": {"command": "/opt/bait-mcp", "disabled": false}}}'
+    )
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(config_file), ""),
+    )
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
 
     dialog._on_import()
@@ -213,26 +233,37 @@ def test_import_from_file_adds_new_server(qapp, aida_home: Path, tmp_path: Path,
     assert dialog._server_list.count() == 1
 
 
-def test_import_conflict_prompts_and_respects_no(qapp, aida_home: Path, tmp_path: Path, monkeypatch):
+def test_import_conflict_prompts_and_respects_no(
+    qapp, aida_home: Path, tmp_path: Path, monkeypatch
+):
     settings = load_settings()
-    settings.mcp = McpConfig(servers={"pyirena": McpServerConfig(name="pyirena", command="/existing")})
+    settings.mcp = McpConfig(
+        servers={"pyirena": McpServerConfig(name="pyirena", command="/existing")}
+    )
     dialog = McpManagementDialog(settings, None, aida_home / "skills")
 
     config_file = tmp_path / "import.json"
     config_file.write_text('{"mcpServers": {"pyirena": {"command": "/imported"}}}')
-    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.QFileDialog.getOpenFileName", lambda *a, **k: (str(config_file), ""))
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(config_file), ""),
+    )
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
 
     dialog._on_import()
 
-    assert settings.mcp.servers["pyirena"].command == "/existing", "declining the overwrite prompt must not clobber"
+    assert settings.mcp.servers["pyirena"].command == "/existing", (
+        "declining the overwrite prompt must not clobber"
+    )
 
 
 # --- groups editor ----------------------------------------------------------
 
 
-def test_groups_dialog_add_creates_a_brand_new_group_from_selected_servers(qapp, aida_home: Path, monkeypatch):
+def test_groups_dialog_add_creates_a_brand_new_group_from_selected_servers(
+    qapp, aida_home: Path, monkeypatch
+):
     """Regression: the Groups dialog had Rename/Delete but no way to
     actually create a new group short of opening a server's own edit form
     and typing it there, one server at a time."""
@@ -257,7 +288,9 @@ def test_groups_dialog_add_creates_a_brand_new_group_from_selected_servers(qapp,
 
     assert settings.mcp.servers["pyirena"].groups == ["analysis", "everything"]
     assert settings.mcp.servers["bait"].groups == ["everything"]
-    assert "everything" in [dialog._list.item(r).text().split("  —  ")[0] for r in range(dialog._list.count())]
+    assert "everything" in [
+        dialog._list.item(r).text().split("  —  ")[0] for r in range(dialog._list.count())
+    ]
     assert changed == [True]
 
 
@@ -272,7 +305,9 @@ def test_groups_dialog_add_cancelled_makes_no_changes(qapp, aida_home: Path, mon
     assert settings.mcp.servers["pyirena"].groups == []
 
 
-def test_groups_dialog_add_with_no_servers_configured_warns_instead_of_opening(qapp, aida_home: Path, monkeypatch):
+def test_groups_dialog_add_with_no_servers_configured_warns_instead_of_opening(
+    qapp, aida_home: Path, monkeypatch
+):
     settings = load_settings()
     settings.mcp = McpConfig(servers={})
     dialog = GroupsDialog(settings.mcp, on_changed=lambda: None)
@@ -292,12 +327,16 @@ def test_groups_dialog_add_with_no_servers_configured_warns_instead_of_opening(q
 
 def test_groups_dialog_rename(qapp, aida_home: Path, monkeypatch):
     settings = load_settings()
-    settings.mcp = McpConfig(servers={"pyirena": McpServerConfig(name="pyirena", command="/x", groups=["analysis"])})
+    settings.mcp = McpConfig(
+        servers={"pyirena": McpServerConfig(name="pyirena", command="/x", groups=["analysis"])}
+    )
     changed = []
     dialog = GroupsDialog(settings.mcp, on_changed=lambda: changed.append(True))
     dialog._list.setCurrentRow(0)
 
-    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.QInputDialog.getText", lambda *a, **k: ("full", True))
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QInputDialog.getText", lambda *a, **k: ("full", True)
+    )
     dialog._on_rename()
 
     assert settings.mcp.servers["pyirena"].groups == ["full"]
@@ -306,7 +345,9 @@ def test_groups_dialog_rename(qapp, aida_home: Path, monkeypatch):
 
 def test_groups_dialog_delete(qapp, aida_home: Path, monkeypatch):
     settings = load_settings()
-    settings.mcp = McpConfig(servers={"pyirena": McpServerConfig(name="pyirena", command="/x", groups=["analysis"])})
+    settings.mcp = McpConfig(
+        servers={"pyirena": McpServerConfig(name="pyirena", command="/x", groups=["analysis"])}
+    )
     dialog = GroupsDialog(settings.mcp, on_changed=lambda: None)
     dialog._list.setCurrentRow(0)
 
@@ -406,17 +447,27 @@ def test_start_and_stop_a_server_updates_status_and_tools(
         assert "stopped" in dialog._server_list.item(0).text()
 
         dialog._on_start()
-        assert pump_until(qapp, lambda: "running" in dialog._server_list.item(0).text(), timeout=10.0)
-        assert any(k.startswith("mock-mcp__") for k in bridge.session.tools), "live tools merged into the session"
+        assert pump_until(
+            qapp, lambda: "running" in dialog._server_list.item(0).text(), timeout=10.0
+        )
+        assert any(k.startswith("mock-mcp__") for k in bridge.session.tools), (
+            "live tools merged into the session"
+        )
 
         dialog._server_list.setCurrentRow(0)
         assert pump_until(
-            qapp, lambda: any(isinstance(r, _ToolPermissionRow) for r in dialog._tool_rows), timeout=5.0
+            qapp,
+            lambda: any(isinstance(r, _ToolPermissionRow) for r in dialog._tool_rows),
+            timeout=5.0,
         )
 
         dialog._on_stop()
-        assert pump_until(qapp, lambda: "stopped" in dialog._server_list.item(0).text(), timeout=10.0)
-        assert not any(k.startswith("mock-mcp__") for k in bridge.session.tools), "tools removed from the live session"
+        assert pump_until(
+            qapp, lambda: "stopped" in dialog._server_list.item(0).text(), timeout=10.0
+        )
+        assert not any(k.startswith("mock-mcp__") for k in bridge.session.tools), (
+            "tools removed from the live session"
+        )
     finally:
         bridge.shutdown()
 
@@ -424,30 +475,49 @@ def test_start_and_stop_a_server_updates_status_and_tools(
 def test_disabled_tool_is_absent_from_the_next_turns_schemas(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    """"Disable one pyirena tool; verify the model no longer sees it" —
+    """ "Disable one pyirena tool; verify the model no longer sees it" —
     Phase 7 acceptance criterion, automated against the mock server."""
     settings = _settings_with_profile()
     settings.mcp = McpConfig(servers={"mock-mcp": _mock_server_config()})
     bridge = _make_bridge(
-        qapp, loop_thread, settings, monkeypatch,
-        [MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp__echo_text", id="c1")]), MockTurn(text="done")],
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [
+            MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp__echo_text", id="c1")]),
+            MockTurn(text="done"),
+        ],
     )
     dialog = McpManagementDialog(settings, bridge, aida_home / "skills")
     try:
         dialog._server_list.setCurrentRow(0)
         dialog._on_start()
-        assert pump_until(qapp, lambda: "running" in dialog._server_list.item(0).text(), timeout=10.0)
+        assert pump_until(
+            qapp, lambda: "running" in dialog._server_list.item(0).text(), timeout=10.0
+        )
 
         dialog._server_list.setCurrentRow(0)
-        assert pump_until(qapp, lambda: any(isinstance(r, _ToolPermissionRow) for r in dialog._tool_rows), timeout=5.0)
-        row = next(r for r in dialog._tool_rows if isinstance(r, _ToolPermissionRow) and r.tool_name == "always_fails")
+        assert pump_until(
+            qapp,
+            lambda: any(isinstance(r, _ToolPermissionRow) for r in dialog._tool_rows),
+            timeout=5.0,
+        )
+        row = next(
+            r
+            for r in dialog._tool_rows
+            if isinstance(r, _ToolPermissionRow) and r.tool_name == "always_fails"
+        )
         row.enabled_checkbox.setChecked(False)
         dialog._on_save_tool_permissions()
 
         assert "always_fails" in settings.mcp.servers["mock-mcp"].disabled_tools
         assert pump_until(
             qapp,
-            lambda: "mock-mcp__always_fails" not in bridge.session.tools and "mock-mcp__echo_text" in bridge.session.tools,
+            lambda: (
+                "mock-mcp__always_fails" not in bridge.session.tools
+                and "mock-mcp__echo_text" in bridge.session.tools
+            ),
             timeout=10.0,
         )
     finally:
@@ -457,7 +527,7 @@ def test_disabled_tool_is_absent_from_the_next_turns_schemas(
 def test_confirm_flagged_tool_triggers_the_modal_even_in_relaxed_workspace(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    """"Mark a bait_mcp write-tool 'confirm before run'; confirmation
+    """ "Mark a bait_mcp write-tool 'confirm before run'; confirmation
     appears even in a relaxed workspace" — the MCP per-tool confirm gate is
     independent of SafetyGuard's own mode. Reuses the same
     _on_confirmation_requested modal path already proven for file-safety
@@ -470,13 +540,20 @@ def test_confirm_flagged_tool_triggers_the_modal_even_in_relaxed_workspace(
     settings.mcp.servers["mock-mcp"].confirm_tools = ["echo_text"]
     settings.mcp.servers["mock-mcp"].groups = ["analysis"]
     settings.workspaces = WorkspacesConfig(
-        workspaces={"ws": WorkspaceConfig(name="ws", profile="mock-profile", mcp_group="analysis", safety="relaxed")}
+        workspaces={
+            "ws": WorkspaceConfig(
+                name="ws", profile="mock-profile", mcp_group="analysis", safety="relaxed"
+            )
+        }
     )
 
     monkeypatch.setattr(
         "aida.core.session.build_provider",
         lambda profile: MockProvider(
-            [MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp__echo_text", id="c1")]), MockTurn(text="done")]
+            [
+                MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp__echo_text", id="c1")]),
+                MockTurn(text="done"),
+            ]
         ),
     )
     asked: list[str] = []
@@ -485,14 +562,22 @@ def test_confirm_flagged_tool_triggers_the_modal_even_in_relaxed_workspace(
         asked.append(request.detail)
         return ConfirmAnswer.ALLOW_ONCE
 
-    monkeypatch.setattr("aida.ui.qt.main_window.MainWindow._ask_confirmation", _fake_ask_confirmation)
+    monkeypatch.setattr(
+        "aida.ui.qt.main_window.MainWindow._ask_confirmation", _fake_ask_confirmation
+    )
 
     window = MainWindow(settings, loop_thread, start_kwargs={"workspace_name": "ws"})
     try:
-        assert pump_until(qapp, lambda: window.statusBar().currentMessage().startswith("Ready"), timeout=10.0)
+        assert pump_until(
+            qapp, lambda: window.statusBar().currentMessage().startswith("Ready"), timeout=10.0
+        )
         window.input_box.set_text("echo something")
         window.input_box._send_button.click()
-        assert pump_until(qapp, lambda: any("confirm" in t.lower() or "echo_text" in t for t in asked), timeout=10.0)
+        assert pump_until(
+            qapp,
+            lambda: any("confirm" in t.lower() or "echo_text" in t for t in asked),
+            timeout=10.0,
+        )
     finally:
         window.close()
 
@@ -500,13 +585,19 @@ def test_confirm_flagged_tool_triggers_the_modal_even_in_relaxed_workspace(
 def test_breaking_a_server_on_purpose_shows_error_status_and_why(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    """"Break a server on purpose (bad path): status shows error, log
+    """ "Break a server on purpose (bad path): status shows error, log
     panel shows why" — Phase 7 acceptance criterion."""
     settings = _settings_with_profile()
-    settings.mcp = McpConfig(servers={"broken": McpServerConfig(name="broken", command="definitely-not-a-real-executable")})
+    settings.mcp = McpConfig(
+        servers={
+            "broken": McpServerConfig(name="broken", command="definitely-not-a-real-executable")
+        }
+    )
     bridge = _make_bridge(qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")])
     dialog = McpManagementDialog(settings, bridge, aida_home / "skills")
-    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)  # the failure dialog itself isn't under test here
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *a, **k: None
+    )  # the failure dialog itself isn't under test here
     try:
         dialog._server_list.setCurrentRow(0)
         dialog._on_start()
@@ -522,29 +613,42 @@ def test_breaking_a_server_on_purpose_shows_error_status_and_why(
 def test_raw_inspector_shows_image_content_for_a_plot_call(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    """"Raw inspector shows the exact ImageContent response for a plot
+    """ "Raw inspector shows the exact ImageContent response for a plot
     call" — Phase 7 acceptance criterion, exercised against the mock
     server's get_image tool (stands in for a real pyirena plot call, same
     substitution every prior phase's mock-mcp tests make)."""
     settings = _settings_with_profile()
     settings.mcp = McpConfig(servers={"mock-mcp": _mock_server_config()})
     bridge = _make_bridge(
-        qapp, loop_thread, settings, monkeypatch,
-        [MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp__get_image", id="c1")]), MockTurn(text="done")],
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [
+            MockTurn(text="ok", tool_calls=[MockToolCall(name="mock-mcp__get_image", id="c1")]),
+            MockTurn(text="done"),
+        ],
     )
     dialog = McpManagementDialog(settings, bridge, aida_home / "skills")
     try:
         dialog._server_list.setCurrentRow(0)
         dialog._on_start()
-        assert pump_until(qapp, lambda: "running" in dialog._server_list.item(0).text(), timeout=10.0)
+        assert pump_until(
+            qapp, lambda: "running" in dialog._server_list.item(0).text(), timeout=10.0
+        )
 
         bridge.send("plot it")
         assert pump_until(
             qapp,
-            lambda: any(record.tool_name == "get_image" for _server, record in bridge.mcp_manager.recent_calls()),
+            lambda: any(
+                record.tool_name == "get_image"
+                for _server, record in bridge.mcp_manager.recent_calls()
+            ),
             timeout=10.0,
         )
-        dialog._refresh_log_tab("mock-mcp")  # the log tab only refreshes on selection/status-change, not every call
+        dialog._refresh_log_tab(
+            "mock-mcp"
+        )  # the log tab only refreshes on selection/status-change, not every call
 
         record = next(r for r in dialog._log_records if r.tool_name == "get_image")
         raw = RawResultDialog(record)
@@ -554,7 +658,9 @@ def test_raw_inspector_shows_image_content_for_a_plot_call(
         assert len(image_entries) == 1
         assert image_entries[0]["mime_type"] == "image/png"
         assert image_entries[0]["base64_length"] > 0
-        assert "base64" not in text.lower().split("base64_length")[0][-20:]  # never the raw data itself
+        assert (
+            "base64" not in text.lower().split("base64_length")[0][-20:]
+        )  # never the raw data itself
     finally:
         bridge.shutdown()
 
@@ -571,7 +677,11 @@ def test_tools_tab_is_scrollable_not_ever_growing(qapp, aida_home: Path):
 
     settings = load_settings()
     settings.mcp = McpConfig(
-        servers={"pyirena": McpServerConfig(name="pyirena", command="/x", disabled_tools=[f"tool_{i}" for i in range(150)])}
+        servers={
+            "pyirena": McpServerConfig(
+                name="pyirena", command="/x", disabled_tools=[f"tool_{i}" for i in range(150)]
+            )
+        }
     )
     dialog = McpManagementDialog(settings, None, aida_home / "skills")
     dialog._server_list.setCurrentRow(0)
@@ -692,7 +802,9 @@ def test_add_pyirena_writes_the_server_and_installs_its_skills(qapp, aida_home, 
 # --- Skills browser: install bundled skills (PLAN.md §1.5) -----------------
 
 
-def test_skills_browser_install_bundled_copies_the_shipped_samples(qapp, aida_home: Path, monkeypatch):
+def test_skills_browser_install_bundled_copies_the_shipped_samples(
+    qapp, aida_home: Path, monkeypatch
+):
     infos = []
     monkeypatch.setattr(
         "aida.ui.qt.mcp_management_dialog.QMessageBox.information",
@@ -712,7 +824,9 @@ def test_skills_browser_install_bundled_copies_the_shipped_samples(qapp, aida_ho
     assert infos[0][0] == "Skills Installed"
 
 
-def test_skills_browser_install_bundled_a_second_time_says_nothing_to_do(qapp, aida_home: Path, monkeypatch):
+def test_skills_browser_install_bundled_a_second_time_says_nothing_to_do(
+    qapp, aida_home: Path, monkeypatch
+):
     infos = []
     monkeypatch.setattr(
         "aida.ui.qt.mcp_management_dialog.QMessageBox.information",

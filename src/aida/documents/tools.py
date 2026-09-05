@@ -74,14 +74,22 @@ def _docx_sections_for_body(body: str, images: list[ImageArtifact]) -> list[Docx
     return sections
 
 
-def _resolve_images(artifact_store: ArtifactStore, image_artifact_ids: list[str]) -> list[ImageArtifact]:
-    known = {m.id: m for m in artifact_store.list_metadata() if m.kind == "ImageArtifact" and m.path}
+def _resolve_images(
+    artifact_store: ArtifactStore, image_artifact_ids: list[str]
+) -> list[ImageArtifact]:
+    known = {
+        m.id: m for m in artifact_store.list_metadata() if m.kind == "ImageArtifact" and m.path
+    }
     resolved = []
     for artifact_id in image_artifact_ids:
         meta = known.get(artifact_id)
         if meta is None:
             continue
-        resolved.append(ImageArtifact(data=b"", id=meta.id, path=meta.path, mime_type=meta.mime_type or "image/png"))
+        resolved.append(
+            ImageArtifact(
+                data=b"", id=meta.id, path=meta.path, mime_type=meta.mime_type or "image/png"
+            )
+        )
     return resolved
 
 
@@ -126,10 +134,14 @@ def default_document_tools(
         sections = _docx_sections_for_body(body, _resolve_images(artifact_store, image_ids))
 
         final_path = write_docx_document(
-            target_dir=candidate.parent, filename_stem=candidate.stem, title=title, sections=sections
+            target_dir=candidate.parent,
+            filename_stem=candidate.stem,
+            title=title,
+            sections=sections,
         )
         artifact = FileArtifact(
-            path=str(final_path), mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            path=str(final_path),
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
         return ToolResult(content=f"Wrote DOCX report to {final_path}", artifacts=[artifact])
 

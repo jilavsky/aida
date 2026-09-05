@@ -73,7 +73,9 @@ def cmd_show(args: argparse.Namespace) -> int:
     settings = load_settings()
     kb = _get_kb(settings, args.name)
     if kb is None:
-        print(f"Unknown knowledge base {args.name!r}. Configured: {', '.join(sorted(settings.knowledge.knowledge_bases)) or '(none)'}")
+        print(
+            f"Unknown knowledge base {args.name!r}. Configured: {', '.join(sorted(settings.knowledge.knowledge_bases)) or '(none)'}"
+        )
         return 1
     _print_kb(kb)
     return 0
@@ -142,8 +144,12 @@ def cmd_edit(args: argparse.Namespace) -> int:
 
     updated = KnowledgeBaseConfig(
         name=args.name,
-        source_folders=_split_folders_csv(args.source_folders) if args.source_folders is not None else existing.source_folders,
-        embedding_profile=args.embedding_profile if args.embedding_profile is not None else existing.embedding_profile,
+        source_folders=_split_folders_csv(args.source_folders)
+        if args.source_folders is not None
+        else existing.source_folders,
+        embedding_profile=args.embedding_profile
+        if args.embedding_profile is not None
+        else existing.embedding_profile,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
@@ -177,7 +183,9 @@ def cmd_remove(args: argparse.Namespace) -> int:
     save_knowledge_config(settings.knowledge)
     if args.delete_index:
         knowledge_db_path(args.name).unlink(missing_ok=True)
-        print(f"Removed knowledge base {args.name!r} from configuration and deleted its index file.")
+        print(
+            f"Removed knowledge base {args.name!r} from configuration and deleted its index file."
+        )
     else:
         print(f"Removed knowledge base {args.name!r} from configuration (index file left on disk).")
     return 0
@@ -211,7 +219,9 @@ def _resolve_embeddings_provider(settings: Settings, kb: KnowledgeBaseConfig):
 
 def _print_ingest_result(result) -> None:
     if result.missing_folders:
-        print(f"  WARNING — source folder(s) not found, nothing indexed from them ({len(result.missing_folders)}):")
+        print(
+            f"  WARNING — source folder(s) not found, nothing indexed from them ({len(result.missing_folders)}):"
+        )
         for folder in result.missing_folders:
             print(f"    {folder}")
     print(f"  added:   {len(result.added_files)}")
@@ -314,17 +324,26 @@ def cmd_query(args: argparse.Namespace) -> int:
 
 def _add_kb_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -> None:
     parser.add_argument(
-        "--source-folders", default="" if defaults else None,
+        "--source-folders",
+        default="" if defaults else None,
         help="Comma-separated folders and/or individual files to index "
         "(an Obsidian vault is just a folder of .md files)",
     )
     parser.add_argument(
-        "--embedding-profile", default=None,
+        "--embedding-profile",
+        default=None,
         help="Embedding profile name from providers.yaml (embedding_profiles:)",
     )
-    parser.add_argument("--chunk-size", type=int, default=1000 if defaults else None, help="Max characters per chunk")
     parser.add_argument(
-        "--chunk-overlap", type=int, default=150 if defaults else None,
+        "--chunk-size",
+        type=int,
+        default=1000 if defaults else None,
+        help="Max characters per chunk",
+    )
+    parser.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=150 if defaults else None,
         help="Characters of trailing context carried into the next chunk",
     )
 
@@ -342,26 +361,37 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument("name")
     _add_kb_field_args(add, defaults=True)
 
-    edit = sub.add_parser("edit", help="Update fields of an existing knowledge base (unset flags are left as-is)")
+    edit = sub.add_parser(
+        "edit", help="Update fields of an existing knowledge base (unset flags are left as-is)"
+    )
     edit.add_argument("name")
     _add_kb_field_args(edit, defaults=False)
 
     remove = sub.add_parser(
-        "remove", help="Remove a knowledge base from configuration (add --delete-index to also remove its index file)"
+        "remove",
+        help="Remove a knowledge base from configuration (add --delete-index to also remove its index file)",
     )
     remove.add_argument("name")
     remove.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
     remove.add_argument(
-        "--delete-index", action="store_true", help="Also delete the knowledge base's SQLite index file from disk"
+        "--delete-index",
+        action="store_true",
+        help="Also delete the knowledge base's SQLite index file from disk",
     )
 
-    build = sub.add_parser("build", help="Full rebuild: re-chunk and re-embed every discovered file")
+    build = sub.add_parser(
+        "build", help="Full rebuild: re-chunk and re-embed every discovered file"
+    )
     build.add_argument("name")
 
-    update = sub.add_parser("update", help="Incremental rebuild: only files changed since the last build/update")
+    update = sub.add_parser(
+        "update", help="Incremental rebuild: only files changed since the last build/update"
+    )
     update.add_argument("name")
 
-    query = sub.add_parser("query", help="Retrieval-only debugging tool: embed a question and print the top-k passages")
+    query = sub.add_parser(
+        "query", help="Retrieval-only debugging tool: embed a question and print the top-k passages"
+    )
     query.add_argument("name")
     query.add_argument("question")
     query.add_argument("--top-k", type=int, default=5)

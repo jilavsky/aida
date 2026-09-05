@@ -66,8 +66,13 @@ def test_build_system_message_identity_text_comes_before_everything_else():
         extra_texts=["folder facts"],
         identity_text="Your name is Aida.",
     )
-    order = [msg.content.index(p) for p in ("Your name is Aida.", "Be concise.", "folder facts", "skill text")]
-    assert order == sorted(order), "identity_text must come before system_prompt/extra_texts/skill_texts"
+    order = [
+        msg.content.index(p)
+        for p in ("Your name is Aida.", "Be concise.", "folder facts", "skill text")
+    ]
+    assert order == sorted(order), (
+        "identity_text must come before system_prompt/extra_texts/skill_texts"
+    )
 
 
 def test_build_system_message_identity_text_optional():
@@ -85,7 +90,9 @@ def test_identity_context_block_names_the_assistant():
 
 
 def test_identity_context_block_includes_user_context_when_set():
-    block = build_identity_context_block(assistant_name="Aida", user_context="Jan, beamline scientist at APS.")
+    block = build_identity_context_block(
+        assistant_name="Aida", user_context="Jan, beamline scientist at APS."
+    )
     assert block is not None
     assert "Jan, beamline scientist at APS." in block
 
@@ -98,7 +105,9 @@ def test_identity_context_block_user_context_alone_still_produces_a_block():
     # Defensive case (AppConfig.assistant_name should never actually be
     # blank in practice, see from_dict) — user_context alone is still worth
     # saying something for.
-    block = build_identity_context_block(assistant_name="", user_context="Jan, beamline scientist at APS.")
+    block = build_identity_context_block(
+        assistant_name="", user_context="Jan, beamline scientist at APS."
+    )
     assert block is not None
     assert "Jan, beamline scientist at APS." in block
 
@@ -110,7 +119,10 @@ def test_identity_context_block_user_context_alone_still_produces_a_block():
 def test_workspace_context_block_none_when_nothing_configured():
     assert (
         build_workspace_context_block(
-            source_folders=[], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
+            source_folders=[],
+            target_folder=None,
+            global_allowed_folders=[],
+            sidecar_dirname="figures",
             safety_mode="confirm",
         )
         is None
@@ -134,11 +146,17 @@ def test_workspace_context_block_lists_source_and_target_folders():
 
 def test_workspace_context_block_confirm_mode_wording_differs_from_relaxed():
     relaxed = build_workspace_context_block(
-        source_folders=["/x"], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
+        source_folders=["/x"],
+        target_folder=None,
+        global_allowed_folders=[],
+        sidecar_dirname="figures",
         safety_mode="relaxed",
     )
     confirm = build_workspace_context_block(
-        source_folders=["/x"], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
+        source_folders=["/x"],
+        target_folder=None,
+        global_allowed_folders=[],
+        sidecar_dirname="figures",
         safety_mode="confirm",
     )
     assert "without asking" in relaxed
@@ -147,8 +165,11 @@ def test_workspace_context_block_confirm_mode_wording_differs_from_relaxed():
 
 def test_workspace_context_block_mentions_global_allowed_folders_even_with_no_workspace():
     block = build_workspace_context_block(
-        source_folders=[], target_folder=None, global_allowed_folders=["/shared/reference"],
-        sidecar_dirname="figures", safety_mode="confirm",
+        source_folders=[],
+        target_folder=None,
+        global_allowed_folders=["/shared/reference"],
+        sidecar_dirname="figures",
+        safety_mode="confirm",
     )
     assert block is not None
     assert "/shared/reference" in block
@@ -161,8 +182,12 @@ def test_workspace_context_block_mentions_global_allowed_folders_even_with_no_wo
 def test_workspace_context_block_none_stays_none_without_scratch_dir():
     assert (
         build_workspace_context_block(
-            source_folders=[], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
-            safety_mode="confirm", scratch_dir=None,
+            source_folders=[],
+            target_folder=None,
+            global_allowed_folders=[],
+            sidecar_dirname="figures",
+            safety_mode="confirm",
+            scratch_dir=None,
         )
         is None
     )
@@ -170,8 +195,12 @@ def test_workspace_context_block_none_stays_none_without_scratch_dir():
 
 def test_workspace_context_block_mentions_scratch_dir_even_with_no_workspace():
     block = build_workspace_context_block(
-        source_folders=[], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
-        safety_mode="confirm", scratch_dir="/Users/me/.aida/tmp",
+        source_folders=[],
+        target_folder=None,
+        global_allowed_folders=[],
+        sidecar_dirname="figures",
+        safety_mode="confirm",
+        scratch_dir="/Users/me/.aida/tmp",
     )
     assert block is not None
     assert "/Users/me/.aida/tmp" in block
@@ -186,8 +215,12 @@ def test_workspace_context_block_scratch_dir_explains_mcp_relative_paths():
     # relative path a tool resolves on its own lands there too; the model
     # needs to be told that explicitly rather than discovering it via search.
     block = build_workspace_context_block(
-        source_folders=[], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
-        safety_mode="confirm", scratch_dir="/Users/me/.aida/tmp",
+        source_folders=[],
+        target_folder=None,
+        global_allowed_folders=[],
+        sidecar_dirname="figures",
+        safety_mode="confirm",
+        scratch_dir="/Users/me/.aida/tmp",
     )
     assert block is not None
     assert "MCP tool" in block
@@ -205,8 +238,12 @@ def test_workspace_context_block_scratch_dir_warns_about_servers_with_their_own_
     # nothing to do with AIDA's scratch folder. The block needs to tell the
     # model what to do when a tool rejects that path instead of retrying it.
     block = build_workspace_context_block(
-        source_folders=[], target_folder=None, global_allowed_folders=[], sidecar_dirname="figures",
-        safety_mode="confirm", scratch_dir="/Users/me/.aida/tmp",
+        source_folders=[],
+        target_folder=None,
+        global_allowed_folders=[],
+        sidecar_dirname="figures",
+        safety_mode="confirm",
+        scratch_dir="/Users/me/.aida/tmp",
     )
     assert block is not None
     assert "own separate output directory" in block
@@ -221,7 +258,10 @@ def test_workspace_context_block_scratch_dir_warns_about_servers_with_their_own_
 
 def test_coding_context_block_none_when_scripting_disabled():
     assert (
-        build_coding_context_block(python_interpreter=None, command_allowlist=[], scripting_enabled=False) is None
+        build_coding_context_block(
+            python_interpreter=None, command_allowlist=[], scripting_enabled=False
+        )
+        is None
     )
 
 
@@ -236,25 +276,33 @@ def test_coding_context_block_mentions_configured_interpreter():
 
 
 def test_coding_context_block_mentions_default_interpreter_when_unset():
-    block = build_coding_context_block(python_interpreter=None, command_allowlist=[], scripting_enabled=True)
+    block = build_coding_context_block(
+        python_interpreter=None, command_allowlist=[], scripting_enabled=True
+    )
     assert "AIDA itself is running under" in block
 
 
 def test_coding_context_block_lists_allowlisted_commands():
     block = build_coding_context_block(
-        python_interpreter=None, command_allowlist=["git status", "git log *"], scripting_enabled=True
+        python_interpreter=None,
+        command_allowlist=["git status", "git log *"],
+        scripting_enabled=True,
     )
     assert "git status" in block
     assert "git log *" in block
 
 
 def test_coding_context_block_notes_empty_allowlist():
-    block = build_coding_context_block(python_interpreter=None, command_allowlist=[], scripting_enabled=True)
+    block = build_coding_context_block(
+        python_interpreter=None, command_allowlist=[], scripting_enabled=True
+    )
     assert "no allowlisted commands" in block.lower()
 
 
 def test_coding_context_block_recommends_run_python_script_over_run_command():
-    block = build_coding_context_block(python_interpreter=None, command_allowlist=[], scripting_enabled=True)
+    block = build_coding_context_block(
+        python_interpreter=None, command_allowlist=[], scripting_enabled=True
+    )
     assert "run_python_script" in block
     assert "run_command" in block
 
@@ -350,7 +398,9 @@ def test_trim_history_never_orphans_a_tool_result():
             [
                 Message(role="user", content=f"question {i} " + "x" * 400),
                 _assistant_with_calls(f"c{i}"),
-                Message(role="tool", content="result " + "y" * 400, tool_call_id=f"c{i}", name="track"),
+                Message(
+                    role="tool", content="result " + "y" * 400, tool_call_id=f"c{i}", name="track"
+                ),
                 Message(role="assistant", content="answer " + "z" * 400),
             ]
         )
@@ -450,7 +500,9 @@ def test_estimate_tool_schema_tokens_scales_with_schema_size():
             description="A tool with a fairly detailed description of what it does.",
             parameters={
                 "type": "object",
-                "properties": {f"field_{j}": {"type": "string", "description": "x" * 40} for j in range(6)},
+                "properties": {
+                    f"field_{j}": {"type": "string", "description": "x" * 40} for j in range(6)
+                },
                 "required": [],
             },
         )
@@ -482,30 +534,44 @@ def test_estimate_message_tokens_counts_images():
     look cheap to the trim budget while actually costing real tokens."""
     plain = Message(role="tool", content="a plot was generated", tool_call_id="c1", name="plot")
     with_one_image = Message(
-        role="tool", content="a plot was generated", tool_call_id="c1", name="plot",
+        role="tool",
+        content="a plot was generated",
+        tool_call_id="c1",
+        name="plot",
         images=[ImageRef(path="/tmp/plot.png")],
     )
     with_two_images = Message(
-        role="tool", content="a plot was generated", tool_call_id="c1", name="plot",
+        role="tool",
+        content="a plot was generated",
+        tool_call_id="c1",
+        name="plot",
         images=[ImageRef(path="/tmp/plot1.png"), ImageRef(path="/tmp/plot2.png")],
     )
-    assert estimate_message_tokens(with_one_image) == estimate_message_tokens(plain) + IMAGE_TOKEN_ESTIMATE
-    assert estimate_message_tokens(with_two_images) == estimate_message_tokens(plain) + 2 * IMAGE_TOKEN_ESTIMATE
+    assert (
+        estimate_message_tokens(with_one_image)
+        == estimate_message_tokens(plain) + IMAGE_TOKEN_ESTIMATE
+    )
+    assert (
+        estimate_message_tokens(with_two_images)
+        == estimate_message_tokens(plain) + 2 * IMAGE_TOKEN_ESTIMATE
+    )
 
 
 # --- history_budget (§3.2) --------------------------------------------------
 
 
 def test_history_budget_basic_arithmetic():
-    budget = history_budget(context_window=100_000, reserved_output_tokens=4096, tool_schema_tokens=10_000)
+    budget = history_budget(
+        context_window=100_000, reserved_output_tokens=4096, tool_schema_tokens=10_000
+    )
     expected = int(100_000 * CONTEXT_SAFETY_FRACTION) - 4096 - 10_000
     assert budget == expected
 
 
 def test_history_budget_uses_the_default_safety_fraction():
-    assert history_budget(context_window=200_000, reserved_output_tokens=0, tool_schema_tokens=0) == int(
-        200_000 * CONTEXT_SAFETY_FRACTION
-    )
+    assert history_budget(
+        context_window=200_000, reserved_output_tokens=0, tool_schema_tokens=0
+    ) == int(200_000 * CONTEXT_SAFETY_FRACTION)
 
 
 def test_history_budget_clamps_to_the_floor_when_over_committed():
@@ -513,7 +579,9 @@ def test_history_budget_clamps_to_the_floor_when_over_committed():
     a generous max_tokens reservation can compute to a negative or tiny
     budget — a misconfiguration, not an honest tight budget, so it clamps
     to MIN_HISTORY_BUDGET rather than leaving the next turn unanswerable."""
-    budget = history_budget(context_window=20_000, reserved_output_tokens=8000, tool_schema_tokens=10_000)
+    budget = history_budget(
+        context_window=20_000, reserved_output_tokens=8000, tool_schema_tokens=10_000
+    )
     assert budget == MIN_HISTORY_BUDGET
 
 
@@ -570,7 +638,9 @@ def test_compaction_request_messages_includes_tool_calls_and_results():
             Message(
                 role="assistant",
                 content="",
-                tool_calls=[ToolCall(id="c1", name="fit_guinier", arguments={"file": "run_042.dat"})],
+                tool_calls=[
+                    ToolCall(id="c1", name="fit_guinier", arguments={"file": "run_042.dat"})
+                ],
             ),
             Message(role="tool", content="Rg=32.4, I0=1050", tool_call_id="c1", name="fit_guinier"),
             Message(role="assistant", content="Rg is 32.4 Angstrom."),

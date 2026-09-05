@@ -62,7 +62,10 @@ def cmd_add(args: argparse.Namespace) -> int:
 
     config = load_schedules_config()
     if args.name in config.schedules:
-        print(f"Schedule {args.name!r} already exists — use 'aida schedule remove' first to replace it.", file=sys.stderr)
+        print(
+            f"Schedule {args.name!r} already exists — use 'aida schedule remove' first to replace it.",
+            file=sys.stderr,
+        )
         return EXIT_CONFIG_ERROR
 
     config.schedules[args.name] = ScheduleEntry(
@@ -147,7 +150,9 @@ def cmd_watch(args: argparse.Namespace) -> int:
     try:
         asyncio.run(
             scheduler_loop(
-                poll_interval_seconds=args.poll_seconds, on_run_started=_on_started, on_run_finished=_on_finished
+                poll_interval_seconds=args.poll_seconds,
+                on_run_started=_on_started,
+                on_run_finished=_on_finished,
             )
         )
     except KeyboardInterrupt:
@@ -163,7 +168,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     add = sub.add_parser("add", help="Add a new schedule")
     add.add_argument("name")
-    add.add_argument("--workflow", required=True, help="Name of a stored workflow (see 'aida workflow list')")
+    add.add_argument(
+        "--workflow", required=True, help="Name of a stored workflow (see 'aida workflow list')"
+    )
     timing = add.add_mutually_exclusive_group(required=True)
     timing.add_argument("--at", help='Daily local time, e.g. "07:00"')
     timing.add_argument("--every", help='A duration, e.g. "4h", "30m", "1d"')
@@ -182,7 +189,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="A namespaced MCP tool name to approve for this schedule's runs (repeatable)",
     )
 
-    for name, help_text in (("enable", "Enable a schedule"), ("disable", "Disable a schedule"), ("remove", "Remove a schedule")):
+    for name, help_text in (
+        ("enable", "Enable a schedule"),
+        ("disable", "Disable a schedule"),
+        ("remove", "Remove a schedule"),
+    ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("name")
 

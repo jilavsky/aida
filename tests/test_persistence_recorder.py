@@ -45,7 +45,9 @@ def test_resume_reads_back_origin_from_existing_row(tmp_path: Path):
     conv_id = rec1.conversation_id
 
     store2 = ConversationStore(db_path)
-    rec2 = ConversationRecorder(store2, artifact_store, tmp_path / "records", conversation_id=conv_id, resume=True)
+    rec2 = ConversationRecorder(
+        store2, artifact_store, tmp_path / "records", conversation_id=conv_id, resume=True
+    )
 
     assert rec2.origin == "schedule"
 
@@ -119,7 +121,11 @@ def test_next_message_seq_reflects_persisted_messages(tmp_path: Path):
 def test_record_artifact_fields_stores_message_seq(tmp_path: Path):
     rec = _recorder(tmp_path)
     rec.record_artifact_fields(
-        artifact_id="art-1", kind="ImageArtifact", path="/tmp/x.png", mime_type="image/png", call_id="call_1",
+        artifact_id="art-1",
+        kind="ImageArtifact",
+        path="/tmp/x.png",
+        mime_type="image/png",
+        call_id="call_1",
         message_seq=2,
     )
     loaded = rec.store.load_artifacts(rec.conversation_id)
@@ -147,7 +153,11 @@ def test_resume_loads_existing_conversation(tmp_path: Path):
     artifact_store = ArtifactStore(base_dir=tmp_path / "artifacts")
     store1 = ConversationStore(db_path)
     rec1 = ConversationRecorder(
-        store1, artifact_store, tmp_path / "records", workspace_name="use-pyirena", profile_name="argo-claude"
+        store1,
+        artifact_store,
+        tmp_path / "records",
+        workspace_name="use-pyirena",
+        profile_name="argo-claude",
     )
     rec1.record_message(Message(role="user", content="hello"))
     rec1.record_message(Message(role="assistant", content="hi there"))
@@ -173,7 +183,9 @@ def test_resume_continues_appending_after_existing_history(tmp_path: Path):
     conv_id = rec1.conversation_id
 
     store2 = ConversationStore(db_path)
-    rec2 = ConversationRecorder(store2, artifact_store, tmp_path / "records", conversation_id=conv_id, resume=True)
+    rec2 = ConversationRecorder(
+        store2, artifact_store, tmp_path / "records", conversation_id=conv_id, resume=True
+    )
     rec2.record_message(Message(role="assistant", content="after resume"))
 
     history = rec2.load_history()

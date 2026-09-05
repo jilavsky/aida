@@ -26,7 +26,7 @@ _COMMANDS = {
     "workspace": "List/show/create/edit named workspaces (Phase 4)",
     "mcp": "Manage MCP servers, groups, and per-tool permissions (Phase 7)",
     "kb": "Manage RAG knowledge bases: config, build/update indexes, query (Phase 8)",
-    "run": "Non-interactive single turn: `aida run --workspace W \"prompt\"` (Phase 10)",
+    "run": 'Non-interactive single turn: `aida run --workspace W "prompt"` (Phase 10)',
     "workflow": "Run/list/show/validate stored named workflows (Phase 10)",
     "schedule": "Manage and run scheduled workflows (Phase 10)",
     "documents": "Inspect document extraction: `documents figures FILE`, `documents verify-ocr`",
@@ -112,7 +112,9 @@ def main_gui() -> int:
     try:
         from aida.ui.qt.app import main as gui_main
     except ImportError:
-        print("aida-gui: PySide6 isn't installed. Run `pip install -e '.[gui]'` (or `pip install aida-workbench[gui]`).")
+        print(
+            "aida-gui: PySide6 isn't installed. Run `pip install -e '.[gui]'` (or `pip install aida-workbench[gui]`)."
+        )
         return 1
     return gui_main()
 

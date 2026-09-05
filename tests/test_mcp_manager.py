@@ -31,7 +31,9 @@ MOCK_SERVER_PATH = Path(__file__).parent / "mock_mcp_server.py"
 VALID_TOOL_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
 
-def _mock_server_config(name: str = "mock-mcp", *, skills: list[str] | None = None) -> McpServerConfig:
+def _mock_server_config(
+    name: str = "mock-mcp", *, skills: list[str] | None = None
+) -> McpServerConfig:
     return McpServerConfig(
         name=name,
         command=sys.executable,
@@ -270,7 +272,9 @@ async def test_confirm_flagged_tool_calls_the_confirm_callback(tmp_path):
         calls.append(request)
         return True
 
-    manager = McpManager([config], artifact_store=ArtifactStore(base_dir=tmp_path), confirm_callback=confirm)
+    manager = McpManager(
+        [config], artifact_store=ArtifactStore(base_dir=tmp_path), confirm_callback=confirm
+    )
     try:
         tools = await manager.start_all()
         result = await tools["mock-mcp__echo_text"].func({"message": "hi"})
@@ -289,7 +293,9 @@ async def test_confirm_denied_produces_an_error_result_not_a_raised_exception(tm
     async def deny(_request):
         return False
 
-    manager = McpManager([config], artifact_store=ArtifactStore(base_dir=tmp_path), confirm_callback=deny)
+    manager = McpManager(
+        [config], artifact_store=ArtifactStore(base_dir=tmp_path), confirm_callback=deny
+    )
     try:
         tools = await manager.start_all()
         result = await tools["mock-mcp__echo_text"].func({"message": "hi"})
@@ -308,7 +314,9 @@ async def test_tool_without_confirm_flag_never_calls_the_confirm_callback(tmp_pa
         called.append(request)
         return True
 
-    manager = McpManager([config], artifact_store=ArtifactStore(base_dir=tmp_path), confirm_callback=confirm)
+    manager = McpManager(
+        [config], artifact_store=ArtifactStore(base_dir=tmp_path), confirm_callback=confirm
+    )
     try:
         tools = await manager.start_all()
         await tools["mock-mcp__echo_text"].func({"message": "hi"})
@@ -423,7 +431,9 @@ async def test_connection_test_against_a_working_server(tmp_path):
     assert result.ok is True
     assert result.tool_count > 0
     assert result.elapsed_seconds >= 0
-    assert manager.running_server_names == [], "a standalone test must not leave a handle registered"
+    assert manager.running_server_names == [], (
+        "a standalone test must not leave a handle registered"
+    )
 
 
 @pytest.mark.asyncio
@@ -467,7 +477,9 @@ async def test_recent_calls_are_most_recent_first_across_servers(tmp_path):
     safe to leave registered for ``manager.aclose()``'s cleanup loop."""
     from aida.mcp.server import McpServerHandle, ToolCallRecord
 
-    manager = McpManager([_mock_server_config("a")], artifact_store=ArtifactStore(base_dir=tmp_path))
+    manager = McpManager(
+        [_mock_server_config("a")], artifact_store=ArtifactStore(base_dir=tmp_path)
+    )
     try:
         tools = await manager.start_all()
         await tools["a__echo_text"].func({"message": "first"})
@@ -475,7 +487,10 @@ async def test_recent_calls_are_most_recent_first_across_servers(tmp_path):
         fake_b = McpServerHandle(_mock_server_config("b"))
         fake_b.calls.append(
             ToolCallRecord(
-                tool_name="echo_text", duration_seconds=0.01, is_error=False, arguments={"message": "second"}
+                tool_name="echo_text",
+                duration_seconds=0.01,
+                is_error=False,
+                arguments={"message": "second"},
             )
         )
         manager._handles["b"] = fake_b
@@ -502,21 +517,29 @@ def test_recent_calls_orders_by_seq_even_when_recorded_at_ties(tmp_path):
     how fast the CI runner's clock ticks."""
     from aida.mcp.server import McpServerHandle, ToolCallRecord
 
-    manager = McpManager([_mock_server_config("a")], artifact_store=ArtifactStore(base_dir=tmp_path))
+    manager = McpManager(
+        [_mock_server_config("a")], artifact_store=ArtifactStore(base_dir=tmp_path)
+    )
     try:
         tied_clock = 123.456
         handle_a = McpServerHandle(_mock_server_config("a"))
         handle_a.calls.append(
-            ToolCallRecord(tool_name="t", duration_seconds=0.0, is_error=False, arguments={"message": "first"})
+            ToolCallRecord(
+                tool_name="t", duration_seconds=0.0, is_error=False, arguments={"message": "first"}
+            )
         )
         handle_a.calls[-1].recorded_at = tied_clock
         handle_b = McpServerHandle(_mock_server_config("b"))
         handle_b.calls.append(
-            ToolCallRecord(tool_name="t", duration_seconds=0.0, is_error=False, arguments={"message": "second"})
+            ToolCallRecord(
+                tool_name="t", duration_seconds=0.0, is_error=False, arguments={"message": "second"}
+            )
         )
         handle_b.calls[-1].recorded_at = tied_clock
         handle_a.calls.append(
-            ToolCallRecord(tool_name="t", duration_seconds=0.0, is_error=False, arguments={"message": "third"})
+            ToolCallRecord(
+                tool_name="t", duration_seconds=0.0, is_error=False, arguments={"message": "third"}
+            )
         )
         handle_a.calls[-1].recorded_at = tied_clock
         manager._handles["a"] = handle_a

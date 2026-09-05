@@ -179,7 +179,9 @@ async def _try_ocr(document: Path, assets: Path, ocr: OcrBackend) -> tuple[list,
         )
         entries = await asyncio.to_thread(figures_from_ocr, result, assets)
     except (MistralOcrError, TimeoutError) as exc:
-        logger.warning("OCR unavailable for %s (%s); using the built-in extractor", document.name, exc)
+        logger.warning(
+            "OCR unavailable for %s (%s); using the built-in extractor", document.name, exc
+        )
         return None
     except Exception as exc:  # noqa: BLE001 - never fail a turn over an optional backend
         logger.warning("OCR failed unexpectedly for %s: %s", document.name, exc)
@@ -218,7 +220,8 @@ async def _figures_for(document: Path, ocr: OcrBackend | None = None) -> FigureI
             )
     if entries is None:
         entries = await asyncio.wait_for(
-            asyncio.to_thread(extract_pdf_figures, document, assets), timeout=EXTRACT_TIMEOUT_SECONDS
+            asyncio.to_thread(extract_pdf_figures, document, assets),
+            timeout=EXTRACT_TIMEOUT_SECONDS,
         )
     await asyncio.to_thread(write_index, assets, document.name, entries, backend=backend, note=note)
     return FigureIndex(source=document.name, figures=entries, backend=backend, note=note)
@@ -287,9 +290,7 @@ def default_figure_tools(
                 is_error=True,
             )
         caption = f" — {match.caption}" if match.caption else ""
-        uncertain = (
-            " (label uncertain: multi-column layout)" if match.confidence == "low" else ""
-        )
+        uncertain = " (label uncertain: multi-column layout)" if match.confidence == "low" else ""
         return ToolResult(
             content=f"{match.label} from {document.name}, page {match.page}{caption}{uncertain}",
             artifacts=[
@@ -339,7 +340,10 @@ def default_figure_tools(
                 parameters={
                     "type": "object",
                     "properties": {
-                        "document": {"type": "string", "description": "Filename of the attached document."},
+                        "document": {
+                            "type": "string",
+                            "description": "Filename of the attached document.",
+                        },
                         "label": {
                             "type": "string",
                             "description": "Figure label from list_document_figures, e.g. 'Figure 2'.",

@@ -58,7 +58,11 @@ def test_provider_check_uses_validate_profile_not_a_raw_http_head(
     since Phase 2 and was simply never wired in."""
     save_providers_config(
         ProvidersConfig(
-            profiles={"ollama": ProviderProfile(name="ollama", base_url="http://localhost:11434/v1", model="qwen")}
+            profiles={
+                "ollama": ProviderProfile(
+                    name="ollama", base_url="http://localhost:11434/v1", model="qwen"
+                )
+            }
         ),
         aida_home,
     )
@@ -67,7 +71,9 @@ def test_provider_check_uses_validate_profile_not_a_raw_http_head(
 
     async def fake_validate(profile, **kwargs):
         called.append(profile.name)
-        return ProfileValidation(name=profile.name, ok=True, detail="reachable (openai_compat, model=qwen)")
+        return ProfileValidation(
+            name=profile.name, ok=True, detail="reachable (openai_compat, model=qwen)"
+        )
 
     monkeypatch.setattr("aida.cli.doctor.validate_profile", fake_validate)
 
@@ -83,7 +89,10 @@ def test_provider_check_reports_an_unreachable_profile_without_crashing(
     aida_home: Path, records_home: Path, monkeypatch: pytest.MonkeyPatch
 ):
     save_providers_config(
-        ProvidersConfig(profiles={"argo": ProviderProfile(name="argo", kind="anthropic", model="claude")}), aida_home
+        ProvidersConfig(
+            profiles={"argo": ProviderProfile(name="argo", kind="anthropic", model="claude")}
+        ),
+        aida_home,
     )
 
     async def fake_validate(profile, **kwargs):
@@ -226,7 +235,9 @@ def test_context_windows_check_silent_when_every_profile_has_one_set(aida_home, 
     assert "every profile has an explicit context_window" in result.detail
 
 
-def test_context_windows_check_flags_a_global_default_larger_than_a_configured_window(aida_home, records_home):
+def test_context_windows_check_flags_a_global_default_larger_than_a_configured_window(
+    aida_home, records_home
+):
     from aida.cli import doctor
     from aida.config.settings import load_settings
 
@@ -259,13 +270,19 @@ def test_max_tokens_vs_context_window_ok_with_no_profiles(aida_home, records_hom
     assert "skipped" in result.detail
 
 
-def test_max_tokens_vs_context_window_silent_when_max_tokens_is_a_modest_reply_budget(aida_home, records_home):
+def test_max_tokens_vs_context_window_silent_when_max_tokens_is_a_modest_reply_budget(
+    aida_home, records_home
+):
     from aida.cli import doctor
     from aida.config.settings import load_settings
 
     settings = load_settings()
     settings.providers.profiles["local-qwen"] = ProviderProfile(
-        name="local-qwen", kind="openai_compat", model="qwen", context_window=128_000, max_tokens=8_000
+        name="local-qwen",
+        kind="openai_compat",
+        model="qwen",
+        context_window=128_000,
+        max_tokens=8_000,
     )
 
     result = doctor._check_max_tokens_vs_context_window(settings)
@@ -274,7 +291,9 @@ def test_max_tokens_vs_context_window_silent_when_max_tokens_is_a_modest_reply_b
     assert result.detail == "no profile's max_tokens crowds out its context_window"
 
 
-def test_max_tokens_vs_context_window_fails_when_max_tokens_set_to_the_full_window(aida_home, records_home):
+def test_max_tokens_vs_context_window_fails_when_max_tokens_set_to_the_full_window(
+    aida_home, records_home
+):
     """The exact real-world mistake this check exists for: max_tokens read
     as "the model's total window" and set to that model's full context
     size instead of a modest reply budget."""
@@ -283,7 +302,11 @@ def test_max_tokens_vs_context_window_fails_when_max_tokens_set_to_the_full_wind
 
     settings = load_settings()
     settings.providers.profiles["ollama-big"] = ProviderProfile(
-        name="ollama-big", kind="openai_compat", model="big-model", context_window=250_000, max_tokens=262_000
+        name="ollama-big",
+        kind="openai_compat",
+        model="big-model",
+        context_window=250_000,
+        max_tokens=262_000,
     )
 
     result = doctor._check_max_tokens_vs_context_window(settings)
@@ -321,7 +344,9 @@ def test_secret_check_skips_profile_with_no_secret_ref(aida_home: Path, records_
     from aida.config.settings import load_settings
 
     settings = load_settings()
-    settings.providers.profiles["local"] = ProviderProfile(name="local", kind="openai_compat", model="m")
+    settings.providers.profiles["local"] = ProviderProfile(
+        name="local", kind="openai_compat", model="m"
+    )
 
     assert doctor._check_secrets_non_interactive(settings) == []
 
@@ -343,7 +368,9 @@ def test_secret_check_ok_when_env_var_set(monkeypatch, aida_home: Path, records_
     assert "AIDA_SECRET_ARGO_CLAUDE" in results[0].detail
 
 
-def test_secret_check_informational_when_only_in_keyring(monkeypatch, aida_home: Path, records_home: Path):
+def test_secret_check_informational_when_only_in_keyring(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     from aida.cli import doctor
     from aida.config.settings import load_settings
 
@@ -361,7 +388,9 @@ def test_secret_check_informational_when_only_in_keyring(monkeypatch, aida_home:
     assert "OS keychain" in results[0].detail
 
 
-def test_secret_check_fails_when_nowhere_to_find_it(monkeypatch, aida_home: Path, records_home: Path):
+def test_secret_check_fails_when_nowhere_to_find_it(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     from aida.cli import doctor
     from aida.config.settings import load_settings
 
@@ -379,7 +408,9 @@ def test_secret_check_fails_when_nowhere_to_find_it(monkeypatch, aida_home: Path
     assert "argo-claude" in results[0].detail
 
 
-def test_run_checks_includes_secret_headless_check(monkeypatch, aida_home: Path, records_home: Path):
+def test_run_checks_includes_secret_headless_check(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     from aida.config.settings import load_settings, save_providers_config
 
     settings = load_settings()

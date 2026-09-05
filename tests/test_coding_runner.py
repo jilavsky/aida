@@ -26,7 +26,9 @@ async def test_run_subprocess_captures_stderr(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_run_subprocess_surfaces_nonzero_returncode(tmp_path: Path):
-    result = await run_subprocess([sys.executable, "-c", "import sys; sys.exit(3)"], cwd=tmp_path, timeout=10.0)
+    result = await run_subprocess(
+        [sys.executable, "-c", "import sys; sys.exit(3)"], cwd=tmp_path, timeout=10.0
+    )
     assert result.returncode == 3
     assert not result.timed_out
 

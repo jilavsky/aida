@@ -70,7 +70,9 @@ def _openai_image_parts(images: list[Any]) -> list[dict[str, Any]]:
     return parts
 
 
-def to_openai_messages(messages: list[Message], *, supports_vision: bool = False) -> list[dict[str, Any]]:
+def to_openai_messages(
+    messages: list[Message], *, supports_vision: bool = False
+) -> list[dict[str, Any]]:
     """AIDA ``Message`` list -> OpenAI chat-completions ``messages`` list.
 
     **Vision (B1).** When ``supports_vision`` is true, the most recent
@@ -120,7 +122,11 @@ def to_openai_messages(messages: list[Message], *, supports_vision: bool = False
         else:
             image_parts = _openai_image_parts(selected_images.get(idx, []))
             if image_parts:
-                content: Any = [*image_parts, {"type": "text", "text": m.content}] if m.content else image_parts
+                content: Any = (
+                    [*image_parts, {"type": "text", "text": m.content}]
+                    if m.content
+                    else image_parts
+                )
                 out.append({"role": m.role, "content": content})
             else:
                 out.append({"role": m.role, "content": m.content})
@@ -287,7 +293,9 @@ class OpenAICompatProvider(LLMProvider):
 
     layer_name = "provider"
 
-    def __init__(self, *, model: str, base_url: str | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self, *, model: str, base_url: str | None = None, api_key: str | None = None
+    ) -> None:
         self.model = model
         # The SDK requires a non-empty api_key even for endpoints (Ollama,
         # LM Studio) that ignore it entirely.
@@ -337,6 +345,7 @@ class OpenAICompatProvider(LLMProvider):
             "model %s rejected %r; sending without it for the rest of this session", model, name
         )
         return name
+
     def _without_known_bad_params(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Strip params this endpoint already rejected for this model."""
         for name in self._dropped_params.get(str(kwargs.get("model", "")), ()):
@@ -388,11 +397,17 @@ class OpenAICompatProvider(LLMProvider):
                 for event in finalize_stream(state):
                     yield event
             except AuthenticationError as exc:
-                error = AgentError(layer=self.layer_name, message="authentication failed", detail=str(exc))
+                error = AgentError(
+                    layer=self.layer_name, message="authentication failed", detail=str(exc)
+                )
             except NotFoundError as exc:
-                error = AgentError(layer=self.layer_name, message="model not found", detail=str(exc))
+                error = AgentError(
+                    layer=self.layer_name, message="model not found", detail=str(exc)
+                )
             except APIConnectionError as exc:
-                error = AgentError(layer=self.layer_name, message="connection failed", detail=str(exc))
+                error = AgentError(
+                    layer=self.layer_name, message="connection failed", detail=str(exc)
+                )
             except APIStatusError as exc:
                 retry_param = None if emitted else self._param_to_drop(exc, kwargs)
                 error = AgentError(

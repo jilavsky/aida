@@ -10,7 +10,9 @@ from aida.ui.qt.settings_dialog import SettingsDialog
 
 
 def test_dialog_seeds_fields_from_app_config(qapp):
-    cfg = AppConfig(font_size=14, records_dir="/data/records", log_level="DEBUG", max_agent_iterations=100)
+    cfg = AppConfig(
+        font_size=14, records_dir="/data/records", log_level="DEBUG", max_agent_iterations=100
+    )
     dialog = SettingsDialog(cfg)
     assert dialog.font_size() == 14
     assert dialog.records_dir() == "/data/records"
@@ -68,7 +70,8 @@ def test_browse_button_sets_records_dir(qapp, monkeypatch, tmp_path):
     cfg = AppConfig()
     dialog = SettingsDialog(cfg)
     monkeypatch.setattr(
-        "aida.ui.qt.settings_dialog.QFileDialog.getExistingDirectory", lambda *a, **kw: str(tmp_path)
+        "aida.ui.qt.settings_dialog.QFileDialog.getExistingDirectory",
+        lambda *a, **kw: str(tmp_path),
     )
     dialog._on_browse_records_dir()
     assert dialog.records_dir() == str(tmp_path)
@@ -77,7 +80,9 @@ def test_browse_button_sets_records_dir(qapp, monkeypatch, tmp_path):
 def test_browse_cancelled_leaves_records_dir_unchanged(qapp, monkeypatch):
     cfg = AppConfig(records_dir="/keep/me")
     dialog = SettingsDialog(cfg)
-    monkeypatch.setattr("aida.ui.qt.settings_dialog.QFileDialog.getExistingDirectory", lambda *a, **kw: "")
+    monkeypatch.setattr(
+        "aida.ui.qt.settings_dialog.QFileDialog.getExistingDirectory", lambda *a, **kw: ""
+    )
     dialog._on_browse_records_dir()
     assert dialog.records_dir() == "/keep/me"
 
@@ -120,7 +125,8 @@ def test_browse_button_sets_scratch_dir(qapp, monkeypatch, tmp_path):
     cfg = AppConfig()
     dialog = SettingsDialog(cfg)
     monkeypatch.setattr(
-        "aida.ui.qt.settings_dialog.QFileDialog.getExistingDirectory", lambda *a, **kw: str(tmp_path)
+        "aida.ui.qt.settings_dialog.QFileDialog.getExistingDirectory",
+        lambda *a, **kw: str(tmp_path),
     )
     dialog._on_browse_scratch_dir()
     assert dialog.scratch_dir() == str(tmp_path)
@@ -129,7 +135,9 @@ def test_browse_button_sets_scratch_dir(qapp, monkeypatch, tmp_path):
 def test_browse_cancelled_leaves_scratch_dir_unchanged(qapp, monkeypatch):
     cfg = AppConfig(scratch_dir="/keep/me")
     dialog = SettingsDialog(cfg)
-    monkeypatch.setattr("aida.ui.qt.settings_dialog.QFileDialog.getExistingDirectory", lambda *a, **kw: "")
+    monkeypatch.setattr(
+        "aida.ui.qt.settings_dialog.QFileDialog.getExistingDirectory", lambda *a, **kw: ""
+    )
     dialog._on_browse_scratch_dir()
     assert dialog.scratch_dir() == "/keep/me"
 
@@ -249,7 +257,10 @@ def test_profile_row_shows_capability_notes_when_set(qapp):
     """U7 paper cut: "capability_notes is stored but shown nowhere"."""
     profiles = {
         "local": ProviderProfile(
-            name="local", kind="openai_compat", model="llama", capability_notes="small local model — prefer lean MCP groups"
+            name="local",
+            kind="openai_compat",
+            model="llama",
+            capability_notes="small local model — prefer lean MCP groups",
         ),
         "argo-claude": ProviderProfile(name="argo-claude", kind="anthropic", model="claude-x"),
     }
@@ -345,7 +356,7 @@ def test_personal_context_edits_the_active_users_own_text(qapp):
 
 
 def test_clearing_a_users_context_falls_back_rather_than_storing_blank(qapp):
-    """"No personal context" and "an empty personal context" should not be
+    """ "No personal context" and "an empty personal context" should not be
     different states."""
     config = AppConfig(
         active_user="Jan", user_context="Shared framing.", user_contexts={"Jan": "Jan's text."}

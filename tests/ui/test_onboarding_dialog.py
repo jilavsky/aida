@@ -18,7 +18,9 @@ def test_workspace_button_disabled_with_no_profiles(qapp, aida_home: Path, recor
 
 def test_workspace_button_enabled_once_a_profile_exists(qapp, aida_home: Path, records_home: Path):
     settings = load_settings()
-    settings.providers.profiles["mock-profile"] = ProviderProfile(name="mock-profile", kind="openai_compat", model="m")
+    settings.providers.profiles["mock-profile"] = ProviderProfile(
+        name="mock-profile", kind="openai_compat", model="m"
+    )
     dialog = OnboardingDialog(settings, None, aida_home / "skills")
     assert dialog._workspace_button.isEnabled()
     assert "1 provider profile(s) configured" in dialog._status_label.text()
@@ -33,7 +35,9 @@ def test_checks_label_reports_pass_count(qapp, aida_home: Path, records_home: Pa
     assert "environment checks passed" in dialog._checks_label.text()
 
 
-def test_checks_label_survives_run_checks_raising(qapp, aida_home: Path, records_home: Path, monkeypatch):
+def test_checks_label_survives_run_checks_raising(
+    qapp, aida_home: Path, records_home: Path, monkeypatch
+):
     def _boom():
         raise RuntimeError("disk on fire")
 
@@ -43,7 +47,9 @@ def test_checks_label_survives_run_checks_raising(qapp, aida_home: Path, records
     assert "could not run environment checks" in dialog._checks_label.text()
 
 
-def test_add_profile_opens_profiles_dialog_and_refreshes_status(qapp, aida_home: Path, records_home: Path, monkeypatch):
+def test_add_profile_opens_profiles_dialog_and_refreshes_status(
+    qapp, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = load_settings()
     dialog = OnboardingDialog(settings, None, aida_home / "skills")
 
@@ -68,9 +74,13 @@ def test_add_profile_opens_profiles_dialog_and_refreshes_status(qapp, aida_home:
     assert dialog._workspace_button.isEnabled()
 
 
-def test_add_workspace_opens_workspace_management_dialog(qapp, aida_home: Path, records_home: Path, monkeypatch):
+def test_add_workspace_opens_workspace_management_dialog(
+    qapp, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = load_settings()
-    settings.providers.profiles["mock-profile"] = ProviderProfile(name="mock-profile", kind="openai_compat", model="m")
+    settings.providers.profiles["mock-profile"] = ProviderProfile(
+        name="mock-profile", kind="openai_compat", model="m"
+    )
     dialog = OnboardingDialog(settings, None, aida_home / "skills")
 
     opened = []
@@ -85,7 +95,8 @@ def test_add_workspace_opens_workspace_management_dialog(qapp, aida_home: Path, 
             return 0
 
     monkeypatch.setattr(
-        "aida.ui.qt.workspace_management_dialog.WorkspaceManagementDialog", _FakeWorkspaceManagementDialog
+        "aida.ui.qt.workspace_management_dialog.WorkspaceManagementDialog",
+        _FakeWorkspaceManagementDialog,
     )
     dialog._on_add_workspace()
 

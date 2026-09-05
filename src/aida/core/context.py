@@ -115,7 +115,11 @@ def estimate_message_tokens(message: Message) -> int:
     session. Vision images (``message.images``, B1) are counted too, at a
     flat ``IMAGE_TOKEN_ESTIMATE`` each — previously not counted at all."""
     is_dense_content = message.role == "tool"
-    total = estimate_tokens_dense(message.content) if is_dense_content else estimate_tokens(message.content)
+    total = (
+        estimate_tokens_dense(message.content)
+        if is_dense_content
+        else estimate_tokens(message.content)
+    )
     for call in message.tool_calls:
         payload = json.dumps({"name": call.name, "arguments": call.arguments}, default=str)
         total += estimate_tokens_dense(payload)
@@ -242,7 +246,9 @@ def build_workspace_context_block(
     lines = ["# Workspace folders"]
     if source_folders:
         lines.append("")
-        lines.append("Source folder(s) — read data from here (list_directory/find_files/search_text/read_file):")
+        lines.append(
+            "Source folder(s) — read data from here (list_directory/find_files/search_text/read_file):"
+        )
         lines.extend(f"- {folder}" for folder in source_folders)
     if target_folder:
         lines.append("")
@@ -272,7 +278,7 @@ def build_workspace_context_block(
             "Exception: some MCP servers (browser/screenshot automation tools especially) enforce "
             "their own separate output directory as a security sandbox, independent of this scratch "
             "folder — if a tool call fails with an error naming *different* allowed folders (e.g. "
-            "\"File access denied ... outside allowed roots\"), that server manages its own location: "
+            '"File access denied ... outside allowed roots"), that server manages its own location: '
             "retry with a bare filename and no directory (most such tools resolve it against their own "
             "configured output dir), or use the folder the error itself named. Don't keep retrying with "
             "an absolute path built from the scratch folder above once a tool has already told you it "
@@ -475,9 +481,7 @@ def repair_tool_call_pairing(
         for call in message.tool_calls:
             repaired.append(
                 answers.get(call.id)
-                or Message(
-                    role="tool", content=placeholder, tool_call_id=call.id, name=call.name
-                )
+                or Message(role="tool", content=placeholder, tool_call_id=call.id, name=call.name)
             )
         index = scan
     return repaired
@@ -505,9 +509,7 @@ class TrimPlan:
         return self.system_messages + self.kept_turn_messages
 
 
-def plan_trim(
-    messages: list[Message], max_tokens: int, *, min_recent_turns: int = 4
-) -> TrimPlan:
+def plan_trim(messages: list[Message], max_tokens: int, *, min_recent_turns: int = 4) -> TrimPlan:
     """Decide which oldest whole turns would need to go to fit
     ``max_tokens`` (estimated), without dropping them — see ``TrimPlan``.
 
@@ -646,7 +648,9 @@ def compaction_summary_message(summary_text: str) -> Message:
     message) is the safe choice across both API dialects — an assistant
     message with no matching tool-call history risks confusing tool-call
     pairing on the next request."""
-    return Message(role="user", content=f"# Summary of earlier conversation (compacted)\n\n{summary_text}")
+    return Message(
+        role="user", content=f"# Summary of earlier conversation (compacted)\n\n{summary_text}"
+    )
 
 
 __all__ = [

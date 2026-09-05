@@ -27,7 +27,9 @@ def _settings() -> Settings:
         name="mock-profile", kind="openai_compat", model="mock-model"
     )
     settings.workspaces = WorkspacesConfig(
-        workspaces={"use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", safety="relaxed")}
+        workspaces={
+            "use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", safety="relaxed")
+        }
     )
     return settings
 
@@ -98,12 +100,17 @@ def test_remove_unknown_schedule_is_config_error(aida_home: Path, records_home: 
     assert code == EXIT_CONFIG_ERROR
 
 
-def test_run_fires_regardless_of_due_state(monkeypatch, aida_home: Path, records_home: Path, capsys):
+def test_run_fires_regardless_of_due_state(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
     """A schedule set for "every 24h" that already fired seconds ago is
     not due — 'aida schedule run NAME' must still fire it, since its whole
     point is testing a schedule without waiting for its next slot."""
     monkeypatch.setattr("aida.cli.schedule_cmds.load_settings", _settings)
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")] * 5))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="done")] * 5),
+    )
     _workflow()
     main(["add", "nightly", "--workflow", "daily", "--every", "24h"])
 

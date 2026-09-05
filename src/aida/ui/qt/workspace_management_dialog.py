@@ -121,12 +121,16 @@ class WorkspaceFormDialog(QDialog):
         target_row.addWidget(target_browse)
         form.addRow("Target folder:", target_row)
 
-        self._sidecar_edit = QLineEdit(workspace.sidecar_folder_name if workspace else "figures", self)
+        self._sidecar_edit = QLineEdit(
+            workspace.sidecar_folder_name if workspace else "figures", self
+        )
         form.addRow("Sidecar folder name:", self._sidecar_edit)
 
         self._mcp_group_combo = QComboBox(self)
         self._mcp_group_combo.addItem(NO_MCP_GROUP_LABEL)
-        self._mcp_group_combo.addItems([g for g in known_group_names(settings.mcp) if g != NO_MCP_GROUP_LABEL])
+        self._mcp_group_combo.addItems(
+            [g for g in known_group_names(settings.mcp) if g != NO_MCP_GROUP_LABEL]
+        )
         current_group = workspace.mcp_group if workspace else NO_MCP_GROUP_LABEL
         index = self._mcp_group_combo.findText(current_group)
         if index >= 0:
@@ -142,7 +146,9 @@ class WorkspaceFormDialog(QDialog):
             item = QListWidgetItem(info.name, self._skills_list)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(
-                Qt.CheckState.Checked if workspace and info.name in workspace.skills else Qt.CheckState.Unchecked
+                Qt.CheckState.Checked
+                if workspace and info.name in workspace.skills
+                else Qt.CheckState.Unchecked
             )
         form.addRow("Skills:", self._skills_list)
 
@@ -152,7 +158,9 @@ class WorkspaceFormDialog(QDialog):
             item = QListWidgetItem(name, self._kb_list)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(
-                Qt.CheckState.Checked if workspace and name in workspace.knowledge_bases else Qt.CheckState.Unchecked
+                Qt.CheckState.Checked
+                if workspace and name in workspace.knowledge_bases
+                else Qt.CheckState.Unchecked
             )
         form.addRow("Knowledge bases:", self._kb_list)
 
@@ -164,7 +172,9 @@ class WorkspaceFormDialog(QDialog):
         form.addRow("Safety mode:", self._safety_combo)
 
         system_prompt_row = QVBoxLayout()
-        self._system_prompt_edit = QPlainTextEdit(workspace.system_prompt if workspace else "", self)
+        self._system_prompt_edit = QPlainTextEdit(
+            workspace.system_prompt if workspace else "", self
+        )
         self._system_prompt_edit.setPlaceholderText(
             "Literal prompt text, or a path to a .md/.txt file (e.g. prompts/pyirena.md)"
         )
@@ -175,7 +185,9 @@ class WorkspaceFormDialog(QDialog):
         system_prompt_row.addWidget(load_file_button)
         form.addRow("System prompt:", system_prompt_row)
 
-        self._scripting_checkbox = QCheckBox("Allow running scripts/commands in this workspace", self)
+        self._scripting_checkbox = QCheckBox(
+            "Allow running scripts/commands in this workspace", self
+        )
         self._scripting_checkbox.setChecked(workspace.scripting_enabled if workspace else True)
         form.addRow("Scripting:", self._scripting_checkbox)
 
@@ -193,7 +205,9 @@ class WorkspaceFormDialog(QDialog):
 
         interpreter_row = QHBoxLayout()
         self._interpreter_edit = QLineEdit(workspace.python_interpreter if workspace else "", self)
-        self._interpreter_edit.setPlaceholderText("(default: the interpreter AIDA itself runs under)")
+        self._interpreter_edit.setPlaceholderText(
+            "(default: the interpreter AIDA itself runs under)"
+        )
         interpreter_row.addWidget(self._interpreter_edit, stretch=1)
         interpreter_browse = QPushButton("Browse…", self)
         interpreter_browse.clicked.connect(self._on_browse_interpreter)
@@ -203,7 +217,9 @@ class WorkspaceFormDialog(QDialog):
         self._command_allowlist_edit = QPlainTextEdit(
             "\n".join(workspace.command_allowlist) if workspace else "", self
         )
-        self._command_allowlist_edit.setPlaceholderText("One allowed command pattern per line, e.g. git status")
+        self._command_allowlist_edit.setPlaceholderText(
+            "One allowed command pattern per line, e.g. git status"
+        )
         self._command_allowlist_edit.setMaximumHeight(80)
         form.addRow("Command allowlist:", self._command_allowlist_edit)
 
@@ -214,23 +230,31 @@ class WorkspaceFormDialog(QDialog):
         self._script_timeout_spin = QSpinBox(self)
         self._script_timeout_spin.setRange(1, 3600)
         self._script_timeout_spin.setSuffix(" s")
-        self._script_timeout_spin.setValue(int(workspace.script_timeout_seconds) if workspace else 30)
+        self._script_timeout_spin.setValue(
+            int(workspace.script_timeout_seconds) if workspace else 30
+        )
         form.addRow("Script/command timeout:", self._script_timeout_spin)
 
         layout.addLayout(form)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
     def _on_browse_target(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Target Folder", self._target_folder_edit.text())
+        folder = QFileDialog.getExistingDirectory(
+            self, "Target Folder", self._target_folder_edit.text()
+        )
         if folder:
             self._target_folder_edit.setText(folder)
 
     def _on_browse_interpreter(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(self, "Python Interpreter", self._interpreter_edit.text())
+        path, _filter = QFileDialog.getOpenFileName(
+            self, "Python Interpreter", self._interpreter_edit.text()
+        )
         if path:
             self._interpreter_edit.setText(path)
 
@@ -256,7 +280,10 @@ class WorkspaceFormDialog(QDialog):
         warning = relaxed_mode_warning_if_newly_enabled(self._previous_safety, new_safety)
         if warning:
             answer = QMessageBox.warning(
-                self, "Relaxed Mode", warning, QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel
+                self,
+                "Relaxed Mode",
+                warning,
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
             )
             if answer != QMessageBox.StandardButton.Ok:
                 return
@@ -286,7 +313,11 @@ class WorkspaceFormDialog(QDialog):
         return WorkspaceConfig(
             name=self._name_edit.text().strip(),
             profile=None if profile == "(none)" else profile,
-            source_folders=[line.strip() for line in self._source_folders_edit.toPlainText().splitlines() if line.strip()],
+            source_folders=[
+                line.strip()
+                for line in self._source_folders_edit.toPlainText().splitlines()
+                if line.strip()
+            ],
             target_folder=self._target_folder_edit.text().strip() or None,
             sidecar_folder_name=self._sidecar_edit.text().strip() or "figures",
             mcp_group=mcp_group or NO_MCP_GROUP_LABEL,
@@ -295,7 +326,9 @@ class WorkspaceFormDialog(QDialog):
             safety=self._safety_combo.currentText(),
             knowledge_bases=self._checked_items(self._kb_list),
             command_allowlist=[
-                line.strip() for line in self._command_allowlist_edit.toPlainText().splitlines() if line.strip()
+                line.strip()
+                for line in self._command_allowlist_edit.toPlainText().splitlines()
+                if line.strip()
             ],
             python_interpreter=self._interpreter_edit.text().strip() or None,
             scripting_enabled=self._scripting_checkbox.isChecked(),
@@ -309,7 +342,9 @@ class WorkspaceFormDialog(QDialog):
         )
 
 
-def _workspace_detail_lines(workspace: WorkspaceConfig, validation: WorkspaceValidation) -> list[str]:
+def _workspace_detail_lines(
+    workspace: WorkspaceConfig, validation: WorkspaceValidation
+) -> list[str]:
     lines = [
         f"name: {workspace.name}",
         f"profile: {workspace.profile or '(none)'}",
@@ -412,12 +447,16 @@ class WorkspaceManagementDialog(QDialog):
     # --- add/edit/remove -------------------------------------------------
 
     def _on_add(self) -> None:
-        dialog = WorkspaceFormDialog(settings=self._settings, skills_dir=self._skills_dir, parent=self)
+        dialog = WorkspaceFormDialog(
+            settings=self._settings, skills_dir=self._skills_dir, parent=self
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         config = dialog.result_config()
         if config.name in self._configs():
-            QMessageBox.warning(self, "Already Exists", f"A workspace named {config.name!r} already exists.")
+            QMessageBox.warning(
+                self, "Already Exists", f"A workspace named {config.name!r} already exists."
+            )
             return
         save_workspace(self._settings, config)
         self._refresh_workspace_list()
@@ -427,7 +466,9 @@ class WorkspaceManagementDialog(QDialog):
         workspace = self._configs().get(name) if name else None
         if workspace is None:
             return
-        dialog = WorkspaceFormDialog(settings=self._settings, skills_dir=self._skills_dir, workspace=workspace, parent=self)
+        dialog = WorkspaceFormDialog(
+            settings=self._settings, skills_dir=self._skills_dir, workspace=workspace, parent=self
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         updated = dialog.result_config()

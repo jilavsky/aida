@@ -35,13 +35,17 @@ from tests.ui._qt_test_utils import pump_until
 
 def _settings_with_profile(name: str = "mock-profile") -> Settings:
     settings = load_settings()
-    settings.providers.profiles[name] = ProviderProfile(name=name, kind="openai_compat", model="mock-model")
+    settings.providers.profiles[name] = ProviderProfile(
+        name=name, kind="openai_compat", model="mock-model"
+    )
     return settings
 
 
 def _settings_with_embedding_profile(name: str = "embed-profile") -> Settings:
     settings = _settings_with_profile()
-    settings.providers.embedding_profiles[name] = EmbeddingProfile(name=name, kind="openai_compat", model="embed-model")
+    settings.providers.embedding_profiles[name] = EmbeddingProfile(
+        name=name, kind="openai_compat", model="embed-model"
+    )
     return settings
 
 
@@ -61,7 +65,9 @@ def _make_corpus(tmp_path: Path) -> Path:
 def test_dialog_with_no_bridge_shows_configured_knowledge_bases(qapp, aida_home: Path):
     settings = load_settings()
     settings.knowledge = KnowledgeConfig(
-        knowledge_bases={"usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")}
+        knowledge_bases={
+            "usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")
+        }
     )
     dialog = KnowledgeManagementDialog(settings, None)
     assert dialog._kb_list.count() == 1
@@ -111,14 +117,17 @@ def test_edit_knowledge_base_via_dialog_action(qapp, aida_home: Path):
     settings = _settings_with_embedding_profile()
     settings.knowledge = KnowledgeConfig(
         knowledge_bases={
-            "usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", source_folders=["/old"], embedding_profile="embed-profile")
+            "usaxs-docs": KnowledgeBaseConfig(
+                name="usaxs-docs", source_folders=["/old"], embedding_profile="embed-profile"
+            )
         }
     )
     dialog = KnowledgeManagementDialog(settings, None)
     dialog._kb_list.setCurrentRow(0)
 
     form = KnowledgeBaseFormDialog(
-        kb=settings.knowledge.knowledge_bases["usaxs-docs"], embedding_profile_names=["embed-profile"]
+        kb=settings.knowledge.knowledge_bases["usaxs-docs"],
+        embedding_profile_names=["embed-profile"],
     )
     assert form._name_edit.isReadOnly(), "name must not be changeable on edit"
     form._folders_edit.setPlainText("/new")
@@ -131,13 +140,17 @@ def test_edit_knowledge_base_via_dialog_action(qapp, aida_home: Path):
     assert load_knowledge_config(aida_home).knowledge_bases["usaxs-docs"].source_folders == ["/new"]
 
 
-def test_remove_knowledge_base_yes_deletes_config_and_index_file(qapp, aida_home: Path, monkeypatch):
+def test_remove_knowledge_base_yes_deletes_config_and_index_file(
+    qapp, aida_home: Path, monkeypatch
+):
     from aida.config.paths import knowledge_db_path
     from aida.config.settings import load_knowledge_config
 
     settings = _settings_with_embedding_profile()
     settings.knowledge = KnowledgeConfig(
-        knowledge_bases={"usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")}
+        knowledge_bases={
+            "usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")
+        }
     )
     index_path = knowledge_db_path("usaxs-docs")
     kb_index.connect(index_path).close()
@@ -152,13 +165,17 @@ def test_remove_knowledge_base_yes_deletes_config_and_index_file(qapp, aida_home
     assert not index_path.exists()
 
 
-def test_remove_knowledge_base_no_removes_config_but_keeps_index_file(qapp, aida_home: Path, monkeypatch):
+def test_remove_knowledge_base_no_removes_config_but_keeps_index_file(
+    qapp, aida_home: Path, monkeypatch
+):
     from aida.config.paths import knowledge_db_path
     from aida.config.settings import load_knowledge_config
 
     settings = _settings_with_embedding_profile()
     settings.knowledge = KnowledgeConfig(
-        knowledge_bases={"usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")}
+        knowledge_bases={
+            "usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")
+        }
     )
     index_path = knowledge_db_path("usaxs-docs")
     kb_index.connect(index_path).close()
@@ -176,7 +193,9 @@ def test_remove_knowledge_base_no_removes_config_but_keeps_index_file(qapp, aida
 def test_remove_knowledge_base_cancelled_keeps_it(qapp, aida_home: Path, monkeypatch):
     settings = _settings_with_embedding_profile()
     settings.knowledge = KnowledgeConfig(
-        knowledge_bases={"usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")}
+        knowledge_bases={
+            "usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", embedding_profile="embed-profile")
+        }
     )
     dialog = KnowledgeManagementDialog(settings, None)
     dialog._kb_list.setCurrentRow(0)
@@ -203,7 +222,9 @@ def test_add_without_any_embedding_profile_configured_offers_to_open_providers_d
     assert dialog._kb_list.count() == 0
 
 
-def test_add_without_any_embedding_profile_opens_providers_dialog_on_yes(qapp, aida_home: Path, monkeypatch):
+def test_add_without_any_embedding_profile_opens_providers_dialog_on_yes(
+    qapp, aida_home: Path, monkeypatch
+):
     settings = load_settings()  # no embedding_profiles configured at all
     dialog = KnowledgeManagementDialog(settings, None)
 
@@ -242,7 +263,9 @@ def test_form_normalizes_a_file_uri_source_folder(qapp, aida_home: Path):
 
 
 def _make_bridge(qapp, loop_thread, settings, monkeypatch) -> ChatBridge:
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     bridge = ChatBridge(loop_thread)
     bridge.start(settings, profile_name="mock-profile")
     assert pump_until(qapp, lambda: bridge.session is not None, timeout=10.0)
@@ -252,7 +275,9 @@ def _make_bridge(qapp, loop_thread, settings, monkeypatch) -> ChatBridge:
 def test_rebuild_ingests_the_corpus_and_updates_the_list(
     qapp, loop_thread, aida_home: Path, records_home: Path, tmp_path: Path, monkeypatch
 ):
-    monkeypatch.setattr("aida.ui.qt.bridge.build_embeddings_provider", lambda profile: MockEmbeddings())
+    monkeypatch.setattr(
+        "aida.ui.qt.bridge.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
     corpus = _make_corpus(tmp_path)
 
     settings = _settings_with_embedding_profile()
@@ -270,7 +295,10 @@ def test_rebuild_ingests_the_corpus_and_updates_the_list(
         dialog._on_rebuild()
 
         assert pump_until(qapp, lambda: "added 1" in dialog._status_label.text(), timeout=10.0)
-        assert "(1 chunk" in dialog._kb_list.item(0).text() or "chunk(s)" in dialog._kb_list.item(0).text()
+        assert (
+            "(1 chunk" in dialog._kb_list.item(0).text()
+            or "chunk(s)" in dialog._kb_list.item(0).text()
+        )
 
         from aida.config.paths import knowledge_db_path
         from aida.knowledge.rag import index as kb_index
@@ -289,7 +317,9 @@ def test_rebuild_with_unbuildable_embedding_profile_reports_failure(
 ):
     corpus = _make_corpus(tmp_path)
     settings = _settings_with_profile()
-    settings.providers.embedding_profiles["embed-profile"] = EmbeddingProfile(name="embed-profile", kind="totally-unknown")
+    settings.providers.embedding_profiles["embed-profile"] = EmbeddingProfile(
+        name="embed-profile", kind="totally-unknown"
+    )
     settings.knowledge = KnowledgeConfig(
         knowledge_bases={
             "usaxs-docs": KnowledgeBaseConfig(
@@ -317,7 +347,9 @@ def test_rebuild_with_a_missing_source_folder_warns_instead_of_silently_no_oping
     "added 0, updated 0" with zero indication why. A rebuild against a
     knowledge base with a missing folder must now pop an explicit
     warning."""
-    monkeypatch.setattr("aida.ui.qt.bridge.build_embeddings_provider", lambda profile: MockEmbeddings())
+    monkeypatch.setattr(
+        "aida.ui.qt.bridge.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
     missing = tmp_path / "does-not-exist"
 
     settings = _settings_with_embedding_profile()
@@ -348,7 +380,9 @@ def test_closing_the_dialog_disconnects_it_from_the_bridge(
     """Same leaked-connection regression class as
     test_mcp_management_dialog.py's equivalent test: a closed dialog must
     stop reacting to bridge signals."""
-    monkeypatch.setattr("aida.ui.qt.bridge.build_embeddings_provider", lambda profile: MockEmbeddings())
+    monkeypatch.setattr(
+        "aida.ui.qt.bridge.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
     corpus = _make_corpus(tmp_path)
     settings = _settings_with_embedding_profile()
     settings.knowledge = KnowledgeConfig(
@@ -384,9 +418,16 @@ def test_full_workflow_rebuild_then_chat_turn_shows_retrieval_row(
     a real temp corpus, rebuild, confirm chunk count updates; then send a
     chat turn through a workspace with that KB attached and confirm a
     RetrievalPerformed row appears in the chat transcript."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="here you go")]))
-    monkeypatch.setattr("aida.core.session.build_embeddings_provider", lambda profile: MockEmbeddings())
-    monkeypatch.setattr("aida.ui.qt.bridge.build_embeddings_provider", lambda profile: MockEmbeddings())
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="here you go")]),
+    )
+    monkeypatch.setattr(
+        "aida.core.session.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
+    monkeypatch.setattr(
+        "aida.ui.qt.bridge.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
     corpus = _make_corpus(tmp_path)
 
     settings = _settings_with_embedding_profile()
@@ -399,14 +440,20 @@ def test_full_workflow_rebuild_then_chat_turn_shows_retrieval_row(
     )
     settings.workspaces = WorkspacesConfig(
         workspaces={
-            "use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", knowledge_bases=["usaxs-docs"])
+            "use-ws": WorkspaceConfig(
+                name="use-ws", profile="mock-profile", knowledge_bases=["usaxs-docs"]
+            )
         }
     )
 
     window = MainWindow(settings, loop_thread, start_kwargs={"workspace_name": "use-ws"})
     try:
-        assert pump_until(qapp, lambda: window.statusBar().currentMessage().startswith("Ready"), timeout=10.0)
-        assert window.bridge.session.active_knowledge_bases, "session must have resolved the workspace's KB"
+        assert pump_until(
+            qapp, lambda: window.statusBar().currentMessage().startswith("Ready"), timeout=10.0
+        )
+        assert window.bridge.session.active_knowledge_bases, (
+            "session must have resolved the workspace's KB"
+        )
 
         dialog = KnowledgeManagementDialog(settings, window.bridge)
         dialog._kb_list.setCurrentRow(0)
@@ -418,7 +465,10 @@ def test_full_workflow_rebuild_then_chat_turn_shows_retrieval_row(
         window.input_box._send_button.click()
         assert pump_until(
             qapp,
-            lambda: any(isinstance(window.chat_panel.widget_at(i), RetrievalRow) for i in range(window.chat_panel.widget_count)),
+            lambda: any(
+                isinstance(window.chat_panel.widget_at(i), RetrievalRow)
+                for i in range(window.chat_panel.widget_count)
+            ),
             timeout=10.0,
         )
     finally:

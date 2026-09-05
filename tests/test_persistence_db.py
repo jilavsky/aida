@@ -18,8 +18,7 @@ def test_connect_creates_db_file(tmp_path: Path):
 def test_connect_creates_expected_tables(tmp_path: Path):
     conn = connect(tmp_path / "aida.db")
     tables = {
-        row["name"]
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
     assert {"conversations", "messages", "artifacts", "schedule_runs"} <= tables
     conn.close()
@@ -66,7 +65,9 @@ def test_row_factory_allows_dict_like_access(tmp_path: Path):
     conn.close()
 
 
-def test_concurrent_first_connect_from_two_threads_does_not_raise_database_is_locked(tmp_path: Path):
+def test_concurrent_first_connect_from_two_threads_does_not_raise_database_is_locked(
+    tmp_path: Path,
+):
     """Real-use bug: the GUI opens the first-ever connection to a fresh DB
     file from two threads at once (MainWindow.__init__ starts a session on
     the background loop thread while its own Qt-thread constructor opens a
@@ -146,8 +147,7 @@ def test_conversations_table_has_an_origin_column(tmp_path: Path):
 def test_connect_creates_schedule_runs_table(tmp_path: Path):
     conn = connect(tmp_path / "aida.db")
     tables = {
-        row["name"]
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
     assert "schedule_runs" in tables
     conn.close()

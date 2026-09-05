@@ -29,12 +29,18 @@ def test_server_show_unknown(aida_home: Path, capsys):
 def test_server_add_persists_to_disk(aida_home: Path, capsys):
     rc = main(
         [
-            "server", "add", "pyirena",
-            "--command", "/opt/pyirena-mcp",
+            "server",
+            "add",
+            "pyirena",
+            "--command",
+            "/opt/pyirena-mcp",
             "--arg=--stdio",
-            "--env", "FOO=bar",
-            "--groups", "analysis,full",
-            "--skills", "saxs-basics",
+            "--env",
+            "FOO=bar",
+            "--groups",
+            "analysis,full",
+            "--skills",
+            "saxs-basics",
         ]
     )
     assert rc == 0
@@ -86,7 +92,19 @@ def test_server_edit_unknown(aida_home: Path, capsys):
 
 
 def test_server_edit_only_overwrites_passed_fields(aida_home: Path):
-    main(["server", "add", "pyirena", "--command", "/old", "--groups", "analysis", "--skills", "saxs"])
+    main(
+        [
+            "server",
+            "add",
+            "pyirena",
+            "--command",
+            "/old",
+            "--groups",
+            "analysis",
+            "--skills",
+            "saxs",
+        ]
+    )
     main(["server", "edit", "pyirena", "--command", "/new"])
 
     server = load_mcp_config(aida_home).servers["pyirena"]
@@ -101,7 +119,9 @@ def test_server_edit_preserves_disabled_and_confirm_tools(aida_home: Path):
     main(["server", "edit", "pyirena", "--command", "/y"])
 
     server = load_mcp_config(aida_home).servers["pyirena"]
-    assert server.disabled_tools == ["plot_saxs"], "editing an unrelated field must not drop tool permissions"
+    assert server.disabled_tools == ["plot_saxs"], (
+        "editing an unrelated field must not drop tool permissions"
+    )
 
 
 # --- server remove -----------------------------------------------------------
@@ -256,7 +276,9 @@ def test_group_delete_unknown_group(aida_home: Path, capsys):
 
 def test_import_adds_new_servers(aida_home: Path, tmp_path: Path, capsys):
     config_file = tmp_path / "claude_desktop.json"
-    config_file.write_text('{"mcpServers": {"bait": {"command": "/opt/bait-mcp", "disabled": false}}}')
+    config_file.write_text(
+        '{"mcpServers": {"bait": {"command": "/opt/bait-mcp", "disabled": false}}}'
+    )
 
     rc = main(["import", str(config_file)])
     assert rc == 0

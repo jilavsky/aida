@@ -71,7 +71,9 @@ def test_shift_enter_inserts_newline_instead_of_sending(qapp):
 
     box = InputBox()
     box._text_edit.setPlainText("line1")
-    box._text_edit.moveCursor(QTextCursor.MoveOperation.End)  # setPlainText leaves the cursor at position 0
+    box._text_edit.moveCursor(
+        QTextCursor.MoveOperation.End
+    )  # setPlainText leaves the cursor at position 0
     sent = []
     box.send_requested.connect(sent.append)
 

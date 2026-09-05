@@ -172,7 +172,12 @@ async def _run_scan(func, *args, timeout: float = FS_TIMEOUT_SECONDS, **kwargs):
 
 
 async def _run_mutation(
-    func, *args, target: Path, description: str, timeout: float = FS_MUTATION_TIMEOUT_SECONDS, **kwargs
+    func,
+    *args,
+    target: Path,
+    description: str,
+    timeout: float = FS_MUTATION_TIMEOUT_SECONDS,
+    **kwargs,
 ):
     """Run a blocking filesystem *mutation* with an honest deadline.
 
@@ -303,7 +308,12 @@ def _matches_pattern(path: Path, root: Path, pattern: str) -> bool:
 
 
 def _find_files_sync(
-    root: Path, pattern: str, *, recursive: bool, max_entries: int, cancel: threading.Event | None = None
+    root: Path,
+    pattern: str,
+    *,
+    recursive: bool,
+    max_entries: int,
+    cancel: threading.Event | None = None,
 ) -> list[list[Any]]:
     rows: list[list[Any]] = []
     truncated = False
@@ -464,7 +474,9 @@ def default_file_tools(
             max_chars=INTERACTIVE_MAX_CHARS,
             max_pdf_pages=INTERACTIVE_MAX_PDF_PAGES,
         )
-        content = "\n\n".join(describe_for_model(a, max_chars=INTERACTIVE_MAX_CHARS) for a in artifacts)
+        content = "\n\n".join(
+            describe_for_model(a, max_chars=INTERACTIVE_MAX_CHARS) for a in artifacts
+        )
         return ToolResult(content=content, artifacts=artifacts)
 
     @_tool
@@ -475,7 +487,8 @@ def default_file_tools(
         candidate = await guard.authorize_write(path)
         if candidate.exists() and not overwrite:
             return ToolResult(
-                content=f"{candidate} already exists — pass overwrite=true to replace it.", is_error=True
+                content=f"{candidate} already exists — pass overwrite=true to replace it.",
+                is_error=True,
             )
 
         def _write() -> None:
@@ -485,7 +498,9 @@ def default_file_tools(
         await _run_mutation(_write, target=candidate, description="write")
         mime_type = mimetypes.guess_type(str(candidate))[0]
         artifact = FileArtifact(path=str(candidate), mime_type=mime_type)
-        return ToolResult(content=f"Wrote {len(content)} character(s) to {candidate}", artifacts=[artifact])
+        return ToolResult(
+            content=f"Wrote {len(content)} character(s) to {candidate}", artifacts=[artifact]
+        )
 
     @_tool
     async def create_directory(arguments: dict[str, Any]) -> ToolResult:
@@ -590,7 +605,10 @@ def default_file_tools(
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "Directory to list."},
-                        "recursive": {"type": "boolean", "description": "List subdirectories too. Default false."},
+                        "recursive": {
+                            "type": "boolean",
+                            "description": "List subdirectories too. Default false.",
+                        },
                     },
                     "required": ["path"],
                 },
@@ -625,7 +643,10 @@ def default_file_tools(
                     "properties": {
                         "path": {"type": "string", "description": "Directory to search under."},
                         "query": {"type": "string", "description": "Text to search for."},
-                        "recursive": {"type": "boolean", "description": "Search subdirectories too. Default true."},
+                        "recursive": {
+                            "type": "boolean",
+                            "description": "Search subdirectories too. Default true.",
+                        },
                         "case_sensitive": {"type": "boolean", "description": "Default false."},
                     },
                     "required": ["path", "query"],
@@ -657,7 +678,10 @@ def default_file_tools(
                     "properties": {
                         "path": {"type": "string", "description": "File to write."},
                         "content": {"type": "string", "description": "Text content to write."},
-                        "overwrite": {"type": "boolean", "description": "Replace an existing file. Default false."},
+                        "overwrite": {
+                            "type": "boolean",
+                            "description": "Replace an existing file. Default false.",
+                        },
                     },
                     "required": ["path", "content"],
                 },
@@ -670,7 +694,9 @@ def default_file_tools(
                 description="Create a directory (and any missing parent directories).",
                 parameters={
                     "type": "object",
-                    "properties": {"path": {"type": "string", "description": "Directory to create."}},
+                    "properties": {
+                        "path": {"type": "string", "description": "Directory to create."}
+                    },
                     "required": ["path"],
                 },
             ),

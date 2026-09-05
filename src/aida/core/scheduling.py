@@ -47,7 +47,9 @@ def parse_at(value: str) -> time:
     """Parse a local "HH:MM" time-of-day string."""
     match = _AT_RE.match(value)
     if not match:
-        raise ScheduleConfigError(f"invalid --at time {value!r}; expected 24-hour \"HH:MM\", e.g. \"07:00\"")
+        raise ScheduleConfigError(
+            f'invalid --at time {value!r}; expected 24-hour "HH:MM", e.g. "07:00"'
+        )
     return time(hour=int(match.group(1)), minute=int(match.group(2)))
 
 
@@ -55,7 +57,9 @@ def parse_every(value: str) -> timedelta:
     """Parse a duration like ``"30m"``, ``"4h"``, ``"1d"``."""
     match = _EVERY_RE.match(value)
     if not match:
-        raise ScheduleConfigError(f"invalid --every duration {value!r}; expected e.g. \"30m\", \"4h\", \"1d\"")
+        raise ScheduleConfigError(
+            f'invalid --every duration {value!r}; expected e.g. "30m", "4h", "1d"'
+        )
     amount = int(match.group(1))
     if amount <= 0:
         raise ScheduleConfigError(f"invalid --every duration {value!r}; must be greater than zero")
@@ -68,8 +72,7 @@ def parse_schedule_timing(*, at: str | None, every: str | None) -> ParsedSchedul
     not enforce itself."""
     if bool(at) == bool(every):
         raise ScheduleConfigError(
-            "a schedule needs exactly one of --at or --every "
-            f"(got at={at!r}, every={every!r})"
+            f"a schedule needs exactly one of --at or --every (got at={at!r}, every={every!r})"
         )
     if at:
         return ParsedSchedule(at=parse_at(at))
@@ -85,7 +88,9 @@ def _most_recent_slot(at: time, now: datetime) -> datetime:
     return candidate
 
 
-def due_since(schedule: ParsedSchedule, *, last_fired_at: datetime | None, now: datetime) -> datetime | None:
+def due_since(
+    schedule: ParsedSchedule, *, last_fired_at: datetime | None, now: datetime
+) -> datetime | None:
     """*When* ``schedule`` became due, or ``None`` if it isn't due yet.
 
     ``at``: due iff the most recent daily slot at-or-before ``now`` is one
@@ -116,7 +121,9 @@ def due_since(schedule: ParsedSchedule, *, last_fired_at: datetime | None, now: 
             # "missed occurrence" to catch up on yet, so this deliberately
             # does not fall back to yesterday's slot the way
             # _most_recent_slot does for a schedule that has fired before.
-            today_slot = now.replace(hour=schedule.at.hour, minute=schedule.at.minute, second=0, microsecond=0)
+            today_slot = now.replace(
+                hour=schedule.at.hour, minute=schedule.at.minute, second=0, microsecond=0
+            )
             return today_slot if now >= today_slot else None
         slot = _most_recent_slot(schedule.at, now)
         return slot if last_fired_at < slot else None

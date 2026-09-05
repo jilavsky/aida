@@ -87,6 +87,14 @@ packages = ["src/aida"]
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.format]
+# ruff >= 0.16 formats Python code blocks inside Markdown when a .md file is
+# passed to it. That is wrong for this repo: the snippets in planning/ and
+# docs/ are written at the indentation they will actually live at, so a
+# reader (or an agent following a guide) can see where a block belongs.
+# Reformatting them to column zero silently destroys that.
+exclude = ["*.md"]
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]

@@ -240,7 +240,9 @@ def test_a_label_is_matched_case_insensitively_and_by_prefix(tmp_path: Path):
 
 def test_an_unknown_label_lists_what_is_available(tmp_path: Path):
     attachments = _attached(tmp_path)
-    result = _call(_tools(attachments), "get_document_figure", document="paper.pdf", label="Figure 9")
+    result = _call(
+        _tools(attachments), "get_document_figure", document="paper.pdf", label="Figure 9"
+    )
     assert result.is_error
     assert "Figure 1" in result.content
 
@@ -292,7 +294,9 @@ def test_a_document_with_no_figures_is_reported_as_such(tmp_path: Path):
 
 def test_describe_index_names_every_figure_and_prompts_the_pull(tmp_path: Path):
     entries = [
-        FigureEntry(label="Figure 1", caption="Guinier fits", file="fig-01.png", page=2, confidence="high"),
+        FigureEntry(
+            label="Figure 1", caption="Guinier fits", file="fig-01.png", page=2, confidence="high"
+        ),
         FigureEntry(label="Figure 2", caption="", file="fig-02.png", page=3, confidence="high"),
     ]
     described = describe_index("paper.pdf", FigureIndex("paper.pdf", entries))

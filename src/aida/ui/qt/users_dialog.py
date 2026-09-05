@@ -144,7 +144,11 @@ class UsersDialog(QDialog):
         self._list.clear()
         for name, count in self._counts:
             plural = "" if count == 1 else "s"
-            label = f"{name}  ({count} conversation{plural})" if count else f"{name}  (no conversations yet)"
+            label = (
+                f"{name}  ({count} conversation{plural})"
+                if count
+                else f"{name}  (no conversations yet)"
+            )
             if name == self._active_user:
                 label += "  — active"
             self._list.addItem(label)
@@ -187,7 +191,9 @@ class UsersDialog(QDialog):
         current = self.selected_user()
         if current is None:
             return
-        new_name, ok = QInputDialog.getText(self, "Rename or Merge", f"New name for {current!r}:", text=current)
+        new_name, ok = QInputDialog.getText(
+            self, "Rename or Merge", f"New name for {current!r}:", text=current
+        )
         if not ok:
             return
         new_name = new_name.strip()
@@ -239,7 +245,9 @@ class UsersDialog(QDialog):
         if self._active_user == current:
             self._active_user = ""
         self.refresh()
-        QMessageBox.information(self, "Label Cleared", f"Cleared the label from {cleared} conversation(s).")
+        QMessageBox.information(
+            self, "Label Cleared", f"Cleared the label from {cleared} conversation(s)."
+        )
 
 
 __all__ = ["UsersDialog"]

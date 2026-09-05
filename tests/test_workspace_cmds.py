@@ -31,7 +31,9 @@ def test_cmd_list_no_workspaces(aida_home: Path, records_home: Path, capsys, mon
     assert "No workspaces configured." in capsys.readouterr().out
 
 
-def test_cmd_new_creates_and_persists_to_disk(aida_home: Path, records_home: Path, capsys, monkeypatch, tmp_path: Path):
+def test_cmd_new_creates_and_persists_to_disk(
+    aida_home: Path, records_home: Path, capsys, monkeypatch, tmp_path: Path
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
 
     # tmp_path (not a hardcoded "/tmp") so this is reachable on every OS —
@@ -40,10 +42,14 @@ def test_cmd_new_creates_and_persists_to_disk(aida_home: Path, records_home: Pat
     source_folder = str(tmp_path)
     rc = cmd_new(
         _parse(
-            "new", "ws1",
-            "--profile", "p1",
-            "--mcp-group", "none",
-            "--source-folders", source_folder,
+            "new",
+            "ws1",
+            "--profile",
+            "p1",
+            "--mcp-group",
+            "none",
+            "--source-folders",
+            source_folder,
         )
     )
     out = capsys.readouterr().out
@@ -57,7 +63,9 @@ def test_cmd_new_creates_and_persists_to_disk(aida_home: Path, records_home: Pat
     assert reloaded.workspaces["ws1"].source_folders == [source_folder]
 
 
-def test_cmd_new_refuses_to_clobber_existing(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_new_refuses_to_clobber_existing(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(_parse("new", "ws1", "--profile", "p1"))
     capsys.readouterr()
@@ -76,7 +84,9 @@ def test_cmd_show_unknown_workspace(aida_home: Path, records_home: Path, capsys,
     assert "does-not-exist" in out
 
 
-def test_cmd_show_known_workspace_prints_fields_and_validation(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_show_known_workspace_prints_fields_and_validation(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(_parse("new", "ws1", "--profile", "p1", "--system-prompt", "You are helpful."))
     capsys.readouterr()
@@ -97,14 +107,20 @@ def test_cmd_edit_unknown_workspace(aida_home: Path, records_home: Path, capsys,
     assert "does-not-exist" in out
 
 
-def test_cmd_edit_only_overwrites_passed_fields(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_edit_only_overwrites_passed_fields(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(
         _parse(
-            "new", "ws1",
-            "--profile", "p1",
-            "--skills", "a,b",
-            "--system-prompt", "original prompt",
+            "new",
+            "ws1",
+            "--profile",
+            "p1",
+            "--skills",
+            "a,b",
+            "--system-prompt",
+            "original prompt",
         )
     )
     capsys.readouterr()
@@ -116,9 +132,9 @@ def test_cmd_edit_only_overwrites_passed_fields(aida_home: Path, records_home: P
 
     reloaded = load_workspaces_config(aida_home)
     ws = reloaded.workspaces["ws1"]
-    assert ws.safety == "relaxed"          # changed
-    assert ws.profile == "p1"              # left alone
-    assert ws.skills == ["a", "b"]         # left alone
+    assert ws.safety == "relaxed"  # changed
+    assert ws.profile == "p1"  # left alone
+    assert ws.skills == ["a", "b"]  # left alone
     assert ws.system_prompt == "original prompt"  # left alone
 
 
@@ -127,14 +143,18 @@ def test_cmd_edit_only_overwrites_passed_fields(aida_home: Path, records_home: P
 
 def test_cmd_new_sets_knowledge_bases(aida_home: Path, records_home: Path, capsys, monkeypatch):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
-    cmd_new(_parse("new", "ws1", "--profile", "p1", "--knowledge-bases", "usaxs-docs,obsidian-vault"))
+    cmd_new(
+        _parse("new", "ws1", "--profile", "p1", "--knowledge-bases", "usaxs-docs,obsidian-vault")
+    )
     capsys.readouterr()
 
     ws = load_workspaces_config(aida_home).workspaces["ws1"]
     assert ws.knowledge_bases == ["usaxs-docs", "obsidian-vault"]
 
 
-def test_cmd_new_defaults_knowledge_bases_to_empty(aida_home: Path, records_home: Path, monkeypatch):
+def test_cmd_new_defaults_knowledge_bases_to_empty(
+    aida_home: Path, records_home: Path, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(_parse("new", "ws1", "--profile", "p1"))
 
@@ -142,9 +162,13 @@ def test_cmd_new_defaults_knowledge_bases_to_empty(aida_home: Path, records_home
     assert ws.knowledge_bases == []
 
 
-def test_cmd_edit_updates_knowledge_bases_leaving_other_fields_alone(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_edit_updates_knowledge_bases_leaving_other_fields_alone(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
-    cmd_new(_parse("new", "ws1", "--profile", "p1", "--knowledge-bases", "usaxs-docs", "--skills", "a"))
+    cmd_new(
+        _parse("new", "ws1", "--profile", "p1", "--knowledge-bases", "usaxs-docs", "--skills", "a")
+    )
     capsys.readouterr()
 
     cmd_edit(_parse("edit", "ws1", "--knowledge-bases", "usaxs-docs,obsidian-vault"))
@@ -155,7 +179,9 @@ def test_cmd_edit_updates_knowledge_bases_leaving_other_fields_alone(aida_home: 
     assert ws.skills == ["a"]  # left alone
 
 
-def test_cmd_edit_without_knowledge_bases_flag_leaves_it_unchanged(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_edit_without_knowledge_bases_flag_leaves_it_unchanged(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(_parse("new", "ws1", "--profile", "p1", "--knowledge-bases", "usaxs-docs"))
     capsys.readouterr()
@@ -167,7 +193,9 @@ def test_cmd_edit_without_knowledge_bases_flag_leaves_it_unchanged(aida_home: Pa
     assert ws.knowledge_bases == ["usaxs-docs"]
 
 
-def test_cmd_show_includes_knowledge_bases(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_show_includes_knowledge_bases(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(_parse("new", "ws1", "--profile", "p1", "--knowledge-bases", "usaxs-docs"))
     capsys.readouterr()
@@ -180,8 +208,12 @@ def test_cmd_show_includes_knowledge_bases(aida_home: Path, records_home: Path, 
 def test_cmd_edit_updates_profile(aida_home: Path, records_home: Path, capsys, monkeypatch):
     def _settings_with_two_profiles():
         settings = load_settings()
-        settings.providers.profiles["p1"] = ProviderProfile(name="p1", kind="openai_compat", model="m1")
-        settings.providers.profiles["p2"] = ProviderProfile(name="p2", kind="openai_compat", model="m2")
+        settings.providers.profiles["p1"] = ProviderProfile(
+            name="p1", kind="openai_compat", model="m1"
+        )
+        settings.providers.profiles["p2"] = ProviderProfile(
+            name="p2", kind="openai_compat", model="m2"
+        )
         return settings
 
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_two_profiles)
@@ -195,7 +227,9 @@ def test_cmd_edit_updates_profile(aida_home: Path, records_home: Path, capsys, m
     assert reloaded.workspaces["ws1"].profile == "p2"
 
 
-def test_cmd_list_shows_created_workspaces(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_list_shows_created_workspaces(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(_parse("new", "ws1", "--profile", "p1", "--mcp-group", "analysis"))
     capsys.readouterr()
@@ -211,7 +245,9 @@ def test_cmd_list_shows_created_workspaces(aida_home: Path, records_home: Path, 
 # --- Phase 6: one-time relaxed-mode warning ----------------------------------
 
 
-def test_cmd_new_with_relaxed_safety_prints_warning(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_new_with_relaxed_safety_prints_warning(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     rc = cmd_new(_parse("new", "ws1", "--profile", "p1", "--safety", "relaxed"))
     out = capsys.readouterr().out
@@ -229,7 +265,9 @@ def test_cmd_new_with_confirm_safety_prints_no_relaxed_warning(
     assert "Relaxed mode" not in out
 
 
-def test_cmd_edit_enabling_relaxed_prints_warning(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_edit_enabling_relaxed_prints_warning(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(_parse("new", "ws1", "--profile", "p1", "--safety", "confirm"))
     capsys.readouterr()
@@ -240,7 +278,9 @@ def test_cmd_edit_enabling_relaxed_prints_warning(aida_home: Path, records_home:
     assert "Relaxed mode" in out
 
 
-def test_cmd_edit_already_relaxed_does_not_reprint_warning(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_edit_already_relaxed_does_not_reprint_warning(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     """The "one-time" part: re-saving an already-relaxed workspace (e.g.
     editing an unrelated field) must not show the warning again."""
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
@@ -266,15 +306,21 @@ def test_cmd_edit_switching_from_relaxed_to_confirm_prints_no_warning(
     assert "Relaxed mode" not in out
 
 
-def test_two_workspaces_resolve_to_different_environments(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_two_workspaces_resolve_to_different_environments(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     """Phase 4 acceptance criterion: two workspaces demonstrably load
     different provider/skills environments."""
     from aida.workspace.workspaces import resolve_workspace_environment
 
     def _settings_with_two_profiles():
         settings = load_settings()
-        settings.providers.profiles["p1"] = ProviderProfile(name="p1", kind="openai_compat", model="m1")
-        settings.providers.profiles["p2"] = ProviderProfile(name="p2", kind="openai_compat", model="m2")
+        settings.providers.profiles["p1"] = ProviderProfile(
+            name="p1", kind="openai_compat", model="m1"
+        )
+        settings.providers.profiles["p2"] = ProviderProfile(
+            name="p2", kind="openai_compat", model="m2"
+        )
         return settings
 
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_two_profiles)
@@ -339,12 +385,23 @@ def test_cmd_new_defaults_coding_fields(aida_home: Path, records_home: Path, mon
     assert ws.saved_scripts_dir is None
 
 
-def test_cmd_edit_updates_coding_fields_leaving_others_alone(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_edit_updates_coding_fields_leaving_others_alone(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(_parse("new", "ws1", "--profile", "p1", "--skills", "a"))
     capsys.readouterr()
 
-    cmd_edit(_parse("edit", "ws1", "--command-allowlist", "ls", "--python-interpreter", "/opt/env/bin/python"))
+    cmd_edit(
+        _parse(
+            "edit",
+            "ws1",
+            "--command-allowlist",
+            "ls",
+            "--python-interpreter",
+            "/opt/env/bin/python",
+        )
+    )
     capsys.readouterr()
 
     ws = load_workspaces_config(aida_home).workspaces["ws1"]
@@ -353,7 +410,9 @@ def test_cmd_edit_updates_coding_fields_leaving_others_alone(aida_home: Path, re
     assert ws.skills == ["a"]  # left alone
 
 
-def test_cmd_edit_without_coding_flags_leaves_them_unchanged(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_edit_without_coding_flags_leaves_them_unchanged(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(_parse("new", "ws1", "--profile", "p1", "--command-allowlist", "ls"))
     capsys.readouterr()
@@ -365,7 +424,9 @@ def test_cmd_edit_without_coding_flags_leaves_them_unchanged(aida_home: Path, re
     assert ws.command_allowlist == ["ls"]
 
 
-def test_cmd_edit_toggles_scripting_enabled(aida_home: Path, records_home: Path, capsys, monkeypatch):
+def test_cmd_edit_toggles_scripting_enabled(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
     monkeypatch.setattr("aida.cli.workspace_cmds.load_settings", _settings_with_profile)
     cmd_new(_parse("new", "ws1", "--profile", "p1"))
     capsys.readouterr()

@@ -60,7 +60,8 @@ def test_add_via_dialog_appends_and_emits_tasks_changed(qapp, monkeypatch):
 def test_add_cancelled_does_not_emit(qapp, monkeypatch):
     panel = QuickTasksPanel()
     monkeypatch.setattr(
-        "aida.ui.qt.quick_tasks_panel.QuickTaskEditDialog.get_task", staticmethod(lambda *a, **kw: None)
+        "aida.ui.qt.quick_tasks_panel.QuickTaskEditDialog.get_task",
+        staticmethod(lambda *a, **kw: None),
     )
     changed = []
     panel.tasks_changed.connect(changed.append)
@@ -132,7 +133,8 @@ def test_edit_cancelled_leaves_the_task_unchanged(qapp, monkeypatch):
     panel = QuickTasksPanel()
     panel.set_tasks([_task("old name", "old text")])
     monkeypatch.setattr(
-        "aida.ui.qt.quick_tasks_panel.QuickTaskEditDialog.get_task", staticmethod(lambda *a, **kw: None)
+        "aida.ui.qt.quick_tasks_panel.QuickTaskEditDialog.get_task",
+        staticmethod(lambda *a, **kw: None),
     )
     changed = []
     panel.tasks_changed.connect(changed.append)

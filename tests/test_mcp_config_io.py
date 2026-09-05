@@ -46,7 +46,9 @@ def test_explicit_overwrite_replaces_the_existing_server():
 
 def test_existing_config_object_is_not_mutated():
     existing = _config(pyirena=McpServerConfig(name="pyirena", command="/existing/path"))
-    incoming = {"mcpServers": {"pyirena": {"command": "/imported/path"}, "bait": {"command": "/bait"}}}
+    incoming = {
+        "mcpServers": {"pyirena": {"command": "/imported/path"}, "bait": {"command": "/bait"}}
+    }
 
     merge_mcp_config(existing, incoming, overwrite={"pyirena"})
 

@@ -54,7 +54,9 @@ class _FakeMcpManager:
     #: into the session's system message.
     instructions_to_report: dict[str, str] = {}
 
-    def __init__(self, servers, *, artifact_store=None, confirm_callback=None, scratch_dir=None) -> None:
+    def __init__(
+        self, servers, *, artifact_store=None, confirm_callback=None, scratch_dir=None
+    ) -> None:
         self.servers = servers
         self.artifact_store = artifact_store
         self.confirm_callback = confirm_callback
@@ -97,7 +99,9 @@ def _settings(**overrides) -> Settings:
     settings.mcp = McpConfig(
         servers={
             "ws-server": McpServerConfig(name="ws-server", command="ws-mcp", groups=["ws-group"]),
-            "explicit-server": McpServerConfig(name="explicit-server", command="explicit-mcp", groups=["other"]),
+            "explicit-server": McpServerConfig(
+                name="explicit-server", command="explicit-mcp", groups=["other"]
+            ),
         }
     )
     for key, value in overrides.items():
@@ -124,7 +128,9 @@ def _workspace(**overrides) -> WorkspaceConfig:
 async def test_start_session_explicit_profile_no_workspace_creates_recorder(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings()
 
     session, mcp_manager = await start_session(settings, profile_name="mock-profile")
@@ -155,7 +161,9 @@ async def test_start_session_unknown_workspace_raises(aida_home: Path, records_h
 async def test_start_session_workspace_supplies_profile_prompt_and_mcp(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
@@ -176,7 +184,9 @@ async def test_start_session_tells_the_model_its_source_and_target_folders(
 ):
     """Regression: "Agent seems to have no understanding of Source and
     Target folders" — the system message must actually name them."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     source = tmp_path / "usaxs_data"
@@ -202,10 +212,15 @@ async def test_start_session_tells_the_model_its_python_interpreter(
     probe (via run_command, needing confirmation) just to discover which
     interpreter/packages it had — the system message must name the
     configured interpreter directly instead."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
-    ws = _workspace(python_interpreter="/opt/miniconda3/envs/aievaluator/bin/python", command_allowlist=["git status"])
+    ws = _workspace(
+        python_interpreter="/opt/miniconda3/envs/aievaluator/bin/python",
+        command_allowlist=["git status"],
+    )
     settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
 
     session, mcp_manager = await start_session(settings, workspace_name="use-ws")
@@ -228,7 +243,9 @@ async def test_start_session_tells_the_model_its_name_and_the_user_before_the_wo
     and land ahead of the workspace's own system_prompt ("You are a
     workspace assistant.") — a domain persona shouldn't open the
     conversation before the model knows its own name."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
@@ -248,7 +265,9 @@ async def test_start_session_tells_the_model_its_name_and_the_user_before_the_wo
 async def test_start_session_no_coding_context_when_scripting_disabled(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     ws = _workspace(scripting_enabled=False)
@@ -270,7 +289,9 @@ async def test_start_session_folds_mcp_server_instructions_into_system_message(
     server author's own LLM-facing usage guidance — pyirena-mcp ships a
     detailed one) used to be discarded entirely; it must now reach the
     model via McpManager.server_instructions()."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
     _FakeMcpManager.instructions_to_report = {"ws-server": "Call pyirena_summarize_folder first."}
 
@@ -284,21 +305,27 @@ async def test_start_session_folds_mcp_server_instructions_into_system_message(
 
 
 @pytest.mark.asyncio
-async def test_start_session_passes_confirm_callback_to_mcp_manager(monkeypatch, aida_home: Path, records_home: Path):
+async def test_start_session_passes_confirm_callback_to_mcp_manager(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     """Regression: McpManager's own per-tool "confirm before run" gate
     (Phase 7) is only reachable in real usage if start_session actually
     hands it the session's confirm_callback — the same one SafetyGuard
     gets. Before this was wired up, McpManager fell back to its own
     deny_all default, silently refusing every confirm-flagged MCP tool no
     matter what the user answered."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     async def my_confirm(_request):
         return True
 
     settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
-    session, mcp_manager = await start_session(settings, workspace_name="use-ws", confirm_callback=my_confirm)
+    session, mcp_manager = await start_session(
+        settings, workspace_name="use-ws", confirm_callback=my_confirm
+    )
     try:
         assert mcp_manager.confirm_callback is my_confirm
     finally:
@@ -309,7 +336,9 @@ async def test_start_session_passes_confirm_callback_to_mcp_manager(monkeypatch,
 async def test_start_session_explicit_profile_overrides_workspace_profile(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
@@ -326,7 +355,9 @@ async def test_start_session_explicit_profile_overrides_workspace_profile(
 async def test_start_session_explicit_mcp_overrides_workspace_group(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
@@ -345,7 +376,9 @@ async def test_start_session_explicit_mcp_overrides_workspace_group(
 async def test_start_session_resume_loads_history_and_defaults_workspace_profile(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="reply 1")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="reply 1")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
     settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
 
@@ -356,7 +389,9 @@ async def test_start_session_resume_loads_history_and_defaults_workspace_profile
     if first_mcp is not None:
         await first_mcp.aclose()
 
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="reply 2")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="reply 2")])
+    )
     resumed_session, resumed_mcp = await start_session(settings, resume_conversation_id=conv_id)
     try:
         assert resumed_session.recorder.conversation_id == conv_id
@@ -370,7 +405,9 @@ async def test_start_session_resume_loads_history_and_defaults_workspace_profile
 
 
 @pytest.mark.asyncio
-async def test_start_session_resume_unknown_conversation_raises(aida_home: Path, records_home: Path):
+async def test_start_session_resume_unknown_conversation_raises(
+    aida_home: Path, records_home: Path
+):
     settings = _settings()
     with pytest.raises(ConversationNotFoundError):
         await start_session(settings, resume_conversation_id="does-not-exist")
@@ -387,7 +424,9 @@ async def test_start_session_merges_file_and_document_tools_by_default(
     native file/document tools in (against an empty allowed-folders set —
     everything just requires confirmation, per SafetyGuard's outside-bounds
     behavior)."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings()
 
     session, _mcp_manager = await start_session(settings, profile_name="mock-profile")
@@ -408,7 +447,9 @@ async def test_start_session_relaxed_workspace_allows_writes_without_confirmatio
     + safety mode is what actually gates the merged file tools — a
     'relaxed' workspace should let a write inside its own target folder
     through without ever calling the confirm callback."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     target = tmp_path / "target"
@@ -445,7 +486,9 @@ async def test_start_session_confirm_workspace_requires_confirmation_inside_fold
     """'confirm' mode (the default) gates writes even *inside* the
     workspace's own allowed folders — the custom confirm_callback passed to
     start_session must be the one consulted."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     target = tmp_path / "target"
@@ -480,7 +523,9 @@ async def test_start_session_global_allowed_folders_apply_without_workspace(
 ):
     """settings.app.allowed_folders (Phase 6) is layered on even when no
     workspace is in play at all."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     shared = tmp_path / "shared"
     shared.mkdir()
     settings = _settings()
@@ -520,7 +565,9 @@ async def test_start_session_always_allows_writes_under_aida_artifacts_dir(
     allowed-folders case; see test_start_session_global_allowed_folders_apply_without_workspace)."""
     from aida.config.paths import artifacts_dir
 
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings()
     settings.app.default_safety_mode = "relaxed"
 
@@ -566,7 +613,9 @@ def test_build_parser_profile_optional_when_workspace_given():
 async def test_start_session_creates_missing_source_and_target_folders(
     monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     source = tmp_path / "not-yet-created-source"
@@ -611,16 +660,24 @@ def test_ensure_workspace_folders_warns_instead_of_raising_on_failure(tmp_path: 
 async def test_start_session_resolves_workspace_knowledge_bases(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
-    monkeypatch.setattr("aida.core.session.build_embeddings_provider", lambda profile: MockEmbeddings())
+    monkeypatch.setattr(
+        "aida.core.session.build_embeddings_provider", lambda profile: MockEmbeddings()
+    )
 
     settings = _settings(
-        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}),
+        workspaces=WorkspacesConfig(
+            workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}
+        ),
         knowledge=KnowledgeConfig(
             knowledge_bases={
                 "usaxs-docs": KnowledgeBaseConfig(
-                    name="usaxs-docs", source_folders=["/data/docs"], embedding_profile="embed-profile"
+                    name="usaxs-docs",
+                    source_folders=["/data/docs"],
+                    embedding_profile="embed-profile",
                 )
             }
         ),
@@ -643,11 +700,15 @@ async def test_start_session_resolves_workspace_knowledge_bases(
 async def test_start_session_warns_and_skips_unknown_knowledge_base_name(
     monkeypatch, aida_home: Path, records_home: Path, capsys
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     settings = _settings(
-        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["does-not-exist"])}),
+        workspaces=WorkspacesConfig(
+            workspaces={"use-ws": _workspace(knowledge_bases=["does-not-exist"])}
+        ),
     )
 
     session, mcp_manager = await start_session(settings, workspace_name="use-ws")
@@ -664,13 +725,19 @@ async def test_start_session_warns_and_skips_unknown_knowledge_base_name(
 async def test_start_session_warns_and_skips_knowledge_base_without_embedding_profile(
     monkeypatch, aida_home: Path, records_home: Path, capsys
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     settings = _settings(
-        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}),
+        workspaces=WorkspacesConfig(
+            workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}
+        ),
         knowledge=KnowledgeConfig(
-            knowledge_bases={"usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", source_folders=["/data/docs"])}
+            knowledge_bases={
+                "usaxs-docs": KnowledgeBaseConfig(name="usaxs-docs", source_folders=["/data/docs"])
+            }
         ),
     )
 
@@ -688,15 +755,21 @@ async def test_start_session_warns_and_skips_knowledge_base_without_embedding_pr
 async def test_start_session_warns_and_skips_knowledge_base_with_unknown_embedding_profile(
     monkeypatch, aida_home: Path, records_home: Path, capsys
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     settings = _settings(
-        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}),
+        workspaces=WorkspacesConfig(
+            workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}
+        ),
         knowledge=KnowledgeConfig(
             knowledge_bases={
                 "usaxs-docs": KnowledgeBaseConfig(
-                    name="usaxs-docs", source_folders=["/data/docs"], embedding_profile="does-not-exist"
+                    name="usaxs-docs",
+                    source_folders=["/data/docs"],
+                    embedding_profile="does-not-exist",
                 )
             }
         ),
@@ -716,15 +789,21 @@ async def test_start_session_warns_and_skips_knowledge_base_with_unknown_embeddi
 async def test_start_session_warns_and_skips_knowledge_base_with_unbuildable_embedding_profile(
     monkeypatch, aida_home: Path, records_home: Path, capsys
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     settings = _settings(
-        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}),
+        workspaces=WorkspacesConfig(
+            workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}
+        ),
         knowledge=KnowledgeConfig(
             knowledge_bases={
                 "usaxs-docs": KnowledgeBaseConfig(
-                    name="usaxs-docs", source_folders=["/data/docs"], embedding_profile="embed-profile"
+                    name="usaxs-docs",
+                    source_folders=["/data/docs"],
+                    embedding_profile="embed-profile",
                 )
             }
         ),
@@ -747,7 +826,9 @@ async def test_start_session_warns_and_skips_knowledge_base_with_unbuildable_emb
 async def test_start_session_no_workspace_knowledge_bases_configured_resolves_nothing(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
 
     session, _mcp_manager = await start_session(_settings(), profile_name="mock-profile")
     try:
@@ -760,7 +841,9 @@ async def test_start_session_no_workspace_knowledge_bases_configured_resolves_no
 async def test_start_session_aclose_closes_active_knowledge_base_resources(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     closed = []
@@ -769,14 +852,20 @@ async def test_start_session_aclose_closes_active_knowledge_base_resources(
         async def aclose(self):
             closed.append(True)
 
-    monkeypatch.setattr("aida.core.session.build_embeddings_provider", lambda profile: _TrackingEmbeddings())
+    monkeypatch.setattr(
+        "aida.core.session.build_embeddings_provider", lambda profile: _TrackingEmbeddings()
+    )
 
     settings = _settings(
-        workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}),
+        workspaces=WorkspacesConfig(
+            workspaces={"use-ws": _workspace(knowledge_bases=["usaxs-docs"])}
+        ),
         knowledge=KnowledgeConfig(
             knowledge_bases={
                 "usaxs-docs": KnowledgeBaseConfig(
-                    name="usaxs-docs", source_folders=["/data/docs"], embedding_profile="embed-profile"
+                    name="usaxs-docs",
+                    source_folders=["/data/docs"],
+                    embedding_profile="embed-profile",
                 )
             }
         ),
@@ -805,7 +894,9 @@ def test_ensure_workspace_folders_ignores_unset_target(tmp_path: Path):
 async def test_start_session_leaves_already_existing_folders_alone(
     monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     target = tmp_path / "already-there"
@@ -825,7 +916,9 @@ async def test_start_session_leaves_already_existing_folders_alone(
             await mcp_manager.aclose()
 
 
-def test_ensure_workspace_folders_does_not_fabricate_an_unmounted_source_tree(tmp_path: Path, capsys):
+def test_ensure_workspace_folders_does_not_fabricate_an_unmounted_source_tree(
+    tmp_path: Path, capsys
+):
     """A source folder whose *parent* is also missing almost always means a
     network share isn't mounted. Creating it with parents=True would leave
     empty local directories shadowing the real mount point, so the agent
@@ -840,7 +933,9 @@ def test_ensure_workspace_folders_does_not_fabricate_an_unmounted_source_tree(tm
     assert "not creating it" in capsys.readouterr().out
 
 
-def test_ensure_workspace_folders_still_creates_a_source_folder_beside_existing_ones(tmp_path: Path):
+def test_ensure_workspace_folders_still_creates_a_source_folder_beside_existing_ones(
+    tmp_path: Path,
+):
     """The original request ("can we create the folders if they do not
     exist?") still holds where the parent is really there — that's a folder
     the user just hasn't populated yet, not an absent mount."""
@@ -895,7 +990,9 @@ async def test_start_session_shuts_down_mcp_servers_when_the_session_fails_to_bu
 async def test_start_session_stamps_the_active_user_on_a_new_conversation(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings()
 
     session, _ = await start_session(settings, profile_name="mock-profile", user="jan")
@@ -909,7 +1006,9 @@ async def test_start_session_stamps_the_active_user_on_a_new_conversation(
 async def test_start_session_falls_back_to_the_configured_active_user(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings()
     settings.app.active_user = "from-config"
 
@@ -925,7 +1024,9 @@ async def test_start_session_records_no_user_by_default(
     monkeypatch, aida_home: Path, records_home: Path
 ):
     """Every install that has not opted in keeps today's behaviour."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
 
     session, _ = await start_session(_settings(), profile_name="mock-profile")
     try:
@@ -941,7 +1042,9 @@ async def test_resuming_never_relabels_someone_elses_conversation(
     """A conversation belongs to whoever created it, even if a different
     name is active at the machine now. Re-stamping on resume would quietly
     move another person's work into the current user's bucket."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings()
 
     first, _ = await start_session(settings, profile_name="mock-profile", user="eva")
@@ -965,7 +1068,9 @@ async def test_start_session_creates_the_expanded_workspace_folder_not_a_literal
     """End-to-end proof that `{user}` is expanded before *anything* reads
     the workspace's folders: `_ensure_workspace_folders` creates the real
     directory, and no folder literally named `{user}` is left behind."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
 
     ws = _workspace(target_folder=str(tmp_path / "out" / "{user}"), safety="relaxed")
@@ -990,7 +1095,9 @@ async def test_start_session_expands_the_user_in_the_records_dir(
     """The records dir is where transcripts live — and, once the attachment
     store lands, copies of attached documents. It is the path most worth
     splitting per user on a shared machine."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings()
     settings.app.records_dir = str(tmp_path / "records" / "{user}")
 
@@ -1008,7 +1115,9 @@ async def test_session_send_keeps_attached_documents(
 ):
     """End to end: a document attached to a turn is copied into the
     conversation's own folder and outlives the original."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")])
+    )
     source = tmp_path / "Downloads" / "paper.pdf"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"%PDF-1.4 pretend")
@@ -1028,7 +1137,9 @@ async def test_session_send_keeps_attached_documents(
 async def test_session_send_without_attachments_creates_no_folder(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")])
+    )
     session, _ = await start_session(_settings(), profile_name="mock-profile")
     try:
         _ = [e async for e in session.send("just talking")]
@@ -1043,11 +1154,16 @@ async def test_a_failed_attachment_copy_never_fails_the_turn(
 ):
     """The content is already in the message; losing the turn over a
     bookkeeping copy would be far worse than not keeping the file."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")])
+    )
     session, _ = await start_session(_settings(), profile_name="mock-profile")
     try:
         events = [
-            e async for e in session.send("here", attachment_paths=[str(tmp_path / "never-existed.pdf")])
+            e
+            async for e in session.send(
+                "here", attachment_paths=[str(tmp_path / "never-existed.pdf")]
+            )
         ]
         assert events, "the turn must still have run"
         assert session.messages[-1].role == "assistant"
@@ -1062,7 +1178,9 @@ async def test_figure_tools_are_registered_and_see_this_conversations_folder(
     """They are built after the recorder, since the attachments folder
     depends on the conversation id — a regression here would silently drop
     both tools from every session."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
 
     session, _ = await start_session(_settings(), profile_name="mock-profile")
     try:
@@ -1081,7 +1199,9 @@ async def test_looking_up_figures_never_creates_an_attachments_row(
     """The tools ask for the attachments folder on every call; that lookup
     must stay a pure read, or an attachment-free conversation would end up
     recorded as having had one."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
 
     session, _ = await start_session(_settings(), profile_name="mock-profile")
     try:
@@ -1100,7 +1220,9 @@ async def test_attachment_text_reaches_the_conversation_folder(
     """End to end for the plumbing that was missing: the extracted text has
     to travel with the path, or the attachments folder holds a PDF and no
     record of what the model was actually given."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")])
+    )
     source = tmp_path / "Downloads" / "paper.pdf"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"%PDF-1.4 pretend")
@@ -1126,7 +1248,9 @@ async def test_attachment_text_reaches_the_conversation_folder(
 async def test_the_system_message_uses_the_active_users_own_context(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings()
     settings.app.user_context = "Shared: this is the USAXS instrument."
     settings.app.user_contexts = {"Jan": "Jan runs the beamline."}
@@ -1143,7 +1267,9 @@ async def test_the_system_message_uses_the_active_users_own_context(
 async def test_a_user_with_no_context_of_their_own_gets_the_shared_one(
     monkeypatch, aida_home: Path, records_home: Path
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings()
     settings.app.user_context = "Shared: this is the USAXS instrument."
     settings.app.user_contexts = {"Jan": "Jan runs the beamline."}

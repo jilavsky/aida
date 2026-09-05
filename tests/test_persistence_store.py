@@ -16,7 +16,9 @@ def _store(tmp_path: Path) -> ConversationStore:
 
 def test_create_conversation_returns_id_and_is_retrievable(tmp_path: Path):
     store = _store(tmp_path)
-    conv_id = store.create_conversation(timestamp=T0, workspace_name="use-pyirena", profile_name="argo-claude")
+    conv_id = store.create_conversation(
+        timestamp=T0, workspace_name="use-pyirena", profile_name="argo-claude"
+    )
 
     summary = store.get_conversation(conv_id)
     assert summary is not None
@@ -103,7 +105,9 @@ def test_load_messages_round_trips_tool_calls(tmp_path: Path):
 def test_load_messages_round_trips_tool_result_message(tmp_path: Path):
     store = _store(tmp_path)
     conv_id = store.create_conversation(timestamp=T0)
-    original = Message(role="tool", content="the time is now", tool_call_id="call_1", name="get_current_time")
+    original = Message(
+        role="tool", content="the time is now", tool_call_id="call_1", name="get_current_time"
+    )
     store.append_message(conv_id, original, timestamp=T0)
 
     loaded = store.load_messages(conv_id)
@@ -173,7 +177,9 @@ def test_delete_conversation_removes_messages_and_artifacts(tmp_path: Path):
     store = _store(tmp_path)
     conv_id = store.create_conversation(timestamp=T0)
     store.append_message(conv_id, Message(role="user", content="hi"), timestamp=T0)
-    store.append_artifact_from_object(conv_id, ImageArtifact(data=b"x", mime_type="image/png"), call_id="c1", timestamp=T0)
+    store.append_artifact_from_object(
+        conv_id, ImageArtifact(data=b"x", mime_type="image/png"), call_id="c1", timestamp=T0
+    )
 
     msg_count, artifact_count = store.delete_conversation(conv_id)
 

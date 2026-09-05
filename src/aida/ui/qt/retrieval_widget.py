@@ -33,7 +33,9 @@ class RetrievalRow(QFrame):
     knowledge base(s)``; the expand button reveals every passage's source
     file, heading, score, and text."""
 
-    def __init__(self, *, passages_by_kb: dict[str, list[dict]], parent: QWidget | None = None) -> None:
+    def __init__(
+        self, *, passages_by_kb: dict[str, list[dict]], parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.passages_by_kb = passages_by_kb
         self._expanded = False
@@ -57,7 +59,9 @@ class RetrievalRow(QFrame):
 
         passage_count = sum(len(passages) for passages in passages_by_kb.values())
         kb_count = len(passages_by_kb)
-        self._summary_label.setText(f"📚 Retrieved {passage_count} passage(s) from {kb_count} knowledge base(s)")
+        self._summary_label.setText(
+            f"📚 Retrieved {passage_count} passage(s) from {kb_count} knowledge base(s)"
+        )
 
     def toggle_expanded(self) -> None:
         self._expanded = not self._expanded

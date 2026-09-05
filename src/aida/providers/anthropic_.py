@@ -79,7 +79,9 @@ def _anthropic_image_blocks(images: list[Any]) -> list[dict[str, Any]]:
         if encoded is None:
             continue
         mime_type, data = encoded
-        blocks.append({"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": data}})
+        blocks.append(
+            {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": data}}
+        )
     return blocks
 
 
@@ -153,7 +155,9 @@ def to_anthropic_params(
                 {
                     "type": "tool_result",
                     "tool_use_id": m.tool_call_id,
-                    "content": [*image_blocks, {"type": "text", "text": text}] if image_blocks else text,
+                    "content": [*image_blocks, {"type": "text", "text": text}]
+                    if image_blocks
+                    else text,
                 }
             )
         elif m.content or selected_images.get(idx):
@@ -162,7 +166,9 @@ def to_anthropic_params(
                 out.append(
                     {
                         "role": m.role,
-                        "content": [*image_blocks, {"type": "text", "text": m.content}] if m.content else image_blocks,
+                        "content": [*image_blocks, {"type": "text", "text": m.content}]
+                        if m.content
+                        else image_blocks,
                     }
                 )
             else:
@@ -254,7 +260,9 @@ def process_anthropic_event(event: Any, state: _StreamState) -> list[AgentEvent]
             # Cache stats are only ever reported here (message_start), not
             # on the later message_delta — that one only ever carries
             # output_tokens.
-            state.cache_creation_input_tokens = getattr(usage, "cache_creation_input_tokens", None) or 0
+            state.cache_creation_input_tokens = (
+                getattr(usage, "cache_creation_input_tokens", None) or 0
+            )
             state.cache_read_input_tokens = getattr(usage, "cache_read_input_tokens", None) or 0
 
     elif etype == "content_block_start":
@@ -326,7 +334,9 @@ class AnthropicProvider(LLMProvider):
 
     layer_name = "provider"
 
-    def __init__(self, *, model: str, base_url: str | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self, *, model: str, base_url: str | None = None, api_key: str | None = None
+    ) -> None:
         self.model = model
         self._client = AsyncAnthropic(base_url=base_url, api_key=api_key or "not-needed")
         # model -> sampling params this endpoint has already rejected once
@@ -376,6 +386,7 @@ class AnthropicProvider(LLMProvider):
             "model %s rejected %r; sending without it for the rest of this session", model, name
         )
         return name
+
     def _without_known_bad_params(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Strip params this endpoint already rejected for this model."""
         for name in self._dropped_params.get(str(kwargs.get("model", "")), ()):
@@ -389,7 +400,9 @@ class AnthropicProvider(LLMProvider):
         settings: CompletionSettings,
     ) -> AsyncIterator[AgentEvent]:
         message_id = f"anthropic-{id(messages)}-{len(messages)}"
-        system, anthropic_messages = to_anthropic_params(messages, supports_vision=settings.supports_vision)
+        system, anthropic_messages = to_anthropic_params(
+            messages, supports_vision=settings.supports_vision
+        )
 
         kwargs: dict[str, Any] = {
             "model": settings.model or self.model,
@@ -427,11 +440,17 @@ class AnthropicProvider(LLMProvider):
                         emitted = True
                         yield out_event
             except AuthenticationError as exc:
-                error = AgentError(layer=self.layer_name, message="authentication failed", detail=str(exc))
+                error = AgentError(
+                    layer=self.layer_name, message="authentication failed", detail=str(exc)
+                )
             except NotFoundError as exc:
-                error = AgentError(layer=self.layer_name, message="model not found", detail=str(exc))
+                error = AgentError(
+                    layer=self.layer_name, message="model not found", detail=str(exc)
+                )
             except APIConnectionError as exc:
-                error = AgentError(layer=self.layer_name, message="connection failed", detail=str(exc))
+                error = AgentError(
+                    layer=self.layer_name, message="connection failed", detail=str(exc)
+                )
             except APIStatusError as exc:
                 retry_param = None if emitted else self._param_to_drop(exc, kwargs)
                 error = AgentError(

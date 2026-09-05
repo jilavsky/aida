@@ -44,14 +44,22 @@ EXIT_CONFIG_ERROR = 2
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aida run")
-    parser.add_argument("prompt", nargs="?", default=None, help="The prompt to run (reads stdin if omitted)")
+    parser.add_argument(
+        "prompt", nargs="?", default=None, help="The prompt to run (reads stdin if omitted)"
+    )
     parser.add_argument("--workspace", required=True, help="Named workspace from workspaces.yaml")
-    parser.add_argument("--profile", default="", help="Provider profile name (default: the workspace's own)")
-    parser.add_argument("--skills", default="", help="Comma-separated skill names to load into the system context")
+    parser.add_argument(
+        "--profile", default="", help="Provider profile name (default: the workspace's own)"
+    )
+    parser.add_argument(
+        "--skills", default="", help="Comma-separated skill names to load into the system context"
+    )
     parser.add_argument(
         "--mcp-group", default="", help="Named MCP server group (default: the workspace's own)"
     )
-    parser.add_argument("--mcp", default="", help="Comma-separated MCP server names, bypassing groups")
+    parser.add_argument(
+        "--mcp", default="", help="Comma-separated MCP server names, bypassing groups"
+    )
     parser.add_argument(
         "--input",
         action="append",
@@ -81,7 +89,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Organization label for the conversation this run creates (default: $AIDA_USER, else "
         "config.yaml's active_user). Labels and filters only — not authentication.",
     )
-    parser.add_argument("--json", action="store_true", help="Emit a machine-readable JSON result summary")
+    parser.add_argument(
+        "--json", action="store_true", help="Emit a machine-readable JSON result summary"
+    )
     return parser
 
 
@@ -158,7 +168,9 @@ async def _async_main(
                     "stop_reason": stop_reason,
                     "tool_calls": tool_calls,
                     "error": error,
-                    "conversation_id": session.recorder.conversation_id if session.recorder else None,
+                    "conversation_id": session.recorder.conversation_id
+                    if session.recorder
+                    else None,
                 },
                 indent=2,
             )
@@ -175,7 +187,10 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     prompt = _read_prompt(args)
     if not prompt:
-        print("aida run: no prompt given (pass it as an argument or pipe it on stdin)", file=sys.stderr)
+        print(
+            "aida run: no prompt given (pass it as an argument or pipe it on stdin)",
+            file=sys.stderr,
+        )
         return EXIT_CONFIG_ERROR
 
     skill_names = [s.strip() for s in args.skills.split(",") if s.strip()]

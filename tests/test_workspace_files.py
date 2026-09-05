@@ -156,7 +156,9 @@ async def test_search_text_case_insensitive_by_default(tmp_path: Path):
 async def test_search_text_case_sensitive_when_requested(tmp_path: Path):
     (tmp_path / "a.txt").write_text("Hello World\n")
     tools = default_file_tools(_guard(tmp_path))
-    result = await _call(tools, "search_text", path=str(tmp_path), query="hello", case_sensitive=True)
+    result = await _call(
+        tools, "search_text", path=str(tmp_path), query="hello", case_sensitive=True
+    )
     assert len(result.artifacts[0].rows) == 0
 
 

@@ -97,7 +97,9 @@ class MockProvider(LLMProvider):
 
         for mtc in turn.tool_calls:
             call_id = mtc.id or f"call-{uuid.uuid4().hex[:8]}"
-            yield ToolCallStarted(call_id=call_id, tool_name=mtc.name, arguments=dict(mtc.arguments))
+            yield ToolCallStarted(
+                call_id=call_id, tool_name=mtc.name, arguments=dict(mtc.arguments)
+            )
 
         stop_reason = "tool_calls" if turn.tool_calls else "stop"
         yield MessageFinished(message_id=message_id, stop_reason=stop_reason)

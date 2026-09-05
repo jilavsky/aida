@@ -76,7 +76,11 @@ class ScheduleFormDialog(QDialog):
     """Add (``entry=None``) or edit (``entry`` given) one ``ScheduleEntry``."""
 
     def __init__(
-        self, *, workflow_names: list[str], entry: ScheduleEntry | None = None, parent: QWidget | None = None
+        self,
+        *,
+        workflow_names: list[str],
+        entry: ScheduleEntry | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._is_edit = entry is not None
@@ -125,8 +129,12 @@ class ScheduleFormDialog(QDialog):
         self._vars_edit.setMaximumHeight(80)
         form.addRow("Vars:", self._vars_edit)
 
-        self._preapproved_edit = QPlainTextEdit("\n".join(entry.preapproved_tools) if entry else "", self)
-        self._preapproved_edit.setPlaceholderText("One namespaced tool per line, e.g. pyirena__reduce_scan")
+        self._preapproved_edit = QPlainTextEdit(
+            "\n".join(entry.preapproved_tools) if entry else "", self
+        )
+        self._preapproved_edit.setPlaceholderText(
+            "One namespaced tool per line, e.g. pyirena__reduce_scan"
+        )
         self._preapproved_edit.setMaximumHeight(60)
         form.addRow("Preapproved tools:", self._preapproved_edit)
 
@@ -142,7 +150,9 @@ class ScheduleFormDialog(QDialog):
 
         layout.addLayout(form)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -190,7 +200,9 @@ class ScheduleFormDialog(QDialog):
             every=every,
             vars=self._parsed_vars(),
             preapproved_tools=[
-                line.strip() for line in self._preapproved_edit.toPlainText().splitlines() if line.strip()
+                line.strip()
+                for line in self._preapproved_edit.toPlainText().splitlines()
+                if line.strip()
             ],
             yes_in_allowed=self._yes_in_allowed_checkbox.isChecked(),
             enabled=self._enabled_checkbox.isChecked(),
@@ -321,7 +333,9 @@ class ScheduleManagementDialog(QDialog):
             return
         entry = dialog.result_entry()
         if entry.name in self._configs():
-            QMessageBox.warning(self, "Already Exists", f"A schedule named {entry.name!r} already exists.")
+            QMessageBox.warning(
+                self, "Already Exists", f"A schedule named {entry.name!r} already exists."
+            )
             return
         self._configs()[entry.name] = entry
         save_schedules_config(self._settings.schedules)
@@ -380,7 +394,9 @@ class ScheduleManagementDialog(QDialog):
         if entry is None:
             return
         if self._scheduler_bridge is None:
-            QMessageBox.warning(self, "Scheduler Unavailable", "The in-app scheduler isn't running.")
+            QMessageBox.warning(
+                self, "Scheduler Unavailable", "The in-app scheduler isn't running."
+            )
             return
         self._scheduler_bridge.run_now(name, entry, self._settings)
 

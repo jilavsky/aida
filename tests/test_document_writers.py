@@ -14,7 +14,9 @@ from aida.documents.writers.md_obsidian import ImageToEmbed, write_markdown_docu
 from tests.mock_mcp_server import TINY_PNG_BYTES
 
 
-def _saved_image_artifact(tmp_path: Path, artifact_store: ArtifactStore, name: str = "plot.png") -> ImageArtifact:
+def _saved_image_artifact(
+    tmp_path: Path, artifact_store: ArtifactStore, name: str = "plot.png"
+) -> ImageArtifact:
     artifact = ImageArtifact(data=TINY_PNG_BYTES, mime_type="image/png", filename=name)
     return artifact_store.save_image(artifact)
 
@@ -23,7 +25,11 @@ def test_write_markdown_document_plain_text_only(tmp_path: Path):
     target_dir = tmp_path / "records"
     store = ArtifactStore(base_dir=tmp_path / "artifacts")
     path = write_markdown_document(
-        target_dir=target_dir, filename_stem="report", title="My Report", body="Some findings here.", artifact_store=store
+        target_dir=target_dir,
+        filename_stem="report",
+        title="My Report",
+        body="Some findings here.",
+        artifact_store=store,
     )
     assert path == target_dir / "report.md"
     text = path.read_text(encoding="utf-8")
@@ -90,7 +96,11 @@ def test_write_markdown_document_collision_safe_filename(tmp_path: Path):
     store = ArtifactStore(base_dir=tmp_path / "artifacts")
 
     path = write_markdown_document(
-        target_dir=target_dir, filename_stem="report", title="New Report", body="new content", artifact_store=store
+        target_dir=target_dir,
+        filename_stem="report",
+        title="New Report",
+        body="new content",
+        artifact_store=store,
     )
     assert path.name == "report (1).md"
     assert (target_dir / "report.md").read_text(encoding="utf-8") == "existing"
@@ -144,7 +154,9 @@ def test_write_markdown_document_unreferenced_image_still_appended_after_body(tm
     target_dir = tmp_path / "records"
     store = ArtifactStore(base_dir=tmp_path / "artifacts")
     placed = _saved_image_artifact(tmp_path, store, name="a.png")
-    leftover = store.save_image(ImageArtifact(data=TINY_PNG_BYTES, mime_type="image/png", filename="b.png"))
+    leftover = store.save_image(
+        ImageArtifact(data=TINY_PNG_BYTES, mime_type="image/png", filename="b.png")
+    )
 
     path = write_markdown_document(
         target_dir=target_dir,
@@ -234,5 +246,7 @@ def test_write_docx_document_collision_safe_filename(tmp_path: Path):
     pytest.importorskip("docx")
     tmp_path.mkdir(exist_ok=True)
     (tmp_path / "report.docx").write_bytes(b"not a real docx but occupies the name")
-    path = write_docx_document(target_dir=tmp_path, filename_stem="report", title="New", sections=[])
+    path = write_docx_document(
+        target_dir=tmp_path, filename_stem="report", title="New", sections=[]
+    )
     assert path.name == "report (1).docx"

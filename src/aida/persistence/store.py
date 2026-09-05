@@ -124,7 +124,17 @@ class ConversationStore:
             "INSERT INTO conversations "
             '(id, title, workspace_name, profile_name, sidecar_dirname, created_at, updated_at, origin, "user") '
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (conv_id, title, workspace_name, profile_name, sidecar_dirname, timestamp, timestamp, origin, user or None),
+            (
+                conv_id,
+                title,
+                workspace_name,
+                profile_name,
+                sidecar_dirname,
+                timestamp,
+                timestamp,
+                origin,
+                user or None,
+            ),
         )
         self._conn.commit()
         return conv_id
@@ -166,7 +176,9 @@ class ConversationStore:
         rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_summary(row, row["message_count"]) for row in rows]
 
-    def set_conversation_user(self, conversation_ids: list[str], user: str, *, timestamp: str) -> int:
+    def set_conversation_user(
+        self, conversation_ids: list[str], user: str, *, timestamp: str
+    ) -> int:
         """Move specific conversations to ``user`` (or unlabel them when it
         is empty). Returns how many rows changed.
 
@@ -296,7 +308,12 @@ class ConversationStore:
         conversation. Bumps the conversation's ``updated_at``."""
         seq = self._next_seq(conversation_id)
         tool_calls_json = (
-            json.dumps([{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in message.tool_calls])
+            json.dumps(
+                [
+                    {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                    for tc in message.tool_calls
+                ]
+            )
             if message.tool_calls
             else None
         )
@@ -389,7 +406,10 @@ class ConversationStore:
     @staticmethod
     def _row_to_message(row: sqlite3.Row, images: list[ImageRef] | None = None) -> Message:
         tool_calls = (
-            [ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"]) for tc in json.loads(row["tool_calls_json"])]
+            [
+                ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
+                for tc in json.loads(row["tool_calls_json"])
+            ]
             if row["tool_calls_json"]
             else []
         )

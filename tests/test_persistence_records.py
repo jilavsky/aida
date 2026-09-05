@@ -96,7 +96,12 @@ def test_render_transcript_includes_user_and_assistant_turns():
 
 def test_render_transcript_links_image_artifact_for_tool_message():
     messages = [
-        Message(role="tool", content="[image artifact abc: image/png]", tool_call_id="call_1", name="get_image"),
+        Message(
+            role="tool",
+            content="[image artifact abc: image/png]",
+            tool_call_id="call_1",
+            name="get_image",
+        ),
     ]
     artifacts = [
         ArtifactRecord(
@@ -138,7 +143,9 @@ def test_write_transcript_creates_real_file_with_working_image_link(tmp_path: Pa
             content="",
             tool_calls=[],
         ),
-        Message(role="tool", content="[image artifact abc]", tool_call_id="call_1", name="get_image"),
+        Message(
+            role="tool", content="[image artifact abc]", tool_call_id="call_1", name="get_image"
+        ),
         Message(role="assistant", content="Here is the plot."),
     ]
     artifacts = [
@@ -204,7 +211,10 @@ def test_write_transcript_overwrites_on_repeat_calls(tmp_path: Path):
         title=None,
         workspace_name=None,
         profile_name=None,
-        messages=[Message(role="user", content="first"), Message(role="assistant", content="second")],
+        messages=[
+            Message(role="user", content="first"),
+            Message(role="assistant", content="second"),
+        ],
         artifacts=[],
     )
 

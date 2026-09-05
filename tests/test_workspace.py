@@ -26,11 +26,15 @@ from aida.workspace.workspaces import (
 def _settings(**overrides) -> Settings:
     settings = load_settings()
     settings.providers = ProvidersConfig(
-        profiles={"argo-claude": ProviderProfile(name="argo-claude", kind="anthropic", model="claude")}
+        profiles={
+            "argo-claude": ProviderProfile(name="argo-claude", kind="anthropic", model="claude")
+        }
     )
     settings.mcp = McpConfig(
         servers={
-            "pyirena": McpServerConfig(name="pyirena", command="pyirena-mcp", groups=["pyirena-analysis"]),
+            "pyirena": McpServerConfig(
+                name="pyirena", command="pyirena-mcp", groups=["pyirena-analysis"]
+            ),
         }
     )
     for key, value in overrides.items():
@@ -128,35 +132,47 @@ def test_resolve_system_prompt_literal_text_passthrough_when_no_matching_file():
     assert resolve_system_prompt("You are a USAXS expert.") == "You are a USAXS expert."
 
 
-def test_resolve_system_prompt_loads_relative_file_under_aida_home(aida_home: Path, records_home: Path):
+def test_resolve_system_prompt_loads_relative_file_under_aida_home(
+    aida_home: Path, records_home: Path
+):
     prompt_file = aida_home / "prompts" / "pyirena.md"
     prompt_file.parent.mkdir(parents=True)
     prompt_file.write_text("You are a pyIrena SAXS analysis assistant.", encoding="utf-8")
 
-    assert resolve_system_prompt("prompts/pyirena.md") == "You are a pyIrena SAXS analysis assistant."
+    assert (
+        resolve_system_prompt("prompts/pyirena.md") == "You are a pyIrena SAXS analysis assistant."
+    )
 
 
-def test_resolve_system_prompt_loads_absolute_file(tmp_path: Path, aida_home: Path, records_home: Path):
+def test_resolve_system_prompt_loads_absolute_file(
+    tmp_path: Path, aida_home: Path, records_home: Path
+):
     prompt_file = tmp_path / "custom-prompt.txt"
     prompt_file.write_text("Custom prompt content.", encoding="utf-8")
 
     assert resolve_system_prompt(str(prompt_file)) == "Custom prompt content."
 
 
-def test_resolve_system_prompt_falls_back_to_literal_when_file_missing(aida_home: Path, records_home: Path):
+def test_resolve_system_prompt_falls_back_to_literal_when_file_missing(
+    aida_home: Path, records_home: Path
+):
     # Exactly the user-reported scenario: a workspaces.yaml copied from
     # PLAN.md's example, but the referenced file was never created.
     assert resolve_system_prompt("prompts/pyirena.md") == "prompts/pyirena.md"
 
 
-def test_validate_workspace_warns_on_missing_system_prompt_file(aida_home: Path, records_home: Path):
+def test_validate_workspace_warns_on_missing_system_prompt_file(
+    aida_home: Path, records_home: Path
+):
     settings = _settings()
     result = validate_workspace(settings, _workspace(system_prompt="prompts/pyirena.md"))
     assert result.ok is True
     assert any("system_prompt" in w and "prompts/pyirena.md" in w for w in result.warnings)
 
 
-def test_validate_workspace_no_warning_when_system_prompt_file_exists(aida_home: Path, records_home: Path):
+def test_validate_workspace_no_warning_when_system_prompt_file_exists(
+    aida_home: Path, records_home: Path
+):
     prompt_file = aida_home / "prompts" / "pyirena.md"
     prompt_file.parent.mkdir(parents=True)
     prompt_file.write_text("You are a pyIrena SAXS analysis assistant.", encoding="utf-8")
@@ -166,13 +182,17 @@ def test_validate_workspace_no_warning_when_system_prompt_file_exists(aida_home:
     assert result.warnings == []
 
 
-def test_validate_workspace_no_warning_for_plain_literal_prompt_text(aida_home: Path, records_home: Path):
+def test_validate_workspace_no_warning_for_plain_literal_prompt_text(
+    aida_home: Path, records_home: Path
+):
     settings = _settings()
     result = validate_workspace(settings, _workspace(system_prompt="You are a USAXS expert."))
     assert result.warnings == []
 
 
-def test_resolve_workspace_environment_loads_system_prompt_file(aida_home: Path, records_home: Path):
+def test_resolve_workspace_environment_loads_system_prompt_file(
+    aida_home: Path, records_home: Path
+):
     prompt_file = aida_home / "prompts" / "pyirena.md"
     prompt_file.parent.mkdir(parents=True)
     prompt_file.write_text("You are a pyIrena SAXS analysis assistant.", encoding="utf-8")
@@ -182,20 +202,26 @@ def test_resolve_workspace_environment_loads_system_prompt_file(aida_home: Path,
     assert env.system_prompt == "You are a pyIrena SAXS analysis assistant."
 
 
-def test_resolve_workspace_environment_pulls_mcp_servers_from_group(aida_home: Path, records_home: Path):
+def test_resolve_workspace_environment_pulls_mcp_servers_from_group(
+    aida_home: Path, records_home: Path
+):
     settings = _settings()
     env = resolve_workspace_environment(settings, _workspace())
     assert [s.name for s in env.mcp_servers] == ["pyirena"]
     assert env.profile_name == "argo-claude"
 
 
-def test_resolve_workspace_environment_none_group_gives_no_servers(aida_home: Path, records_home: Path):
+def test_resolve_workspace_environment_none_group_gives_no_servers(
+    aida_home: Path, records_home: Path
+):
     settings = _settings()
     env = resolve_workspace_environment(settings, _workspace(mcp_group="none"))
     assert env.mcp_servers == []
 
 
-def test_resolve_workspace_environment_carries_skills_and_prompt(aida_home: Path, records_home: Path):
+def test_resolve_workspace_environment_carries_skills_and_prompt(
+    aida_home: Path, records_home: Path
+):
     settings = _settings()
     ws = _workspace(skills=["saxs-basics"], system_prompt="You are a USAXS expert.")
     env = resolve_workspace_environment(settings, ws)

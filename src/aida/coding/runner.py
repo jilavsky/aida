@@ -166,7 +166,11 @@ async def _terminate_tree(proc: asyncio.subprocess.Process) -> None:
         # unavailable, fall back to killing the process itself.
         try:
             killer = await asyncio.create_subprocess_exec(
-                "taskkill", "/PID", str(proc.pid), "/T", "/F",
+                "taskkill",
+                "/PID",
+                str(proc.pid),
+                "/T",
+                "/F",
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )

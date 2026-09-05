@@ -161,7 +161,11 @@ def test_print_event_tool_call_finished_error(capsys):
 
 
 def test_print_event_image_artifact(capsys):
-    print_event(ImageArtifactCreated(artifact_id="a1", call_id="c1", mime_type="image/png", path="/tmp/x.png"))
+    print_event(
+        ImageArtifactCreated(
+            artifact_id="a1", call_id="c1", mime_type="image/png", path="/tmp/x.png"
+        )
+    )
     assert "/tmp/x.png" in capsys.readouterr().out
 
 
@@ -228,7 +232,11 @@ def test_print_event_usage_info_omits_cache_note_when_zero(capsys):
 
 
 def test_print_event_usage_info_with_duration_shows_cache_note_too(capsys):
-    print_event(UsageInfo(input_tokens=100, output_tokens=50, duration_seconds=2.0, cache_read_input_tokens=30))
+    print_event(
+        UsageInfo(
+            input_tokens=100, output_tokens=50, duration_seconds=2.0, cache_read_input_tokens=30
+        )
+    )
     out = capsys.readouterr().out
     assert "30 cached" in out
     assert "25.0 tok/s" in out
@@ -237,7 +245,9 @@ def test_print_event_usage_info_with_duration_shows_cache_note_too(capsys):
 # --- _completion_settings_for_profile (B2) -----------------------------------
 
 
-def test_completion_settings_for_profile_sends_no_temperature_when_unset(aida_home: Path, records_home: Path):
+def test_completion_settings_for_profile_sends_no_temperature_when_unset(
+    aida_home: Path, records_home: Path
+):
     """A profile that never set a temperature must not have one invented
     for it — AIDA used to substitute 0.7, which models that fix temperature
     at their own default then reject outright."""
@@ -254,7 +264,9 @@ def test_completion_settings_for_profile_sends_no_temperature_when_unset(aida_ho
     assert completion_settings.supports_vision is False
 
 
-def test_completion_settings_for_profile_uses_profile_overrides(aida_home: Path, records_home: Path):
+def test_completion_settings_for_profile_uses_profile_overrides(
+    aida_home: Path, records_home: Path
+):
     from aida.core.session import _completion_settings_for_profile
 
     settings = _settings_with_profile(temperature=0.2, max_tokens=512, supports_vision=True)
@@ -293,7 +305,9 @@ async def test_cli_confirm_shows_the_request_detail(monkeypatch):
         return "no"
 
     monkeypatch.setattr("builtins.input", _fake_input)
-    request = ConfirmationRequest(action="write", path="/tmp/x", detail="Write outside allowed folders: /tmp/x")
+    request = ConfirmationRequest(
+        action="write", path="/tmp/x", detail="Write outside allowed folders: /tmp/x"
+    )
     assert await cli_confirm(request) is ConfirmAnswer.DENY
     assert "Write outside allowed folders: /tmp/x" in seen_prompts[0]
 
@@ -312,7 +326,9 @@ async def test_cli_confirm_allow_for_chat_not_offered_when_not_rememberable(monk
     # remember_scope=None (e.g. fetch_url) -> "a" isn't a recognized answer,
     # so it's treated like any other non-"y" input: denied.
     monkeypatch.setattr("builtins.input", lambda prompt: "a")
-    request = ConfirmationRequest(action="fetch_url", path="https://example.com", detail="Fetch it?")
+    request = ConfirmationRequest(
+        action="fetch_url", path="https://example.com", detail="Fetch it?"
+    )
     assert await cli_confirm(request) is ConfirmAnswer.DENY
 
 
@@ -320,7 +336,9 @@ async def test_cli_confirm_allow_for_chat_not_offered_when_not_rememberable(monk
 
 
 @pytest.mark.asyncio
-async def test_chat_session_send_streams_and_updates_history(monkeypatch, aida_home: Path, records_home: Path):
+async def test_chat_session_send_streams_and_updates_history(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     settings = _settings_with_profile()
     provider = MockProvider([MockTurn(text="hi there")])
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
@@ -354,7 +372,9 @@ async def test_chat_session_send_attaches_images_to_the_user_message(
     events = [e async for e in session.send("what is this?", images=refs)]
 
     assert any(isinstance(e, TextFinished) for e in events)
-    user_message = next(m for m in session.messages if m.role == "user" and m.content == "what is this?")
+    user_message = next(
+        m for m in session.messages if m.role == "user" and m.content == "what is this?"
+    )
     assert user_message.images == refs
 
 
@@ -374,7 +394,9 @@ async def test_chat_session_send_with_no_images_defaults_to_empty_list(
 
 
 @pytest.mark.asyncio
-async def test_chat_session_profile_switch_preserves_history(monkeypatch, aida_home: Path, records_home: Path):
+async def test_chat_session_profile_switch_preserves_history(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     settings = _settings_with_profile("profile-a")
     settings.providers.profiles["profile-b"] = ProviderProfile(
         name="profile-b", kind="openai_compat", model="model-b"
@@ -403,7 +425,9 @@ async def test_chat_session_profile_switch_preserves_history(monkeypatch, aida_h
 
 
 @pytest.mark.asyncio
-async def test_chat_session_switch_profile_closes_old_provider(monkeypatch, aida_home: Path, records_home: Path):
+async def test_chat_session_switch_profile_closes_old_provider(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     """Regression test: switching profiles (and ending the session) must
     close the outgoing provider's connections rather than leaking them —
     see test_provider_lifecycle.py for why this matters."""
@@ -435,12 +459,16 @@ async def test_chat_session_switch_profile_closes_old_provider(monkeypatch, aida
     assert closed == ["a", "b"]  # session end closes whatever is current
 
 
-def test_chat_session_uses_configured_max_iterations(monkeypatch, aida_home: Path, records_home: Path):
+def test_chat_session_uses_configured_max_iterations(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     """Bug report: iteration cap was hardcoded at 10 with no way to raise
     it. AppConfig.max_agent_iterations must actually reach the AgentLoop."""
     settings = _settings_with_profile()
     settings.app.max_agent_iterations = 250
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
 
     session = ChatSession(settings, "mock-profile")
     assert session.loop.max_iterations == 250
@@ -455,7 +483,9 @@ async def test_chat_session_switch_profile_keeps_configured_max_iterations(
     settings.providers.profiles["profile-b"] = ProviderProfile(
         name="profile-b", kind="openai_compat", model="model-b"
     )
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
 
     session = ChatSession(settings, "profile-a")
     await session.switch_profile("profile-b")
@@ -463,7 +493,9 @@ async def test_chat_session_switch_profile_keeps_configured_max_iterations(
 
 
 @pytest.mark.asyncio
-async def test_chat_session_accumulates_usage_across_turns(monkeypatch, aida_home: Path, records_home: Path):
+async def test_chat_session_accumulates_usage_across_turns(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     """Bug report: "Can we get cost estimate... token use may be
     better... at this moment it is a black box." ChatSession.send() must
     accumulate UsageInfo tokens across the whole session, not just report
@@ -500,7 +532,9 @@ async def test_repl_max_iterations_command_raises_the_cap_mid_session(
     dialog at all. /max-iterations must take effect on session.loop
     immediately, without restarting."""
     settings = _settings_with_profile()
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     session = ChatSession(settings, "mock-profile")
     assert session.loop.max_iterations == 10
 
@@ -516,7 +550,9 @@ async def test_repl_max_iterations_command_rejects_non_numeric_input(
     monkeypatch, aida_home: Path, records_home: Path, capsys
 ):
     settings = _settings_with_profile()
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     session = ChatSession(settings, "mock-profile")
 
     lines = iter(["/max-iterations nope", "/exit"])
@@ -568,7 +604,9 @@ async def test_repl_compact_command_reports_nothing_to_compact(
 
 
 def test_print_event_context_trimmed_summarized_wording(capsys):
-    print_event(ContextTrimmed(dropped_turns=3, estimated_tokens=512, summarized=True, summary_tokens=80))
+    print_event(
+        ContextTrimmed(dropped_turns=3, estimated_tokens=512, summarized=True, summary_tokens=80)
+    )
     out = capsys.readouterr().out
     assert "summarized 3 old turns" in out
     assert "~80 tokens" in out
@@ -581,17 +619,23 @@ def test_chat_session_unknown_profile_raises(aida_home: Path, records_home: Path
 
 
 @pytest.mark.asyncio
-async def test_chat_session_loads_skills_into_system_message(monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path):
+async def test_chat_session_loads_skills_into_system_message(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
     from aida.config import paths as paths_module
 
     skills_dir = aida_home / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
-    (skills_dir / "saxs-basics.md").write_text("SAXS is small-angle X-ray scattering.", encoding="utf-8")
+    (skills_dir / "saxs-basics.md").write_text(
+        "SAXS is small-angle X-ray scattering.", encoding="utf-8"
+    )
     monkeypatch.setattr(paths_module, "skills_dir", lambda: skills_dir)
     monkeypatch.setattr("aida.core.session.skills_dir", lambda: skills_dir)
 
     settings = _settings_with_profile()
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")])
+    )
 
     session = ChatSession(settings, "mock-profile", skill_names=["saxs-basics"])
     assert session.messages
@@ -600,7 +644,9 @@ async def test_chat_session_loads_skills_into_system_message(monkeypatch, aida_h
 
 
 @pytest.mark.asyncio
-async def test_chat_session_tool_round_trip_with_default_tools(monkeypatch, aida_home: Path, records_home: Path):
+async def test_chat_session_tool_round_trip_with_default_tools(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     provider = MockProvider(
         [
             MockTurn(tool_calls=[MockToolCall(name="get_current_time", id="call_1")]),
@@ -639,14 +685,20 @@ async def test_send_records_image_artifact_with_the_tool_messages_future_seq(
     right position, not just append it at the end like pre-U6(b)."""
 
     async def _get_plot(_args):
-        art = ImageArtifact(data=b"pngbytes", mime_type="image/png", path=str(tmp_path / "plot.png"))
+        art = ImageArtifact(
+            data=b"pngbytes", mime_type="image/png", path=str(tmp_path / "plot.png")
+        )
         return ToolResult(content="[image]", artifacts=[art])
 
     tool = NativeTool(
-        schema=ToolSchema(name="get_plot", description="", parameters={"type": "object"}), func=_get_plot
+        schema=ToolSchema(name="get_plot", description="", parameters={"type": "object"}),
+        func=_get_plot,
     )
     provider = MockProvider(
-        [MockTurn(tool_calls=[MockToolCall(name="get_plot", id="call_1")]), MockTurn(text="here it is")]
+        [
+            MockTurn(tool_calls=[MockToolCall(name="get_plot", id="call_1")]),
+            MockTurn(text="here it is"),
+        ]
     )
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
     settings = _settings_with_profile()
@@ -658,7 +710,9 @@ async def test_send_records_image_artifact_with_the_tool_messages_future_seq(
     records = recorder.store.load_artifacts(recorder.conversation_id)
     assert len(records) == 1
     tool_message_seq = next(
-        seq for seq, m in recorder.store.load_messages_with_seq(recorder.conversation_id) if m.role == "tool"
+        seq
+        for seq, m in recorder.store.load_messages_with_seq(recorder.conversation_id)
+        if m.role == "tool"
     )
     assert records[0].seq == tool_message_seq
 
@@ -672,10 +726,14 @@ async def test_send_records_file_artifact_with_the_tool_messages_future_seq(
         return ToolResult(content="[file]", artifacts=[art])
 
     tool = NativeTool(
-        schema=ToolSchema(name="get_report", description="", parameters={"type": "object"}), func=_get_report
+        schema=ToolSchema(name="get_report", description="", parameters={"type": "object"}),
+        func=_get_report,
     )
     provider = MockProvider(
-        [MockTurn(tool_calls=[MockToolCall(name="get_report", id="call_1")]), MockTurn(text="here it is")]
+        [
+            MockTurn(tool_calls=[MockToolCall(name="get_report", id="call_1")]),
+            MockTurn(text="here it is"),
+        ]
     )
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
     settings = _settings_with_profile()
@@ -687,7 +745,9 @@ async def test_send_records_file_artifact_with_the_tool_messages_future_seq(
     records = recorder.store.load_artifacts(recorder.conversation_id)
     assert len(records) == 1
     tool_message_seq = next(
-        seq for seq, m in recorder.store.load_messages_with_seq(recorder.conversation_id) if m.role == "tool"
+        seq
+        for seq, m in recorder.store.load_messages_with_seq(recorder.conversation_id)
+        if m.role == "tool"
     )
     assert records[0].seq == tool_message_seq
 
@@ -695,7 +755,9 @@ async def test_send_records_file_artifact_with_the_tool_messages_future_seq(
 # --- ChatSession.send() retrieval injection (Phase 8 RAG) -------------------
 
 
-async def _seeded_active_kb(tmp_path: Path, *, name: str = "kb", text: str = "Unified Fit models a SAXS curve.") -> ActiveKnowledgeBase:
+async def _seeded_active_kb(
+    tmp_path: Path, *, name: str = "kb", text: str = "Unified Fit models a SAXS curve."
+) -> ActiveKnowledgeBase:
     """A ready-to-query ActiveKnowledgeBase backed by a real (tmp-file)
     index with one chunk in it — mirrors test_knowledge_retrieval.py's
     seeding helper, at the granularity ChatSession actually consumes."""
@@ -709,7 +771,9 @@ async def _seeded_active_kb(tmp_path: Path, *, name: str = "kb", text: str = "Un
         chunks_with_embeddings=[(Chunk(text=text, heading="Fitting", chunk_index=0), vector)],
         embedding_profile="mock",
     )
-    return ActiveKnowledgeBase(name=name, connection=conn, embeddings_provider=embedder, embedding_profile_name="mock")
+    return ActiveKnowledgeBase(
+        name=name, connection=conn, embeddings_provider=embedder, embedding_profile_name="mock"
+    )
 
 
 @pytest.mark.asyncio
@@ -827,7 +891,9 @@ async def test_send_does_not_trim_when_the_budget_is_disabled(
 ):
     settings = _settings_with_profile()
     settings.app.max_context_tokens = 0
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")])
+    )
 
     session = ChatSession(settings, "mock-profile")
     for i in range(40):
@@ -877,7 +943,9 @@ async def test_send_yields_no_context_trimmed_event_when_nothing_was_dropped(
     monkeypatch, aida_home: Path, records_home: Path
 ):
     settings = _settings_with_profile()  # default max_context_tokens is generous
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")])
+    )
 
     session = ChatSession(settings, "mock-profile")
     events = [e async for e in session.send("hello")]
@@ -905,19 +973,26 @@ def test_estimate_message_tokens_counts_tool_call_arguments():
     assert estimate_message_tokens(tool_heavy) > estimate_tokens("") + 400
 
 
-def test_chat_session_repairs_broken_resumed_history(monkeypatch, aida_home: Path, records_home: Path):
+def test_chat_session_repairs_broken_resumed_history(
+    monkeypatch, aida_home: Path, records_home: Path
+):
     """A conversation killed mid-turn leaves an announced tool call with no
     result — a history the provider rejects outright on the next turn."""
     from aida.providers.base import ToolCall
 
     settings = _settings_with_profile()
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     broken = [
         Message(role="user", content="plot everything"),
         Message(
             role="assistant",
             content="",
-            tool_calls=[ToolCall(id="c1", name="plot", arguments={}), ToolCall(id="c2", name="plot", arguments={})],
+            tool_calls=[
+                ToolCall(id="c1", name="plot", arguments={}),
+                ToolCall(id="c2", name="plot", arguments={}),
+            ],
         ),
         Message(role="tool", content="plotted", tool_call_id="c1", name="plot"),
     ]
@@ -956,7 +1031,9 @@ async def test_ephemeral_context_message_is_removed_by_identity_not_equality(
     async for _event in session.send("How does Unified Fit work?"):
         pass
 
-    assert any(m is look_alike for m in session.messages), "an equal-but-distinct message was removed"
+    assert any(m is look_alike for m in session.messages), (
+        "an equal-but-distinct message was removed"
+    )
     assert sum(1 for m in session.messages if m.content == look_alike.content) == 1
 
     await kb.embeddings_provider.aclose()

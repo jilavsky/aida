@@ -20,12 +20,18 @@ from tests.ui._qt_test_utils import pump_until
 
 def _settings_with_profile(name: str = "mock-profile") -> object:
     settings = load_settings()
-    settings.providers.profiles[name] = ProviderProfile(name=name, kind="openai_compat", model="mock-model")
+    settings.providers.profiles[name] = ProviderProfile(
+        name=name, kind="openai_compat", model="mock-model"
+    )
     return settings
 
 
-def test_start_success_fires_session_ready(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+def test_start_success_fires_session_ready(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings_with_profile()
 
     bridge = ChatBridge(loop_thread)
@@ -42,7 +48,9 @@ def test_start_success_fires_session_ready(qapp, loop_thread, aida_home: Path, r
     bridge.shutdown()
 
 
-def test_start_unknown_profile_fires_startup_failed(qapp, loop_thread, aida_home: Path, records_home: Path):
+def test_start_unknown_profile_fires_startup_failed(
+    qapp, loop_thread, aida_home: Path, records_home: Path
+):
     settings = load_settings()  # no profiles configured
 
     bridge = ChatBridge(loop_thread)
@@ -58,7 +66,10 @@ def test_start_unknown_profile_fires_startup_failed(qapp, loop_thread, aida_home
 def test_send_emits_events_in_order_and_turn_finished(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hello there")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="hello there")]),
+    )
     settings = _settings_with_profile()
 
     bridge = ChatBridge(loop_thread)
@@ -82,7 +93,9 @@ def test_send_emits_events_in_order_and_turn_finished(
     bridge.shutdown()
 
 
-def test_send_before_session_ready_is_a_safe_noop(qapp, loop_thread, aida_home: Path, records_home: Path):
+def test_send_before_session_ready_is_a_safe_noop(
+    qapp, loop_thread, aida_home: Path, records_home: Path
+):
     bridge = ChatBridge(loop_thread)
     bridge.send("too early")  # must not raise, must not hang
     qapp.processEvents()
@@ -105,11 +118,20 @@ def test_startup_failure_leaves_session_none_and_send_is_a_noop(
     assert events == []
 
 
-def test_switch_profile_success(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_switch_profile_success(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     settings = load_settings()
-    settings.providers.profiles["a"] = ProviderProfile(name="a", kind="openai_compat", model="model-a")
-    settings.providers.profiles["b"] = ProviderProfile(name="b", kind="openai_compat", model="model-b")
-    providers = {"a": MockProvider([MockTurn(text="from a")]), "b": MockProvider([MockTurn(text="from b")])}
+    settings.providers.profiles["a"] = ProviderProfile(
+        name="a", kind="openai_compat", model="model-a"
+    )
+    settings.providers.profiles["b"] = ProviderProfile(
+        name="b", kind="openai_compat", model="model-b"
+    )
+    providers = {
+        "a": MockProvider([MockTurn(text="from a")]),
+        "b": MockProvider([MockTurn(text="from b")]),
+    }
     monkeypatch.setattr("aida.core.session.build_provider", lambda profile: providers[profile.name])
 
     bridge = ChatBridge(loop_thread)
@@ -128,8 +150,12 @@ def test_switch_profile_success(qapp, loop_thread, aida_home: Path, records_home
     bridge.shutdown()
 
 
-def test_switch_profile_unknown_fires_failure_signal(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+def test_switch_profile_unknown_fires_failure_signal(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings_with_profile()
 
     bridge = ChatBridge(loop_thread)
@@ -148,14 +174,18 @@ def test_switch_profile_unknown_fires_failure_signal(qapp, loop_thread, aida_hom
     bridge.shutdown()
 
 
-def test_shutdown_closes_provider(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_shutdown_closes_provider(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     closed = []
 
     class _TrackingProvider(MockProvider):
         async def aclose(self):
             closed.append(True)
 
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: _TrackingProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: _TrackingProvider([MockTurn(text="hi")])
+    )
     settings = _settings_with_profile()
 
     bridge = ChatBridge(loop_thread)
@@ -168,19 +198,25 @@ def test_shutdown_closes_provider(qapp, loop_thread, aida_home: Path, records_ho
     assert closed == [True]
 
 
-def test_shutdown_before_start_is_a_safe_noop(qapp, loop_thread, aida_home: Path, records_home: Path):
+def test_shutdown_before_start_is_a_safe_noop(
+    qapp, loop_thread, aida_home: Path, records_home: Path
+):
     bridge = ChatBridge(loop_thread)
     bridge.shutdown()  # must not raise, must not hang
 
 
-def test_cancel_forwards_to_the_session(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_cancel_forwards_to_the_session(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     """``ChatBridge.cancel`` (wired to InputBox's Stop button in
     MainWindow) is a thin synchronous forward to ``ChatSession.cancel`` —
     the actual mid-stream interruption semantics belong to
     ``aida.core.agent.AgentLoop`` and are covered by its own tests from
     earlier phases; what's specific to Phase 5 is that the GUI's wiring
     actually reaches it, which is what this pins down."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
     settings = _settings_with_profile()
 
     bridge = ChatBridge(loop_thread)
@@ -197,7 +233,9 @@ def test_cancel_forwards_to_the_session(qapp, loop_thread, aida_home: Path, reco
     bridge.shutdown()
 
 
-def test_cancel_before_session_ready_is_a_safe_noop(qapp, loop_thread, aida_home: Path, records_home: Path):
+def test_cancel_before_session_ready_is_a_safe_noop(
+    qapp, loop_thread, aida_home: Path, records_home: Path
+):
     bridge = ChatBridge(loop_thread)
     bridge.cancel()  # must not raise even with no session yet
 
@@ -205,7 +243,9 @@ def test_cancel_before_session_ready_is_a_safe_noop(qapp, loop_thread, aida_home
 # --- confirmation_requested (Phase 6 SafetyGuard bridging) -------------------
 
 
-def test_confirm_bridges_signal_to_a_resolvable_future(qapp, loop_thread, aida_home: Path, records_home: Path):
+def test_confirm_bridges_signal_to_a_resolvable_future(
+    qapp, loop_thread, aida_home: Path, records_home: Path
+):
     """``ChatBridge._confirm_interactive`` runs on the background asyncio
     thread; this pins down that emitting confirmation_requested delivers
     (request, future) to a Qt-thread receiver, and that resolving the plain
@@ -213,10 +253,14 @@ def test_confirm_bridges_signal_to_a_resolvable_future(qapp, loop_thread, aida_h
     coroutine — without going through a real tool call at all."""
     bridge = ChatBridge(loop_thread)
     received = []
-    bridge.confirmation_requested.connect(lambda request, future: received.append((request, future)))
+    bridge.confirmation_requested.connect(
+        lambda request, future: received.append((request, future))
+    )
 
     request = ConfirmationRequest(action="write", path="/tmp/x", detail="Write /tmp/x?")
-    outer_future = asyncio.run_coroutine_threadsafe(bridge._confirm_interactive(request), loop_thread.loop)
+    outer_future = asyncio.run_coroutine_threadsafe(
+        bridge._confirm_interactive(request), loop_thread.loop
+    )
 
     assert pump_until(qapp, lambda: received), "confirmation_requested never fired"
     inner_request, inner_future = received[0]
@@ -230,10 +274,14 @@ def test_confirm_bridges_signal_to_a_resolvable_future(qapp, loop_thread, aida_h
 def test_confirm_denial_resolves_false(qapp, loop_thread, aida_home: Path, records_home: Path):
     bridge = ChatBridge(loop_thread)
     received = []
-    bridge.confirmation_requested.connect(lambda request, future: received.append((request, future)))
+    bridge.confirmation_requested.connect(
+        lambda request, future: received.append((request, future))
+    )
 
     request = ConfirmationRequest(action="delete", path="/tmp/x", detail="Delete /tmp/x?")
-    outer_future = asyncio.run_coroutine_threadsafe(bridge._confirm_interactive(request), loop_thread.loop)
+    outer_future = asyncio.run_coroutine_threadsafe(
+        bridge._confirm_interactive(request), loop_thread.loop
+    )
     assert pump_until(qapp, lambda: received)
 
     received[0][1].set_result(ConfirmAnswer.DENY)
@@ -273,7 +321,9 @@ def test_remembering_confirm_skips_repeat_prompt_for_same_scope(
     second = asyncio.run_coroutine_threadsafe(remembering(second_request), loop_thread.loop)
     assert pump_until(qapp, lambda: second.done())
     assert second.result(timeout=1) is True
-    assert len(prompted) == 1, "second request in the same (action, folder) scope must not re-prompt"
+    assert len(prompted) == 1, (
+        "second request in the same (action, folder) scope must not re-prompt"
+    )
 
 
 def test_start_defaults_confirm_callback_to_bridge_confirm(
@@ -386,7 +436,9 @@ def test_validate_provider_profile_emits_profile_validated(qapp, loop_thread, mo
     results = []
     bridge.profile_validated.connect(lambda name, result: results.append((name, result)))
 
-    bridge.validate_provider_profile(ProviderProfile(name="argo-claude", kind="anthropic", model="claude-x"))
+    bridge.validate_provider_profile(
+        ProviderProfile(name="argo-claude", kind="anthropic", model="claude-x")
+    )
 
     assert pump_until(qapp, lambda: results)
     name, result = results[0]
@@ -408,26 +460,34 @@ def test_validate_provider_profile_surfaces_a_failed_ping(qapp, loop_thread, mon
     results = []
     bridge.profile_validated.connect(lambda name, result: results.append((name, result)))
 
-    bridge.validate_provider_profile(ProviderProfile(name="local", kind="openai_compat", model="llama"))
+    bridge.validate_provider_profile(
+        ProviderProfile(name="local", kind="openai_compat", model="llama")
+    )
 
     assert pump_until(qapp, lambda: results)
     assert results[0][1].ok is False
 
 
-def test_validate_embedding_provider_profile_emits_embedding_profile_validated(qapp, loop_thread, monkeypatch):
+def test_validate_embedding_provider_profile_emits_embedding_profile_validated(
+    qapp, loop_thread, monkeypatch
+):
     from aida.config.settings import EmbeddingProfile
     from aida.providers.profiles import ProfileValidation
 
     async def fake_validate_embedding_profile(profile, *, timeout=10.0):
         return ProfileValidation(name=profile.name, ok=True, detail="reachable (fake)")
 
-    monkeypatch.setattr("aida.ui.qt.bridge.validate_embedding_profile", fake_validate_embedding_profile)
+    monkeypatch.setattr(
+        "aida.ui.qt.bridge.validate_embedding_profile", fake_validate_embedding_profile
+    )
 
     bridge = ChatBridge(loop_thread)
     results = []
     bridge.embedding_profile_validated.connect(lambda name, result: results.append((name, result)))
 
-    bridge.validate_embedding_provider_profile(EmbeddingProfile(name="local-embed", kind="openai_compat", model="nomic"))
+    bridge.validate_embedding_provider_profile(
+        EmbeddingProfile(name="local-embed", kind="openai_compat", model="nomic")
+    )
 
     assert pump_until(qapp, lambda: results)
     name, result = results[0]

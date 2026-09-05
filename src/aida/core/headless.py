@@ -26,7 +26,9 @@ from __future__ import annotations
 from aida.core.confirmation import ConfirmationRequest
 
 
-def build_headless_confirm_callback(*, yes_in_allowed: bool, preapproved_tools: set[str] | None = None):
+def build_headless_confirm_callback(
+    *, yes_in_allowed: bool, preapproved_tools: set[str] | None = None
+):
     """Returns a ``ConfirmCallback`` (see ``aida.core.confirmation``) that
     never blocks: every request is answered immediately from the two rules
     above, using only what the caller passed in — no terminal prompt, no

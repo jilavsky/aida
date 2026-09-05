@@ -207,13 +207,17 @@ class AgentLoop:
             terminated_by_error = False
 
             round_trip_started = time.monotonic()
-            async for event in self.provider.complete(messages, self._tool_schemas(), self.settings):
+            async for event in self.provider.complete(
+                messages, self._tool_schemas(), self.settings
+            ):
                 # Wallclock duration of this provider round-trip, stamped
                 # here (not by the provider itself) so it's available
                 # uniformly regardless of whether a given provider's own
                 # API reports timing — see UsageInfo's docstring.
                 if isinstance(event, UsageInfo) and event.duration_seconds is None:
-                    event = dataclasses.replace(event, duration_seconds=time.monotonic() - round_trip_started)
+                    event = dataclasses.replace(
+                        event, duration_seconds=time.monotonic() - round_trip_started
+                    )
                 yield event
                 if isinstance(event, TextFinished):
                     assistant_text = event.text
@@ -273,7 +277,9 @@ class AgentLoop:
                 if tool is None:
                     result_content: object = f"Unknown tool: {tc.name}"
                     is_error = True
-                    logger.warning("tool call to unknown tool %r (arguments=%r)", tc.name, tc.arguments)
+                    logger.warning(
+                        "tool call to unknown tool %r (arguments=%r)", tc.name, tc.arguments
+                    )
                 else:
                     try:
                         result = await tool.func(tc.arguments)
@@ -283,7 +289,9 @@ class AgentLoop:
                     except Exception as exc:  # noqa: BLE001 - a tool crash must not kill the loop
                         result_content = str(exc)
                         is_error = True
-                        logger.warning("tool %s(%r) raised: %s", tc.name, tc.arguments, exc, exc_info=True)
+                        logger.warning(
+                            "tool %s(%r) raised: %s", tc.name, tc.arguments, exc, exc_info=True
+                        )
 
                 if is_error:
                     logger.info("tool %s finished with error: %s", tc.name, result_content)

@@ -29,17 +29,27 @@ def _settings_with_due_schedule():
         name="mock-profile", kind="openai_compat", model="mock-model"
     )
     settings.workspaces = WorkspacesConfig(
-        workspaces={"use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", safety="relaxed")}
+        workspaces={
+            "use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", safety="relaxed")
+        }
     )
-    save_workflow(WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")]))
-    schedules = SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")})
+    save_workflow(
+        WorkflowConfig(name="daily", workspace="use-ws", steps=[WorkflowStep(prompt="go")])
+    )
+    schedules = SchedulesConfig(
+        schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")}
+    )
     save_schedules_config(schedules)
     settings.schedules = schedules
     return settings
 
 
-def test_start_runs_a_due_schedule_and_emits_signals(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+def test_start_runs_a_due_schedule_and_emits_signals(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
 
     # defer_to_user=False: this covers the loop/signal mechanics, not the
@@ -77,7 +87,10 @@ def test_start_runs_a_due_schedule_and_emits_signals(qapp, loop_thread, aida_hom
 
 
 def test_start_is_idempotent(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")] * 3))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="done")] * 3),
+    )
     monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
 
     scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60, defer_to_user=False)
@@ -113,7 +126,9 @@ def test_stop_ends_the_loop(qapp, loop_thread, aida_home: Path, records_home: Pa
     assert scheduler._future is None
 
 
-def test_run_now_fires_regardless_of_due_state(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
+def test_run_now_fires_regardless_of_due_state(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
     """run_now must fire even when the schedule isn't due by the clock —
     same "forced run" contract as `aida schedule run NAME`."""
     from aida.config.settings import save_providers_config, save_workspaces_config
@@ -121,7 +136,10 @@ def test_run_now_fires_regardless_of_due_state(qapp, loop_thread, aida_home: Pat
     settings = _settings_with_due_schedule()  # "every 1h", never fired => already due anyway
     save_providers_config(settings.providers)
     save_workspaces_config(settings.workspaces)
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")] * 5))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="done")] * 5),
+    )
 
     scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
     finished = []
@@ -147,7 +165,9 @@ def test_due_job_is_deferred_while_the_user_is_active(
 ):
     """The default: a job that comes due right after the user did anything
     waits out the quiet period instead of firing on top of them."""
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
 
     scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
@@ -168,8 +188,12 @@ def test_due_job_is_deferred_while_the_user_is_active(
         scheduler.stop()
 
 
-def test_a_running_turn_defers_hard(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+def test_a_running_turn_defers_hard(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
 
     scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
@@ -192,7 +216,9 @@ def test_a_running_turn_defers_hard(qapp, loop_thread, aida_home: Path, records_
 def test_job_runs_once_the_quiet_period_has_elapsed(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
 
     scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)
@@ -209,7 +235,9 @@ def test_job_runs_once_the_quiet_period_has_elapsed(
 
 
 def test_unsent_text_defers(qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch):
-    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")]))
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="done")])
+    )
     monkeypatch.setattr("aida.core.scheduler_runtime.load_settings", _settings_with_due_schedule)
 
     scheduler = SchedulerBridge(loop_thread, poll_interval_seconds=60)

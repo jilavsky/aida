@@ -85,16 +85,18 @@ class StepFormDialog(QDialog):
         )
         form.addRow("Prompt:", self._prompt_edit)
 
-        self._expect_files_edit = QPlainTextEdit(
-            "\n".join(step.expect_files) if step else "", self
+        self._expect_files_edit = QPlainTextEdit("\n".join(step.expect_files) if step else "", self)
+        self._expect_files_edit.setPlaceholderText(
+            "One glob pattern per line, e.g. *.png (optional)"
         )
-        self._expect_files_edit.setPlaceholderText("One glob pattern per line, e.g. *.png (optional)")
         self._expect_files_edit.setMaximumHeight(80)
         form.addRow("Expect files:", self._expect_files_edit)
 
         layout.addLayout(form)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -108,7 +110,11 @@ class StepFormDialog(QDialog):
     def result_step(self) -> WorkflowStep:
         return WorkflowStep(
             prompt=self._prompt_edit.toPlainText().strip(),
-            expect_files=[line.strip() for line in self._expect_files_edit.toPlainText().splitlines() if line.strip()],
+            expect_files=[
+                line.strip()
+                for line in self._expect_files_edit.toPlainText().splitlines()
+                if line.strip()
+            ],
         )
 
 
@@ -179,7 +185,9 @@ class WorkflowFormDialog(QDialog):
         form.addRow("MCP group:", self._mcp_group_combo)
 
         self._vars_edit = QPlainTextEdit(self)
-        self._vars_edit.setPlaceholderText("One key=value per line — defaults for {placeholder} names in steps")
+        self._vars_edit.setPlaceholderText(
+            "One key=value per line — defaults for {placeholder} names in steps"
+        )
         if workflow:
             self._vars_edit.setPlainText("\n".join(f"{k}={v}" for k, v in workflow.vars.items()))
         self._vars_edit.setMaximumHeight(70)
@@ -188,7 +196,9 @@ class WorkflowFormDialog(QDialog):
         self._preapproved_edit = QPlainTextEdit(
             "\n".join(workflow.preapproved_tools) if workflow else "", self
         )
-        self._preapproved_edit.setPlaceholderText("One namespaced tool per line, e.g. pyirena__reduce_scan")
+        self._preapproved_edit.setPlaceholderText(
+            "One namespaced tool per line, e.g. pyirena__reduce_scan"
+        )
         self._preapproved_edit.setMaximumHeight(60)
         form.addRow("Preapproved tools:", self._preapproved_edit)
 
@@ -217,7 +227,9 @@ class WorkflowFormDialog(QDialog):
 
         self._refresh_steps_list()
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -281,7 +293,9 @@ class WorkflowFormDialog(QDialog):
             QMessageBox.warning(self, "Name Required", "A workflow needs a name.")
             return
         if not self._workspace_combo.currentText().strip():
-            QMessageBox.warning(self, "Workspace Required", "Pick a workspace for this workflow to run in.")
+            QMessageBox.warning(
+                self, "Workspace Required", "Pick a workspace for this workflow to run in."
+            )
             return
         if not self._steps:
             QMessageBox.warning(self, "No Steps", "Add at least one step.")
@@ -309,7 +323,9 @@ class WorkflowFormDialog(QDialog):
             mcp_group=None if mcp_group == NO_MCP_GROUP_LABEL else mcp_group,
             vars=self._parsed_vars(),
             preapproved_tools=[
-                line.strip() for line in self._preapproved_edit.toPlainText().splitlines() if line.strip()
+                line.strip()
+                for line in self._preapproved_edit.toPlainText().splitlines()
+                if line.strip()
             ],
             steps=list(self._steps),
         )
@@ -414,7 +430,9 @@ class WorkflowManagementDialog(QDialog):
             return
         config = dialog.result_config()
         if config.name in self._names():
-            QMessageBox.warning(self, "Already Exists", f"A workflow named {config.name!r} already exists.")
+            QMessageBox.warning(
+                self, "Already Exists", f"A workflow named {config.name!r} already exists."
+            )
             return
         save_workflow(config)
         self._refresh_workflow_list()

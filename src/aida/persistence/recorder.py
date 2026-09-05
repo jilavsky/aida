@@ -164,7 +164,9 @@ class ConversationRecorder:
             )
         return directory
 
-    def keep_attachments(self, paths: list[str], *, texts: dict[str, str] | None = None) -> IngestResult:
+    def keep_attachments(
+        self, paths: list[str], *, texts: dict[str, str] | None = None
+    ) -> IngestResult:
         """Copy documents a person attached into this conversation's own
         folder, so they survive the original being moved or cleaned up and
         so the transcript in the records folder is complete.
@@ -209,7 +211,8 @@ class ConversationRecorder:
         self._transcript_dirty = True
         elapsed_enough = (
             self._last_transcript_export is None
-            or time.monotonic() - self._last_transcript_export >= self.transcript_min_interval_seconds
+            or time.monotonic() - self._last_transcript_export
+            >= self.transcript_min_interval_seconds
         )
         if elapsed_enough:
             self.export_transcript()
@@ -233,9 +236,13 @@ class ConversationRecorder:
         owned: list[ImageRef] = []
         for ref in images:
             try:
-                artifact = self.artifact_store.adopt_image_file(Path(ref.path), mime_type=ref.mime_type)
+                artifact = self.artifact_store.adopt_image_file(
+                    Path(ref.path), mime_type=ref.mime_type
+                )
             except OSError as exc:
-                logger.warning("could not copy attached image %s into the conversation: %s", ref.path, exc)
+                logger.warning(
+                    "could not copy attached image %s into the conversation: %s", ref.path, exc
+                )
                 owned.append(ref)
                 continue
             owned.append(ImageRef(path=artifact.path or ref.path, mime_type=artifact.mime_type))
@@ -249,7 +256,9 @@ class ConversationRecorder:
             return self._record_path
         return self.export_transcript()
 
-    def record_artifact(self, artifact: Artifact, *, call_id: str | None, message_seq: int | None = None) -> None:
+    def record_artifact(
+        self, artifact: Artifact, *, call_id: str | None, message_seq: int | None = None
+    ) -> None:
         """Persist a real ``Artifact`` object's metadata. ``message_seq``
         (U6(b)) is the seq of the message this artifact belongs with — see
         ``next_message_seq``."""
@@ -314,7 +323,9 @@ class ConversationRecorder:
             # ordinary conversation leaves no empty folder behind.
             attachments_path=self._attachments_path,
         )
-        self.store.set_record_path(self.conversation_id, str(self._record_path), timestamp=_now_iso())
+        self.store.set_record_path(
+            self.conversation_id, str(self._record_path), timestamp=_now_iso()
+        )
         self._transcript_dirty = False
         self._last_transcript_export = time.monotonic()
         return self._record_path

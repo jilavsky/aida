@@ -23,9 +23,14 @@ async def _deny(_request: ConfirmationRequest) -> bool:
     return False
 
 
-def _guard(root: Path, *, mode: str = "relaxed", allowlist: list[str] | None = None, confirm=_approve) -> SafetyGuard:
+def _guard(
+    root: Path, *, mode: str = "relaxed", allowlist: list[str] | None = None, confirm=_approve
+) -> SafetyGuard:
     return SafetyGuard(
-        allowed_roots=[root], mode=mode, confirm_callback=confirm, command_allowlist=CommandAllowlist(allowlist or [])
+        allowed_roots=[root],
+        mode=mode,
+        confirm_callback=confirm,
+        command_allowlist=CommandAllowlist(allowlist or []),
     )
 
 
@@ -177,7 +182,9 @@ async def test_run_python_script_defaults_to_workspace_timeout(tmp_path: Path, m
 
 
 @pytest.mark.asyncio
-async def test_run_python_script_requested_timeout_is_capped_by_workspace(tmp_path: Path, monkeypatch):
+async def test_run_python_script_requested_timeout_is_capped_by_workspace(
+    tmp_path: Path, monkeypatch
+):
     """A model-requested ``timeout`` larger than the workspace's configured
     ceiling is clamped down to it, never allowed to raise it."""
     import aida.coding.tools as tools_module
@@ -201,7 +208,9 @@ async def test_run_python_script_requested_timeout_is_capped_by_workspace(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_run_python_script_requested_timeout_below_ceiling_is_honored(tmp_path: Path, monkeypatch):
+async def test_run_python_script_requested_timeout_below_ceiling_is_honored(
+    tmp_path: Path, monkeypatch
+):
     """A smaller-than-ceiling request (a script that should fail fast) is
     respected rather than always snapping to the workspace maximum."""
     import aida.coding.tools as tools_module

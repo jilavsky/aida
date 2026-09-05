@@ -179,7 +179,8 @@ def test_folder_display_set_folders_updates_labels(qapp):
     assert display._source_label.isHidden()  # "(none)" placeholder hidden once non-empty
 
     row_paths = [
-        display._source_rows_layout.itemAt(i).widget().path for i in range(display._source_rows_layout.count())
+        display._source_rows_layout.itemAt(i).widget().path
+        for i in range(display._source_rows_layout.count())
     ]
     assert row_paths == ["/data/a", "/data/b"]
 
@@ -200,7 +201,9 @@ def test_folder_display_add_source_folder_via_dialog(qapp, monkeypatch, tmp_path
 
 def test_folder_display_dialog_cancelled_does_nothing(qapp, monkeypatch):
     display = FolderDisplay()
-    monkeypatch.setattr("aida.ui.qt.selectors.QFileDialog.getExistingDirectory", lambda *a, **kw: "")
+    monkeypatch.setattr(
+        "aida.ui.qt.selectors.QFileDialog.getExistingDirectory", lambda *a, **kw: ""
+    )
     changed = []
     display.source_folders_changed.connect(changed.append)
 
@@ -293,7 +296,9 @@ def test_folder_display_set_folders_updates_sidecar_name(qapp):
 def test_folder_display_set_folders_without_sidecar_arg_leaves_it_unchanged(qapp):
     display = FolderDisplay()
     display.set_folders(source_folders=[], target_folder=None, sidecar_folder_name="images")
-    display.set_folders(source_folders=["/a"], target_folder="/out")  # no sidecar_folder_name this time
+    display.set_folders(
+        source_folders=["/a"], target_folder="/out"
+    )  # no sidecar_folder_name this time
     assert display.sidecar_folder_name == "images"
 
 
@@ -354,7 +359,8 @@ def test_folder_display_set_commands_updates_rows_and_interpreter(qapp):
     assert display._command_label.isHidden()
 
     row_patterns = [
-        display._command_rows_layout.itemAt(i).widget().path for i in range(display._command_rows_layout.count())
+        display._command_rows_layout.itemAt(i).widget().path
+        for i in range(display._command_rows_layout.count())
     ]
     assert row_patterns == ["git status", "git log *"]
 
@@ -439,7 +445,8 @@ def test_folder_display_clearing_interpreter_is_allowed(qapp):
 def test_folder_display_browse_interpreter_via_dialog(qapp, monkeypatch):
     display = FolderDisplay()
     monkeypatch.setattr(
-        "aida.ui.qt.selectors.QFileDialog.getOpenFileName", lambda *a, **kw: ("/opt/env/bin/python", "")
+        "aida.ui.qt.selectors.QFileDialog.getOpenFileName",
+        lambda *a, **kw: ("/opt/env/bin/python", ""),
     )
     changed = []
     display.python_interpreter_changed.connect(changed.append)
@@ -452,7 +459,9 @@ def test_folder_display_browse_interpreter_via_dialog(qapp, monkeypatch):
 
 def test_folder_display_browse_interpreter_dialog_cancelled_does_nothing(qapp, monkeypatch):
     display = FolderDisplay()
-    monkeypatch.setattr("aida.ui.qt.selectors.QFileDialog.getOpenFileName", lambda *a, **kw: ("", ""))
+    monkeypatch.setattr(
+        "aida.ui.qt.selectors.QFileDialog.getOpenFileName", lambda *a, **kw: ("", "")
+    )
     changed = []
     display.python_interpreter_changed.connect(changed.append)
 

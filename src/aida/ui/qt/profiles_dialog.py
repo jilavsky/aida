@@ -117,7 +117,9 @@ class _OptionalNumberRow(QWidget):
 class ProviderProfileFormDialog(QDialog):
     """Add (``profile=None``) or edit (``profile`` given) one ``ProviderProfile``."""
 
-    def __init__(self, *, profile: ProviderProfile | None = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, *, profile: ProviderProfile | None = None, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self._is_edit = profile is not None
         self.setWindowTitle("Edit Provider Profile" if self._is_edit else "Add Provider Profile")
@@ -144,23 +146,33 @@ class ProviderProfileFormDialog(QDialog):
         self._model_edit = QLineEdit(profile.model if profile else "", self)
         form.addRow("Model:", self._model_edit)
 
-        self._secret_ref_edit = QLineEdit(profile.secret_ref if profile and profile.secret_ref else "", self)
+        self._secret_ref_edit = QLineEdit(
+            profile.secret_ref if profile and profile.secret_ref else "", self
+        )
         self._secret_ref_edit.setPlaceholderText("(defaults to the profile name)")
         form.addRow("Secret ref:", self._secret_ref_edit)
 
         self._secret_value_edit = QLineEdit(self)
         self._secret_value_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self._secret_value_edit.setPlaceholderText(
-            "(leave blank to keep the existing keychain secret)" if self._is_edit else "API key / ANL username"
+            "(leave blank to keep the existing keychain secret)"
+            if self._is_edit
+            else "API key / ANL username"
         )
         form.addRow("Secret value:", self._secret_value_edit)
 
         self._capability_notes_edit = QLineEdit(profile.capability_notes if profile else "", self)
-        self._capability_notes_edit.setPlaceholderText("e.g. small local model — prefer lean MCP groups")
+        self._capability_notes_edit.setPlaceholderText(
+            "e.g. small local model — prefer lean MCP groups"
+        )
         form.addRow("Capability notes:", self._capability_notes_edit)
 
         self._max_tokens_row = _OptionalNumberRow(
-            initial=profile.max_tokens if profile else None, minimum=1, maximum=1_000_000, decimals=0, step=256
+            initial=profile.max_tokens if profile else None,
+            minimum=1,
+            maximum=1_000_000,
+            decimals=0,
+            step=256,
         )
         self._max_tokens_row.setToolTip(
             "Caps only the length of THIS REPLY (the model's output) — not the model's total "
@@ -172,7 +184,11 @@ class ProviderProfileFormDialog(QDialog):
         form.addRow("Max tokens:", self._max_tokens_row)
 
         self._temperature_row = _OptionalNumberRow(
-            initial=profile.temperature if profile else None, minimum=0.0, maximum=2.0, decimals=2, step=0.1
+            initial=profile.temperature if profile else None,
+            minimum=0.0,
+            maximum=2.0,
+            decimals=2,
+            step=0.1,
         )
         form.addRow("Temperature:", self._temperature_row)
 
@@ -217,12 +233,16 @@ class ProviderProfileFormDialog(QDialog):
         form.addRow("Context window:", self._context_window_row)
 
         self._supports_vision_checkbox = QCheckBox("This model can see attached images", self)
-        self._supports_vision_checkbox.setChecked(bool(profile.supports_vision) if profile else False)
+        self._supports_vision_checkbox.setChecked(
+            bool(profile.supports_vision) if profile else False
+        )
         form.addRow("Vision:", self._supports_vision_checkbox)
 
         layout.addLayout(form)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -252,7 +272,9 @@ class ProviderProfileFormDialog(QDialog):
             usd_per_m_input=self._usd_input_row.value(),
             usd_per_m_output=self._usd_output_row.value(),
             supports_vision=self._supports_vision_checkbox.isChecked(),
-            context_window=(int(v) if (v := self._context_window_row.value()) is not None else None),
+            context_window=(
+                int(v) if (v := self._context_window_row.value()) is not None else None
+            ),
         )
 
 
@@ -262,7 +284,9 @@ class ProviderProfileFormDialog(QDialog):
 class EmbeddingProfileFormDialog(QDialog):
     """Add (``profile=None``) or edit (``profile`` given) one ``EmbeddingProfile``."""
 
-    def __init__(self, *, profile: EmbeddingProfile | None = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, *, profile: EmbeddingProfile | None = None, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self._is_edit = profile is not None
         self.setWindowTitle("Edit Embedding Profile" if self._is_edit else "Add Embedding Profile")
@@ -289,7 +313,9 @@ class EmbeddingProfileFormDialog(QDialog):
         self._model_edit = QLineEdit(profile.model if profile else "", self)
         form.addRow("Model:", self._model_edit)
 
-        self._secret_ref_edit = QLineEdit(profile.secret_ref if profile and profile.secret_ref else "", self)
+        self._secret_ref_edit = QLineEdit(
+            profile.secret_ref if profile and profile.secret_ref else "", self
+        )
         self._secret_ref_edit.setPlaceholderText("(defaults to the profile name)")
         form.addRow("Secret ref:", self._secret_ref_edit)
 
@@ -305,7 +331,9 @@ class EmbeddingProfileFormDialog(QDialog):
 
         layout.addLayout(form)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -405,7 +433,9 @@ class ProfilesDialog(QDialog):
         provider_details_layout = QVBoxLayout(provider_details_box)
         self._provider_details_label = QLabel(self)
         self._provider_details_label.setWordWrap(True)
-        self._provider_details_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._provider_details_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         provider_details_layout.addWidget(self._provider_details_label)
         provider_details_layout.addStretch(1)
         provider_outer.addWidget(provider_details_box, stretch=2)
@@ -438,7 +468,9 @@ class ProfilesDialog(QDialog):
         embedding_details_layout = QVBoxLayout(embedding_details_box)
         self._embedding_details_label = QLabel(self)
         self._embedding_details_label.setWordWrap(True)
-        self._embedding_details_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._embedding_details_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         embedding_details_layout.addWidget(self._embedding_details_label)
         embedding_details_layout.addStretch(1)
         embedding_outer.addWidget(embedding_details_box, stretch=2)
@@ -484,7 +516,9 @@ class ProfilesDialog(QDialog):
         self._provider_list.clear()
         for name in sorted(self._provider_configs()):
             profile = self._provider_configs()[name]
-            item = QListWidgetItem(f"{name}  ({profile.kind}, model={profile.model or 'unset'})", self._provider_list)
+            item = QListWidgetItem(
+                f"{name}  ({profile.kind}, model={profile.model or 'unset'})", self._provider_list
+            )
             item.setData(Qt.ItemDataRole.UserRole, name)
             if name == previous:
                 self._provider_list.setCurrentItem(item)
@@ -509,7 +543,9 @@ class ProfilesDialog(QDialog):
             return
         profile = dialog.result_profile()
         if profile.name in self._provider_configs():
-            QMessageBox.warning(self, "Already Exists", f"A profile named {profile.name!r} already exists.")
+            QMessageBox.warning(
+                self, "Already Exists", f"A profile named {profile.name!r} already exists."
+            )
             return
         if dialog.secret_value():
             set_secret(profile.secret_ref, dialog.secret_value())
@@ -575,7 +611,9 @@ class ProfilesDialog(QDialog):
         self._embedding_list.clear()
         for name in sorted(self._embedding_configs()):
             profile = self._embedding_configs()[name]
-            item = QListWidgetItem(f"{name}  ({profile.kind}, model={profile.model or 'unset'})", self._embedding_list)
+            item = QListWidgetItem(
+                f"{name}  ({profile.kind}, model={profile.model or 'unset'})", self._embedding_list
+            )
             item.setData(Qt.ItemDataRole.UserRole, name)
             if name == previous:
                 self._embedding_list.setCurrentItem(item)
@@ -597,7 +635,9 @@ class ProfilesDialog(QDialog):
             return
         profile = dialog.result_profile()
         if profile.name in self._embedding_configs():
-            QMessageBox.warning(self, "Already Exists", f"A profile named {profile.name!r} already exists.")
+            QMessageBox.warning(
+                self, "Already Exists", f"A profile named {profile.name!r} already exists."
+            )
             return
         if dialog.secret_value():
             set_secret(profile.secret_ref, dialog.secret_value())

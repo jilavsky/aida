@@ -39,7 +39,9 @@ from aida.ui.qt._qt import (
 
 
 class OnboardingDialog(QDialog):
-    def __init__(self, settings: Settings, bridge, skills_dir: Path, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, settings: Settings, bridge, skills_dir: Path, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Welcome to AIDA")
         self.resize(480, 360)
