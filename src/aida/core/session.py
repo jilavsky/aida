@@ -1002,8 +1002,12 @@ async def _start_session(
     # build_identity_context_block's docstring for why this is kept
     # separate from extra_context_texts rather than folded in (ordering:
     # it must land ahead of a workspace's own system_prompt, not after it).
+    # Per-user framing where it exists, the install-wide text otherwise —
+    # see AppConfig.context_for_user for why it falls back rather than
+    # replaces. build_identity_context_block itself needed no change.
     identity_text = build_identity_context_block(
-        assistant_name=settings.app.assistant_name, user_context=settings.app.user_context
+        assistant_name=settings.app.assistant_name,
+        user_context=settings.app.context_for_user(active_user),
     )
 
     all_skill_names = list(skill_names or [])

@@ -71,13 +71,25 @@ class SettingsDialog(QDialog):
         self._assistant_name_edit = QLineEdit(app_config.assistant_name, self)
         form.addRow("Assistant name:", self._assistant_name_edit)
 
-        self._user_context_edit = QPlainTextEdit(app_config.user_context, self)
+        # Edits the *active user's* context when there is one, falling back
+        # to the install-wide text otherwise. The label says which, because
+        # a box that silently means two different things depending on a
+        # dropdown elsewhere in the window is worse than no box.
+        active_user = (app_config.active_user or "").strip()
+        self._context_user = active_user
+        context_label = f"Personal context ({active_user}):" if active_user else "Personal context:"
+        self._user_context_edit = QPlainTextEdit(app_config.context_for_user(active_user), self)
         self._user_context_edit.setPlaceholderText(
             "Optional — a sentence or two the model always sees, e.g. "
             "\"The user is Jan, a beamline scientist at APS.\""
         )
+        if active_user:
+            self._user_context_edit.setToolTip(
+                f"Saved for {active_user!r} only. Users with nothing of their own fall back "
+                f"to the text saved with no user selected."
+            )
         self._user_context_edit.setMaximumHeight(60)
-        form.addRow("Personal context:", self._user_context_edit)
+        form.addRow(context_label, self._user_context_edit)
 
         records_row = QHBoxLayout()
         self._records_dir_edit = QLineEdit(app_config.records_dir or "", self)
@@ -259,7 +271,26 @@ class SettingsDialog(QDialog):
         return text or self._original.assistant_name
 
     def user_context(self) -> str:
+        """The install-wide text — unchanged when a specific user is being
+        edited, since their text belongs in ``user_contexts`` instead."""
+        if self._context_user:
+            return self._original.user_context
         return self._user_context_edit.toPlainText().strip()
+
+    def user_contexts(self) -> dict[str, str]:
+        """``user_contexts`` with this dialog's edit applied. Clearing the
+        box removes the entry rather than storing an empty string, so the
+        user falls back to the shared text — "no personal context" and
+        "an empty personal context" should not be different states."""
+        contexts = dict(self._original.user_contexts)
+        if not self._context_user:
+            return contexts
+        edited = self._user_context_edit.toPlainText().strip()
+        if edited:
+            contexts[self._context_user] = edited
+        else:
+            contexts.pop(self._context_user, None)
+        return contexts
 
     def records_dir(self) -> str | None:
         text = self._records_dir_edit.text().strip()
@@ -305,6 +336,7 @@ class SettingsDialog(QDialog):
             font_size=self.font_size(),
             assistant_name=self.assistant_name(),
             user_context=self.user_context(),
+            user_contexts=self.user_contexts(),
             records_dir=self.records_dir(),
             scratch_dir=self.scratch_dir(),
             log_level=self.log_level(),

@@ -322,3 +322,49 @@ def test_clear_ocr_key_deletes_the_secret_and_clears_the_field(qapp, monkeypatch
 
     assert deleted == [SECRET_REF]
     assert dialog.ocr_api_key() == ""
+
+
+def test_personal_context_edits_the_active_users_own_text(qapp):
+    """On a shared machine the box has to mean one person's context, not
+    everybody's — and the label has to say which, or a box that silently
+    means two different things depending on a dropdown elsewhere is worse
+    than no box."""
+    config = AppConfig(
+        active_user="Jan",
+        user_context="Shared framing.",
+        user_contexts={"Jan": "Jan runs the beamline."},
+    )
+    dialog = SettingsDialog(config)
+
+    assert dialog._user_context_edit.toPlainText() == "Jan runs the beamline."
+    dialog._user_context_edit.setPlainText("Jan, updated.")
+    updated = dialog.updated_app_config()
+
+    assert updated.user_contexts == {"Jan": "Jan, updated."}
+    assert updated.user_context == "Shared framing.", "the shared text must not be overwritten"
+
+
+def test_clearing_a_users_context_falls_back_rather_than_storing_blank(qapp):
+    """"No personal context" and "an empty personal context" should not be
+    different states."""
+    config = AppConfig(
+        active_user="Jan", user_context="Shared framing.", user_contexts={"Jan": "Jan's text."}
+    )
+    dialog = SettingsDialog(config)
+    dialog._user_context_edit.setPlainText("   ")
+    updated = dialog.updated_app_config()
+
+    assert updated.user_contexts == {}
+    assert updated.context_for_user("Jan") == "Shared framing."
+
+
+def test_with_no_active_user_the_box_edits_the_shared_text(qapp):
+    config = AppConfig(user_context="Shared framing.", user_contexts={"Jan": "Jan's text."})
+    dialog = SettingsDialog(config)
+
+    assert dialog._user_context_edit.toPlainText() == "Shared framing."
+    dialog._user_context_edit.setPlainText("New shared framing.")
+    updated = dialog.updated_app_config()
+
+    assert updated.user_context == "New shared framing."
+    assert updated.user_contexts == {"Jan": "Jan's text."}, "another user's text is untouched"

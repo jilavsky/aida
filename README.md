@@ -31,6 +31,16 @@ a general-purpose AI platform — see [`PLAN.md`](PLAN.md) §1 for the rationale
   folder, linked relatively) or DOCX, written into your target folder.
 - **Search your own documentation** — optional local RAG over folders you
   choose, with local or cloud embeddings.
+- **Keep the documents you attach** — an attached paper is copied into the
+  conversation's own folder with the text that was extracted from it, and
+  deleted again with the conversation. Ask about a figure and the agent
+  fetches that one by label rather than being handed every image in the
+  file. Optional [Mistral OCR](docs/documents.md#optional-mistral-ocr) makes
+  those labels reliable on multi-column journal PDFs — off by default, per
+  workspace, and it asks before a document leaves your machine.
+- **Keep conversations sorted** — label them by person on a shared beamline
+  machine, or by project on a laptop, and filter the list by it. Labels are
+  organization, not security.
 - **Stay out of black boxes** — token counts and cost estimates per session,
   a tool-call log, a raw MCP result inspector, and `aida doctor`.
 
@@ -46,7 +56,8 @@ aida-gui
 
 The PyPI distribution name is `aida-workbench`; the import package and the
 console scripts are `aida` / `aida-gui`. Extras: `gui` (PySide6 desktop app),
-`docs` (PDF/DOCX/XLSX/PPTX reading, image handling).
+`docs` (PDF/DOCX/XLSX/PPTX reading, image handling), `ocr` (the optional
+Mistral OCR backend for figure extraction).
 
 Already using pyIrena? Install both — in either order, in one environment or
 two — and wire up its MCP tools with a single command:

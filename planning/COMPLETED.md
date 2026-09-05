@@ -490,3 +490,57 @@ Note for anyone extending this: these readers extract **text only**.
 Images embedded in a PDF, DOCX or PPTX are not extracted and never reach
 the model — see `PLAN.md` §2.4 and
 [`document_images.md`](document_images.md).
+
+---
+
+## 11. Conversation organization, documents, figures and OCR (2026-09-05)
+
+Four days of work, delivered as `PLAN.md` §1.3 plus the four phases of
+`documents_implementation.md`. The design rationale lives in
+[`multiuser_plan.md`](multiuser_plan.md),
+[`document_images.md`](document_images.md) and
+[`documents_implementation.md`](documents_implementation.md); this is the
+summary of what exists now.
+
+**Conversation organization — a `user` label, not authentication.** A
+nullable `conversations."user"` column (migration 4), an active name
+resolved `--user` → `$AIDA_USER` → `config.yaml`, `{user}` expanded into
+`records_dir`/`target_folder`/`saved_scripts_dir`/`templates_dir`/
+`source_folders` *before* `SafetyGuard` builds its allowed roots, a toolbar
+picker, sidebar filtering with **All users** and **(no user)**, **File ▸
+Manage Users…** for rename/merge/clear, right-click **Move to User** for
+individual conversations, and per-user `user_context` falling back to the
+install-wide text. Anyone can pick any name; the docs say so in those
+words.
+
+**Attachments are kept and deleted with the conversation.** Documents a
+person attaches are copied into `<records_dir>/attachments/<conv8>/` with
+the text extracted from them, listed in the Markdown transcript, and
+removed when the conversation is deleted — with the folder's real path
+recorded on the row rather than recomputed, so moving the Records folder
+cannot strand a copy of somebody's manuscript. `aida doctor` reports
+orphans and `aida conversations gc` removes them.
+
+**Figures are pulled, not pushed.** `list_document_figures` returns a text
+index (label, caption, page, confidence) and `get_document_figure` returns
+one image by label, so a twelve-figure paper costs a couple of hundred
+tokens to describe and the vision budget goes on the two that matter.
+Extraction is lazy and cached. Labels are honest: `high` on a single-column
+page, `low` on multi-column where caption pairing is a guess, `none` when
+no caption was found.
+
+**Optional Mistral OCR** raises that ceiling by resolving reading order —
+off by default, enabled per workspace, asking before each document leaves
+the machine, refusing in unattended runs without explicit pre-approval, and
+always falling back to the built-in extractor with a note saying it did.
+
+**Diagnostics, because none of the above is observable by staring at it:**
+`aida documents figures FILE` runs the real path and reports which backend
+ran and *why*; `aida documents verify-ocr` and Settings' **Verify key**
+check the key without uploading anything.
+
+Along the way: the readers now say how many images they dropped and detect
+a scanned PDF instead of returning silently empty text (`COMPLETED.md` §10
+covers the related budget fix), and `tests/ui/conftest.py` turns any real
+modal dialog in a GUI test into an immediate named failure rather than a
+hung suite.

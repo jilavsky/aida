@@ -83,31 +83,6 @@ remains is distribution, plus one deliberate deferral:
       a user actually asks for "logged out, not just closed". `ScheduleEntry.
       trigger` already exists so nothing shipped has to be rewritten for it.
 
-### 1.3 Conversation organization — the "user" layer
-
-**Committed 2026-09-04**, ahead of deploying AIDA at the beamline. Framed
-first as per-user chats, better understood as **an organization axis for
-conversations**: at the beamline the buckets are people, on a laptop they
-are tasks or projects. Same mechanism either way. The motivating problem is
-the same in both: a flat, ever-growing chat list has no safe bulk cleanup,
-because deleting in a shared list takes conversations someone wanted kept.
-Not authentication and not secrecy — a name picker. Shape, sizing and
-step-by-step in [`planning/multiuser_plan.md`](planning/multiuser_plan.md).
-
-**Sequencing: steps 1, 2 and 4 below go before the attachment store in
-§1.5**, because a DB column can be added at any time but a folder layout
-cannot be changed once users have files in it. See `multiuser_plan.md` §0.
-
-**Core and GUI organization layers shipped 2026-09-05** — schema, path
-resolution, stamping, CLI controls, toolbar user picker, and sidebar
-filtering with its *All users* escape hatch. Detail in
-`multiuser_plan.md` §7.
-
-- [ ] Per-user `user_context` remains: store a mapping by user, resolve it
-      at session start, and retain the existing flat value as the fallback.
-      This was part of `multiuser_plan.md` step 5, but not part of the
-      scoped GUI implementation guide.
-
 ### 1.4 Verification owed (cannot be done from a sandbox)
 
 Every one of these is a *manual* check the phase files left open because no

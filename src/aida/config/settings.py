@@ -60,6 +60,10 @@ def _coerce(kind: str, value: Any) -> Any:
         if isinstance(value, str) or not isinstance(value, (list, tuple)):
             raise ValueError("expected a list")
         return [str(item) for item in value]
+    if base == "dict[str,str]":
+        if not isinstance(value, dict):
+            raise ValueError("expected a mapping")
+        return {str(k): str(v) for k, v in value.items()}
     if base == "str":
         if isinstance(value, (dict, list, tuple)):
             raise ValueError("expected a string")
@@ -365,6 +369,12 @@ class AppConfig:
     #: database rather than replacing them, so this can only ever *add* a
     #: name — it can never contradict what the conversations say.
     known_users: list[str] = field(default_factory=list)
+    #: Per-user overrides of ``user_context``, keyed by the user label.
+    #: ``user_context`` above stays the fallback, so a single-user install
+    #: is untouched and a shared machine does not have to fill in an entry
+    #: for everybody before anyone gets sensible framing. Empty by default:
+    #: an install says nothing about anyone until it is told to.
+    user_contexts: dict[str, str] = field(default_factory=dict)
     # Titles of the right-hand session panels (Folders / MCP Servers /
     # Quick Tasks / Workspace Notes) the user has collapsed. Persisted so
     # the column reopens the way they left it — with four panels stacked
@@ -442,6 +452,23 @@ class AppConfig:
             filtered["default_safety_mode"] = "confirm"
         return cls(**filtered)
 
+    def context_for_user(self, user: str | None) -> str:
+        """The personal-context text for ``user``, falling back to the
+        install-wide ``user_context``.
+
+        A fallback rather than a replacement on purpose: on a shared
+        machine the useful framing is usually "this is a USAXS beamline,
+        these are the instruments" — true for everyone — with at most a
+        line or two that differs per person. Requiring an entry per user
+        before anyone got any context would make the common case worse to
+        get the rare one right.
+        """
+        if user:
+            specific = self.user_contexts.get(user)
+            if specific and specific.strip():
+                return specific
+        return self.user_context
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "config_version": self.config_version,
@@ -464,6 +491,7 @@ class AppConfig:
             "user_context": self.user_context,
             "active_user": self.active_user,
             "known_users": self.known_users,
+            "user_contexts": self.user_contexts,
             "collapsed_panels": self.collapsed_panels,
             "scheduler_quiet_period_seconds": self.scheduler_quiet_period_seconds,
             "scheduler_max_defer_seconds": self.scheduler_max_defer_seconds,
@@ -496,6 +524,7 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "user_context": "str",
     "active_user": "str",
     "known_users": "list[str]",
+    "user_contexts": "dict[str,str]",
     "collapsed_panels": "list[str]",
     "scheduler_quiet_period_seconds": "int",
     "scheduler_max_defer_seconds": "int",

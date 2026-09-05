@@ -14,6 +14,12 @@ explains its fields and behavior.
 
 ## Toolbar (left to right)
 
+- **User selector** — an editable box naming who (or what) new
+  conversations are labelled with — a person on a shared machine, or a
+  project. Type a name and press Return to start using a new one. First on
+  purpose: the three selectors read left to right in the order the choices
+  narrow each other. See
+  [organizing-conversations.md](organizing-conversations.md).
 - **Workspace selector** — a dropdown of configured workspaces, plus
   "(no workspace)". Switching asks for confirmation and starts a new
   conversation in the chosen workspace. See [workspaces.md](workspaces.md).
@@ -33,8 +39,38 @@ explains its fields and behavior.
   remove profiles). See [providers-and-secrets.md](providers-and-secrets.md).
 - **Workspaces…** — opens the workspace management dialog (add/edit/remove
   named workspaces). See [workspaces.md](workspaces.md).
+- **Workflows…** — opens the stored-workflow dialog (add/edit/run a saved
+  sequence of prompts). See [workflows.md](workflows.md).
+- **Schedules…** — opens the in-app scheduler dialog, with each schedule's
+  last-run status. See [workflows.md](workflows.md).
 - **Settings…** — opens the settings dialog (font size, records folder, log
-  level, max agent iterations, profile list view).
+  level, max agent iterations, assistant name and personal context,
+  scheduler timings, and the optional document-OCR key). See
+  [documents.md](documents.md#optional-mistral-ocr) for the OCR part.
+
+At the right-hand end, separated from the rest:
+
+- **Documentation** (red) — opens the AIDA documentation in your web
+  browser. Deliberately the same shape and corner as pyIrena's, so it is
+  recognisable before anything has been read. The same link is under
+  **Help → Documentation**.
+
+## Menus
+
+- **File → Open Config / Records / Scratch Folder** — opens each of AIDA's
+  own folders in the system file browser, so you never have to hunt for
+  them.
+- **File → Open Conversation Folder** — the current conversation's
+  attachment folder. See [documents.md](documents.md).
+- **File → Manage Users…** — rename a label (renaming onto an existing name
+  merges them), or clear one. Also **New User…**, which starts using a
+  name. See [organizing-conversations.md](organizing-conversations.md).
+- **File → Compact Conversation** — summarize older turns to free context.
+  See [context-and-limits.md](context-and-limits.md).
+- **File → Save Conversation as Workflow…** — turn the prompts you have
+  already sent into a stored workflow. See [workflows.md](workflows.md).
+- **Help → Documentation** — opens this documentation in your web browser.
+- **Help → About AIDA** — version and project link.
 
 ## Main area
 
@@ -76,6 +112,17 @@ Lists past conversations (date, workspace, title) with **Resume**,
 **Delete…**, **Rename…**, and **Clean Up…** (delete everything older than N
 days) — all with confirmation dialogs. Double-clicking an entry resumes it.
 Resuming replays chat history and any still-present image/file artifacts.
+
+Above the list, a search box matches the title, workspace and user label,
+and — once any conversation carries a user label — a filter narrows the
+list to one name, to **(no user)**, or to **All users**. The filter follows
+the toolbar's User box when you switch, and otherwise leaves your choice
+alone.
+
+Right-clicking gives **Resume**, **Rename…**, **Move to User** and
+**Delete…**; a multi-row selection gives **Move to User** and **Delete…**.
+**Move to User** is how a conversation started under the wrong name is put
+right. See [organizing-conversations.md](organizing-conversations.md).
 
 ## Dialogs reachable from the toolbar
 

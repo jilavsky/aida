@@ -419,3 +419,33 @@ def test_set_conversation_user_handles_several_at_once(tmp_path: Path):
         assert store.set_conversation_user([], "team", timestamp="2026-01-05") == 0
     finally:
         store.close()
+
+
+# --- per-user personal context -------------------------------------------
+
+
+def test_context_for_user_prefers_the_users_own_text(tmp_path: Path):
+    config = AppConfig(user_context="shared framing", user_contexts={"jan": "Jan, 9-ID"})
+    assert config.context_for_user("jan") == "Jan, 9-ID"
+
+
+def test_context_for_user_falls_back_to_the_install_wide_text(tmp_path: Path):
+    """A fallback rather than a replacement: on a shared machine the useful
+    framing is mostly true for everyone, and requiring an entry per person
+    before anyone got any context would make the common case worse."""
+    config = AppConfig(user_context="shared framing", user_contexts={"jan": "Jan, 9-ID"})
+    assert config.context_for_user("eva") == "shared framing"
+    assert config.context_for_user(None) == "shared framing"
+    assert config.context_for_user("") == "shared framing"
+
+
+def test_a_blank_per_user_entry_does_not_shadow_the_fallback(tmp_path: Path):
+    config = AppConfig(user_context="shared framing", user_contexts={"jan": "   "})
+    assert config.context_for_user("jan") == "shared framing"
+
+
+def test_user_contexts_round_trip_and_reject_a_wrong_type(tmp_path: Path):
+    config = AppConfig.from_dict({"user_contexts": {"jan": "Jan, 9-ID"}})
+    assert AppConfig.from_dict(config.to_dict()).user_contexts == {"jan": "Jan, 9-ID"}
+    # "old configs must always load": a bad value warns and uses the default.
+    assert AppConfig.from_dict({"user_contexts": "not a mapping"}).user_contexts == {}

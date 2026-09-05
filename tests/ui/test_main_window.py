@@ -11,6 +11,7 @@ silently skipped.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -29,7 +30,14 @@ from aida.core.events import ContextTrimmed
 from aida.persistence.store import ConversationStore
 from aida.providers.base import Message
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
-from aida.ui.qt._qt import QApplication, QDesktopServices, QDialog, QMessageBox, Qt
+from aida.ui.qt._qt import (
+    QApplication,
+    QDesktopServices,
+    QDialog,
+    QMessageBox,
+    Qt,
+    QToolBar,
+)
 from aida.ui.qt.artifact_widgets import InlineImageWidget
 from aida.ui.qt.chat_panel import MessageBubble
 from aida.ui.qt.main_window import MainWindow
@@ -1554,7 +1562,11 @@ def test_open_documentation_opens_the_project_url(qapp, loop_thread, aida_home: 
         opened = []
         monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
         window._on_open_documentation()
-        assert opened == ["https://github.com/jilavsky/aida"]
+        # The docs index, not the repo root: landing a new user on a
+        # source tree and leaving them to find `docs/` wastes the one
+        # click this menu item exists to spend.
+        assert opened == [MainWindow.DOCUMENTATION_URL]
+        assert opened[0].endswith("/docs")
     finally:
         window.close()
 
@@ -2890,5 +2902,88 @@ def test_moving_a_conversation_to_a_user_relabels_and_remembers_the_name(
         finally:
             store.close()
         assert "Carol" in window._known_users(), "a name used only here must still be offered"
+    finally:
+        window.close()
+
+
+def test_augment_with_attachments_arity_matches_its_caller(tmp_path: Path):
+    """A tuple-arity mismatch between this method and `_on_send_requested`
+    is invisible to ruff and to every non-GUI test, and the symptom was
+    ugly: the ValueError was swallowed by the send path's own broad
+    `except`, which then tried to pop a QMessageBox — so a plain chat turn
+    with *no* attachments failed, and in a test it hung the suite instead of
+    reporting anything.
+
+    Both branches are exercised, because the one that shipped broken was
+    the early return for "nothing attached" — the common case, and the one
+    a test about attachments would never have covered.
+
+    No MainWindow is constructed: the method only reaches `self._logger`
+    and `self._read_attachment_for_model`, so a stub carrying those two is
+    enough. Qt classes define their own `__new__`, so `object.__new__` on a
+    QMainWindow subclass is rejected outright — and building a real window
+    just to check a return arity would be slow and fragile for no gain.
+    """
+
+    class _Stub:
+        _logger = logging.getLogger("test")
+        _read_attachment_for_model = MainWindow._read_attachment_for_model
+
+    stub = _Stub()
+
+    empty = MainWindow._augment_with_attachments(stub, "hello", [])
+    assert len(empty) == 4
+    assert empty == ("hello", [], [], {})
+
+    attachment = tmp_path / "notes.txt"
+    attachment.write_text("file body", encoding="utf-8")
+    with_one = MainWindow._augment_with_attachments(stub, "hello", [str(attachment)])
+    assert len(with_one) == 4
+    text, failures, images, texts = with_one
+    assert "file body" in text
+    assert failures == []
+    assert texts[str(attachment)], "the extracted text must travel with the path"
+
+
+def test_documentation_button_is_last_on_the_toolbar_and_opens_the_docs(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A menu entry is not discoverable enough for the one thing a brand-new
+    user most needs. pyIrena — which most of this audience already runs —
+    puts a docs button in the same corner, so the shape is familiar before
+    anything is read.
+
+    Note what is *not* asserted: ``isVisibleTo(window)``. Elsewhere in this
+    suite ``isVisibleTo`` is used against a widget's *immediate* parent
+    (``content.isVisibleTo(section)``), which works fine. Against a distant
+    ancestor it does not: these tests never ``show()`` the window, so the
+    QToolBar in between is itself unshown and the chain answers False for a
+    perfectly ordinary button. The toolbar action's own visibility is the
+    flag that means something here, and it needs no realized window.
+    """
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        button = window.documentation_button
+        assert button.text() == "Documentation"
+        assert button.isEnabled()
+        assert MainWindow.DOCUMENTATION_URL in button.toolTip()
+
+        toolbar = window.findChildren(QToolBar)[0]
+        widgets = [
+            toolbar.widgetForAction(action)
+            for action in toolbar.actions()
+            if toolbar.widgetForAction(action) is not None
+        ]
+        assert widgets[-1] is button, "the button must sit at the right-hand end"
+        action = next(a for a in toolbar.actions() if toolbar.widgetForAction(a) is button)
+        assert action.isVisible()
+
+        opened: list[str] = []
+        monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+        button.click()
+        assert opened == [MainWindow.DOCUMENTATION_URL]
     finally:
         window.close()

@@ -473,3 +473,52 @@ raises, naming the call. A test's own `monkeypatch.setattr` still wins,
 since it is applied afterwards — this only catches the paths nobody thought
 to stub. An immediate named failure is worth far more than any of those
 dialogs ever were.
+
+It earned its keep on the first run. The hang was not a stray dialog at
+all: `_augment_with_attachments` was left returning a 3-tuple while its one
+caller unpacked 4, so **every chat turn with no attachments** raised
+`ValueError` — which the send path's own broad `except` swallowed and
+answered with a `QMessageBox.warning`, i.e. a modal, i.e. a hung suite.
+Ruff cannot see a tuple-arity mismatch and no non-GUI test touches that
+method, so nothing else would have caught it.
+
+Two process notes, both mine:
+
+- A patch script that raises **before** its `write_text` applies *nothing*.
+  One did, on its last edit; the error looked like "one replacement
+  failed", and only the single line ruff then complained about got fixed —
+  leaving the file half-edited. Write first, or verify by reading the file
+  back. Never infer from ruff that an edit landed.
+- The broken branch was the *early return* for "nothing attached", not the
+  attachment path. A change about attachments broke the case with none.
+  `tests/ui/test_main_window.py` now asserts the arity of both branches
+  against the caller directly.
+
+
+---
+
+## 12. Per-user personal context (2026-09-05) — the layer is complete
+
+`AppConfig.user_contexts: dict[str, str]`, resolved by
+`AppConfig.context_for_user(user)`, which **falls back** to the flat
+`user_context` rather than replacing it. That is the whole design decision:
+on a shared machine most of the useful framing ("this is the USAXS
+instrument, these are the detectors") is true for everyone, and only a line
+or two differs per person — requiring an entry per user before anyone got
+any context would make the common case worse to get the rare one right.
+
+`build_identity_context_block` needed no change, exactly as step 5
+predicted; only its one caller in `session.py` did.
+
+In Settings the **Personal context** box edits the *active user's* text
+when there is one, and the label says whose — a box that silently means two
+different things depending on a dropdown elsewhere in the window is worse
+than no box. Clearing it removes that user's entry rather than saving an
+empty string, so "no personal context" and "an empty personal context" stay
+the same state.
+
+Also added a `dict[str,str]` kind to the config coercion table, so a
+hand-edited `user_contexts:` that is not a mapping warns and falls back to
+the default like every other malformed field.
+
+**With this, §1.3 is done.** Nothing from the user layer remains open.

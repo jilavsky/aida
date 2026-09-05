@@ -1120,3 +1120,36 @@ async def test_attachment_text_reaches_the_conversation_folder(
         assert (folder / "paper.pdf.md").read_text() == "The full extracted text."
     finally:
         await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_the_system_message_uses_the_active_users_own_context(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    settings = _settings()
+    settings.app.user_context = "Shared: this is the USAXS instrument."
+    settings.app.user_contexts = {"Jan": "Jan runs the beamline."}
+
+    session, _ = await start_session(settings, profile_name="mock-profile", user="Jan")
+    try:
+        assert "Jan runs the beamline." in session.messages[0].content
+        assert "Shared: this is the USAXS instrument." not in session.messages[0].content
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_user_with_no_context_of_their_own_gets_the_shared_one(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")]))
+    settings = _settings()
+    settings.app.user_context = "Shared: this is the USAXS instrument."
+    settings.app.user_contexts = {"Jan": "Jan runs the beamline."}
+
+    session, _ = await start_session(settings, profile_name="mock-profile", user="Eva")
+    try:
+        assert "Shared: this is the USAXS instrument." in session.messages[0].content
+    finally:
+        await session.aclose()

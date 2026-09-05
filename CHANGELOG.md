@@ -111,6 +111,37 @@ decision revised), unrelated to what shipped when. Entries below link to
   status bar and provides **File → Open Conversation Folder** without
   creating empty folders for chats that have no attachments.
 
+- Documentation caught up with the last few days: `docs/gui-overview.md`
+  gains the User selector (and the toolbar's real left-to-right order), the
+  Workflows/Schedules dialogs, a Menus section, and the sidebar's filter and
+  right-click actions; `docs/organizing-conversations.md` gains Manage Users
+  and Move to User, and its filtering section was **wrong** — it still said
+  unlabelled conversations stay visible under every name, which stopped
+  being true when selecting a name started meaning only that name;
+  `docs/documents.md` gains the `aida documents` commands, Verify key, the
+  `use_ocr` field, and — the thing that actually confused a first user —
+  that *nothing* is extracted or uploaded when a document is attached, only
+  when its figures are first asked for.
+
+- **Personal context can differ per user.** `user_contexts` in
+  `config.yaml` maps a user label to its own text, and Settings' **Personal
+  context** box edits the active user's when there is one (the label says
+  whose). It *falls back* to the install-wide `user_context` rather than
+  replacing it: on a shared machine most useful framing is true for
+  everyone, and only a line or two differs per person. Clearing the box
+  removes that user's entry rather than storing an empty one.
+
+- **A red Documentation button** at the right-hand end of the toolbar, in
+  the same corner and colour pyIrena uses — most of this audience runs both,
+  and the shape is recognisable before anything has been read. A menu entry
+  alone is not discoverable enough for the one thing a brand-new user most
+  needs.
+
+- **Help ▸ Documentation** now opens the documentation index rather than the
+  repository root, so the one click it exists to spend does not land a new
+  user on a source tree to go hunting for a `docs/` folder. About shows the
+  same link.
+
 - **`aida documents figures FILE`** — run the real extraction against a
   file and see exactly what happened: which backend ran, what it found,
   and the reason if OCR was configured but did not run (no key, extra

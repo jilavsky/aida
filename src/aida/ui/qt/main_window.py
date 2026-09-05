@@ -51,6 +51,7 @@ from aida.ui.qt._qt import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     Qt,
     QTimer,
@@ -239,6 +240,33 @@ class MainWindow(QMainWindow):
         settings_action = QAction("Settings…", self)
         settings_action.triggered.connect(self.open_settings_dialog)
         toolbar.addAction(settings_action)
+
+        # Everything after this spacer is pushed to the right-hand end of
+        # the toolbar. An expanding blank widget is the standard Qt way to
+        # do it — QToolBar has no right-align of its own.
+        spacer = QWidget(self)
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
+
+        # A *visible* documentation button, not only the Help menu entry.
+        # pyIrena — which most of this audience already runs — puts a red
+        # docs button in the same corner, and matching it is worth more
+        # here than the usual "red means destructive" convention: someone
+        # who has never opened a menu bar in this app will still recognise
+        # the thing they use next door. The Help ▸ Documentation item stays
+        # for anyone who looks there first.
+        self.documentation_button = QPushButton("Documentation", self)
+        self.documentation_button.setToolTip(
+            f"Open the AIDA documentation in your web browser\n{self.DOCUMENTATION_URL}"
+        )
+        self.documentation_button.setStyleSheet(
+            "QPushButton { background-color: #c0392b; color: white; font-weight: bold; "
+            "border: none; border-radius: 4px; padding: 4px 12px; }"
+            "QPushButton:hover { background-color: #e74c3c; }"
+            "QPushButton:pressed { background-color: #96281b; }"
+        )
+        self.documentation_button.clicked.connect(self._on_open_documentation)
+        toolbar.addWidget(self.documentation_button)
 
         self.sidebar = ConversationsSidebar(self)
         self.chat_panel = ChatPanel(self)
@@ -444,15 +472,32 @@ class MainWindow(QMainWindow):
     def _on_compaction_failed(self, message: str) -> None:
         self.statusBar().showMessage(message, 8000)
 
+    #: Where Help ▸ Documentation goes. The docs *index*, not the repo root:
+    #: landing a new user on a source tree and leaving them to notice a
+    #: `docs/` folder wastes the one click this menu item exists to spend.
+    #: GitHub renders `docs/README.md` as the folder's own page, so the
+    #: tree URL is the index — no `blob/main/...` path to rot when a file
+    #: is renamed.
+    DOCUMENTATION_URL = "https://github.com/jilavsky/aida/tree/main/docs"
+
     def _on_open_documentation(self) -> None:
-        QDesktopServices.openUrl(QUrl("https://github.com/jilavsky/aida"))
+        """Open the docs in the system browser.
+
+        Deliberately the hosted copy rather than the `docs/` folder of
+        whatever is installed locally: a `pip install` may not ship the
+        docs at all, and a user who cloned months ago would be reading a
+        stale tree while believing it current.
+        """
+        QDesktopServices.openUrl(QUrl(self.DOCUMENTATION_URL))
 
     def _on_show_about(self) -> None:
         QMessageBox.about(
             self,
             "About AIDA",
             f"AIDA — AI Data Assistant\nVersion {AIDA_VERSION}\n\n"
-            "A local scientific agent workbench.\nhttps://github.com/jilavsky/aida",
+            "A local scientific agent workbench.\n\n"
+            "https://github.com/jilavsky/aida\n"
+            f"Documentation: {MainWindow.DOCUMENTATION_URL}",
         )
 
     def _wire_ui_signals(self) -> None:
@@ -948,7 +993,7 @@ class MainWindow(QMainWindow):
 
     def _augment_with_attachments(
         self, text: str, attachments: list[str]
-    ) -> tuple[str, list[str], list[ImageRef]]:
+    ) -> tuple[str, list[str], list[ImageRef], dict[str, str]]:
         """Drag & drop onto the chat -- "included in the next sent message"
         (PLAN.md Phase 6): each attached path's content is read directly via
         ``aida.documents.readers`` (dispatched by extension, same as the
@@ -977,20 +1022,26 @@ class MainWindow(QMainWindow):
         caller can also flag it in the status bar without re-parsing the
         text."""
         if not attachments:
-            return text, [], []
+            return text, [], [], {}
         from aida.documents.readers import is_image_path
 
         sections = [text] if text else []
         failures: list[str] = []
         images: list[ImageRef] = []
+        # Kept per file so the conversation's attachments folder can hold
+        # the extracted text beside the document — the folder then shows
+        # what the model actually received, not only the file it came from.
+        texts: dict[str, str] = {}
         for path in attachments:
             rendered, ok = self._read_attachment_for_model(path)
             sections.append(rendered)
             if not ok:
                 failures.append(path)
-            elif is_image_path(path):
+                continue
+            texts[path] = rendered
+            if is_image_path(path):
                 images.append(ImageRef(path=path))
-        return "\n\n".join(sections), failures, images
+        return "\n\n".join(sections), failures, images, texts
 
     def _read_attachment_for_model(self, path: str) -> tuple[str, bool]:
         """Returns ``(rendered_text, ok)`` — never raises. **Real bug this

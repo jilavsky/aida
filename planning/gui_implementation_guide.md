@@ -24,6 +24,14 @@ wrote this file — **do not implement anything here**. Say so and stop.
 
 **Ground rules for this codebase**, learned the hard way:
 
+- **Do not assert on Qt's realized state.** These tests never `show()` a
+  window, so anything that depends on layout having happened —
+  `isVisibleTo` against a *distant* ancestor, geometry, sizes — answers
+  False (or zero) for perfectly correct code. `isVisibleTo` against a
+  widget's immediate parent is fine and is used that way throughout.
+  Assert on what the code set: the action's `isVisible()`, `isEnabled()`,
+  text, tooltip, parent, and position within `toolbar.actions()`.
+
 - `ruff check src tests` must pass; `ruff check --fix` handles import
   order. Run it before you declare anything done.
 - Core must never import Qt. `tests/ui/test_qt_contract.py` enforces it.
