@@ -119,6 +119,26 @@ Claude direct (no proxy) is the same `kind: anthropic` shape with
 `base_url: null` (SDK default) and `secret_ref` pointing at a keychain entry
 holding your Anthropic API key instead of an ANL username.
 
+### `OpenRouter` example — OpenRouter free random AI (NOT SECURE OR PRIVATE)
+
+```yaml
+profiles:
+  openRouter:
+    kind: openai_compat
+    base_url: "https://openrouter.ai/api/v1"
+    model: "openrouter/free"
+    secret_ref: "openrouter"   # holds your openrouter API key - see below
+    capability_notes: "Random free model, not secure or private"
+```
+
+Openrouter is AI providers proxy providing selection of paid and free AI models.
+To test capabilities, you can use Aida with this model - with varying results. 
+Go to https://openrouter.ai and setup free account and key API key, configure 
+through GUI "Secret ref."="opnerouter" and "Secret value"= your_key.
+OpenRouter forwards your requests to random free model offered by providers. 
+Works, but occasionally tool calling fails depending on model used.  
+*Remember, your data are stored and used for training!!!!*
+
 ## Embedding profiles
 
 Embedding profiles have the exact same shape (`kind`, `base_url`, `model`,
