@@ -84,7 +84,12 @@ from aida.ui.qt.selectors import (
 )
 from aida.ui.qt.settings_dialog import SettingsDialog
 from aida.ui.qt.users_dialog import UsersDialog
-from aida.ui.qt.window_state import apply_font_size, apply_window_state, capture_window_state
+from aida.ui.qt.window_state import (
+    DEFAULT_WINDOW_SIZE,
+    apply_font_size,
+    apply_window_state,
+    capture_window_state,
+)
 from aida.ui.qt.workflow_management_dialog import WorkflowFormDialog, WorkflowManagementDialog
 from aida.ui.qt.workspace_management_dialog import WorkspaceManagementDialog
 from aida.workspace.safety import relaxed_mode_warning_if_newly_enabled
@@ -94,6 +99,30 @@ from aida.workspace.workspaces import (
     list_workspace_names,
     save_workspace,
 )
+
+#: The three columns of the main window's splitter, left to right.
+CONVERSATIONS_COLUMN = 0
+CHAT_COLUMN = 1
+SESSION_COLUMN = 2
+
+#: Fallback widths for the three columns (conversations / chat / session
+#: panels) before the user has dragged anything. Proportions rather than
+#: pixels: QSplitter.setSizes normalizes whatever it is given to the actual
+#: width, so the same numbers behave on a laptop and on a 4K monitor.
+DEFAULT_COLUMN_WEIGHTS = (22, 52, 26)
+
+#: Below this a column counts as dragged shut rather than merely narrow —
+#: what the View menu's tick marks report (see ``_sync_view_menu``).
+COLLAPSED_COLUMN_WIDTH = 8
+
+#: Never squeeze the chat column below this to reopen a side column; the
+#: chat is what the window is for.
+MIN_CHAT_WIDTH = 240
+
+#: How long after the last splitter drag the chosen column widths are
+#: written to config.yaml. ``splitterMoved`` fires continuously during a
+#: drag; without a delay every pixel of movement would rewrite the file.
+SPLITTER_SAVE_DELAY_MS = 800
 
 #: How often the status-bar "Session total" / "Context" labels refresh
 #: *while a turn is running* (user request: "while we are running a long
@@ -149,6 +178,17 @@ class MainWindow(QMainWindow):
         self.scheduler_bridge.run_finished.connect(self._on_schedule_run_finished)
         self.scheduler_bridge.deferred_changed.connect(self._on_schedule_deferred_changed)
 
+        # Column widths: the widths the user dragged are saved a beat after
+        # the drag stops (see _on_splitter_moved), and a column hidden from
+        # the View menu remembers how wide it was so showing it again gives
+        # back the same layout. Both have to exist before _build_ui, which
+        # is where the splitter is built and connected.
+        self._splitter_save_timer = QTimer(self)
+        self._splitter_save_timer.setSingleShot(True)
+        self._splitter_save_timer.setInterval(SPLITTER_SAVE_DELAY_MS)
+        self._splitter_save_timer.timeout.connect(self._save_splitter_sizes)
+        self._remembered_column_widths: dict[int, int] = {}
+
         self._build_ui()
         self._wire_ui_signals()
 
@@ -166,6 +206,10 @@ class MainWindow(QMainWindow):
         self.scheduler_bridge.start()
 
         apply_window_state(self, settings.app)
+        # After apply_window_state, never before: the saved column widths
+        # are only meaningful against the window width they were saved at,
+        # and the default proportions are computed from the live width.
+        self._restore_splitter_sizes()
         self._refresh_conversations_sidebar()
         self._refresh_workspace_selector()
         self._refresh_profile_selector()
@@ -321,12 +365,25 @@ class MainWindow(QMainWindow):
         session_scroll.setWidgetResizable(True)
         session_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        splitter.addWidget(self.sidebar)
-        splitter.addWidget(chat_column)
-        splitter.addWidget(session_scroll)
-        splitter.setStretchFactor(1, 1)  # chat column gets the extra space
-        self.setCentralWidget(splitter)
+        self._splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self._splitter.addWidget(self.sidebar)
+        self._splitter.addWidget(chat_column)
+        self._splitter.addWidget(session_scroll)
+        self._splitter.setStretchFactor(CHAT_COLUMN, 1)  # it gets the extra space
+        # Bug report: "The right one width is flexible ... Left one is fixed
+        # width or hidden. Can you tweak the settings for the left one so I
+        # can also change its width as I want. I cannot fit this on smaller
+        # screens." Nothing here ever declared the left column fixed — its
+        # own contents did (a row of four buttons a QSplitter cannot shrink
+        # past), which is fixed in ConversationsSidebar. What is left to do
+        # here is let both side columns collapse to nothing by drag and
+        # remember the widths the user picked; setChildrenCollapsible is
+        # Qt's default but stated explicitly, because "drag it away
+        # entirely" is now a documented part of how this window is used
+        # (View > Show Conversations is the way back).
+        self._splitter.setChildrenCollapsible(True)
+        self._splitter.splitterMoved.connect(self._on_splitter_moved)
+        self.setCentralWidget(self._splitter)
 
         self.statusBar().showMessage("Starting session…")
         # Bug report: "Can we get cost estimate... at this moment it is a
@@ -426,6 +483,41 @@ class MainWindow(QMainWindow):
         save_as_workflow_action = QAction("Save Conversation as Workflow…", self)
         save_as_workflow_action.triggered.connect(self._on_save_conversation_as_workflow)
         file_menu.addAction(save_as_workflow_action)
+
+        # Bug report: "Left one is fixed width or hidden ... I cannot fit
+        # this on smaller screens." Both side columns are now freely
+        # resizable *and* collapsible by dragging their splitter handle —
+        # which leaves one gap: a column dragged all the way shut has no
+        # handle left that is easy to find. These are the way back, and the
+        # way out of any layout that ended up unusable.
+        view_menu = self.menuBar().addMenu("&View")
+        # Checkable rather than two "Show…"/"Hide…" pairs, so the menu also
+        # *reports* the current layout; _sync_view_menu keeps the ticks
+        # honest when the change came from a drag instead of from here.
+        # Bound methods, not lambdas capturing ``self``: PySide connects a
+        # bound method weakly, so the window stays collectable — a lambda
+        # here kept a closed-over MainWindow alive past its test/teardown,
+        # long enough for a queued startup_failed to reopen a modal on a
+        # window nobody could see.
+        self._column_actions: dict[int, QAction] = {}
+        conversations_action = QAction("Conversations Column", self)
+        conversations_action.setCheckable(True)
+        conversations_action.setChecked(True)
+        conversations_action.triggered.connect(self._on_toggle_conversations_column)
+        view_menu.addAction(conversations_action)
+        self._column_actions[CONVERSATIONS_COLUMN] = conversations_action
+
+        session_action = QAction("Session Column", self)
+        session_action.setCheckable(True)
+        session_action.setChecked(True)
+        session_action.triggered.connect(self._on_toggle_session_column)
+        view_menu.addAction(session_action)
+        self._column_actions[SESSION_COLUMN] = session_action
+
+        view_menu.addSeparator()
+        reset_widths_action = QAction("Reset Column Widths", self)
+        reset_widths_action.triggered.connect(self._reset_column_widths)
+        view_menu.addAction(reset_widths_action)
 
         help_menu = self.menuBar().addMenu("&Help")
         docs_action = QAction("Documentation", self)
@@ -1739,6 +1831,92 @@ class MainWindow(QMainWindow):
             self._current_workspace_config.name,
         )
 
+    # --- column widths --------------------------------------------------------
+
+    def _restore_splitter_sizes(self) -> None:
+        """Apply the saved column widths, or the default proportions.
+
+        A saved layout is only honored if it still describes this window:
+        the right number of columns, no negative widths, and not
+        everything collapsed to zero (which would open the app to a blank
+        window with no obvious way back)."""
+        saved = list(self.settings.app.splitter_sizes)
+        count = self._splitter.count()
+        if len(saved) == count and all(size >= 0 for size in saved) and any(saved):
+            self._splitter.setSizes(saved)
+            self._sync_view_menu()
+            return
+        if saved:
+            self._logger.info("ignoring unusable saved splitter_sizes %r", saved)
+        total = max(self.width(), DEFAULT_WINDOW_SIZE.width())
+        weights = DEFAULT_COLUMN_WEIGHTS
+        self._splitter.setSizes([total * weight // sum(weights) for weight in weights])
+        self._sync_view_menu()
+
+    def _sync_view_menu(self) -> None:
+        """Tick the View menu's column entries to match the live layout —
+        the width can change by drag as easily as by menu."""
+        sizes = self._splitter.sizes()
+        for index, action in self._column_actions.items():
+            action.setChecked(sizes[index] > COLLAPSED_COLUMN_WIDTH)
+
+    def _on_splitter_moved(self, _pos: int, _index: int) -> None:
+        """Debounced save: ``splitterMoved`` fires continuously while the
+        handle is dragged, and each save rewrites config.yaml. Saved a beat
+        after the drag stops rather than only on close, for the same reason
+        ``_on_section_toggled`` saves immediately — a layout the user
+        arranged by hand should survive a crash, not only a clean exit."""
+        self._splitter_save_timer.start()
+        self._sync_view_menu()
+
+    def _save_splitter_sizes(self) -> None:
+        sizes = self._splitter.sizes()
+        if sizes == list(self.settings.app.splitter_sizes):
+            return
+        self.settings.app.splitter_sizes = sizes
+        save_app_config(self.settings.app)
+
+    def _on_toggle_conversations_column(self) -> None:
+        self._toggle_column(CONVERSATIONS_COLUMN)
+
+    def _on_toggle_session_column(self) -> None:
+        self._toggle_column(SESSION_COLUMN)
+
+    def _toggle_column(self, index: int) -> None:
+        """Show or hide one side column from the View menu.
+
+        The counterpart to dragging a column shut: a pane dragged to zero
+        width has no handle left worth finding, so the menu is how it comes
+        back. Reopening restores the column's last non-zero width when
+        there is one, so hide/show is not a way to lose a chosen width."""
+        sizes = self._splitter.sizes()
+        if sizes[index] > COLLAPSED_COLUMN_WIDTH:
+            self._remembered_column_widths[index] = sizes[index]
+            sizes[index] = 0
+        else:
+            total = sum(sizes) or self.width()
+            restored = self._remembered_column_widths.get(
+                index, total * DEFAULT_COLUMN_WEIGHTS[index] // sum(DEFAULT_COLUMN_WEIGHTS)
+            )
+            # The space comes from the chat column, the one that stretches.
+            # No exact arithmetic needed: setSizes normalizes the list to
+            # the splitter's real width, and each column's own minimum
+            # width still applies on top.
+            sizes[CHAT_COLUMN] = max(sizes[CHAT_COLUMN] - restored, MIN_CHAT_WIDTH)
+            sizes[index] = restored
+        self._splitter.setSizes(sizes)
+        self._sync_view_menu()
+        self._save_splitter_sizes()
+
+    def _reset_column_widths(self) -> None:
+        """Back to the default proportions — the escape hatch for a layout
+        dragged into a state the user cannot undo by hand (both side
+        columns shut, or one dragged so wide the handles bunch up)."""
+        self.settings.app.splitter_sizes = []
+        self._remembered_column_widths.clear()
+        self._restore_splitter_sizes()
+        self._save_splitter_sizes()
+
     # --- collapsible session panels ------------------------------------------
 
     def _on_section_toggled(self, title: str, collapsed: bool) -> None:
@@ -2036,6 +2214,9 @@ class MainWindow(QMainWindow):
         # drop that keystroke on the floor.
         self.notes_panel.flush()
         capture_window_state(self, self.settings.app)
+        # The debounce timer may still be pending from a drag the user made
+        # a moment before quitting.
+        self.settings.app.splitter_sizes = self._splitter.sizes()
         save_app_config(self.settings.app)
         conversation_id = self._active_conversation_id(self.bridge)
         # Phase 10: stopped *before* the chat bridge, not after. The

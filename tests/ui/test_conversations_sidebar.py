@@ -8,6 +8,7 @@ from aida.persistence.store import ConversationSummary
 from aida.ui.qt._qt import QAbstractItemView, QDialog, QMessageBox
 from aida.ui.qt.conversations_sidebar import (
     ALL_USERS_LABEL,
+    MIN_SIDEBAR_WIDTH,
     NO_USER_LABEL,
     CleanupDialog,
     ConversationsSidebar,
@@ -666,3 +667,39 @@ def test_move_to_user_with_nothing_selected_emits_nothing(qapp):
     sidebar.move_to_user_requested.connect(lambda ids, user: emitted.append(user))
     sidebar._on_move_to_user("Jan")
     assert emitted == []
+
+
+def test_sidebar_can_be_resized_down_to_its_declared_minimum(qapp):
+    """Bug report: "Left one is fixed width or hidden ... I cannot fit this
+    on smaller screens."
+
+    Nothing ever declared this column fixed-width — its four action buttons
+    sat in a single row, and a QSplitter cannot shrink a pane below its
+    layout's minimum, so that row's combined width *was* the floor. The
+    guard is on the layout, not on any one widget: whatever this column
+    grows to contain later, it must never ask the splitter for more than
+    MIN_SIDEBAR_WIDTH.
+    """
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [_summary("c1", title="a conversation with a very long descriptive title")]
+    )
+
+    assert sidebar.minimumWidth() == MIN_SIDEBAR_WIDTH
+    layout = sidebar.layout()
+    assert layout is not None
+    assert layout.minimumSize().width() <= MIN_SIDEBAR_WIDTH
+
+    sidebar.resize(MIN_SIDEBAR_WIDTH, 600)
+    qapp.processEvents()
+    assert sidebar.width() == MIN_SIDEBAR_WIDTH
+
+
+def test_narrow_rows_keep_their_full_label_as_a_tooltip(qapp):
+    """The row text elides once the column is narrow, so the untruncated
+    label has to stay reachable somewhere."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("c1", title="quantitative USAXS of the aged sample")])
+
+    item = sidebar._list.item(0)
+    assert "quantitative USAXS of the aged sample" in item.toolTip()

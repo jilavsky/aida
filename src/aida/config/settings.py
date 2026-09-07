@@ -60,6 +60,12 @@ def _coerce(kind: str, value: Any) -> Any:
         if isinstance(value, str) or not isinstance(value, (list, tuple)):
             raise ValueError("expected a list")
         return [str(item) for item in value]
+    if base == "list[int]":
+        if isinstance(value, str) or not isinstance(value, (list, tuple)):
+            raise ValueError("expected a list")
+        if any(isinstance(item, bool) for item in value):
+            raise ValueError("expected numbers, got a boolean")
+        return [int(item) for item in value]
     if base == "dict[str,str]":
         if not isinstance(value, dict):
             raise ValueError("expected a mapping")
@@ -392,6 +398,17 @@ class AppConfig:
     # not something to re-decide on every launch. Unknown titles are
     # ignored on load, so renaming or removing a panel can't break startup.
     collapsed_panels: list[str] = field(default_factory=list)
+    # Widths of the main window's three columns (conversations sidebar /
+    # chat / session panels), left to right, as the user last dragged them.
+    # Bug report: "Left one is fixed width or hidden ... I cannot fit this
+    # on smaller screens." Making the left column draggable is only half an
+    # answer if every launch throws the chosen width away — screen size is
+    # a property of the machine, so the layout that fits it should be too.
+    # Empty means "no saved layout": the window falls back to its default
+    # proportions. A saved list whose length no longer matches the number
+    # of columns is ignored the same way, so adding or removing a column
+    # can't strand a user with a broken layout.
+    splitter_sizes: list[int] = field(default_factory=list)
     # Phase 10 (planning/phase10_scheduling_design.md §7): how long after
     # the user's last interaction the in-app scheduler waits before it will
     # start a due job. Without this, a scheduled run fired the instant it
@@ -508,6 +525,7 @@ class AppConfig:
             "known_users": self.known_users,
             "user_contexts": self.user_contexts,
             "collapsed_panels": self.collapsed_panels,
+            "splitter_sizes": self.splitter_sizes,
             "scheduler_quiet_period_seconds": self.scheduler_quiet_period_seconds,
             "scheduler_max_defer_seconds": self.scheduler_max_defer_seconds,
         }
@@ -541,6 +559,7 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "known_users": "list[str]",
     "user_contexts": "dict[str,str]",
     "collapsed_panels": "list[str]",
+    "splitter_sizes": "list[int]",
     "scheduler_quiet_period_seconds": "int",
     "scheduler_max_defer_seconds": "int",
 }

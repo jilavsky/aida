@@ -21,7 +21,7 @@ from aida.ui.qt._qt import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
-    QHBoxLayout,
+    QGridLayout,
     QInputDialog,
     QLineEdit,
     QListWidget,
@@ -29,6 +29,7 @@ from aida.ui.qt._qt import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     Qt,
     QVBoxLayout,
@@ -37,6 +38,18 @@ from aida.ui.qt._qt import (
 )
 
 ALL_USERS_LABEL = "All users"
+
+#: How narrow the user is allowed to drag this column. Bug report: "Left
+#: one is fixed width or hidden ... I cannot fit this on smaller screens."
+#: It was never *declared* fixed — the four action buttons sat in one row,
+#: and a QSplitter cannot shrink a pane below its layout's minimum, so that
+#: row's combined width was the floor and the only way past it was to
+#: collapse the pane entirely. The buttons now wrap 2x2 and ignore their
+#: text width when shrinking (see ``__init__``), which leaves this as the
+#: real floor: small enough to fit a laptop screen, large enough that the
+#: column still shows a usable slice of a conversation title rather than
+#: becoming an unreadable sliver the user has to drag back out again.
+MIN_SIDEBAR_WIDTH = 140
 
 #: The conversations that carry no user label at all — everything created
 #: before the feature existed, and anything a user cleared. Reachable on
@@ -153,6 +166,10 @@ class ConversationsSidebar(QWidget):
         self._known_users: list[str] = []
 
         layout = QVBoxLayout(self)
+        # Everything below is built to *shrink*: the column's width is the
+        # user's to choose (MIN_SIDEBAR_WIDTH), so no child may quietly
+        # impose a wider floor on the splitter than that.
+        self.setMinimumWidth(MIN_SIDEBAR_WIDTH)
 
         # User labels organize shared work; they are not access control.
         # Keep "All users" one click away so selecting a label can never
@@ -162,6 +179,12 @@ class ConversationsSidebar(QWidget):
         self._user_filter.currentTextChanged.connect(
             lambda _text: self._apply_filter(self._search_edit.text())
         )
+        # A combo box sizes itself to its longest entry by default, so one
+        # long user label would have set the whole column's minimum width.
+        self._user_filter.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self._user_filter.setMinimumContentsLength(6)
         layout.addWidget(self._user_filter)
 
         # U5 bug report follow-up: "the list grows fast in real use" — a
@@ -170,6 +193,7 @@ class ConversationsSidebar(QWidget):
         self._search_edit.setPlaceholderText("Search conversations…")
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.textChanged.connect(self._apply_filter)
+        self._search_edit.setMinimumWidth(0)
         layout.addWidget(self._search_edit)
 
         self._list = QListWidget(self)
@@ -183,24 +207,46 @@ class ConversationsSidebar(QWidget):
         # click (rename, resume, delete)."
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_context_menu_requested)
+        # Row labels are long ("Aug 22 09:03  [workspace]  title") and a
+        # QListWidget would otherwise ask for the widest of them; the text
+        # elides instead, and the full label stays available as a tooltip
+        # for whatever the narrow column cuts off.
+        self._list.setMinimumWidth(0)
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list.setTextElideMode(Qt.TextElideMode.ElideRight)
         layout.addWidget(self._list)
 
-        buttons = QHBoxLayout()
+        # 2x2 rather than one row of four: half the width for the same four
+        # actions. Each button additionally ignores its own text width when
+        # the layout shrinks (QSizePolicy.Ignored contributes 0 to the
+        # layout's minimum), which is what actually lets the column reach
+        # MIN_SIDEBAR_WIDTH — the labels clip there, so every button also
+        # carries a tooltip, and each action already has a right-click menu
+        # entry that never clips at all.
+        buttons = QGridLayout()
         self._resume_button = QPushButton("Resume", self)
         self._resume_button.clicked.connect(self._on_resume_clicked)
-        buttons.addWidget(self._resume_button)
+        buttons.addWidget(self._resume_button, 0, 0)
 
         self._delete_button = QPushButton("Delete…", self)
         self._delete_button.clicked.connect(self._on_delete_clicked)
-        buttons.addWidget(self._delete_button)
+        buttons.addWidget(self._delete_button, 0, 1)
 
         self._rename_button = QPushButton("Rename…", self)
         self._rename_button.clicked.connect(self._on_rename_clicked)
-        buttons.addWidget(self._rename_button)
+        buttons.addWidget(self._rename_button, 1, 0)
 
         self._cleanup_button = QPushButton("Clean Up…", self)
         self._cleanup_button.clicked.connect(self._on_cleanup_clicked)
-        buttons.addWidget(self._cleanup_button)
+        buttons.addWidget(self._cleanup_button, 1, 1)
+        for button in (
+            self._resume_button,
+            self._delete_button,
+            self._rename_button,
+            self._cleanup_button,
+        ):
+            button.setToolTip(button.text())
+            button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         layout.addLayout(buttons)
 
     def set_conversations(
@@ -275,6 +321,9 @@ class ConversationsSidebar(QWidget):
         self._titles_by_row = []
         for summary in visible:
             item = QListWidgetItem(_row_label(summary))
+            # The column is user-resizable and the label elides, so the
+            # untruncated row has to stay reachable somewhere.
+            item.setToolTip(_row_label(summary))
             self._list.addItem(item)
             self._ids_by_row.append(summary.id)
             self._titles_by_row.append(summary.title or "")

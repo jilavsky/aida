@@ -16,6 +16,20 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Changed
+
+- **The conversations column resizes like the session column does.** Bug
+  report: "Left one is fixed width or hidden ... I cannot fit this on
+  smaller screens." Nothing ever declared that column fixed — its four
+  action buttons sat in one row, and a splitter cannot shrink a pane below
+  its layout's minimum, so that row's width *was* the floor and collapsing
+  the column entirely was the only way past it. The buttons now wrap 2x2
+  and the column can be dragged down to 140px; row labels elide and carry
+  the full text as a tooltip. Column widths are also remembered between
+  launches now (`splitter_sizes` in `config.yaml`), and a new **View** menu
+  shows/hides either side column and resets the widths — the way back for a
+  column dragged all the way shut.
+
 ##  [0.1.0b5] - 2026-09-05
 
 setup for automatic link to pypi. Rerelease of b04. 

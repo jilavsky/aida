@@ -23,6 +23,7 @@ from aida.config.settings import (
     Settings,
     WorkspaceConfig,
     WorkspacesConfig,
+    load_app_config,
     load_settings,
 )
 from aida.core.confirmation import ConfirmAnswer
@@ -3434,5 +3435,114 @@ def test_documentation_button_is_last_on_the_toolbar_and_opens_the_docs(
         monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
         button.click()
         assert opened == [MainWindow.DOCUMENTATION_URL]
+    finally:
+        window.close()
+
+
+# --- column widths (bug report: "Left one is fixed width or hidden ... I
+# cannot fit this on smaller screens") ---------------------------------------
+
+
+def test_column_widths_are_saved_and_restored_across_windows(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A width the user dragged has to outlive the window. Screen size is a
+    property of the machine, so the layout that fits it should be too."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        window._splitter.setSizes([150, 700, 250])
+        qapp.processEvents()
+        window._save_splitter_sizes()
+        chosen = window._splitter.sizes()
+        assert load_app_config().splitter_sizes == chosen
+    finally:
+        window.close()
+
+    reopened = _make_window(
+        qapp,
+        loop_thread,
+        _settings_with_profile(),
+        monkeypatch,
+        [MockTurn(text="hi")],
+        profile_name="mock-profile",
+    )
+    try:
+        assert reopened._splitter.sizes() == chosen
+    finally:
+        reopened.close()
+
+
+def test_saved_widths_from_a_different_layout_are_ignored(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A saved list that no longer describes this window (wrong number of
+    columns, or everything collapsed to nothing) must not open the app to a
+    blank window with no obvious way back."""
+    settings = _settings_with_profile()
+    settings.app.splitter_sizes = [0, 0, 0]
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert all(size > 0 for size in window._splitter.sizes())
+    finally:
+        window.close()
+
+    settings = _settings_with_profile()
+    settings.app.splitter_sizes = [100, 900]  # two columns, not three
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert all(size > 0 for size in window._splitter.sizes())
+    finally:
+        window.close()
+
+
+def test_view_menu_hides_and_restores_a_column_at_its_previous_width(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A column dragged (or toggled) shut has no handle left that is easy to
+    find, so the View menu is the way back — and coming back must not cost
+    the user the width they had chosen."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        window._splitter.setSizes([200, 650, 250])
+        qapp.processEvents()
+        width_before = window._splitter.sizes()[0]
+
+        window._on_toggle_conversations_column()
+        qapp.processEvents()
+        assert window._splitter.sizes()[0] == 0
+        assert not window._column_actions[0].isChecked()
+
+        window._on_toggle_conversations_column()
+        qapp.processEvents()
+        assert window._splitter.sizes()[0] == width_before
+        assert window._column_actions[0].isChecked()
+    finally:
+        window.close()
+
+
+def test_reset_column_widths_reopens_both_side_columns(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        window._splitter.setSizes([0, 1100, 0])
+        qapp.processEvents()
+        window._reset_column_widths()
+        qapp.processEvents()
+        assert all(size > 0 for size in window._splitter.sizes())
+        assert all(action.isChecked() for action in window._column_actions.values())
     finally:
         window.close()

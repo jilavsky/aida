@@ -50,4 +50,9 @@ def apply_font_size(app: QApplication, app_config: AppConfig) -> None:
     app.setFont(font)
 
 
-__all__ = ["apply_font_size", "apply_window_state", "capture_window_state"]
+__all__ = [
+    "DEFAULT_WINDOW_SIZE",
+    "apply_font_size",
+    "apply_window_state",
+    "capture_window_state",
+]
