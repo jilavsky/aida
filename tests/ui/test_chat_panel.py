@@ -795,7 +795,12 @@ def test_files_dropped_on_the_transcript_are_reported(qapp, tmp_path: Path):
         )
     )
 
-    assert [url.toLocalFile() for urls in seen for url in urls] == [str(dropped_file)]
+    # Compared via Path rather than raw strings: on Windows, Qt's QUrl
+    # round-trip through fromLocalFile()/toLocalFile() has been observed to
+    # come back with forward slashes rather than the native backslash
+    # separator (real CI failure) — Path() treats both as equivalent, which
+    # is all this test actually cares about.
+    assert [Path(url.toLocalFile()) for urls in seen for url in urls] == [dropped_file]
 
 
 def test_message_views_do_not_swallow_drops(qapp):
