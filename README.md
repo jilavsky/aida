@@ -85,6 +85,12 @@ conda activate aida
 aida doctor
 ```
 
+`environment.yml` already includes the `gui` and `docs` extras. If
+`aida doctor` or `aida-gui` says PySide6 isn't installed on a headless
+Linux machine even though the install above reported no errors, see
+[GUI fails to import on headless Linux](docs/installation.md#gui-fails-to-import-on-headless-linux)
+— it's usually a missing system Qt library, not a missing Python package.
+
 ## First run
 
 1. `aida doctor` — confirms Python, config files, keychain, and folders.

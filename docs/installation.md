@@ -87,6 +87,10 @@ checks, and reports pass/fail for each:
   parse and load correctly
 - The OS keychain backend is available (needed for provider secrets —
   see [providers-and-secrets.md](providers-and-secrets.md))
+- The `gui` extra: PySide6 not installed is reported OK (a CLI-only install
+  is a normal, deliberate choice), but PySide6 *installed and still failing
+  to import* is flagged — see
+  [below](#gui-fails-to-import-on-headless-linux) if you hit that
 - `~/.aida/`, `~/.aida/logs/`, `~/.aida/artifacts/`, and the configured
   records folder are all writable
 - Every configured provider profile is actually reachable (a real
@@ -95,6 +99,36 @@ checks, and reports pass/fail for each:
 A clean `aida doctor` run means the app is ready to configure further —
 it doesn't yet mean you have a working chat session, since that also
 needs at least one provider profile (next: `providers-and-secrets.md`).
+
+### GUI fails to import on headless Linux
+
+`aida-gui` (and `aida doctor`'s `gui` check) says PySide6 isn't installed,
+but `pip install "aida-workbench[gui]"` reports nothing wrong. This is a
+different failure than a missing Python package: PySide6's wheel installed
+fine, but importing it needs system Qt libraries — `libGL`, `libEGL`,
+`libxkbcommon`, `libxcb-cursor`, and a handful of others — that a minimal
+or headless server (a beamline control machine with no desktop environment
+installed, a container, a CI runner) typically doesn't have. `aida doctor`
+and `aida-gui` both now show the real `ImportError` instead of the generic
+"not installed" message when this is the cause.
+
+On Debian/Ubuntu, this usually fixes it:
+
+```bash
+sudo apt-get install libgl1 libegl1 libxkbcommon0 libxcb-cursor0 \
+    libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+    libxcb-render-util0 libxcb-shape0 libdbus-1-3
+```
+
+Package names differ on other distros (`mesa-libGL`, `libxkbcommon` on
+Fedora/RHEL, etc.). To see exactly which shared library is missing rather
+than guessing from the list above:
+
+```bash
+python -c "from PySide6.QtWidgets import QApplication"
+```
+
+The `ImportError` names the specific `.so` that couldn't be loaded.
 
 ## Where AIDA keeps its files
 

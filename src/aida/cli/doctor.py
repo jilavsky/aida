@@ -6,6 +6,9 @@ Reports, per PLAN.md Phase 1 acceptance criteria:
 - config file status/validity (config.yaml, providers.yaml, workspaces.yaml,
   mcp.json)
 - keyring availability
+- the optional ``gui`` extra (PySide6): not installed is fine (CLI-only use),
+  but installed-and-failing-to-import is flagged, since that almost always
+  means a missing system Qt library rather than a missing Python package
 - reachable provider endpoints — a real per-profile check through the
   provider layer (``aida.providers.profiles.validate_profile``), each under
   its own timeout
@@ -20,6 +23,7 @@ checking, so tests can assert on structured results without parsing text.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import sys
 from dataclasses import dataclass
@@ -84,6 +88,36 @@ def _check_keyring() -> CheckResult:
         ok,
         "keyring backend available" if ok else "no usable keyring backend found",
     )
+
+
+def _check_gui() -> CheckResult:
+    """The optional ``gui`` extra (PySide6, for ``aida-gui``).
+
+    PySide6 not being installed at all is a normal, intentional state for a
+    CLI-only/headless install and is reported ``ok``. PySide6 *installed*
+    but still failing to import is the interesting failure: on Linux it is
+    almost always a missing system Qt library (headless control machines
+    without libGL/libxcb/libxkbcommon are the common case), and running
+    ``aida doctor`` before ``aida-gui`` should say so plainly rather than
+    leaving the user to decode ``aida-gui``'s generic error.
+    """
+    if importlib.util.find_spec("PySide6") is None:
+        return CheckResult(
+            "gui",
+            True,
+            "PySide6 not installed — aida-gui unavailable (pip install '.[gui]' to enable)",
+        )
+    try:
+        from aida.ui.qt.app import main as _gui_main  # noqa: F401
+    except ImportError as exc:
+        return CheckResult(
+            "gui",
+            False,
+            f"PySide6 installed but failed to import ({exc}) — on Linux this usually "
+            "means a system Qt library is missing (libGL, libxkbcommon, xcb, ...), "
+            "see docs/installation.md#gui-fails-to-import-on-headless-linux",
+        )
+    return CheckResult("gui", True, "PySide6 importable — aida-gui available")
 
 
 def _check_secrets_non_interactive(settings: Settings | None) -> list[CheckResult]:
@@ -438,6 +472,7 @@ def run_checks() -> list[CheckResult]:
     results.append(_check_writable("artifacts_dir", paths.artifacts_dir()))
     results.append(_check_writable("records_dir", _effective_records_dir(settings)))
     results.append(_check_keyring())
+    results.append(_check_gui())
     results.append(_check_orphan_attachments(settings))
     results.append(_check_ocr(settings))
     results.append(_check_pyirena_mcp(settings))

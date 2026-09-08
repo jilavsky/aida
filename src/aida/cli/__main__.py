@@ -14,6 +14,7 @@ even when it isn't installed.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 
 from aida.config.logging_setup import configure_logging
@@ -111,10 +112,23 @@ def main_gui() -> int:
     itself, same as every other console-script entry point in this file."""
     try:
         from aida.ui.qt.app import main as gui_main
-    except ImportError:
-        print(
-            "aida-gui: PySide6 isn't installed. Run `pip install -e '.[gui]'` (or `pip install aida-workbench[gui]`)."
-        )
+    except ImportError as exc:
+        if importlib.util.find_spec("PySide6") is None:
+            print(
+                "aida-gui: PySide6 isn't installed. Run `pip install -e '.[gui]'` (or `pip install aida-workbench[gui]`)."
+            )
+        else:
+            # The package is present but failed to import — on Linux this is
+            # almost always missing system Qt libraries (headless machines
+            # without libGL/libxcb/libxkbcommon), not a missing Python
+            # package, and telling the user to reinstall PySide6 would send
+            # them in the wrong direction. Show the real error instead.
+            print(
+                f"aida-gui: PySide6 is installed but failed to import ({exc}).\n"
+                "On Linux this is usually a missing system library (libGL, "
+                "libxkbcommon, xcb, ...), not a missing Python package — see "
+                "docs/installation.md#gui-fails-to-import-on-headless-linux."
+            )
         return 1
     return gui_main()
 

@@ -123,6 +123,50 @@ def test_records_dir_check_honors_the_configured_override(aida_home: Path, recor
 # --- pyirena MCP check ----------------------------------------------------
 
 
+def test_gui_check_ok_when_pyside6_not_installed(aida_home, monkeypatch):
+    """Not installing the gui extra is a normal, intentional CLI-only setup
+    and must not show up as a FAIL."""
+    from aida.cli import doctor
+
+    monkeypatch.setattr(doctor.importlib.util, "find_spec", lambda name: None)
+    result = doctor._check_gui()
+
+    assert result.ok
+    assert "not installed" in result.detail
+    assert "pip install" in result.detail
+
+
+def test_gui_check_fails_and_names_the_real_error_when_import_breaks(aida_home, monkeypatch):
+    """PySide6 present but failing to import (the classic headless-Linux
+    missing-system-library case) must not be reported as 'not installed' —
+    that sends the user to reinstall a package that's already there."""
+    from aida.cli import doctor
+
+    monkeypatch.setattr(doctor.importlib.util, "find_spec", lambda name: object())
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _broken_import(name, *args, **kwargs):
+        if name.startswith("aida.ui.qt"):
+            raise ImportError("libGL.so.1: cannot open shared object file")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", _broken_import)
+    result = doctor._check_gui()
+
+    assert not result.ok
+    assert "libGL.so.1" in result.detail
+    assert "installed but failed to import" in result.detail
+
+
+def test_run_checks_includes_gui(aida_home: Path, records_home: Path):
+    results = run_checks()
+    names = {r.name for r in results}
+    assert "gui" in names
+
+
 def _candidate(command: str = "/opt/envs/pyirena/bin/pyirena-mcp"):
     from aida.mcp.pyirena_setup import PyirenaMcpCandidate
 

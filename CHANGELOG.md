@@ -16,6 +16,25 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Fixed
+
+- **`aida-gui` and `aida doctor` no longer blame a missing PySide6 install
+  when the real problem is a missing system Qt library.** Bug report: a
+  clean `conda env create -f environment.yml` and a passing `aida doctor`
+  on a headless Linux control machine, then `aida-gui` saying "PySide6
+  isn't installed" anyway. `main_gui()`'s bare `except ImportError` around
+  `from aida.ui.qt.app import main` caught every import failure in that
+  chain, not just a genuinely missing package — and on a headless Linux
+  box, PySide6 installs fine but fails to *import* for lack of system
+  libraries (`libGL`, `libxcb`, `libxkbcommon`, ...), which is a different
+  problem with a different fix. Both now check whether PySide6 is actually
+  present (`importlib.util.find_spec`) and, if it is, show the real
+  `ImportError` instead of telling the user to reinstall a package that's
+  already there. `aida doctor` also gained a `gui` check so this shows up
+  before `aida-gui` is even launched. See
+  [`docs/installation.md`](docs/installation.md#gui-fails-to-import-on-headless-linux)
+  for the fix (a short `apt-get install` of the missing Qt libraries).
+
 ## [0.1.0b6] - 2026-09-08
 
 ### Added
