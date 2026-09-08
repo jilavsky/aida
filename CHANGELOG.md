@@ -18,6 +18,25 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Fixed
 
+- **Saving a provider profile's secret on a headless Linux login no longer
+  crashes the GUI (or `aida config secret set`).** Bug report: `aida-gui`
+  on an APS beamline control machine (`s12gate`), adding a provider
+  profile, raised an uncaught `keyring.errors.KeyringLocked: Failed to
+  unlock the collection!` straight out of `_on_add_provider` — the whole
+  app died, and the profile the user had just filled in was lost.
+  `keyring`'s Linux Secret Service backend needs a running, *unlocked*
+  keyring daemon (gnome-keyring/kwallet) behind a D-Bus session; a bare
+  console/SSH login to a control machine with no desktop session usually
+  has no such daemon running at all, and no system package can start one
+  on the user's behalf. `set_secret()` failures are now caught at both call
+  sites (`aida.ui.qt.profiles_dialog`'s four Add/Edit handlers, and `aida
+  config secret set`) and turned into actionable guidance
+  (`aida.config.secrets.describe_keyring_error`) pointing at the
+  already-documented `AIDA_SECRET_<PROFILE>` environment-variable
+  fallback, which needs no keyring daemon at all — and the profile itself
+  is still saved even when its secret couldn't be. See
+  [`docs/installation.md`](docs/installation.md#storing-a-secret-fails-with-keyringlocked-on-headless-linux).
+
 - **`aida-gui` and `aida doctor` no longer blame a missing PySide6 install
   when PySide6 is actually installed and just failing to import.** Bug
   report: a clean `conda env create -f environment.yml` and a passing

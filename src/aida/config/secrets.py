@@ -73,3 +73,29 @@ def keyring_available() -> bool:
         return backend is not None and "fail" not in type(backend).__name__.lower()
     except Exception:
         return False
+
+
+def describe_keyring_error(exc: KeyringError) -> str:
+    """Turn a ``set_secret`` failure into guidance, shared by the GUI
+    Providers dialog and ``aida config secret set`` so both give identical
+    advice.
+
+    ``KeyringLocked`` is the common case on an APS beamline control machine:
+    the Linux Secret Service backend needs a running, *unlocked* keyring
+    daemon (gnome-keyring or kwallet) behind a D-Bus session, and a bare
+    console/SSH login typically has neither — there is no desktop session to
+    prompt for an unlock, and no system package fixes a daemon that was
+    never started. The supported escape hatch, already documented in
+    ``docs/providers-and-secrets.md``, is the ``AIDA_SECRET_<PROFILE>``
+    environment variable: it is checked before the keychain and needs no
+    keyring daemon at all.
+    """
+    detail = str(exc) or type(exc).__name__
+    return (
+        f"Could not store the secret in the OS keychain ({detail}). This is "
+        "common on a headless/console Linux login, where the Secret Service "
+        "backend needs a running, unlocked keyring daemon (gnome-keyring or "
+        "kwallet) that isn't available. Set the secret via the "
+        "AIDA_SECRET_<PROFILE> environment variable instead — see "
+        "docs/providers-and-secrets.md#secrets — no keychain needed."
+    )

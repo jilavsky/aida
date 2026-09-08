@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import sys
 from pathlib import Path
 
 from aida.config.paths import app_dir, ensure_records_dir
@@ -61,7 +62,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _secret_main(args: argparse.Namespace) -> int:
-    from aida.config.secrets import delete_secret, get_secret, set_secret
+    from keyring.errors import KeyringError
+
+    from aida.config.secrets import delete_secret, describe_keyring_error, get_secret, set_secret
 
     if args.secret_action == "set":
         # Taking the secret as an argv value means it lands in shell
@@ -76,7 +79,11 @@ def _secret_main(args: argparse.Namespace) -> int:
         if not value:
             print("No secret entered — nothing stored.")
             return 1
-        set_secret(args.profile, value)
+        try:
+            set_secret(args.profile, value)
+        except KeyringError as exc:
+            print(describe_keyring_error(exc), file=sys.stderr)
+            return 1
         print(f"Stored a secret for profile {args.profile!r} in the OS keychain.")
         print(
             f"Now set providers.yaml's matching profile's secret_ref to {args.profile!r} (a reference name, not the secret itself)."

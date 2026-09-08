@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import contextlib
 
-from aida.config.secrets import set_secret
+from keyring.errors import KeyringError
+
+from aida.config.secrets import describe_keyring_error, set_secret
 from aida.config.settings import (
     EmbeddingProfile,
     ProviderProfile,
@@ -537,6 +539,16 @@ class ProfilesDialog(QDialog):
     def _save_providers(self) -> None:
         save_providers_config(self._settings.providers)
 
+    def _store_secret(self, secret_ref: str, value: str) -> None:
+        """Store a secret, warning rather than crashing on a locked/broken
+        keychain (common on a headless Linux login) — the profile itself is
+        still saved either way, so a keychain failure doesn't lose the rest
+        of what the user just typed into the dialog."""
+        try:
+            set_secret(secret_ref, value)
+        except KeyringError as exc:
+            QMessageBox.warning(self, "Secret Not Stored", describe_keyring_error(exc))
+
     def _on_add_provider(self) -> None:
         dialog = ProviderProfileFormDialog(parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -548,7 +560,7 @@ class ProfilesDialog(QDialog):
             )
             return
         if dialog.secret_value():
-            set_secret(profile.secret_ref, dialog.secret_value())
+            self._store_secret(profile.secret_ref, dialog.secret_value())
         self._settings.providers.profiles[profile.name] = profile
         self._save_providers()
         self._refresh_provider_list()
@@ -563,7 +575,7 @@ class ProfilesDialog(QDialog):
             return
         updated = dialog.result_profile()
         if dialog.secret_value():
-            set_secret(updated.secret_ref, dialog.secret_value())
+            self._store_secret(updated.secret_ref, dialog.secret_value())
         self._settings.providers.profiles[name] = updated
         self._save_providers()
         self._refresh_provider_list()
@@ -640,7 +652,7 @@ class ProfilesDialog(QDialog):
             )
             return
         if dialog.secret_value():
-            set_secret(profile.secret_ref, dialog.secret_value())
+            self._store_secret(profile.secret_ref, dialog.secret_value())
         self._settings.providers.embedding_profiles[profile.name] = profile
         self._save_providers()
         self._refresh_embedding_list()
@@ -655,7 +667,7 @@ class ProfilesDialog(QDialog):
             return
         updated = dialog.result_profile()
         if dialog.secret_value():
-            set_secret(updated.secret_ref, dialog.secret_value())
+            self._store_secret(updated.secret_ref, dialog.secret_value())
         self._settings.providers.embedding_profiles[name] = updated
         self._save_providers()
         self._refresh_embedding_list()

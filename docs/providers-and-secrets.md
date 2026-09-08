@@ -169,7 +169,11 @@ The actual API key or ANL username is resolved at runtime, in this order:
    argo-claude` → `AIDA_SECRET_ARGO_CLAUDE`). Checked first, so it always
    wins — useful for headless/CI use where there's no OS keychain session.
 2. The OS keychain (via the `keyring` package), under the service name
-   `aida`.
+   `aida`. On a console/SSH login to a Linux machine with no desktop
+   session (common on beamline control machines), storing a secret this way
+   can fail with a locked/unavailable keyring — see
+   [installation.md](installation.md#storing-a-secret-fails-with-keyringlocked-on-headless-linux)
+   for the fix (option 1, above, sidesteps it entirely).
 
 To store a secret in the keychain, run:
 

@@ -150,6 +150,34 @@ that same version into AIDA's environment. Otherwise, step back one
 PySide6 release at a time (`pip index versions PySide6` lists what's
 available) until one imports.
 
+### Storing a secret fails with `KeyringLocked` on headless Linux
+
+Saving a provider profile's secret — from the GUI's Providers dialog, or
+`aida config secret set` — reports it couldn't be stored, naming the OS
+keychain error rather than crashing. On a bare console/SSH login to a
+Linux control machine (no desktop session), the `keyring` package's Secret
+Service backend needs a running, *unlocked* keyring daemon (gnome-keyring
+or kwallet) behind a D-Bus session — and there is usually no daemon running
+at all, since nothing ever logged into a desktop to start one. No system
+package fixes this: unlocking is normally done by a desktop login prompt,
+which doesn't exist here.
+
+The supported workaround, already the documented order of precedence in
+[providers-and-secrets.md](providers-and-secrets.md#secrets), is to skip
+the keychain entirely and set the secret as an environment variable instead
+— it's checked before the keychain on every lookup:
+
+```bash
+export AIDA_SECRET_ARGO_CLAUDE=<your-ANL-username-or-API-key>
+```
+
+(the name is the profile's `secret_ref`, upper-cased with `-` → `_`,
+prefixed `AIDA_SECRET_`). Put the `export` in the shell profile that starts
+`aida-gui`/`aida` on this machine so it's set on every login. A profile
+saved through the GUI while this error appears is still saved — only the
+secret itself didn't make it into the keychain, so the environment variable
+picks up exactly where it left off.
+
 ## Where AIDA keeps its files
 
 ```text

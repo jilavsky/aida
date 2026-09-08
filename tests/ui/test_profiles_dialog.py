@@ -250,6 +250,38 @@ def test_add_provider_profile_with_secret_value_writes_to_keychain(qapp, aida_ho
     assert "super-secret-key" not in str(reloaded.to_dict())
 
 
+def test_add_provider_profile_survives_a_locked_keyring(qapp, aida_home, monkeypatch):
+    """A KeyringLocked (or any KeyringError) from set_secret must not crash
+    the dialog or lose the profile the user just filled in — it should warn
+    and still save the profile, matching the guidance in
+    aida.config.secrets.describe_keyring_error."""
+    from keyring.errors import KeyringLocked
+
+    settings = load_settings()
+    dialog = ProfilesDialog(settings, None)
+
+    form = ProviderProfileFormDialog()
+    form._name_edit.setText("argo-claude")
+    form._secret_value_edit.setText("super-secret-key")
+    monkeypatch.setattr("aida.ui.qt.profiles_dialog.ProviderProfileFormDialog", lambda **kw: form)
+    monkeypatch.setattr(form.__class__, "exec", lambda self: 1)
+
+    def _raise(*a, **k):
+        raise KeyringLocked("Failed to unlock the collection!")
+
+    monkeypatch.setattr("aida.ui.qt.profiles_dialog.set_secret", _raise)
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(a[2]))
+
+    dialog._on_add_provider()  # must not raise
+
+    assert len(warned) == 1
+    assert "AIDA_SECRET_" in warned[0]
+    assert "argo-claude" in settings.providers.profiles
+    reloaded = load_providers_config(aida_home)
+    assert "argo-claude" in reloaded.profiles
+
+
 def test_add_provider_profile_rejects_a_duplicate_name(qapp, aida_home, monkeypatch):
     settings = load_settings()
     settings.providers.profiles["argo-claude"] = ProviderProfile(

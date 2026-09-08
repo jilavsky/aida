@@ -59,6 +59,24 @@ def test_secret_set_stores_in_keychain_not_printed(monkeypatch, capsys):
     assert secrets.get_secret("argo-claude") == "super-secret-value"
 
 
+def test_secret_set_reports_a_locked_keyring_instead_of_crashing(monkeypatch, capsys):
+    """A KeyringLocked backend (headless Linux with no unlocked keyring
+    daemon) must produce a clean error and exit code, not a traceback."""
+    from keyring.errors import KeyringLocked
+
+    def _raise(*a, **k):
+        raise KeyringLocked("Failed to unlock the collection!")
+
+    monkeypatch.setattr("aida.config.secrets.set_secret", _raise)
+
+    exit_code = main(["secret", "set", "argo-claude", "super-secret-value"])
+
+    assert exit_code == 1
+    err = capsys.readouterr().err
+    assert "AIDA_SECRET_" in err
+    assert "super-secret-value" not in err
+
+
 def test_secret_get_reports_set_without_printing_value(monkeypatch, capsys):
     _use_memory_backend(monkeypatch)
     secrets.set_secret("argo-claude", "super-secret-value")
