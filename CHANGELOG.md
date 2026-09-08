@@ -51,6 +51,18 @@ decision revised), unrelated to what shipped when. Entries below link to
   re-render faithfully reproduced it. The transcript is now told the new
   font explicitly before re-rendering. The small grey role/timestamp labels
   stay at their fixed 10px by design.
+- **Quitting AIDA on Windows could hang forever after killing a running
+  script.** `AsyncLoopThread.stop()` (called once, right after the main
+  window closes) blocked on `QThread.wait()` with no timeout. On Windows,
+  `asyncio`'s `ProactorEventLoop.close()` waits for every in-flight
+  overlapped I/O to report completion, and a subprocess pipe whose process
+  was just force-killed via `taskkill /F` (the only way to kill a process
+  tree on Windows — see `aida.coding.runner._terminate_tree`) can leave one
+  such registration with no completion ever coming, hanging `close()`
+  indefinitely. Surfaced as a CI job stuck for over an hour on
+  windows-latest, immune to pytest's 30s per-test timeout since that hang
+  was in fixture teardown, not the test body. `stop()` now gives up after
+  10s and logs a warning instead of blocking the caller forever.
 
 ### Changed
 

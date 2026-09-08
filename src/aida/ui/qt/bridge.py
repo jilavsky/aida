@@ -124,12 +124,44 @@ class AsyncLoopThread(QThread):
         if not self._ready.wait(timeout):
             raise TimeoutError("asyncio loop thread did not start in time")
 
+    #: Bounds ``wait()`` below. asyncio's ``ProactorEventLoop.close()`` (the
+    #: only loop implementation on Windows) polls for every in-flight
+    #: overlapped I/O to report completion before returning, with no
+    #: timeout of its own — a subprocess pipe still registered when its
+    #: process was force-killed (``taskkill /F``, the only tree-kill
+    #: available on Windows, see ``aida.coding.runner._terminate_tree``)
+    #: can leave one such registration with no completion ever coming,
+    #: hanging ``close()`` forever. That already-bounded shutdown sequence
+    #: lives in ``run()``'s ``finally`` above; this is the outer backstop
+    #: for when it doesn't unwind anyway. Observed as an indefinite
+    #: (1h+, well past pytest-timeout's 30s) CI hang specific to
+    #: windows-latest — the run/cancel-script-run path is exactly this
+    #: shape (a real subprocess, killed via taskkill, on this thread's
+    #: loop) — never on POSIX, where SelectorEventLoop's close() has no
+    #: equivalent wait.
+    _STOP_JOIN_TIMEOUT_MS = 10_000
+
     def stop(self) -> None:
-        """Ask the loop to stop and block until the thread has exited.
-        Safe to call even if the loop was never started."""
+        """Ask the loop to stop and block until the thread has exited, or
+        until ``_STOP_JOIN_TIMEOUT_MS`` passes. Safe to call even if the
+        loop was never started.
+
+        Giving up after the timeout rather than blocking forever matters
+        both for tests (one wedged thread must not hang the whole suite)
+        and for the app itself: this is called from ``main()`` right after
+        ``app.exec()`` returns, so a hang here means the user has to force-
+        kill the process to close a window that looks already gone. The
+        thread is left to spin in the background if this happens — not
+        joined, but also not holding the GIL continuously, so it doesn't
+        stop the rest of the process from exiting."""
         if self.loop is not None:
             self.loop.call_soon_threadsafe(self.loop.stop)
-        self.wait()
+        if not self.wait(self._STOP_JOIN_TIMEOUT_MS):
+            logger.warning(
+                "AsyncLoopThread did not exit within %.1fs of stop() — abandoning it "
+                "rather than blocking the caller forever (see _STOP_JOIN_TIMEOUT_MS)",
+                self._STOP_JOIN_TIMEOUT_MS / 1000,
+            )
 
 
 class ChatBridge(QObject):

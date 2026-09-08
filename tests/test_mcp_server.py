@@ -475,9 +475,19 @@ async def test_stop_returns_after_a_startup_timeout():
 @pytest.mark.asyncio
 async def test_a_wedged_server_does_not_block_the_others_from_starting():
     """Failure isolation, the whole point: one silent server contributes no
-    tools and is recorded in start_errors; the healthy one still comes up."""
+    tools and is recorded in start_errors; the healthy one still comes up.
+
+    ``startup_timeout_seconds`` applies to *both* servers here (it's the
+    manager's one shared setting), not just the wedged one — the mock
+    server is a real subprocess that has to spawn, import the mcp SDK, and
+    complete the initialize handshake within it too. 1.0s cut that too
+    close on a loaded CI runner (observed flake: mock-mcp itself timed out
+    alongside quiet-mcp under concurrent process-spawn load on macOS CI).
+    5.0s leaves headroom for the healthy server while quiet-mcp — which
+    never replies at all — still reliably times out, just a few seconds
+    later."""
     manager = McpManager(
-        [_quiet_server_config(), _mock_config(name="mock-mcp")], startup_timeout_seconds=1.0
+        [_quiet_server_config(), _mock_config(name="mock-mcp")], startup_timeout_seconds=5.0
     )
     try:
         tools = await manager.start_all()
