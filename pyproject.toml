@@ -41,17 +41,31 @@ Repository = "https://github.com/jilavsky/aida"
 Issues = "https://github.com/jilavsky/aida/issues"
 
 [project.optional-dependencies]
-# The exclusions mirror pyirena[gui]'s own PySide6 pin, on purpose. AIDA's
-# main audience installs both packages, often into one environment, and pip
-# resolving them *sequentially* (`pip install pyirena[gui]` then
-# `pip install aida-workbench[gui]`, or the reverse) only ever sees the
-# requirement it was asked for: a bare `PySide6>=6.6` here lets pip pick a
-# release pyIrena has excluded for a real reason, breaking the *other*
-# package with nothing worse than a warning. Matching the exclusions makes
-# any resolution order land on a version both accept. AIDA has no stake in
-# 6.7.x or 6.10.x specifically, so this costs nothing; if pyIrena ever adds
-# or drops an exclusion, mirror it here too.
-gui = ["PySide6>=6.6,!=6.7.*,!=6.10.*"]
+# The `!=6.7.*,!=6.10.*` exclusions mirror pyirena[gui]'s own PySide6 pin,
+# on purpose. AIDA's main audience installs both packages, often into one
+# environment, and pip resolving them *sequentially* (`pip install
+# pyirena[gui]` then `pip install aida-workbench[gui]`, or the reverse)
+# only ever sees the requirement it was asked for: a bare `PySide6>=6.6`
+# here lets pip pick a release pyIrena has excluded for a real reason,
+# breaking the *other* package with nothing worse than a warning. Matching
+# the exclusions makes any resolution order land on a version both accept.
+# AIDA has no stake in 6.7.x or 6.10.x specifically, so this costs nothing;
+# if pyIrena ever adds or drops an exclusion, mirror it here too.
+#
+# `<6.11` is AIDA's own addition, not mirrored from pyIrena: PySide6 6.11's
+# Linux wheels need glibc 2.32+, which broke `aida-gui` on an APS beamline
+# control machine (glibc 2.28, RHEL8-class — a first-class target for this
+# project, not an edge case) even though `pip install` reported no error.
+# pyIrena's environment on that same machine still runs fine on 6.10.2,
+# confirming the break is the PySide6 6.11 glibc bump, not a local
+# misconfiguration. No system package fixes a missing glibc symbol, so the
+# fix here is capping the resolvable range instead of documenting a
+# manual downgrade per machine (see
+# docs/installation.md#gui-fails-to-import-on-headless-linux for a user
+# who still hits an equivalent wall on an even older system). Revisit this
+# cap if a future PySide6 release restores support for glibc 2.28, or once
+# these control machines get OS upgrades — whichever comes first.
+gui = ["PySide6>=6.6,!=6.7.*,!=6.10.*,<6.11"]
 docs = ["pymupdf>=1.24", "python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=0.6.23", "Pillow>=10.0"]
 # Optional OCR backend for document figure extraction (aida.documents.ocr).
 # httpx only: three REST endpoints do not justify the `mistralai` SDK and

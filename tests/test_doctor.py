@@ -159,6 +159,38 @@ def test_gui_check_fails_and_names_the_real_error_when_import_breaks(aida_home, 
     assert not result.ok
     assert "libGL.so.1" in result.detail
     assert "installed but failed to import" in result.detail
+    assert "glibc" not in result.detail  # missing-library case, not the glibc case
+
+
+def test_gui_check_distinguishes_a_glibc_mismatch_from_a_missing_library(aida_home, monkeypatch):
+    """A PySide6 wheel needing a newer glibc than the OS has looks like the
+    same ImportError as a missing system Qt library, but no `apt-get
+    install` fixes a missing glibc symbol — the two need different advice,
+    and this is the real failure a beamline control machine hit (glibc
+    2.28, PySide6 wheel built against glibc 2.32+)."""
+    from aida.cli import doctor
+
+    monkeypatch.setattr(doctor.importlib.util, "find_spec", lambda name: object())
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _broken_import(name, *args, **kwargs):
+        if name.startswith("aida.ui.qt"):
+            raise ImportError(
+                "/lib64/libc.so.6: version `GLIBC_2.32' not found "
+                "(required by .../PySide6/QtCore.abi3.so)"
+            )
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", _broken_import)
+    result = doctor._check_gui()
+
+    assert not result.ok
+    assert "GLIBC_2.32" in result.detail
+    assert "glibc" in result.detail
+    assert "libGL" not in result.detail  # must not send a glibc problem to apt-get
 
 
 def test_run_checks_includes_gui(aida_home: Path, records_home: Path):

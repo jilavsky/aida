@@ -100,7 +100,7 @@ order**, with `pip check` clean:
 | Package | pyIrena requires | AIDA requires | Result |
 |---|---|---|---|
 | Python | `>=3.10` | `>=3.11` | **Use 3.11+.** A 3.10 environment can hold pyIrena but not AIDA; pip refuses the AIDA install with a clear message rather than breaking anything. |
-| PySide6 | `>=6.4,!=6.7.*,!=6.10.*` | `>=6.6,!=6.7.*,!=6.10.*` | AIDA deliberately mirrors pyIrena's exclusions so no resolution order can land on a release pyIrena has ruled out. |
+| PySide6 | `>=6.4,!=6.7.*,!=6.10.*` | `>=6.6,!=6.7.*,!=6.10.*,<6.11` | AIDA mirrors pyIrena's exclusions so no resolution order can land on a release pyIrena has ruled out, and additionally caps below 6.11 — that release's Linux wheels need glibc 2.32+, breaking `aida-gui` on RHEL8-class beamline control machines (glibc 2.28) with no error at install time. If pyIrena's own pin ever grows a `<6.11` too, drop this row's asymmetry note. |
 | `mcp` | `>=1.0,<2.0` | `>=1.28,<2.0` | Both exclude mcp 2.x, which removed the `mcp.server.fastmcp` API pyirena-mcp is built on. |
 | `anthropic` / `openai` / `keyring` | pyIrena's `gui` extra | AIDA core | Compatible ranges; whichever is installed second leaves the other's version in place. |
 | numpy, scipy, h5py, matplotlib | pyIrena | not used by AIDA | No interaction. |

@@ -19,21 +19,26 @@ decision revised), unrelated to what shipped when. Entries below link to
 ### Fixed
 
 - **`aida-gui` and `aida doctor` no longer blame a missing PySide6 install
-  when the real problem is a missing system Qt library.** Bug report: a
-  clean `conda env create -f environment.yml` and a passing `aida doctor`
-  on a headless Linux control machine, then `aida-gui` saying "PySide6
-  isn't installed" anyway. `main_gui()`'s bare `except ImportError` around
-  `from aida.ui.qt.app import main` caught every import failure in that
-  chain, not just a genuinely missing package — and on a headless Linux
-  box, PySide6 installs fine but fails to *import* for lack of system
-  libraries (`libGL`, `libxcb`, `libxkbcommon`, ...), which is a different
-  problem with a different fix. Both now check whether PySide6 is actually
-  present (`importlib.util.find_spec`) and, if it is, show the real
-  `ImportError` instead of telling the user to reinstall a package that's
-  already there. `aida doctor` also gained a `gui` check so this shows up
-  before `aida-gui` is even launched. See
-  [`docs/installation.md`](docs/installation.md#gui-fails-to-import-on-headless-linux)
-  for the fix (a short `apt-get install` of the missing Qt libraries).
+  when PySide6 is actually installed and just failing to import.** Bug
+  report: a clean `conda env create -f environment.yml` and a passing
+  `aida doctor` on an APS beamline control machine, then `aida-gui` saying
+  "PySide6 isn't installed" anyway — while pyIrena's GUI, on the same
+  machine, ran fine. `main_gui()`'s bare `except ImportError` around `from
+  aida.ui.qt.app import main` caught every import failure in that chain,
+  not just a genuinely missing package, and two distinct causes both land
+  there: a missing system Qt library (headless Linux without `libGL`/
+  `libxcb`/`libxkbcommon`), or — the actual cause here — a PySide6 wheel
+  built against a **newer glibc than the OS has**. PySide6 6.11's Linux
+  wheels need glibc 2.32+; this machine's RHEL8-class glibc 2.28 (same as
+  pyIrena's working install, which is pinned to 6.10.2) doesn't have it,
+  and no system package can supply a missing glibc symbol — installing
+  `libGL` etc. would have done nothing. `aida-gui` and `aida doctor`'s new
+  `gui` check (`aida.cli._gui_diagnosis`) now tell the two apart from the
+  exception text and show the real error with cause-specific guidance
+  instead of a generic "not installed" message. AIDA's `gui` extra also
+  gained a `<6.11` cap (`pyproject.toml`) so a fresh install on this class
+  of machine no longer resolves to the broken release at all. See
+  [`docs/installation.md`](docs/installation.md#gui-fails-to-import-on-headless-linux).
 
 ## [0.1.0b6] - 2026-09-08
 

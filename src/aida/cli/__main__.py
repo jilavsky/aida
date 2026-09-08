@@ -118,17 +118,14 @@ def main_gui() -> int:
                 "aida-gui: PySide6 isn't installed. Run `pip install -e '.[gui]'` (or `pip install aida-workbench[gui]`)."
             )
         else:
-            # The package is present but failed to import — on Linux this is
-            # almost always missing system Qt libraries (headless machines
-            # without libGL/libxcb/libxkbcommon), not a missing Python
-            # package, and telling the user to reinstall PySide6 would send
-            # them in the wrong direction. Show the real error instead.
-            print(
-                f"aida-gui: PySide6 is installed but failed to import ({exc}).\n"
-                "On Linux this is usually a missing system library (libGL, "
-                "libxkbcommon, xcb, ...), not a missing Python package — see "
-                "docs/installation.md#gui-fails-to-import-on-headless-linux."
-            )
+            # The package is present but failed to import for one of two very
+            # different reasons (missing system Qt library vs. a glibc too
+            # old for this wheel) — see aida.cli._gui_diagnosis, shared with
+            # `aida doctor`'s equivalent check, for which one this is and why
+            # they need opposite fixes.
+            from aida.cli._gui_diagnosis import diagnose_pyside6_import_error
+
+            print(f"aida-gui: {diagnose_pyside6_import_error(exc)}")
         return 1
     return gui_main()
 

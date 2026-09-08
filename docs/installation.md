@@ -103,16 +103,19 @@ needs at least one provider profile (next: `providers-and-secrets.md`).
 ### GUI fails to import on headless Linux
 
 `aida-gui` (and `aida doctor`'s `gui` check) says PySide6 isn't installed,
-but `pip install "aida-workbench[gui]"` reports nothing wrong. This is a
-different failure than a missing Python package: PySide6's wheel installed
-fine, but importing it needs system Qt libraries — `libGL`, `libEGL`,
-`libxkbcommon`, `libxcb-cursor`, and a handful of others — that a minimal
-or headless server (a beamline control machine with no desktop environment
-installed, a container, a CI runner) typically doesn't have. `aida doctor`
-and `aida-gui` both now show the real `ImportError` instead of the generic
-"not installed" message when this is the cause.
+but `pip install "aida-workbench[gui]"` reports nothing wrong. PySide6's
+wheel installed fine — it's failing to *import*, for one of two different
+reasons that look identical (both are an `ImportError`) but need opposite
+fixes. `aida doctor` and `aida-gui` both name the real underlying error so
+you can tell which one you have; read the error message rather than
+guessing.
 
-On Debian/Ubuntu, this usually fixes it:
+**A missing system Qt library** (the error names a `.so` file, e.g.
+`libGL.so.1: cannot open shared object file`) — a minimal or headless
+server (a beamline control machine with no desktop environment installed,
+a container, a CI runner) typically lacks the shared libraries Qt loads at
+runtime even though it never draws to a real display. On Debian/Ubuntu,
+this usually fixes it:
 
 ```bash
 sudo apt-get install libgl1 libegl1 libxkbcommon0 libxcb-cursor0 \
@@ -128,7 +131,24 @@ than guessing from the list above:
 python -c "from PySide6.QtWidgets import QApplication"
 ```
 
-The `ImportError` names the specific `.so` that couldn't be loaded.
+**A glibc too old for the installed PySide6 wheel** (the error is
+`` `libc.so.6: version `GLIBC_X.YZ' not found` ``) — newer PySide6 releases
+are built against a newer glibc baseline than older, long-lived Linux
+installs provide (RHEL8-class control machines, common at APS beamlines,
+ship glibc 2.28; some recent PySide6 releases now need 2.32+). No system
+package can supply a missing glibc symbol — installing `libgl1` etc. does
+nothing here. Check your system's glibc with `ldd --version`, then pin
+PySide6 down to an older release built against a compatible baseline:
+
+```bash
+pip install "PySide6==<a version you know works>"
+```
+
+If pyIrena's GUI already runs on this machine, `pip show PySide6` in
+*its* environment names a version already confirmed to work here — install
+that same version into AIDA's environment. Otherwise, step back one
+PySide6 release at a time (`pip index versions PySide6` lists what's
+available) until one imports.
 
 ## Where AIDA keeps its files
 

@@ -29,6 +29,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from aida.cli._gui_diagnosis import diagnose_pyside6_import_error
 from aida.config import paths
 from aida.config.secrets import env_var_name, keyring_available
 from aida.config.settings import Settings, load_settings
@@ -95,11 +96,12 @@ def _check_gui() -> CheckResult:
 
     PySide6 not being installed at all is a normal, intentional state for a
     CLI-only/headless install and is reported ``ok``. PySide6 *installed*
-    but still failing to import is the interesting failure: on Linux it is
-    almost always a missing system Qt library (headless control machines
-    without libGL/libxcb/libxkbcommon are the common case), and running
-    ``aida doctor`` before ``aida-gui`` should say so plainly rather than
-    leaving the user to decode ``aida-gui``'s generic error.
+    but still failing to import is the interesting failure — see
+    ``aida.cli._gui_diagnosis`` for the two distinct causes (missing system
+    Qt library vs. a glibc too old for the installed wheel) this
+    distinguishes between, and why running ``aida doctor`` before
+    ``aida-gui`` should say so plainly rather than leaving the user to
+    decode ``aida-gui``'s generic error.
     """
     if importlib.util.find_spec("PySide6") is None:
         return CheckResult(
@@ -110,13 +112,7 @@ def _check_gui() -> CheckResult:
     try:
         from aida.ui.qt.app import main as _gui_main  # noqa: F401
     except ImportError as exc:
-        return CheckResult(
-            "gui",
-            False,
-            f"PySide6 installed but failed to import ({exc}) — on Linux this usually "
-            "means a system Qt library is missing (libGL, libxkbcommon, xcb, ...), "
-            "see docs/installation.md#gui-fails-to-import-on-headless-linux",
-        )
+        return CheckResult("gui", False, diagnose_pyside6_import_error(exc))
     return CheckResult("gui", True, "PySide6 importable — aida-gui available")
 
 
