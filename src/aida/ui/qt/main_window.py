@@ -611,6 +611,11 @@ class MainWindow(QMainWindow):
         self.chat_panel.open_in_code_editor_requested.connect(
             self._on_open_in_code_editor_requested
         )
+        # A file dropped on the transcript attaches exactly as one dropped
+        # on the prompt box does — the transcript is where people look
+        # while they work, so it is where they aim. The InputBox owns what
+        # an attachment *is*; the transcript only reports the drop.
+        self.chat_panel.urls_dropped.connect(self.input_box.accept_dropped_urls)
         self.workspace_selector.workspace_changed.connect(self._on_workspace_changed)
         self.profile_selector.profile_changed.connect(self._on_profile_changed)
         self.folder_display.source_folders_changed.connect(self._on_source_folders_changed)

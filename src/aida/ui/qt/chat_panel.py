@@ -22,6 +22,7 @@ from pathlib import Path
 from aida.persistence.store import ArtifactRecord
 from aida.providers.base import Message
 from aida.ui.qt._qt import (
+    QApplication,
     QFrame,
     QGuiApplication,
     QHBoxLayout,
@@ -151,6 +152,12 @@ class _AutoHeightTextBrowser(QTextBrowser):
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # A read-only view has nothing to do with a dropped file, but Qt
+        # gives every text widget acceptDrops(True) regardless — which
+        # would make it swallow a file dropped on a message instead of
+        # letting it reach ChatPanel below. This is the same trap the
+        # prompt box had (see aida.ui.qt.input_box._InputTextEdit).
+        self.setAcceptDrops(False)
         self.setStyleSheet("QTextBrowser { background: transparent; border: none; }")
         self.document().documentLayout().documentSizeChanged.connect(self._recalculate_height)
         self._recalculate_height()
@@ -306,17 +313,33 @@ class MessageBubble(QFrame):
     def refresh_font(self) -> None:
         """Bug report: "font change in settings dialog does not change for
         the chat window... it does change the other widgets' fonts (left
-        and right panel)". Those panels are plain widgets that paint with
-        their live ``font()`` every frame, so Qt's normal
-        application-font-change cascade (``aida.ui.qt.window_state.
-        apply_font_size``) is all they need. ``QTextBrowser.setMarkdown``
-        is different: Qt's Markdown/HTML importer resolves relative sizes
-        into *absolute* ones against the document's default font at parse
-        time and bakes that into each character's format, so a bubble
-        rendered before a font-size change stays at the old size forever
-        — changing ``self._view``'s font afterwards (already handled by
-        the cascade) only affects text rendered *after* the change.
-        Re-running the exact same render call bakes in the new size."""
+        and right panel)".
+
+        Two separate things have to happen, and the first attempt at this
+        fix only did the second:
+
+        1. **The view's font has to be set explicitly.** A widget whose
+           *parent* carries a style sheet stops receiving the application
+           font cascade — Qt's style-sheet machinery resolves the child's
+           font when it polishes the tree, and a later
+           ``QApplication.setFont`` no longer reaches it. Every bubble
+           sets a style sheet on itself (the rounded user-message
+           background), so ``self._view`` inside it was pinned to
+           whatever the font was when the bubble was built. Setting it on
+           the *parent* does not help either — only the widget itself.
+        2. **The text has to be re-rendered.** Qt's Markdown importer
+           resolves relative sizes into absolute ones against the
+           document's default font at parse time and bakes them into each
+           character's format, so text already in the document keeps its
+           old size even once the default font changes.
+
+        Together: point the view at the current application font, then run
+        the same render again so the new size is baked in.
+        """
+        app_font = QApplication.font()
+        self.setFont(app_font)
+        self._view.setFont(app_font)
+        self._view.document().setDefaultFont(app_font)
         self._render_now()
 
     def stop_pending_render(self) -> None:
@@ -422,8 +445,18 @@ class ChatPanel(QWidget):
     #: the dialog *at* that file rather than with a copy of its text.
     open_in_code_editor_requested = Signal(str)
 
+    #: ``list[QUrl]`` for files dropped onto the transcript. Bug report:
+    #: "Adding it to the chat history area will be useful, users may expect
+    #: that to work also." The transcript itself has no idea what an
+    #: attachment is — MainWindow hands these to
+    #: ``InputBox.accept_dropped_urls``, the same call the prompt box and
+    #: the Attach… button end at, so a drop behaves identically wherever
+    #: in the window it lands.
+    urls_dropped = Signal(list)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setAcceptDrops(True)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
@@ -468,12 +501,50 @@ class ChatPanel(QWidget):
     def widget_at(self, index: int) -> QWidget:
         return self._content_layout.itemAt(index).widget()
 
+    # --- drag and drop ------------------------------------------------------
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt override
+        urls = event.mimeData().urls()
+        if not urls:
+            super().dropEvent(event)
+            return
+        self.urls_dropped.emit(list(urls))
+        event.acceptProposedAction()
+
     def refresh_fonts(self) -> None:
-        """Re-renders every already-shown ``MessageBubble`` so a settings
-        dialog font-size change takes effect on the transcript, not just
-        newly-appended messages — see ``MessageBubble.refresh_font``'s
-        docstring for why that widget alone needs telling. Call right
-        after ``aida.ui.qt.window_state.apply_font_size``."""
+        """Bring the whole transcript to the current application font.
+        Call right after ``aida.ui.qt.window_state.apply_font_size``.
+
+        Not just the message bubbles: a tool-call row, an image caption, a
+        retrieval row and a truncation notice are all built under widgets
+        that carry style sheets, and a style sheet on an ancestor is
+        exactly what stops the application font cascade from reaching a
+        child (see ``MessageBubble.refresh_font``). So every descendant is
+        told explicitly, then the bubbles additionally re-render, because
+        their text has the old size baked into its character formats.
+
+        Widgets whose style sheet names a font size of its own — the small
+        grey "user"/"assistant" and timestamp labels, deliberately fixed
+        at 10px — are unaffected: a style sheet wins over a widget font,
+        which is what keeps this from flattening the transcript into one
+        uniform size.
+        """
+        app_font = QApplication.font()
+        self._content.setFont(app_font)
+        for widget in self._content.findChildren(QWidget):
+            widget.setFont(app_font)
         for i in range(self._content_layout.count() - 1):
             widget = self._content_layout.itemAt(i).widget()
             if isinstance(widget, MessageBubble):

@@ -36,6 +36,17 @@ Extraction happens on the first figure request and is cached. The built-in
 extractor is dependable for simple pages, but reports lower confidence when
 a multi-column layout makes caption pairing ambiguous.
 
+Both PDF and Word (`.docx`) documents are supported. A `.docx` is a zip with
+its pictures stored whole, so extraction needs no extra dependency: pictures
+are read in document order and paired with the caption paragraph immediately
+before or after them ("Figure 3.", "Table 1"). A picture with no caption
+beside it is listed positionally as *image N* rather than being given a
+number it does not have. Word documents have no page numbers until they are
+laid out, so those entries list no page. Pasted vector art (EMF/WMF/SVG —
+often an Excel chart) cannot be shown as a picture; the listing says how many
+were skipped so you can export those as PNG if one matters. OCR applies to
+PDFs only.
+
 **Nothing is extracted when you attach a document** — only when something
 asks about its figures. So a paper you attach and merely summarize costs
 nothing, no `paper.assets/` folder appears, and (with OCR enabled) no

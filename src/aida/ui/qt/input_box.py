@@ -92,9 +92,25 @@ class _AttachmentChip(QWidget):
 
 class _InputTextEdit(QPlainTextEdit):
     """Enter submits; Shift+Enter (or Ctrl+Enter, for muscle memory from
-    other chat apps) inserts a literal newline instead."""
+    other chat apps) inserts a literal newline instead.
+
+    Also hands file drops back to the ``InputBox`` around it. Bug report:
+    "I think dropping the file into the message area is different than
+    attaching through button." It was, and this is why — a QPlainTextEdit
+    accepts drops itself, so a file dropped *on the typing area* (the
+    obvious place to drop one) never reached ``InputBox.dropEvent`` at all:
+    Qt delivered it here, and the default handler pasted the file's URL
+    into the prompt as text. Dropping onto the thin margin around the text
+    box did attach the file, which is what made the two look inconsistent.
+    URL drops are forwarded; everything else (dragging selected text in
+    from another window) still behaves as a normal text editor."""
 
     submit_requested = Signal()
+    #: ``list[QUrl]`` — whatever was dropped on the typing area, for
+    #: ``InputBox`` to turn into attachments or folder decisions. A signal
+    #: rather than a direct ``parent()`` call so this widget keeps knowing
+    #: nothing about who owns it.
+    urls_dropped = Signal(list)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt override
         is_enter = event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
@@ -105,6 +121,29 @@ class _InputTextEdit(QPlainTextEdit):
             self.submit_requested.emit()
             return
         super().keyPressEvent(event)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt override
+        # Needed as well as dragEnterEvent: QPlainTextEdit overrides
+        # dragMoveEvent to track a drop cursor through the text, and a drag
+        # it does not accept *there* is refused mid-hover no matter what
+        # dragEnterEvent said.
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if event.mimeData().hasUrls():
+            self.urls_dropped.emit(list(event.mimeData().urls()))
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
 
 
 class InputBox(QWidget):
@@ -138,6 +177,7 @@ class InputBox(QWidget):
         self._text_edit = _InputTextEdit(self)
         self._text_edit.setPlaceholderText(_IDLE_PLACEHOLDER)
         self._text_edit.submit_requested.connect(self._on_submit)
+        self._text_edit.urls_dropped.connect(self.accept_dropped_urls)
         self._text_edit.textChanged.connect(self.text_changed.emit)
         layout.addWidget(self._text_edit)
 
@@ -301,6 +341,19 @@ class InputBox(QWidget):
         if not urls:
             super().dropEvent(event)
             return
+        self.accept_dropped_urls(urls)
+        event.acceptProposedAction()
+
+    def accept_dropped_urls(self, urls: list) -> None:
+        """The one place a drop becomes an attachment, wherever it landed.
+
+        Called for a drop on this widget's own surface, for one the typing
+        area forwarded (see ``_InputTextEdit.dropEvent``), and for one that
+        landed on the transcript above (``ChatPanel.urls_dropped``, wired
+        up in ``MainWindow``). Dropping a file anywhere in the chat window
+        therefore does exactly what the Attach… button does — every path
+        ends at ``add_attachment``.
+        """
         for url in urls:
             local_path = url.toLocalFile()
             if not local_path:
@@ -310,7 +363,6 @@ class InputBox(QWidget):
                 self.folder_dropped.emit(local_path)
             else:
                 self.add_attachment(local_path)
-        event.acceptProposedAction()
 
     # --- actions -------------------------------------------------------------
 

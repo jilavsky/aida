@@ -31,8 +31,10 @@ from __future__ import annotations
 
 import json
 import re
+import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from xml.etree import ElementTree
 
 from aida.config.logging_setup import get_logger
 
@@ -59,6 +61,40 @@ _CAPTION_RE = re.compile(
     r"^\s*(?P<kind>Fig(?:ure)?|Table|Scheme|Chart|Plate)\s*\.?\s*(?P<number>[0-9]+[a-z]?)",
     re.IGNORECASE,
 )
+
+# --- docx ------------------------------------------------------------------
+#
+# A .docx is a zip: the body is ``word/document.xml``, the pictures are
+# whole files under ``word/media/``, and ``word/_rels/document.xml.rels``
+# maps the relationship id in the body to the file on disk. So extraction
+# here is stdlib zipfile + ElementTree and needs no new dependency —
+# ``python-docx`` (the ``docs`` extra) is not even imported, because it
+# gives no better answer to "which paragraph is this picture in", which is
+# the whole problem. Word has no page numbers without laying the document
+# out, so ``page`` is 0 for these entries and the description says
+# "in document order" instead of a page.
+
+_DOCX_BODY = "word/document.xml"
+_DOCX_RELS = "word/_rels/document.xml.rels"
+_DOCX_MEDIA_PREFIX = "word/media/"
+
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+_PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+
+#: English Metric Units per point — Word stores drawing sizes in EMU
+#: (914400 per inch, 72 points per inch), so this converts a ``wp:extent``
+#: into the same units MIN_FIGURE_EDGE_PT is written in.
+EMU_PER_PT = 12700
+
+#: Formats worth handing to a vision model. Word also stores EMF/WMF
+#: (pasted vector art, chart fallbacks) and SVG companions next to a PNG
+#: of the same picture; those are skipped rather than indexed as figures
+#: nothing can display — and the index note says how many were skipped, so
+#: "this document has one more figure than you listed" is answerable.
+_DOCX_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"}
 
 
 @dataclass
@@ -204,6 +240,183 @@ def extract_pdf_figures(pdf_path: Path, assets_dir: Path) -> list[FigureEntry]:
     return entries
 
 
+def _docx_media_by_rel_id(archive: zipfile.ZipFile) -> dict[str, str]:
+    """``rId7 -> word/media/image3.png`` for every image relationship."""
+    try:
+        rels = ElementTree.fromstring(archive.read(_DOCX_RELS))
+    except (KeyError, ElementTree.ParseError):
+        return {}
+    media: dict[str, str] = {}
+    for rel in rels.findall(f"{{{_PKG_REL_NS}}}Relationship"):
+        target = rel.get("Target") or ""
+        rel_id = rel.get("Id") or ""
+        if not rel_id or not target:
+            continue
+        # Targets are relative to word/ ("media/image1.png"), and an
+        # external relationship (a linked, not embedded, picture) has no
+        # file in the package at all.
+        if (rel.get("TargetMode") or "").lower() == "external":
+            continue
+        name = f"word/{target.lstrip('/')}" if not target.startswith("word/") else target
+        if name.startswith(_DOCX_MEDIA_PREFIX):
+            media[rel_id] = name
+    return media
+
+
+def _docx_paragraph_text(paragraph: ElementTree.Element) -> str:
+    """Visible text of one ``w:p``, runs joined in document order."""
+    return "".join(node.text or "" for node in paragraph.iter(f"{{{_W_NS}}}t")).strip()
+
+
+def _docx_paragraph_images(paragraph: ElementTree.Element) -> list[tuple[str, float, float]]:
+    """``(relationship id, width_pt, height_pt)`` for each picture in a
+    paragraph, in order. Size is 0 when the drawing carries no extent (a
+    floating shape whose size lives elsewhere) — the caller treats an
+    unknown size as "keep it" rather than guessing it away."""
+    found: list[tuple[str, float, float]] = []
+    for drawing in paragraph.iter(f"{{{_W_NS}}}drawing"):
+        width = height = 0.0
+        for extent in drawing.iter(f"{{{_WP_NS}}}extent"):
+            try:
+                width = int(extent.get("cx", 0)) / EMU_PER_PT
+                height = int(extent.get("cy", 0)) / EMU_PER_PT
+            except (TypeError, ValueError):
+                width = height = 0.0
+            break
+        for blip in drawing.iter(f"{{{_A_NS}}}blip"):
+            rel_id = blip.get(f"{{{_R_NS}}}embed")
+            if rel_id:
+                found.append((rel_id, width, height))
+    return found
+
+
+def _is_figure_sized(width_pt: float, height_pt: float) -> bool:
+    """The same "is this a picture or a decoration" test the PDF path uses,
+    applied to a Word drawing's declared size. Unknown size passes: a
+    missing extent is not evidence of a logo."""
+    if width_pt <= 0 or height_pt <= 0:
+        return True
+    if min(width_pt, height_pt) < MIN_FIGURE_EDGE_PT:
+        return False
+    longest, shortest = max(width_pt, height_pt), min(width_pt, height_pt)
+    return longest / shortest <= MAX_FIGURE_ASPECT
+
+
+def extract_docx_figures(docx_path: Path, assets_dir: Path) -> tuple[list[FigureEntry], str]:
+    """Extract the pictures from a .docx into ``assets_dir``, with whatever
+    captions the surrounding paragraphs give up. Returns the index and a
+    note for the reader (empty when there is nothing to explain).
+
+    Captions are more trustworthy here than in the PDF path: Word documents
+    are a single flow, so "the paragraph after the picture" is genuinely
+    the next thing a reader sees, not the neighbouring column. Only text
+    that *starts* like a caption ("Figure 3.", "Table 1") counts, same as
+    everywhere else in this module — an arbitrary following paragraph is
+    not a label.
+
+    Never raises, for the same reason ``extract_pdf_figures`` does not: a
+    damaged file yields an empty index and a log line.
+    """
+    entries: list[FigureEntry] = []
+    skipped_vector = 0
+    seen_media: dict[str, int] = {}
+    try:
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(docx_path) as archive:
+            media_by_rel = _docx_media_by_rel_id(archive)
+            if not media_by_rel:
+                return [], ""
+            body = ElementTree.fromstring(archive.read(_DOCX_BODY))
+            paragraphs = list(body.iter(f"{{{_W_NS}}}p"))
+            texts = [_docx_paragraph_text(p) for p in paragraphs]
+            for position, paragraph in enumerate(paragraphs):
+                for rel_id, width_pt, height_pt in _docx_paragraph_images(paragraph):
+                    member = media_by_rel.get(rel_id)
+                    if member is None:
+                        continue
+                    suffix = Path(member).suffix.lower()
+                    if suffix not in _DOCX_IMAGE_SUFFIXES:
+                        skipped_vector += 1
+                        continue
+                    if not _is_figure_sized(width_pt, height_pt):
+                        continue
+                    # The same picture used twice (a logo, a repeated
+                    # diagram) is one figure, labelled where it first
+                    # appears — the PDF path's seen_xrefs rule.
+                    if member in seen_media:
+                        continue
+
+                    filename = f"fig-{len(entries) + 1:02d}{suffix}"
+                    (assets_dir / filename).write_bytes(archive.read(member))
+                    seen_media[member] = len(entries)
+
+                    caption = _docx_caption_near(texts, position)
+                    label = _label_from_caption(caption)
+                    if label:
+                        confidence = "high"
+                    else:
+                        label = f"image {len(entries) + 1}"
+                        confidence = "none"
+                    entries.append(
+                        FigureEntry(
+                            label=label,
+                            caption=caption,
+                            file=filename,
+                            page=0,  # Word has no page numbers without layout
+                            confidence=confidence,
+                        )
+                    )
+    except (OSError, KeyError, zipfile.BadZipFile, ElementTree.ParseError) as exc:
+        logger.warning("could not extract figures from %s: %s", docx_path, exc)
+        return entries, ""
+    except Exception as exc:  # noqa: BLE001 - a figure index must never fail a turn
+        logger.warning("could not extract figures from %s: %s", docx_path, exc)
+        return entries, ""
+
+    note = ""
+    if skipped_vector:
+        note = (
+            f"{skipped_vector} embedded image(s) were skipped: they are vector or metafile "
+            "formats (EMF/WMF/SVG — usually pasted charts or drawings) that cannot be shown "
+            "as a picture. Ask the user for a raster export if one of them matters."
+        )
+    return entries, note
+
+
+def _docx_caption_near(texts: list[str], position: int) -> str:
+    """The caption for a picture in paragraph ``position``.
+
+    Looked for in the picture's own paragraph first (Word's own "Insert
+    Caption" often lands the text in the same paragraph as an inline
+    image), then in the *first* non-empty paragraph after it — the figure
+    convention — and finally the first non-empty one before it, which is
+    where tables put theirs. Empty paragraphs are skipped, since a blank
+    line between a picture and its caption is common formatting.
+
+    Exactly one non-empty paragraph in each direction, deliberately.
+    Looking two paragraphs out was tried and produced a confidently wrong
+    label on a real document: an uncaptioned picture followed by a line of
+    body text picked up the *next* figure's caption and reported it as
+    high confidence. A missing caption costs a positional "image 2"; a
+    stolen one makes "Figure 1 shows..." a lie.
+    """
+    own = texts[position] if 0 <= position < len(texts) else ""
+    if _CAPTION_RE.match(own):
+        return own.splitlines()[0].strip()
+
+    def _first_non_empty(indices) -> str:
+        for i in indices:
+            text = texts[i]
+            if not text:
+                continue
+            return text.splitlines()[0].strip() if _CAPTION_RE.match(text) else ""
+        return ""
+
+    return _first_non_empty(range(position + 1, len(texts))) or _first_non_empty(
+        range(position - 1, -1, -1)
+    )
+
+
 @dataclass
 class FigureIndex:
     """A document's figures plus how they were found.
@@ -279,7 +492,9 @@ def describe_index(source_name: str, index: FigureIndex) -> str:
         return f"{head} {index.note}".strip() if index.note else head
     lines = [f"{len(entries)} figure(s) in {source_name}:"]
     for entry in entries:
-        detail = f"  - {entry.label} (page {entry.page})"
+        # page 0 means "this format has no page numbers" (a .docx is a
+        # flow, not pages) — printing "page 0" would be a made-up fact.
+        detail = f"  - {entry.label}" + (f" (page {entry.page})" if entry.page else "")
         if entry.caption:
             detail += f" — {entry.caption}"
         lines.append(detail)
@@ -305,6 +520,7 @@ __all__ = [
     "FigureEntry",
     "FigureIndex",
     "describe_index",
+    "extract_docx_figures",
     "extract_pdf_figures",
     "read_index",
     "write_index",

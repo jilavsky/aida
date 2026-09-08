@@ -37,6 +37,7 @@ from aida.documents.attachments import assets_dir_for
 from aida.documents.figures import (
     FigureIndex,
     describe_index,
+    extract_docx_figures,
     extract_pdf_figures,
     read_index,
     write_index,
@@ -60,7 +61,18 @@ _tool = wrap_tool_errors(OSError, ValueError, asyncio.TimeoutError)
 #: not hold a turn open indefinitely.
 EXTRACT_TIMEOUT_SECONDS = 120.0
 
-_EXTRACTABLE_SUFFIXES = {".pdf"}
+#: Formats whose figures can be pulled out. A .docx is here because it is
+#: a zip with the pictures already whole inside it — see
+#: ``aida.documents.figures.extract_docx_figures``, which needs no
+#: dependency beyond the standard library. Bug report: "I attached docx
+#: file and agent stated ... the extraction tool couldn't get them from
+#: this docx"; before this, every non-PDF returned an empty index, which
+#: reads as "this document has no figures" rather than "nobody looked".
+_EXTRACTABLE_SUFFIXES = {".pdf", ".docx"}
+
+#: Of those, the ones the OCR backend can take. It uploads a PDF; a .docx
+#: would have to be converted first, which is a different feature.
+_OCR_SUFFIXES = {".pdf"}
 
 #: The confirmation identity for an OCR upload. Deliberately reuses the
 #: ``"tool_call"`` action rather than inventing a new one: that action is
@@ -208,7 +220,7 @@ async def _figures_for(document: Path, ocr: OcrBackend | None = None) -> FigureI
 
     backend, note = "builtin", ""
     entries = None
-    if ocr is not None:
+    if ocr is not None and document.suffix.lower() in _OCR_SUFFIXES:
         attempt = await _try_ocr(document, assets, ocr)
         if attempt is not None:
             entries, note = attempt
@@ -219,10 +231,19 @@ async def _figures_for(document: Path, ocr: OcrBackend | None = None) -> FigureI
                 "extractor and may be less reliable on a multi-column layout."
             )
     if entries is None:
-        entries = await asyncio.wait_for(
-            asyncio.to_thread(extract_pdf_figures, document, assets),
-            timeout=EXTRACT_TIMEOUT_SECONDS,
-        )
+        if document.suffix.lower() == ".docx":
+            # No OCR alternative and no note about one: a .docx is a
+            # single text flow, so the built-in pairing of picture to
+            # caption is the good case, not the fallback.
+            entries, note = await asyncio.wait_for(
+                asyncio.to_thread(extract_docx_figures, document, assets),
+                timeout=EXTRACT_TIMEOUT_SECONDS,
+            )
+        else:
+            entries = await asyncio.wait_for(
+                asyncio.to_thread(extract_pdf_figures, document, assets),
+                timeout=EXTRACT_TIMEOUT_SECONDS,
+            )
     await asyncio.to_thread(write_index, assets, document.name, entries, backend=backend, note=note)
     return FigureIndex(source=document.name, figures=entries, backend=backend, note=note)
 

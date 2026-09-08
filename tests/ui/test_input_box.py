@@ -258,6 +258,82 @@ def test_drop_mixed_files_and_folder(qapp, tmp_path):
     assert dropped == [str(folder)]
 
 
+def _real_drop_event(mime):
+    """A genuine QDropEvent, for the tests that let Qt's own
+    QPlainTextEdit handling run — the duck-typed stand-in above is enough
+    for InputBox's handler but not for ``super().dropEvent()``."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QDropEvent
+
+    return QDropEvent(
+        QPointF(10, 10),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def test_drop_on_the_typing_area_attaches_like_the_button_does(qapp, tmp_path):
+    """Bug report: "I think dropping the file into the message area is
+    different than attaching through button."
+
+    It was: QPlainTextEdit accepts drops itself, so a file dropped on the
+    typing area — the obvious place to drop one — never reached
+    InputBox.dropEvent, and Qt's default handler pasted the file's URL into
+    the prompt as text instead. Dropping on the thin margin around the text
+    box worked, which is what made the behavior look arbitrary.
+    """
+    from PySide6.QtCore import QMimeData, QUrl
+
+    file_a = tmp_path / "curve.dat"
+    file_a.write_text("q I", encoding="utf-8")
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(file_a))])
+
+    box = InputBox()
+    box._text_edit.dropEvent(_real_drop_event(mime))
+
+    assert box.attached_paths() == [str(file_a)]
+    # The prompt must be untouched: the old behavior typed the file URL
+    # into it, which is what the user then had to delete by hand.
+    assert box.text() == ""
+
+
+def test_drop_folder_on_the_typing_area_still_asks_about_the_folder(qapp, tmp_path):
+    from PySide6.QtCore import QMimeData, QUrl
+
+    folder = tmp_path / "data_dir"
+    folder.mkdir()
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(folder))])
+
+    box = InputBox()
+    dropped = []
+    box.folder_dropped.connect(dropped.append)
+    box._text_edit.dropEvent(_real_drop_event(mime))
+
+    assert dropped == [str(folder)]
+    assert box.attached_paths() == []
+
+
+def test_dropping_plain_text_on_the_typing_area_still_types_it(qapp):
+    """Only *file* drops are diverted. Dragging selected text in from
+    another window must keep working like any text editor."""
+    from PySide6.QtCore import QMimeData
+
+    mime = QMimeData()
+    mime.setText("pasted by drag")
+
+    box = InputBox()
+    box._text_edit.dropEvent(_real_drop_event(mime))
+
+    assert "pasted by drag" in box.text()
+    assert box.attached_paths() == []
+
+
 def test_send_does_not_automatically_clear_attachments(qapp, tmp_path):
     """InputBox itself never clears attachments on send — that's
     MainWindow's job (it reads attached_paths() right after send_requested

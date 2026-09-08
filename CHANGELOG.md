@@ -16,6 +16,42 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Added
+
+- **Figures can now be pulled out of Word documents.** Bug report: "I
+  attached docx file and agent stated ... the extraction tool couldn't get
+  them from this docx". Only PDFs were extractable before, so every `.docx`
+  came back as "no figures could be extracted" — indistinguishable from a
+  document that genuinely has none. `list_document_figures` /
+  `get_document_figure` now work on `.docx` too, using the standard library
+  only (a `.docx` is a zip holding its pictures whole), so no new
+  dependency. Captions come from the paragraph immediately before or after
+  each picture; an uncaptioned one is listed as *image N* rather than given
+  a number it does not have, and pasted vector art (EMF/WMF/SVG) is
+  reported as skipped rather than silently dropped. Word has no page
+  numbers until layout, so those entries list none.
+
+### Fixed
+
+- **Dropping a file anywhere in the chat window now attaches it**, exactly
+  as the Attach… button does — the typing area and the transcript above it
+  included. Bug report: "I think dropping the file into the message area is
+  different than attaching through button", then "adding it to the chat
+  history area will be useful, users may expect that to work also". Qt
+  gives every text widget its own drop handling, so a file dropped on the
+  prompt (or on a message) never reached the input box and was pasted into
+  the prompt as a URL instead; only the thin margin around the box worked.
+  Dragging *text* in from another window still types it, as before.
+- **Changing the font size now resizes the conversation already on
+  screen.** Bug report: "changing font changes everything except the chat
+  history area." The earlier fix re-rendered each message, which was
+  necessary but not sufficient: every message sets a style sheet on itself,
+  and a style sheet on an ancestor stops Qt's application-font cascade from
+  reaching the child — so the view kept the size it was built with and the
+  re-render faithfully reproduced it. The transcript is now told the new
+  font explicitly before re-rendering. The small grey role/timestamp labels
+  stay at their fixed 10px by design.
+
 ### Changed
 
 - **The conversations column resizes like the session column does.** Bug

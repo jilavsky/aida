@@ -23,7 +23,7 @@ from pathlib import Path
 
 from aida.config.secrets import env_var_name, get_secret
 from aida.config.settings import Settings, load_settings
-from aida.documents.figures import extract_pdf_figures, write_index
+from aida.documents.figures import extract_docx_figures, extract_pdf_figures, write_index
 from aida.documents.ocr.mistral import SECRET_REF, MistralOcrError, figures_from_ocr, ocr_pdf
 
 
@@ -67,6 +67,14 @@ def cmd_figures(args: argparse.Namespace) -> int:
     backend = "builtin"
     note = ""
     entries = []
+    # OCR uploads a PDF; a .docx has its pictures stored whole inside its
+    # own container and is read directly (see
+    # aida.documents.figures.extract_docx_figures), so the OCR question
+    # does not arise for one.
+    is_docx = path.suffix.lower() == ".docx"
+    if use_ocr and is_docx:
+        use_ocr = False
+        why = "OCR applies to PDFs; a .docx is read directly"
     if use_ocr:
         if not args.yes:
             answer = input(f"Send {path.name!r} to Mistral OCR? [y/N] ").strip().lower()
@@ -87,7 +95,11 @@ def cmd_figures(args: argparse.Namespace) -> int:
         note = f"OCR not used — {why}"
 
     if backend == "builtin":
-        entries = extract_pdf_figures(path, assets)
+        if is_docx:
+            entries, docx_note = extract_docx_figures(path, assets)
+            note = "; ".join(part for part in (note, docx_note) if part)
+        else:
+            entries = extract_pdf_figures(path, assets)
     write_index(assets, path.name, entries, backend=backend, note=note)
 
     if args.json:
@@ -116,7 +128,8 @@ def cmd_figures(args: argparse.Namespace) -> int:
     print(f"figures: {len(entries)}")
     for entry in entries:
         caption = f" — {entry.caption}" if entry.caption else ""
-        print(f"  [{entry.confidence:<4}] {entry.label} (page {entry.page}, {entry.file}){caption}")
+        where = f"page {entry.page}, {entry.file}" if entry.page else entry.file
+        print(f"  [{entry.confidence:<4}] {entry.label} ({where}){caption}")
     return 0 if not note.startswith("OCR failed") else 1
 
 

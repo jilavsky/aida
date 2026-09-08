@@ -677,3 +677,133 @@ def test_a_pending_render_still_lands_when_the_timer_fires(qapp):
     bubble = panel.widget_at(0)
 
     assert pump_until(qapp, lambda: "streamed so far" in bubble.rendered_plain_text)
+
+
+# --- font size and drops on the transcript -----------------------------------
+
+
+def _bubble_point_size(bubble: MessageBubble) -> float:
+    """What the transcript will actually paint with: the view's own font,
+    which is also what Qt's Markdown importer bakes into each character's
+    format at render time."""
+    return bubble._view.document().defaultFont().pointSizeF()
+
+
+def test_refresh_fonts_resizes_messages_already_on_screen(qapp):
+    """Bug report: "changing font changes everything except the chat
+    history area".
+
+    The first fix re-rendered each bubble, which is necessary but not
+    sufficient: every bubble sets a style sheet on itself, and a style
+    sheet on an ancestor stops Qt's application-font cascade from ever
+    reaching the child — so the view kept the size it was built with and
+    re-rendering faithfully reproduced it.
+    """
+    from aida.ui.qt._qt import QApplication
+
+    original = QApplication.font()
+    try:
+        small = QApplication.font()
+        small.setPointSize(11)
+        QApplication.setFont(small)
+
+        panel = ChatPanel()
+        bubble = panel.add_user_message("some text in the transcript")
+        qapp.processEvents()
+        assert _bubble_point_size(bubble) == 11
+
+        big = QApplication.font()
+        big.setPointSize(22)
+        QApplication.setFont(big)
+        qapp.processEvents()
+        # The cascade alone does not reach it — this is the bug, pinned so
+        # nobody "simplifies" refresh_fonts back to a no-op.
+        assert _bubble_point_size(bubble) == 11
+
+        panel.refresh_fonts()
+        qapp.processEvents()
+        assert _bubble_point_size(bubble) == 22
+
+        # The small grey "user"/timestamp labels are deliberately pinned at
+        # 10px by their own style sheet and must stay that way — a style
+        # sheet outranks a widget font, which is what stops refresh_fonts
+        # from flattening the transcript into one uniform size.
+        assert "font-size: 10px" in bubble._meta_label.styleSheet()
+        assert bubble._meta_label.font().pixelSize() == 10
+    finally:
+        QApplication.setFont(original)
+
+
+def test_refresh_fonts_leaves_the_whole_transcript_at_the_application_font(qapp):
+    """The end state, not the mechanism: after refresh_fonts nothing in the
+    transcript is still at the old size, whether Qt's cascade got it there
+    (a tool-call row, which no style sheet blocks today) or refresh_fonts
+    had to say so explicitly (a message view, which one does). Pinning the
+    end state is what keeps a future widget nested under a style-sheeted
+    parent from quietly reintroducing the reported bug."""
+    from aida.ui.qt._qt import QApplication
+
+    original = QApplication.font()
+    try:
+        small = QApplication.font()
+        small.setPointSize(11)
+        QApplication.setFont(small)
+
+        panel = ChatPanel()
+        panel.handle_event(ToolCallStarted(call_id="c1", tool_name="read_file", arguments={}))
+        qapp.processEvents()
+        row = panel.widget_at(0)
+        assert isinstance(row, ToolCallRow)
+
+        big = QApplication.font()
+        big.setPointSize(22)
+        QApplication.setFont(big)
+        bubble = panel.add_user_message("and a message")
+        panel.refresh_fonts()
+        qapp.processEvents()
+
+        assert row.font().pointSizeF() == 22
+        assert _bubble_point_size(bubble) == 22
+    finally:
+        QApplication.setFont(original)
+
+
+def test_files_dropped_on_the_transcript_are_reported(qapp, tmp_path: Path):
+    """Bug report: "Adding it to the chat history area will be useful,
+    users may expect that to work also." The panel does not know what an
+    attachment is — it reports the drop and MainWindow hands it to the
+    input box, which is what makes a drop here identical to one on the
+    prompt box or a click on Attach…."""
+    from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
+    from PySide6.QtGui import QDropEvent
+
+    dropped_file = tmp_path / "curve.dat"
+    dropped_file.write_text("q I", encoding="utf-8")
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(dropped_file))])
+
+    panel = ChatPanel()
+    seen = []
+    panel.urls_dropped.connect(seen.append)
+    panel.dropEvent(
+        QDropEvent(
+            QPointF(10, 10),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+    )
+
+    assert [url.toLocalFile() for urls in seen for url in urls] == [str(dropped_file)]
+
+
+def test_message_views_do_not_swallow_drops(qapp):
+    """A read-only QTextBrowser still gets acceptDrops(True) from Qt, which
+    would eat a file dropped *on a message* before ChatPanel ever saw it —
+    the same trap the prompt box had."""
+    panel = ChatPanel()
+    bubble = panel.add_user_message("hello")
+
+    assert panel.acceptDrops()
+    assert not bubble._view.acceptDrops()

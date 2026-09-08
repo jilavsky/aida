@@ -3538,3 +3538,39 @@ def test_view_menu_hides_restores_and_resets_the_side_columns(
         assert all(action.isChecked() for action in window._column_actions.values())
     finally:
         window.close()
+
+
+def test_a_file_dropped_on_the_transcript_becomes_an_attachment(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    """The wiring between the two halves: ChatPanel reports the drop,
+    InputBox turns it into an attachment. Same end state as the Attach…
+    button, which is the whole point of the report ("users may expect that
+    to work also")."""
+    from PySide6.QtCore import QMimeData, QPointF, QUrl
+    from PySide6.QtGui import QDropEvent
+
+    dropped = tmp_path / "usaxs.dat"
+    dropped.write_text("q I", encoding="utf-8")
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(dropped))])
+
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        window.chat_panel.dropEvent(
+            QDropEvent(
+                QPointF(10, 10),
+                Qt.DropAction.CopyAction,
+                mime,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        qapp.processEvents()
+
+        assert window.input_box.attached_paths() == [str(dropped)]
+    finally:
+        window.close()
