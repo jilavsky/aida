@@ -1,6 +1,6 @@
 # pyIrena and AIDA
 
-> **Status: beta (0.1.0b5).** Phases 1–10 are implemented and in daily use.
+> **Status: beta (0.1.0b6).** Phases 1–10 are implemented and in daily use.
 > Config formats and CLI commands are stable enough to build on; anything
 > that has to change before 1.0 will be called out in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`PLAN.md`](../PLAN.md) for what is
@@ -59,7 +59,7 @@ MCP server is code AIDA launches on your machine.
 
 In order, best first:
 
-1. **AIDA's own environment** — the `pip install aida-workbench pyirena[mcp]`
+1. **AIDA's own environment** — the `pip install --pre aida-workbench pyirena[mcp]`
    into one env case.
 2. **`PATH`** — the active conda env when AIDA was started from a terminal.
 3. **`python -m pyirena.mcp.server`** with AIDA's interpreter, as a fallback
@@ -84,8 +84,8 @@ aida mcp add-pyirena --command /path/to/envs/pyirena/bin/pyirena-mcp
 **Both work.** Pick on other grounds:
 
 - **One shared environment** — simplest, and what most people should do on a
-  laptop. `pip install "aida-workbench[gui,docs]" "pyirena[all]"` in either
-  order.
+  laptop. `pip install --pre "aida-workbench[gui,docs]" "pyirena[all]"` in
+  either order.
 - **Two environments** — better when pyIrena's heavier stack (VTK/PyVista
   for the 3D viewer, Dans-Diffraction, xraydb) is something you'd rather
   keep away from AIDA, or when pyIrena is already installed somewhere you
@@ -123,7 +123,7 @@ looking at the other's requirements; it warns afterward rather than
 preventing the install. Re-resolving both together fixes it:
 
 ```bash
-pip install "aida-workbench[gui,docs]" "pyirena[all]"
+pip install --pre "aida-workbench[gui,docs]" "pyirena[all]"
 ```
 
 If that can't be satisfied, use two environments — nothing about AIDA's

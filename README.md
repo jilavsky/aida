@@ -1,6 +1,6 @@
 # AIDA — AI Data Assistant
 
-> **Status: beta (0.1.0b5).** Everything described below works today and is
+> **Status: beta (0.1.0b6).** Everything described below works today and is
 > in daily use. Config formats and CLI commands are stable enough to build
 > on; breaking changes before 1.0 will be called out in
 > [`CHANGELOG.md`](CHANGELOG.md). Bug reports and rough edges are exactly
@@ -49,7 +49,7 @@ a general-purpose AI platform — see [`PLAN.md`](PLAN.md) §1 for the rationale
 From PyPI (recommended):
 
 ```bash
-pip install "aida-workbench[gui,docs]"
+pip install --pre "aida-workbench[gui,docs]"
 aida doctor
 aida-gui
 ```
@@ -59,11 +59,16 @@ console scripts are `aida` / `aida-gui`. Extras: `gui` (PySide6 desktop app),
 `docs` (PDF/DOCX/XLSX/PPTX reading, image handling), `ocr` (the optional
 Mistral OCR backend for figure extraction).
 
+`--pre` matters: every release so far is a `0.1.0bN` pre-release, and pip
+never installs a pre-release over a stable one unless asked — omit it and
+you silently get the long-abandoned `0.0.1` snapshot instead of current
+beta, with no error to say so.
+
 Already using pyIrena? Install both — in either order, in one environment or
 two — and wire up its MCP tools with a single command:
 
 ```bash
-pip install "aida-workbench[gui,docs]" "pyirena[all]"
+pip install --pre "aida-workbench[gui,docs]" "pyirena[all]"
 aida mcp add-pyirena
 ```
 

@@ -1,6 +1,6 @@
 # Installation
 
-> **Status: beta (0.1.0b5).** Phases 1–10 are implemented and in daily use.
+> **Status: beta (0.1.0b6).** Phases 1–10 are implemented and in daily use.
 > Config formats and CLI commands are stable enough to build on; anything
 > that has to change before 1.0 will be called out in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`PLAN.md`](../PLAN.md) for what is
@@ -11,10 +11,15 @@
 ## Install from PyPI
 
 ```bash
-pip install "aida-workbench[gui,docs]"
+pip install --pre "aida-workbench[gui,docs]"
 aida doctor
 aida-gui
 ```
+
+`--pre` is required: every release so far is a `0.1.0bN` pre-release, and
+pip never installs a pre-release over a stable one unless asked — omit it
+and you silently get the long-abandoned `0.0.1` snapshot instead of the
+current beta, with no error to say so.
 
 The **PyPI distribution name is `aida-workbench`**, not `aida` — PyPI's
 automated name-confusion protection blocked the bare name (see PLAN.md §2).

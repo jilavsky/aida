@@ -16,6 +16,8 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+## [0.1.0b6] - 2026-09-08
+
 ### Added
 
 - **Figures can now be pulled out of Word documents.** Bug report: "I
@@ -63,6 +65,13 @@ decision revised), unrelated to what shipped when. Entries below link to
   windows-latest, immune to pytest's 30s per-test timeout since that hang
   was in fixture teardown, not the test body. `stop()` now gives up after
   10s and logs a warning instead of blocking the caller forever.
+- **Every documented `pip install aida-workbench` command was silently
+  installing the abandoned `0.0.1` snapshot, not the current beta.** Every
+  release so far is a `0.1.0bN` pre-release, and pip never prefers a
+  pre-release over a stable one unless asked — `0.0.1` predates the beta
+  entirely, so anyone following README.md or docs/ verbatim got it with no
+  error to say so. Every install command in README.md and `docs/` now
+  passes `--pre`.
 
 ### Changed
 
@@ -78,7 +87,7 @@ decision revised), unrelated to what shipped when. Entries below link to
   shows/hides either side column and resets the widths — the way back for a
   column dragged all the way shut.
 
-##  [0.1.0b5] - 2026-09-05
+## [0.1.0b5] - 2026-09-05
 
 setup for automatic link to pypi. Rerelease of b04. 
 
@@ -506,7 +515,9 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0b4...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0b6...HEAD
+[0.1.0b6]: https://github.com/jilavsky/aida/compare/v0.1.0b5...v0.1.0b6
+[0.1.0b5]: https://github.com/jilavsky/aida/compare/v0.1.0b4...v0.1.0b5
 [0.1.0b4]: https://github.com/jilavsky/aida/compare/v0.1.0b3...v0.1.0b4
 [0.1.0b3]: https://github.com/jilavsky/aida/compare/v0.1.0b2...v0.1.0b3
 [0.1.0b2]: https://github.com/jilavsky/aida/compare/v0.1.0b1...v0.1.0b2

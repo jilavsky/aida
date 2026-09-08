@@ -3,7 +3,7 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 0.1.0b5 (beta), reconciled 2026-09-04.** Phases 1–10's automation
+**Status: 0.1.0b6 (beta), reconciled 2026-09-08.** Phases 1–10's automation
 half are implemented, tested (1,700+ tests, three OSes) and in daily use.
 This file holds **only what is not done** — anything ticked here has been
 moved to `planning/COMPLETED.md`, and anything shipped is dated in
@@ -15,15 +15,15 @@ moved to `planning/COMPLETED.md`, and anything shipped is dated in
 - Per-phase checklists → `planning/phase01…phase10_*.md`
 - User-facing setup and configuration → [`docs/`](docs/README.md)
 
-Two companion proposals live at the repo root rather than in §1, because
+Two companion proposals live under `planning/` rather than in §1, because
 they are accepted-in-principle but not yet committed work. Items graduate
 from them into §1 as they are taken on:
 
-- [`PLAN_INSTRUMENT_INTEGRATION.md`](PLAN_INSTRUMENT_INTEGRATION.md) —
+- [`planning/PLAN_INSTRUMENT_INTEGRATION.md`](planning/PLAN_INSTRUMENT_INTEGRATION.md) —
   BeamlineAdvisor retirement, aievaluator, a safety-limited EPICS MCP, and
   the deployment model for `usaxscontrol`.
-- [`AIEVALUATOR_EPICS_MCP_SETUP.md`](AIEVALUATOR_EPICS_MCP_SETUP.md) — the
-  concrete wiring checklist for those two MCP servers.
+- [`planning/AIEVALUATOR_EPICS_MCP_SETUP.md`](planning/AIEVALUATOR_EPICS_MCP_SETUP.md) —
+  the concrete wiring checklist for those two MCP servers.
 
 Code comments and docstrings that cite "PLAN.md §N" or "PLAN.md Phase N"
 refer to the sections and phase files as they were before this split — the
@@ -50,9 +50,13 @@ gets a dated note appended there; error messages say *which* layer failed.
 
 Nothing here is speculative work; it is what a beta is for.
 
-- [ ] Publish `aida-workbench` 0.1.0b5 to PyPI and verify
-      `pip install "aida-workbench[gui,docs]"` → working `aida-gui` on a
-      clean macOS, Windows, and Linux machine.
+- [ ] Publish `aida-workbench` 0.1.0b6 to PyPI and verify
+      `pip install --pre "aida-workbench[gui,docs]"` → working `aida-gui` on
+      a clean macOS, Windows, and Linux machine. (`--pre` is required: pip
+      never prefers a pre-release over a stable one, so every prior
+      `0.1.0bN` publish left the bare `pip install aida-workbench` silently
+      resolving to the abandoned `0.0.1` snapshot instead — fixed in
+      README.md/docs/ for this release, but worth re-verifying end to end.)
 - [ ] First outside users installing from PyPI, with issues triaged into this
       file rather than fixed ad hoc.
 - [ ] Watch for the two things most likely to bite a new user: a provider
@@ -95,7 +99,7 @@ group switching, UC2, UC3, and live `ollama-local`/`argo-claude` profiles
       each left this box open for the same reason).
 - [ ] bait_mcp connects and lists its tools from AIDA (no instrument needed).
 - [ ] **UC5:** check beamline status via an AIEvaluator script plus bait_mcp
-      from an AIDA workspace. See `AIEVALUATOR_EPICS_MCP_SETUP.md` for the
+      from an AIDA workspace. See `planning/AIEVALUATOR_EPICS_MCP_SETUP.md` for the
       pre-flight commands.
 - [ ] **UC1 full:** a documentation folder indexed, answers citing retrieved
       passages, index rebuilt from the GUI; the same knowledge base working
@@ -201,7 +205,7 @@ concrete asks for it.
 - **Alternative web frontend** (NiceGUI or similar) on the same event API, for
   browser access from beamline LAN machines. Only worthwhile once the event
   API has proven stable through the PySide6 app. See
-  `PLAN_INSTRUMENT_INTEGRATION.md` §1.3 — this is one of the deployment
+  `planning/PLAN_INSTRUMENT_INTEGRATION.md` §1.3 — this is one of the deployment
   options there, and the one that would give users access without an install.
 - **Voice STT input** — macOS dictation already covers it; Windows/Linux would
   mean local Whisper, a heavy dependency. Criterion: real demand at the
@@ -296,7 +300,7 @@ workflow runner (`COMPLETED.md` §9) and has been removed from it.
   workspace's estimated schema-token budget next to the group tool count
   (§1.5 shipped the count). Directly helps small local models. Cheap
   enough to graduate to §1 whenever a workspace's tool list gets noisy —
-  and `PLAN_INSTRUMENT_INTEGRATION.md` §4 wants exactly this for the
+  and `planning/PLAN_INSTRUMENT_INTEGRATION.md` §4 wants exactly this for the
   `usaxs-user` / `usaxs-staff` split.
 - **Local feedback and a diagnostic bundle.** A thumbs-up/down plus
   optional note stored locally on an answer or tool run, and an "Export

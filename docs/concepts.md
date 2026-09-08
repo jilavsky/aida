@@ -199,7 +199,7 @@ the message as much as the filled ones do.
 ### 0. Prerequisites (once)
 
 ```bash
-pip install "aida-workbench[gui,docs]"
+pip install --pre "aida-workbench[gui,docs]"
 aida doctor          # must be clean before anything else
 aida-gui
 ```
