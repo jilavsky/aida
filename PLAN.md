@@ -189,6 +189,23 @@ concrete asks for it.
 
 ### 2.2 Transport and integration
 
+- **MCP tool-count scaling** (pyIrena-mcp's ~110 tools). A real session on
+  `usaxscontrol` hit the ANL Argo gateway's 128-tool cap with a combined
+  count of 137 — `array_above_max_length`, a proxy-side limit invisible
+  talking to a provider directly. `aida.core.session` warns past 100 tools
+  (shipped), and the MCP management dialog's Tools tab now groups a large
+  server's tools into collapsible categories (`aida.mcp.tool_grouping`,
+  shipped) instead of one flat scrolling checkbox list — both curation-UX
+  fixes, see `CHANGELOG.md`. **Still open:** neither reduces the 128-tool
+  cap or the per-turn schema-token cost if a workspace's selected
+  categories still add up to a large combined count. That needs Tier 2: a
+  fixed 3-4-tool dispatcher pattern built in pyIrena-mcp itself
+  (`pyirena_list_categories`/`list_tools`/`describe_tool`/`call`) reusing
+  pyIrena's existing `pyirena.api.control.schemas.TOOL_SCHEMA_BY_NAME`
+  registry — needs matching AIDA-side work (unpacking dispatcher calls for
+  `ToolCallRow` display, and re-deriving `confirm_tools` gating from the
+  dispatched tool name rather than the wrapper's). Full analysis in
+  [`planning/mcp_tool_scaling.md`](planning/mcp_tool_scaling.md).
 - **Remote MCP servers over HTTP/SSE** — instrument-side MCPs reachable from
   an office machine. The manager was designed transport-pluggable; add when a
   concrete remote server exists.

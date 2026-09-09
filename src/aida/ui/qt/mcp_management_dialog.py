@@ -45,6 +45,7 @@ from aida.mcp.manager import ConnectionTestResult
 from aida.mcp.pyirena_setup import DEFAULT_SERVER_NAME as PYIRENA_SERVER_NAME
 from aida.mcp.pyirena_setup import find_pyirena_mcp, pyirena_server_config, pyirena_version
 from aida.mcp.server import ToolCallRecord
+from aida.mcp.tool_grouping import group_tool_names
 from aida.ui.qt._qt import (
     QAbstractItemView,
     QCheckBox,
@@ -67,6 +68,7 @@ from aida.ui.qt._qt import (
     Qt,
     QTabWidget,
     QTextBrowser,
+    QToolButton,
     QUrl,
     QVBoxLayout,
     QWidget,
@@ -722,6 +724,92 @@ class _ToolPermissionRow(QWidget):
         layout.addWidget(self.confirm_checkbox)
 
 
+class _ToolCategoryHeader(QWidget):
+    """A collapsible section header for one tool category in the Tools tab
+    (planning/mcp_tool_scaling.md Tier 1) — a server exposing ~110 tools
+    (pyIrena-mcp) rendered as one flat, ever-scrolling checkbox list before
+    this; ``aida.mcp.tool_grouping.group_tool_names`` splits that into
+    named categories, and this widget is the header above each one: an
+    expand/collapse arrow (categories start collapsed, so opening a big
+    server's Tools tab doesn't itself dump 100+ rows on screen) and a
+    tri-state "all enabled" checkbox that bulk-toggles the category.
+
+    Only wired to each row's *Enabled* checkbox — "Confirm before run"
+    stays a deliberate per-tool choice, never mass-flipped by a category
+    action, since some tools in a category (pyIrena's session/instrument-
+    adjacent ``pyirena_ctrl_*`` calls, for one) plausibly mutate live
+    state and deserve individual attention.
+    """
+
+    def __init__(
+        self, name: str, rows: list[_ToolPermissionRow], parent: QWidget | None = None
+    ) -> None:
+        super().__init__(parent)
+        self.name = name
+        self.rows = rows
+        self._updating = False
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 6, 2, 2)
+
+        self._toggle_button = QToolButton(self)
+        self._toggle_button.setArrowType(Qt.ArrowType.RightArrow)
+        self._toggle_button.setCheckable(True)
+        self._toggle_button.setAutoRaise(True)
+        self._toggle_button.clicked.connect(self._on_toggle_clicked)
+        layout.addWidget(self._toggle_button)
+
+        label = QLabel(f"{name}  ({len(rows)} tools)", self)
+        label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(label, stretch=1)
+
+        self.select_all_checkbox = QCheckBox("All enabled", self)
+        self.select_all_checkbox.setTristate(True)
+        self.select_all_checkbox.clicked.connect(self._on_select_all_clicked)
+        layout.addWidget(self.select_all_checkbox)
+
+        for row in rows:
+            row.setVisible(False)  # collapsed by default
+            row.enabled_checkbox.stateChanged.connect(self._sync_from_children)
+        self._sync_from_children()
+
+    def _on_toggle_clicked(self) -> None:
+        expanded = self._toggle_button.isChecked()
+        self._toggle_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+        for row in self.rows:
+            row.setVisible(expanded)
+
+    def _on_select_all_clicked(self) -> None:
+        # Qt has already cycled the tristate checkbox by the time `clicked`
+        # fires; treat anything other than a plain Unchecked click result
+        # (Checked, or PartiallyChecked from the cycle) as "select all" —
+        # _sync_from_children immediately below corrects the checkbox to
+        # the category's *actual* resulting state either way, so a single
+        # click always lands on a determinate all-on/all-off rather than
+        # requiring a second click to escape "partial".
+        checked = self.select_all_checkbox.checkState() != Qt.CheckState.Unchecked
+        self._updating = True
+        for row in self.rows:
+            row.enabled_checkbox.setChecked(checked)
+        self._updating = False
+        self._sync_from_children()
+
+    def _sync_from_children(self) -> None:
+        if self._updating:
+            return
+        checked_count = sum(1 for row in self.rows if row.enabled_checkbox.isChecked())
+        self._updating = True
+        if checked_count == 0:
+            self.select_all_checkbox.setCheckState(Qt.CheckState.Unchecked)
+        elif checked_count == len(self.rows):
+            self.select_all_checkbox.setCheckState(Qt.CheckState.Checked)
+        else:
+            self.select_all_checkbox.setCheckState(Qt.CheckState.PartiallyChecked)
+        self._updating = False
+
+
 # --- Main dialog ---------------------------------------------------------
 
 
@@ -736,6 +824,7 @@ class McpManagementDialog(QDialog):
         self._bridge = bridge
         self._skills_dir = skills_dir
         self._tool_rows: list[_ToolPermissionRow] = []
+        self._tool_section_headers: list[_ToolCategoryHeader] = []
 
         outer = QHBoxLayout(self)
 
@@ -907,6 +996,10 @@ class McpManagementDialog(QDialog):
             row.setParent(None)
             row.deleteLater()
         self._tool_rows = []
+        for header in self._tool_section_headers:
+            header.setParent(None)
+            header.deleteLater()
+        self._tool_section_headers = []
 
     def _live_tool_names(self, name: str) -> list[str]:
         manager = self._bridge.mcp_manager if self._bridge is not None else None
@@ -928,15 +1021,28 @@ class McpManagementDialog(QDialog):
                 hint
             )  # reused as a "row" purely so _clear_tool_rows tears it down too
             return
-        for tool_name in known_names:
-            row = _ToolPermissionRow(
-                tool_name,
-                disabled=tool_name in server.disabled_tools,
-                confirm=tool_name in server.confirm_tools,
-                parent=self._tools_container,
-            )
-            self._tools_layout.insertWidget(self._tools_layout.count() - 1, row)
-            self._tool_rows.append(row)
+        # planning/mcp_tool_scaling.md Tier 1: a server with a handful of
+        # tools renders exactly as before (group_tool_names returns one
+        # name=None section, so no header appears); a big one (pyIrena-mcp,
+        # ~110 tools) gets collapsible category headers instead of one
+        # ever-scrolling flat list.
+        for group in group_tool_names(known_names):
+            rows = [
+                _ToolPermissionRow(
+                    tool_name,
+                    disabled=tool_name in server.disabled_tools,
+                    confirm=tool_name in server.confirm_tools,
+                    parent=self._tools_container,
+                )
+                for tool_name in group.tools
+            ]
+            if group.name is not None:
+                header = _ToolCategoryHeader(group.name, rows, parent=self._tools_container)
+                self._tools_layout.insertWidget(self._tools_layout.count() - 1, header)
+                self._tool_section_headers.append(header)
+            for row in rows:
+                self._tools_layout.insertWidget(self._tools_layout.count() - 1, row)
+                self._tool_rows.append(row)
 
     def _refresh_log_tab(self, name: str) -> None:
         self._log_list.clear()

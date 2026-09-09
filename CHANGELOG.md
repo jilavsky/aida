@@ -16,6 +16,29 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Added
+
+- **The MCP Servers dialog's Tools tab now groups a large server's tools
+  into collapsible categories instead of one ever-scrolling flat
+  checkbox list.** Follow-up to the tool-count warning below and
+  `planning/mcp_tool_scaling.md`'s Tier 1: pyIrena-mcp alone registers
+  ~110 tools, and curating `disabled_tools` one checkbox at a time across
+  all of them wasn't workable, even with the scroll area already added
+  for exactly this problem. `aida.mcp.tool_grouping.group_tool_names` is a
+  generic longest-common-prefix-then-bucket algorithm over each tool
+  name's `_`-separated tokens (not a `pyirena_ctrl_`-specific regex), so
+  it produces sensible categories for any MCP server with a similar
+  `<namespace>_<category>_<verb>` naming habit — for pyIrena, this splits
+  the ~110 tools into `ctrl/waxs`, `ctrl/sizes`, `ctrl/simple`,
+  `ctrl/modeling`, `read`, and a handful of smaller categories, each with
+  its own collapsible header and a tri-state "All enabled" checkbox that
+  bulk-toggles the whole category in one click. A small server's tool
+  list (below the grouping threshold) renders exactly as before, with no
+  header at all. Deliberately only bulk-toggles the *Enabled* checkbox,
+  never "Confirm before run" — that per-tool safety choice stays
+  individual, since some `pyirena_ctrl_*` calls plausibly mutate live
+  session/instrument-adjacent state.
+
 ### Fixed
 
 - **Chat error banners can now be copied.** Bug report: "I attach picture,

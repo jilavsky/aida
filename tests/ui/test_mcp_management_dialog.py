@@ -693,6 +693,71 @@ def test_tools_tab_is_scrollable_not_ever_growing(qapp, aida_home: Path):
     assert scroll_areas[0].widgetResizable() is True
 
 
+def test_tools_tab_groups_a_large_servers_tools_into_categories(qapp, aida_home: Path):
+    """planning/mcp_tool_scaling.md Tier 1: a pyIrena-shaped tool list must
+    render as collapsible categories, not one flat 110-row list — and
+    every tool must still end up as a real _ToolPermissionRow, so
+    _on_save_tool_permissions (which reads dialog._tool_rows) is
+    unaffected by the grouping."""
+    from tests.test_mcp_tool_grouping import PYIRENA_TOOL_NAMES
+
+    settings = load_settings()
+    settings.mcp = McpConfig(
+        servers={
+            "pyirena": McpServerConfig(
+                name="pyirena", command="/x", disabled_tools=list(PYIRENA_TOOL_NAMES)
+            )
+        }
+    )
+    dialog = McpManagementDialog(settings, None, aida_home / "skills")
+    dialog._server_list.setCurrentRow(0)
+
+    assert len(dialog._tool_rows) == len(PYIRENA_TOOL_NAMES)
+    assert {row.tool_name for row in dialog._tool_rows} == set(PYIRENA_TOOL_NAMES)
+    assert dialog._tool_section_headers, "a 110-tool server must get category headers"
+    header_names = {header.name for header in dialog._tool_section_headers}
+    assert {"ctrl/waxs", "ctrl/sizes", "ctrl/simple", "ctrl/modeling"} <= header_names
+    # Every category's rows start hidden (collapsed) until its arrow is clicked.
+    for header in dialog._tool_section_headers:
+        assert all(not row.isVisible() for row in header.rows)
+
+
+def test_tools_tab_category_select_all_bulk_disables_and_persists(qapp, aida_home: Path):
+    """Unchecking a category header's 'All enabled' checkbox must disable
+    every tool in that category in one click, and Save must persist
+    exactly that set to disabled_tools — the whole point of Tier 1 over
+    ~110 individual checkboxes."""
+    from tests.test_mcp_tool_grouping import PYIRENA_TOOL_NAMES
+
+    settings = load_settings()
+    settings.mcp = McpConfig(
+        servers={"pyirena": McpServerConfig(name="pyirena", command="/x", disabled_tools=[])}
+    )
+    dialog = McpManagementDialog(settings, None, aida_home / "skills")
+    # _refresh_tools_tab only learns about a tool via _live_tool_names,
+    # disabled_tools, or confirm_tools — stub the first so every tool
+    # starts *enabled* (unlike the other test, which uses disabled_tools
+    # and so starts every tool already unchecked). __init__ already
+    # auto-selected row 0 and rendered the Tools tab before this stub was
+    # in place, so force a re-render explicitly rather than relying on
+    # setCurrentRow (a no-op — the row is already current).
+    dialog._live_tool_names = lambda name: list(PYIRENA_TOOL_NAMES)  # type: ignore[method-assign]
+    dialog._refresh_detail()
+
+    waxs_header = next(h for h in dialog._tool_section_headers if h.name == "ctrl/waxs")
+    assert waxs_header.select_all_checkbox.checkState() == Qt.CheckState.Checked
+    waxs_header.select_all_checkbox.click()
+
+    assert all(not row.enabled_checkbox.isChecked() for row in waxs_header.rows)
+    assert waxs_header.select_all_checkbox.checkState() == Qt.CheckState.Unchecked
+
+    dialog._on_save_tool_permissions()
+
+    waxs_tool_names = {row.tool_name for row in waxs_header.rows}
+    assert waxs_tool_names <= {n for n in PYIRENA_TOOL_NAMES if "waxs" in n}
+    assert set(settings.mcp.servers["pyirena"].disabled_tools) == waxs_tool_names
+
+
 def test_closing_the_dialog_disconnects_it_from_the_bridge(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
