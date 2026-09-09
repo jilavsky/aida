@@ -49,6 +49,7 @@ from aida.ui.qt._qt import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     Qt,
     QVBoxLayout,
@@ -89,10 +90,24 @@ class WorkspaceFormDialog(QDialog):
         self._original = workspace
         self._previous_safety = workspace.safety if workspace else None
         self.setWindowTitle("Edit Workspace" if self._is_edit else "Add Workspace")
-        self.resize(520, 640)
+        self.resize(620, 680)
 
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+
+        # The form outgrew a fixed-height dialog: seventeen rows, several of
+        # them multi-line editors. Scrolling the *form* rather than the whole
+        # dialog keeps OK/Cancel permanently visible at the bottom — on a
+        # laptop the alternative is a dialog taller than the screen whose
+        # buttons cannot be reached.
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        # Vertically only. Left on, the form's own width hint (a label column
+        # plus a field plus a Browse… button) exceeds the viewport and the
+        # browse buttons scroll off the right edge instead of the fields
+        # simply narrowing to fit.
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget(scroll)
+        form = QFormLayout(content)
 
         self._name_edit = QLineEdit(workspace.name if workspace else "", self)
         self._name_edit.setReadOnly(self._is_edit)  # name is the identity; not renameable in-place
@@ -185,12 +200,6 @@ class WorkspaceFormDialog(QDialog):
         system_prompt_row.addWidget(load_file_button)
         form.addRow("System prompt:", system_prompt_row)
 
-        self._scripting_checkbox = QCheckBox(
-            "Allow running scripts/commands in this workspace", self
-        )
-        self._scripting_checkbox.setChecked(workspace.scripting_enabled if workspace else True)
-        form.addRow("Scripting:", self._scripting_checkbox)
-
         self._use_ocr_checkbox = QCheckBox(
             "Use Mistral OCR for figures in attached documents", self
         )
@@ -203,39 +212,89 @@ class WorkspaceFormDialog(QDialog):
         )
         form.addRow("Document OCR:", self._use_ocr_checkbox)
 
+        # Everything that governs running code is boxed together rather than
+        # scattered through the flat form: these six settings are only
+        # meaningful in relation to each other (an interpreter and a
+        # templates folder are inert if the checkbox above them is off), and
+        # a workspace that never runs anything can now skip the whole block
+        # at a glance.
+        scripting_group = QGroupBox("Scripting", content)
+        scripting_form = QFormLayout(scripting_group)
+
+        self._scripting_checkbox = QCheckBox(
+            "Allow running scripts/commands in this workspace", scripting_group
+        )
+        self._scripting_checkbox.setChecked(workspace.scripting_enabled if workspace else True)
+        scripting_form.addRow("Enabled:", self._scripting_checkbox)
+
         interpreter_row = QHBoxLayout()
-        self._interpreter_edit = QLineEdit(workspace.python_interpreter if workspace else "", self)
+        self._interpreter_edit = QLineEdit(
+            workspace.python_interpreter if workspace else "", scripting_group
+        )
         self._interpreter_edit.setPlaceholderText(
             "(default: the interpreter AIDA itself runs under)"
         )
         interpreter_row.addWidget(self._interpreter_edit, stretch=1)
-        interpreter_browse = QPushButton("Browse…", self)
+        interpreter_browse = QPushButton("Browse…", scripting_group)
         interpreter_browse.clicked.connect(self._on_browse_interpreter)
         interpreter_row.addWidget(interpreter_browse)
-        form.addRow("Python interpreter:", interpreter_row)
+        scripting_form.addRow("Python interpreter:", interpreter_row)
 
         self._command_allowlist_edit = QPlainTextEdit(
-            "\n".join(workspace.command_allowlist) if workspace else "", self
+            "\n".join(workspace.command_allowlist) if workspace else "", scripting_group
         )
         self._command_allowlist_edit.setPlaceholderText(
             "One allowed command pattern per line, e.g. git status"
         )
         self._command_allowlist_edit.setMaximumHeight(80)
-        form.addRow("Command allowlist:", self._command_allowlist_edit)
+        scripting_form.addRow("Command allowlist:", self._command_allowlist_edit)
 
         # B5: previously hardcoded to 30s with no per-workspace override —
         # a workspace whose scripts legitimately run long (a multi-minute
         # reduction/fit) had no way to raise it short of hand-editing
         # workspaces.yaml.
-        self._script_timeout_spin = QSpinBox(self)
+        self._script_timeout_spin = QSpinBox(scripting_group)
         self._script_timeout_spin.setRange(1, 3600)
         self._script_timeout_spin.setSuffix(" s")
         self._script_timeout_spin.setValue(
             int(workspace.script_timeout_seconds) if workspace else 30
         )
-        form.addRow("Script/command timeout:", self._script_timeout_spin)
+        scripting_form.addRow("Script/command timeout:", self._script_timeout_spin)
 
-        layout.addLayout(form)
+        templates_row = QHBoxLayout()
+        self._templates_dir_edit = QLineEdit(
+            workspace.templates_dir if workspace else "", scripting_group
+        )
+        self._templates_dir_edit.setPlaceholderText("(none)")
+        self._templates_dir_edit.setToolTip(
+            "A flat folder of .py files whose docstrings are shown to the model as this "
+            "workspace's house conventions for generated scripts. The source is not sent — "
+            "only each file's name and module docstring."
+        )
+        templates_row.addWidget(self._templates_dir_edit, stretch=1)
+        templates_browse = QPushButton("Browse…", scripting_group)
+        templates_browse.clicked.connect(self._on_browse_templates_dir)
+        templates_row.addWidget(templates_browse)
+        scripting_form.addRow("Templates folder:", templates_row)
+
+        saved_scripts_row = QHBoxLayout()
+        self._saved_scripts_dir_edit = QLineEdit(
+            workspace.saved_scripts_dir if workspace else "", scripting_group
+        )
+        self._saved_scripts_dir_edit.setPlaceholderText("(default: <target folder>/saved_scripts)")
+        self._saved_scripts_dir_edit.setToolTip(
+            "Where the Code Editor's Save/Save As write scripts."
+        )
+        saved_scripts_row.addWidget(self._saved_scripts_dir_edit, stretch=1)
+        saved_scripts_browse = QPushButton("Browse…", scripting_group)
+        saved_scripts_browse.clicked.connect(self._on_browse_saved_scripts_dir)
+        saved_scripts_row.addWidget(saved_scripts_browse)
+        scripting_form.addRow("Saved scripts folder:", saved_scripts_row)
+
+        form.addRow(scripting_group)
+
+        scroll.setWidget(content)
+        layout.addWidget(scroll, stretch=1)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
@@ -250,6 +309,20 @@ class WorkspaceFormDialog(QDialog):
         )
         if folder:
             self._target_folder_edit.setText(folder)
+
+    def _on_browse_templates_dir(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Code Templates Folder", self._templates_dir_edit.text()
+        )
+        if folder:
+            self._templates_dir_edit.setText(folder)
+
+    def _on_browse_saved_scripts_dir(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Saved Scripts Folder", self._saved_scripts_dir_edit.text()
+        )
+        if folder:
+            self._saved_scripts_dir_edit.setText(folder)
 
     def _on_browse_interpreter(self) -> None:
         path, _filter = QFileDialog.getOpenFileName(
@@ -298,8 +371,10 @@ class WorkspaceFormDialog(QDialog):
         form doesn't show reverted to its dataclass default the moment the
         user pressed OK in the Workspaces… dialog. ``quick_tasks`` (edited
         in the main window's own panel, never in this form) was silently
-        emptied; ``templates_dir`` and ``saved_scripts_dir`` (settable by
-        hand in ``workspaces.yaml``) were reset to ``None`` the same way.
+        emptied; ``templates_dir`` and ``saved_scripts_dir`` were reset to
+        ``None`` the same way — those two now have widgets of their own in
+        the Scripting group, so only ``quick_tasks`` and ``notes``, both
+        edited in panels elsewhere, are still carried across.
 
         Carrying them over from ``self._original`` is deliberately explicit
         rather than a ``replace()`` over the whole dataclass: a new field
@@ -334,11 +409,11 @@ class WorkspaceFormDialog(QDialog):
             scripting_enabled=self._scripting_checkbox.isChecked(),
             use_ocr=self._use_ocr_checkbox.isChecked(),
             script_timeout_seconds=float(self._script_timeout_spin.value()),
+            templates_dir=self._templates_dir_edit.text().strip() or None,
+            saved_scripts_dir=self._saved_scripts_dir_edit.text().strip() or None,
             # Not editable in this form — preserved, not reset:
             quick_tasks=list(original.quick_tasks) if original else [],
             notes=original.notes if original else "",
-            templates_dir=original.templates_dir if original else None,
-            saved_scripts_dir=original.saved_scripts_dir if original else None,
         )
 
 
@@ -360,6 +435,11 @@ def _workspace_detail_lines(
         f"python_interpreter: {workspace.python_interpreter or '(default)'}",
         f"command_allowlist: {', '.join(workspace.command_allowlist) or '(none)'}",
         f"script_timeout_seconds: {workspace.script_timeout_seconds:g}",
+        f"templates_dir: {workspace.templates_dir or '(none)'}",
+        (
+            "saved_scripts_dir: "
+            f"{workspace.saved_scripts_dir or '(default: <target_folder>/saved_scripts)'}"
+        ),
         f"quick_tasks: {', '.join(t.name for t in workspace.quick_tasks) or '(none)'}",
         f"notes: {'(set)' if workspace.notes.strip() else '(none)'}",
         f"system_prompt: {'(set)' if workspace.system_prompt else '(none)'}",

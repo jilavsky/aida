@@ -18,6 +18,41 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Added
 
+- **`edit_file`: the agent can now change part of a file instead of
+  rewriting all of it.** Until now the only way to modify a file was
+  `write_file` with `overwrite=true` — a full rewrite. For the workflow
+  AIDA is actually built around (a user iterating on a 100-300 line
+  instrument plan or reduction script, revising it repeatedly) that meant
+  the model re-emitting the entire file every single turn: slow,
+  expensive, and a fresh chance to drop a comment block each time.
+  `edit_file` takes the exact text to replace and the text to put in its
+  place, and reports a bounded unified diff of what changed — visible in
+  the tool-call row, so an edit is reviewable without opening the file.
+  Exact text rather than line numbers or a diff payload, deliberately:
+  `read_file` emits no line numbers, and diff-format *input* is unreliable
+  from the smaller local models AIDA supports. If the text matches more
+  than once it changes nothing and says how many times it matched, rather
+  than guessing which one was meant (`replace_all=true` opts in to all of
+  them). Safety is unchanged and shared with `write_file` — same
+  allowed-folders check, same per-write confirmation in `confirm` mode.
+  CRLF files keep their line endings, so a one-line edit on Windows does
+  not come back as a whole-file diff.
+
+- **The Workspaces… dialog now edits `templates_dir` and
+  `saved_scripts_dir`,** the last two `WorkspaceConfig` fields that were
+  CLI/config-file only. `templates_dir` in particular is the field that
+  teaches the model a workspace's house conventions for generated scripts
+  (it surfaces each template's docstring, not its source), which makes it
+  the single most useful knob for a beamline-user workspace whose whole
+  purpose is authoring instrument plans — and it was the one knob those
+  users' setup could not reach without a terminal. Both are folder pickers
+  in a new **Scripting** group box that also collects `scripting_enabled`,
+  `python_interpreter`, `command_allowlist` and the script timeout; the
+  form as a whole now scrolls, so a dialog that had grown to seventeen
+  rows keeps OK/Cancel reachable on a laptop screen. `quick_tasks` and
+  `notes`, both edited in their own panels, remain the only fields the
+  form carries across untouched.
+
 - **The MCP Servers dialog's Tools tab now groups a large server's tools
   into collapsible categories instead of one ever-scrolling flat
   checkbox list.** Follow-up to the tool-count warning below and

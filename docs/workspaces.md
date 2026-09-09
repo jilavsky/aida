@@ -110,22 +110,16 @@ closing the app without saving discards the changes.
 Separately, the toolbar's **Workspaces…** button opens the Workspace
 Management dialog — Add…/Edit…/Remove… against the full list of saved
 workspaces, persisted immediately (no "Save to Workspace" step). Its
-Add/Edit form covers every field except `templates_dir`/`saved_scripts_dir`
-(see the gap note below), including several the Folders panel above has no
-control for at all: `profile`, `mcp_group`, `skills`, `knowledge_bases`,
-`system_prompt`, `safety`, `scripting_enabled`, and the **Script/command
-timeout** spinner (1-3600s) for `script_timeout_seconds`.
+Add/Edit form covers every field the Folders panel above has no control for
+at all: `profile`, `mcp_group`, `skills`, `knowledge_bases`,
+`system_prompt`, `safety`, and a **Scripting** group holding
+`scripting_enabled`, `python_interpreter`, `command_allowlist`, the
+**Script/command timeout** spinner (1-3600s) for `script_timeout_seconds`,
+and folder pickers for `templates_dir` and `saved_scripts_dir`.
 
-## Current gap: two fields are config-file only
-
-Two fields are CLI/config-file only for now — neither the Folders panel nor
-the Workspace Management dialog has a control for either:
-
-- `templates_dir`
-- `saved_scripts_dir`
-
-Edit these with `aida workspace edit <name> --templates-dir ... --saved-scripts-dir ...`
-or by hand-editing `workspaces.yaml`.
+The only two fields it does not edit are `quick_tasks` and `notes`, each of
+which has its own panel in the main window; both survive an edit here
+untouched.
 
 ## Full example
 

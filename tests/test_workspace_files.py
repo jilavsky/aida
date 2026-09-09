@@ -299,6 +299,218 @@ async def test_write_file_confirm_mode_declined_raises_error_result(tmp_path: Pa
     assert not (tmp_path / "out.txt").exists()
 
 
+# --- edit_file --------------------------------------------------------
+
+
+PLAN_SOURCE = """\
+def usaxs_step(det, motor):
+    # move to the start of the scan
+    yield from bps.mv(motor, start)
+    for i in range(10):
+        yield from bps.trigger_and_read([det])
+"""
+
+
+@pytest.mark.asyncio
+async def test_edit_file_replaces_single_match_and_returns_diff(tmp_path: Path):
+    target = tmp_path / "plan.py"
+    target.write_text(PLAN_SOURCE)
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(
+        tools,
+        "edit_file",
+        path=str(target),
+        old_text="for i in range(10):",
+        new_text="for i in range(npts):",
+    )
+
+    assert not result.is_error
+    assert "for i in range(npts):" in target.read_text()
+    # Everything else survives — the point of the tool.
+    assert "# move to the start of the scan" in target.read_text()
+    assert "1 replacement in" in result.content
+    assert "-    for i in range(10):" in result.content
+    assert "+    for i in range(npts):" in result.content
+    assert isinstance(result.artifacts[0], FileArtifact)
+
+
+@pytest.mark.asyncio
+async def test_edit_file_no_match_leaves_file_untouched(tmp_path: Path):
+    target = tmp_path / "plan.py"
+    target.write_text(PLAN_SOURCE)
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(
+        tools, "edit_file", path=str(target), old_text="not in the file", new_text="x"
+    )
+
+    assert result.is_error
+    assert "not found" in result.content
+    assert target.read_text() == PLAN_SOURCE
+
+
+@pytest.mark.asyncio
+async def test_edit_file_ambiguous_match_refuses(tmp_path: Path):
+    target = tmp_path / "plan.py"
+    target.write_text("value = 1\nvalue = 1\n")
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(tools, "edit_file", path=str(target), old_text="value = 1", new_text="v=2")
+
+    assert result.is_error
+    assert "appears 2 times" in result.content
+    assert target.read_text() == "value = 1\nvalue = 1\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_replace_all_changes_every_occurrence(tmp_path: Path):
+    target = tmp_path / "plan.py"
+    target.write_text("value = 1\nvalue = 1\n")
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(
+        tools,
+        "edit_file",
+        path=str(target),
+        old_text="value = 1",
+        new_text="value = 2",
+        replace_all=True,
+    )
+
+    assert not result.is_error
+    assert target.read_text() == "value = 2\nvalue = 2\n"
+    assert "2 replacements in" in result.content
+
+
+@pytest.mark.asyncio
+async def test_edit_file_empty_new_text_deletes_the_block(tmp_path: Path):
+    target = tmp_path / "plan.py"
+    target.write_text(PLAN_SOURCE)
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(
+        tools,
+        "edit_file",
+        path=str(target),
+        old_text="    # move to the start of the scan\n",
+        new_text="",
+    )
+
+    assert not result.is_error
+    assert "# move to the start of the scan" not in target.read_text()
+    assert "yield from bps.mv(motor, start)" in target.read_text()
+
+
+@pytest.mark.asyncio
+async def test_edit_file_preserves_crlf_line_endings(tmp_path: Path):
+    target = tmp_path / "plan.py"
+    target.write_bytes(b"alpha = 1\r\nbeta = 2\r\ngamma = 3\r\n")
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(
+        tools, "edit_file", path=str(target), old_text="beta = 2", new_text="beta = 20"
+    )
+
+    assert not result.is_error
+    # The edited line and, crucially, every line it did not touch.
+    assert target.read_bytes() == b"alpha = 1\r\nbeta = 20\r\ngamma = 3\r\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_matches_lf_old_text_against_a_crlf_file(tmp_path: Path):
+    """A model has no way to know the file it just read was authored on
+    Windows, so it will send LF in old_text regardless."""
+    target = tmp_path / "plan.py"
+    target.write_bytes(b"alpha = 1\r\nbeta = 2\r\n")
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(
+        tools, "edit_file", path=str(target), old_text="alpha = 1\nbeta = 2", new_text="alpha = 9"
+    )
+
+    assert not result.is_error
+    assert target.read_bytes() == b"alpha = 9\r\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_rejects_empty_old_text(tmp_path: Path):
+    target = tmp_path / "plan.py"
+    target.write_text(PLAN_SOURCE)
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(tools, "edit_file", path=str(target), old_text="", new_text="x")
+
+    assert result.is_error
+    assert target.read_text() == PLAN_SOURCE
+
+
+@pytest.mark.asyncio
+async def test_edit_file_rejects_a_binary_file(tmp_path: Path):
+    target = tmp_path / "blob.bin"
+    target.write_bytes(b"\xff\xfe\x00\x01binary")
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(tools, "edit_file", path=str(target), old_text="binary", new_text="text")
+
+    assert result.is_error
+    assert "not a UTF-8 text file" in result.content
+    assert target.read_bytes() == b"\xff\xfe\x00\x01binary"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_rejects_an_oversized_file(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("aida.workspace.files.EDIT_MAX_FILE_BYTES", 16)
+    target = tmp_path / "plan.py"
+    target.write_text(PLAN_SOURCE)
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(
+        tools, "edit_file", path=str(target), old_text="range(10)", new_text="range(2)"
+    )
+
+    assert result.is_error
+    assert "larger than edit_file" in result.content
+    assert target.read_text() == PLAN_SOURCE
+
+
+@pytest.mark.asyncio
+async def test_edit_file_diff_is_truncated_for_a_huge_replace_all(tmp_path: Path):
+    target = tmp_path / "plan.py"
+    target.write_text("value = 1\n" * 200)
+    tools = default_file_tools(_guard(tmp_path))
+
+    result = await _call(
+        tools,
+        "edit_file",
+        path=str(target),
+        old_text="value = 1",
+        new_text="value = 2",
+        replace_all=True,
+    )
+
+    assert not result.is_error
+    assert "… (diff truncated)" in result.content
+    assert len(result.content.splitlines()) < 80
+
+
+@pytest.mark.asyncio
+async def test_edit_file_confirm_mode_declined_leaves_file_untouched(tmp_path: Path):
+    from aida.workspace.safety import deny_all
+
+    target = tmp_path / "plan.py"
+    target.write_text(PLAN_SOURCE)
+    guard = SafetyGuard(allowed_roots=[tmp_path], mode="confirm", confirm_callback=deny_all)
+    tools = default_file_tools(guard)
+
+    result = await _call(
+        tools, "edit_file", path=str(target), old_text="range(10)", new_text="range(2)"
+    )
+
+    assert result.is_error
+    assert target.read_text() == PLAN_SOURCE
+
+
 # --- create_directory --------------------------------------------------------
 
 

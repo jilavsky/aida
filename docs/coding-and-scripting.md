@@ -34,8 +34,8 @@ aida workspace edit <name> --no-scripting-enabled   # turn scripting off
 aida workspace edit <name> --scripting-enabled      # turn it back on
 ```
 
-There's no GUI control for this field yet — it's CLI/config-file only (edit
-`workspaces.yaml` directly, or use the flags above).
+In the GUI it's the **Enabled** checkbox at the top of the **Workspaces…**
+dialog's **Scripting** group.
 
 ## `python_interpreter` — which Python runs your scripts
 
@@ -138,7 +138,8 @@ source) to the model, so it follows your house conventions when writing
 instrument functions. A template file that fails to parse is silently
 skipped rather than breaking the whole session.
 
-There's no GUI editor for this field yet — it's CLI/config-file only:
+Set it in the GUI's **Workspaces…** dialog, under **Scripting → Templates
+folder**, or from the CLI:
 
 ```bash
 aida workspace edit <name> --templates-dir ~/bits-usaxs/templates
@@ -157,7 +158,8 @@ workspace's target folder:
 aida workspace edit <name> --saved-scripts-dir ~/bits-usaxs/scripts
 ```
 
-Like `templates_dir`, there's no GUI control for this field yet.
+Like `templates_dir`, it also sits in the **Workspaces…** dialog's
+**Scripting** group.
 
 ## The Code Editor dialog
 

@@ -47,6 +47,8 @@ def test_workspace_form_seeds_fields_when_editing(qapp, aida_home: Path):
         python_interpreter="/usr/bin/python3",
         command_allowlist=["git status"],
         script_timeout_seconds=180.0,
+        templates_dir="/data/templates",
+        saved_scripts_dir="/data/scripts",
     )
     dialog = WorkspaceFormDialog(
         settings=settings, skills_dir=aida_home / "skills", workspace=workspace
@@ -64,6 +66,44 @@ def test_workspace_form_seeds_fields_when_editing(qapp, aida_home: Path):
     assert dialog._interpreter_edit.text() == "/usr/bin/python3"
     assert dialog._command_allowlist_edit.toPlainText() == "git status"
     assert dialog._script_timeout_spin.value() == 180
+    assert dialog._templates_dir_edit.text() == "/data/templates"
+    assert dialog._saved_scripts_dir_edit.text() == "/data/scripts"
+
+
+def test_workspace_form_scripting_folders_round_trip_into_result_config(qapp, aida_home: Path):
+    """templates_dir/saved_scripts_dir were the last two WorkspaceConfig
+    fields with no GUI control at all — CLI or hand-edited workspaces.yaml
+    only — which mattered because templates_dir is the field that teaches
+    the model a workspace's house conventions for generated scripts."""
+    settings = _settings_with_a_profile(aida_home)
+    dialog = WorkspaceFormDialog(settings=settings, skills_dir=aida_home / "skills")
+    dialog._name_edit.setText("usaxs-plans")
+    dialog._templates_dir_edit.setText("  /repo/templates  ")
+    dialog._saved_scripts_dir_edit.setText("/repo/users/jan/scripts")
+
+    config = dialog.result_config()
+
+    assert config.templates_dir == "/repo/templates"
+    assert config.saved_scripts_dir == "/repo/users/jan/scripts"
+
+
+def test_workspace_form_blank_scripting_folders_become_none(qapp, aida_home: Path):
+    """Empty means "unset", not an empty string — saved_scripts_dir=None is
+    what makes it fall back to <target_folder>/saved_scripts."""
+    settings = _settings_with_a_profile(aida_home)
+    workspace = WorkspaceConfig(
+        name="pyirena", templates_dir="/data/templates", saved_scripts_dir="/data/scripts"
+    )
+    dialog = WorkspaceFormDialog(
+        settings=settings, skills_dir=aida_home / "skills", workspace=workspace
+    )
+    dialog._templates_dir_edit.setText("")
+    dialog._saved_scripts_dir_edit.setText("   ")
+
+    config = dialog.result_config()
+
+    assert config.templates_dir is None
+    assert config.saved_scripts_dir is None
 
 
 def test_workspace_form_defaults_when_adding(qapp, aida_home: Path):
@@ -321,7 +361,11 @@ def test_editing_a_workspace_keeps_fields_the_form_does_not_show(
     disappear." The form rebuilt the whole WorkspaceConfig from its own
     widgets, so pressing OK in the Workspaces… dialog reset every field it
     doesn't display — quick_tasks above all, which are edited in the main
-    window's panel and never here."""
+    window's panel and never here.
+
+    templates_dir/saved_scripts_dir have widgets of their own now, so they
+    are asserted here as a plain unchanged round-trip rather than as a
+    carry-over; quick_tasks is still the carry-over this guards."""
     settings = _settings_with_a_profile(aida_home)
     settings.workspaces.workspaces["pyirena"] = WorkspaceConfig(
         name="pyirena",
@@ -391,3 +435,17 @@ def test_workspace_details_show_document_ocr_setting(qapp, aida_home: Path):
     dialog._workspace_list.setCurrentRow(0)
 
     assert "use_ocr: True" in dialog._details_label.text()
+
+
+def test_workspace_details_show_the_scripting_folders(qapp, aida_home: Path):
+    settings = _settings_with_a_profile(aida_home)
+    settings.workspaces.workspaces["plans"] = WorkspaceConfig(
+        name="plans", templates_dir="/repo/templates"
+    )
+    dialog = WorkspaceManagementDialog(settings, aida_home / "skills")
+    dialog._workspace_list.setCurrentRow(0)
+
+    text = dialog._details_label.text()
+    assert "templates_dir: /repo/templates" in text
+    # Unset reads as its effective behaviour, not a bare "(none)".
+    assert "saved_scripts_dir: (default: <target_folder>/saved_scripts)" in text

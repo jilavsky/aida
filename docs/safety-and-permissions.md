@@ -58,6 +58,14 @@ refuse to replace a file that already exists unless the call passes
 applies in `relaxed` mode too, because an overwritten file has no `_trash`
 copy to recover from.
 
+`edit_file` — which replaces one exact block of text inside an existing
+file rather than rewriting the whole thing — is gated exactly like
+`write_file`: same allowed-folders check, same per-write confirmation in
+`confirm` mode, and "Allow for this chat" covers both, since both are
+writes. It has a refusal of its own on top: if the text to replace matches
+more than once it changes nothing and says so, rather than guessing which
+occurrence was meant.
+
 ## "Allow for this chat"
 
 Every confirmation dialog/prompt offers a third answer alongside Deny and

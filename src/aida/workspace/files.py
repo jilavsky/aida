@@ -1,9 +1,9 @@
 """Native workspace file tools (PLAN.md Phase 6): ``list_directory``,
 ``find_files``, ``search_text``, ``read_file``, ``write_file``,
-``create_directory``, ``copy_file``, ``move_file``, ``delete_file``,
-``get_file_metadata`` — exposed to the LLM the same way MCP tools are
-(``aida.core.tools.NativeTool``, merged into the ``tools`` dict passed to
-``AgentLoop`` exactly like ``aida.mcp.manager``'s tools are).
+``edit_file``, ``create_directory``, ``copy_file``, ``move_file``,
+``delete_file``, ``get_file_metadata`` — exposed to the LLM the same way
+MCP tools are (``aida.core.tools.NativeTool``, merged into the ``tools``
+dict passed to ``AgentLoop`` exactly like ``aida.mcp.manager``'s tools are).
 
 Every tool is safety-checked through a ``SafetyGuard`` captured at
 construction time (the same "closure captures state at tool-build time"
@@ -54,6 +54,7 @@ result.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import mimetypes
 import os
 import shutil
@@ -78,6 +79,20 @@ from aida.workspace.safety import ConfirmationDenied, SafetyGuard
 DEFAULT_MAX_LIST_ENTRIES = 500
 DEFAULT_MAX_SEARCH_MATCHES = 100
 DEFAULT_SEARCH_FILE_SIZE_CAP = 2_000_000  # skip scanning files bigger than this for search_text
+
+#: Largest file ``edit_file`` will load, modify in memory, and write back.
+#: Same order as the search cap above and for the same reason: an edit
+#: reads the whole file into memory, and a file this size is not something
+#: a model is editing by exact-text match anyway.
+EDIT_MAX_FILE_BYTES = 2_000_000
+
+#: Context lines either side of a change in ``edit_file``'s reported diff.
+EDIT_DIFF_CONTEXT_LINES = 3
+
+#: Hard cap on the diff ``edit_file`` reports back. A ``replace_all`` over
+#: a few hundred occurrences would otherwise put the whole file in the
+#: model's context — exactly the cost this tool exists to avoid.
+EDIT_DIFF_MAX_LINES = 60
 
 FS_TIMEOUT_SECONDS = 15.0
 
@@ -405,13 +420,55 @@ def _refuse_existing_destination(target: Path, *, overwrite: bool) -> ToolResult
     )
 
 
+def _dominant_newline(text: str) -> str:
+    """Which line ending ``text`` mostly uses — ``"\\r\\n"`` or ``"\\n"``.
+
+    ``edit_file`` matches against newline-normalized text (a model has no
+    way to know, and no business knowing, whether the file it is editing
+    was authored on Windows), then restores this on write. Without the
+    round-trip, the first edit of a CRLF file silently rewrites every line
+    ending in it — a whole-file diff in git for a one-line change, on a
+    project whose users are on both platforms.
+    """
+    crlf = text.count("\r\n")
+    return "\r\n" if crlf and crlf >= text.count("\n") - crlf else "\n"
+
+
+def _edit_diff(before: str, after: str, *, path: Path) -> str:
+    """A bounded unified diff of one ``edit_file`` call.
+
+    Reported back to the model (and shown in the GUI's tool-call row) so an
+    edit is verifiable without re-reading the file: the model can see it
+    changed the region it meant to. Truncated at ``EDIT_DIFF_MAX_LINES``
+    rather than left unbounded — a large ``replace_all`` would otherwise
+    hand back the whole file, which is precisely the context cost
+    ``edit_file`` exists to avoid in the first place.
+    """
+    lines = list(
+        difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=f"{path.name} (before)",
+            tofile=f"{path.name} (after)",
+            n=EDIT_DIFF_CONTEXT_LINES,
+        )
+    )
+    truncated = len(lines) > EDIT_DIFF_MAX_LINES
+    if truncated:
+        lines = lines[:EDIT_DIFF_MAX_LINES]
+    diff = "".join(lines).rstrip("\n")
+    if truncated:
+        diff += "\n… (diff truncated)"
+    return diff
+
+
 def default_file_tools(
     guard: SafetyGuard,
     *,
     max_list_entries: int = DEFAULT_MAX_LIST_ENTRIES,
     max_search_matches: int = DEFAULT_MAX_SEARCH_MATCHES,
 ) -> dict[str, NativeTool]:
-    """Builds the ten native file tools, each closing over ``guard`` (and,
+    """Builds the eleven native file tools, each closing over ``guard`` (and,
     for the listing tools, the size caps) — the exact merge-into-``tools``-
     dict pattern ``aida.mcp.manager``'s tools already use."""
 
@@ -500,6 +557,107 @@ def default_file_tools(
         artifact = FileArtifact(path=str(candidate), mime_type=mime_type)
         return ToolResult(
             content=f"Wrote {len(content)} character(s) to {candidate}", artifacts=[artifact]
+        )
+
+    @_tool
+    async def edit_file(arguments: dict[str, Any]) -> ToolResult:
+        """Exact-text replacement in an existing file.
+
+        Exists because the only way to change a file used to be
+        ``write_file(overwrite=true)`` — a full rewrite. For the workflow
+        this codebase is actually built around (a user iterating on a
+        100-300 line instrument plan, revising it repeatedly) that means
+        re-emitting the entire file every turn: slow, expensive, and a
+        fresh chance to drop a comment block each time.
+
+        Exact text rather than line numbers or a diff payload, deliberately:
+        ``read_file`` emits no line numbers, so a line-range argument would
+        be a guess, and diff-format *input* is unreliable from the smaller
+        local models AIDA supports (Ollama / LM Studio). An exact substring
+        is the one thing a model can reproduce from what it just read.
+        """
+        path = arguments["path"]
+        old_text = arguments["old_text"]
+        new_text = arguments.get("new_text", "")
+        replace_all = bool(arguments.get("replace_all", False))
+
+        if not old_text:
+            return ToolResult(
+                content="old_text must not be empty — use write_file to create a file.",
+                is_error=True,
+            )
+
+        candidate = await guard.authorize_write(path)
+        if not candidate.is_file():
+            return ToolResult(content=f"Not a file: {candidate}", is_error=True)
+
+        size = await _run_blocking(lambda: candidate.stat().st_size)
+        if size > EDIT_MAX_FILE_BYTES:
+            return ToolResult(
+                content=(
+                    f"{candidate} is {size} bytes, larger than edit_file's "
+                    f"{EDIT_MAX_FILE_BYTES}-byte limit."
+                ),
+                is_error=True,
+            )
+
+        # Deliberately *not* read_document: its INTERACTIVE_MAX_CHARS
+        # truncation is right for showing a file to a model and catastrophic
+        # here, where whatever is read is about to be written back.
+        raw = await _run_blocking(candidate.read_bytes)
+        try:
+            original = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return ToolResult(
+                content=f"{candidate} is not a UTF-8 text file — edit_file only edits text.",
+                is_error=True,
+            )
+
+        newline = _dominant_newline(original)
+        before = original.replace("\r\n", "\n")
+        needle = old_text.replace("\r\n", "\n")
+        replacement = new_text.replace("\r\n", "\n")
+
+        count = before.count(needle)
+        if count == 0:
+            return ToolResult(
+                content=(
+                    f"old_text not found in {candidate}. Read the file first and copy the "
+                    "text to replace exactly, including indentation and line breaks."
+                ),
+                is_error=True,
+            )
+        if count > 1 and not replace_all:
+            return ToolResult(
+                content=(
+                    f"old_text appears {count} times in {candidate}. Include more surrounding "
+                    "text to identify the one you mean, or pass replace_all=true to change "
+                    "all of them."
+                ),
+                is_error=True,
+            )
+
+        after = before.replace(needle, replacement)
+        if after == before:
+            return ToolResult(
+                content=f"No change: new_text is identical to old_text in {candidate}.",
+                is_error=True,
+            )
+
+        payload = after.replace("\n", newline) if newline == "\r\n" else after
+
+        def _write() -> None:
+            candidate.write_bytes(payload.encode("utf-8"))
+
+        await _run_mutation(_write, target=candidate, description="edit")
+        mime_type = mimetypes.guess_type(str(candidate))[0]
+        artifact = FileArtifact(path=str(candidate), mime_type=mime_type)
+        plural = "" if count == 1 else "s"
+        return ToolResult(
+            content=(
+                f"{count} replacement{plural} in {candidate}\n\n{_edit_diff(before, after, path=candidate)}"
+            ),
+            artifacts=[artifact],
         )
 
     @_tool
@@ -672,7 +830,11 @@ def default_file_tools(
         NativeTool(
             schema=ToolSchema(
                 name="write_file",
-                description="Write text content to a file. Fails if the file already exists unless overwrite=true.",
+                description=(
+                    "Write text content to a file, replacing all of it. Fails if the file "
+                    "already exists unless overwrite=true. To change part of a file that "
+                    "already exists, use edit_file instead."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
@@ -687,6 +849,47 @@ def default_file_tools(
                 },
             ),
             func=write_file,
+        ),
+        NativeTool(
+            schema=ToolSchema(
+                name="edit_file",
+                description=(
+                    "Replace an exact block of text in an existing file, leaving the rest "
+                    "untouched. Prefer this over write_file whenever you are changing part "
+                    "of a file that already exists. old_text must match exactly once — "
+                    "including indentation and line breaks — unless replace_all=true. "
+                    "Returns a diff of what changed."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Existing file to edit."},
+                        "old_text": {
+                            "type": "string",
+                            "description": (
+                                "Exact text to find, copied verbatim from the file including "
+                                "indentation. Include enough surrounding lines to make it unique."
+                            ),
+                        },
+                        "new_text": {
+                            "type": "string",
+                            "description": (
+                                "Text to put in its place. Pass an empty string to delete the "
+                                "matched block."
+                            ),
+                        },
+                        "replace_all": {
+                            "type": "boolean",
+                            "description": (
+                                "Replace every occurrence instead of failing when old_text "
+                                "matches more than once. Default false."
+                            ),
+                        },
+                    },
+                    "required": ["path", "old_text", "new_text"],
+                },
+            ),
+            func=edit_file,
         ),
         NativeTool(
             schema=ToolSchema(
@@ -778,5 +981,7 @@ __all__ = [
     "DEFAULT_MAX_LIST_ENTRIES",
     "DEFAULT_MAX_SEARCH_MATCHES",
     "DEFAULT_SEARCH_FILE_SIZE_CAP",
+    "EDIT_DIFF_MAX_LINES",
+    "EDIT_MAX_FILE_BYTES",
     "default_file_tools",
 ]
