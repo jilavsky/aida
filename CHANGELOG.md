@@ -41,6 +41,22 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Fixed
 
+- **Clicking Save Tool Permissions (or restarting a server) on Linux
+  briefly flashed a burst of small windows.** Bug report: "lots of little
+  screens spawned, which eventually disappear" — not destructive, but
+  alarming. `_clear_tool_rows` tore down the Tools tab's row/category
+  widgets with `widget.setParent(None)` followed by `deleteLater()`; a
+  *visible* widget reparented to `None` briefly becomes its own top-level
+  window before `deleteLater()` actually destroys it on the next event
+  loop turn — one flashed, WM-decorated X11 window per torn-down widget,
+  far more visible on Linux than on macOS's compositor. Saving tool
+  permissions restarts the running server, which fires a status-changed
+  signal for each of stop/start, each rebuilding every row and category
+  header from scratch — with a large pyIrena-shaped tool list (see the
+  category-grouping entry above), that added up to dozens of flashes per
+  save. Fixed by hiding each widget before detaching it, so nothing is
+  ever shown before it's deleted.
+
 - **Chat error banners can now be copied.** Bug report: "I attach picture,
   I cannot copy text from the error message. It is making debugging
   problematic." `ErrorBanner`'s message `QLabel` had no text-interaction

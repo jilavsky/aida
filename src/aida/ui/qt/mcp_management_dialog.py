@@ -992,11 +992,24 @@ class McpManagementDialog(QDialog):
         self._refresh_log_tab(name)
 
     def _clear_tool_rows(self) -> None:
+        # Bug report: Save Tool Permissions on Linux flashed "lots of
+        # little screens" that disappeared on their own. setParent(None)
+        # on a widget that is still *visible* turns it into its own
+        # top-level window for the instant before deleteLater() actually
+        # destroys it — one X11 window per torn-down row, briefly mapped
+        # by the window manager. Harmless (nothing kept a reference or
+        # could be clicked), but visible — worse on Linux/X11, where each
+        # one gets its own WM-decorated flash, than on macOS's compositor.
+        # A category with ~15 tools tearing down each refresh made this
+        # actually noticeable; hiding first means an invisible,
+        # parent-less widget is never shown at all before it's deleted.
         for row in self._tool_rows:
+            row.hide()
             row.setParent(None)
             row.deleteLater()
         self._tool_rows = []
         for header in self._tool_section_headers:
+            header.hide()
             header.setParent(None)
             header.deleteLater()
         self._tool_section_headers = []
