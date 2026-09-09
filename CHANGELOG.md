@@ -18,6 +18,34 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Fixed
 
+- **Chat error banners can now be copied.** Bug report: "I attach picture,
+  I cannot copy text from the error message. It is making debugging
+  problematic." `ErrorBanner`'s message `QLabel` had no text-interaction
+  flags set — Qt labels default to `NoTextInteraction`, so the text behaved
+  like part of a screenshot rather than selectable text, and a provider's
+  full error body (the exact numbers in a 400 response, say) could only be
+  read, not pasted anywhere. It now has mouse/keyboard text selection plus
+  a "⧉ Copy" button, matching the copy affordance `MessageBubble` already
+  had for regular replies.
+
+- **A very large combined tool count (e.g. a big MCP group) now gets a
+  warning before the request fails, not just an opaque provider 400.** Bug
+  report: `aida-gui` on one Linux machine, working fine on another with
+  "same version, same settings, same everything" — the actual difference
+  was that pyirena-mcp (which alone registers ~110 tools) was active in
+  one session's MCP group and not the other, pushing the total past the
+  128-tool cap the ANL Argo gateway proxy enforces on its `tools` array
+  (`Error code: 400 - ... 'array_above_max_length'`). That cap is Argo's
+  own — not a documented Anthropic/OpenAI limit, so it never surfaces
+  talking to a provider directly — but any provider capping the tools
+  array fails the same opaque way, and nothing in AIDA said why. Once a
+  session's combined tool count (native + file/document/coding/web + every
+  active MCP server) crosses an advisory 100-tool threshold,
+  `aida.core.session` now prints/logs a warning naming
+  `McpServerConfig.disabled_tools` (Settings → Manage MCP Servers, or
+  `mcp.json` directly) as the fix — the same per-tool disable mechanism
+  already used to keep MCP tool counts in check for small local models.
+
 - **Saving a provider profile's secret on a headless Linux login no longer
   crashes the GUI (or `aida config secret set`).** Bug report: `aida-gui`
   on an APS beamline control machine (`s12gate`), adding a provider

@@ -53,6 +53,11 @@ class _FakeMcpManager:
     #: prove start_session actually folds McpManager.server_instructions()
     #: into the session's system message.
     instructions_to_report: dict[str, str] = {}
+    #: Settable per-test — fake tools ``start_all`` reports, so a test can
+    #: prove the large-tool-count warning (session.py's
+    #: _LARGE_TOOL_COUNT_WARNING_THRESHOLD) actually fires without spawning
+    #: enough real MCP servers to reach it.
+    tools_to_report: dict[str, object] = {}
 
     def __init__(
         self, servers, *, artifact_store=None, confirm_callback=None, scratch_dir=None
@@ -67,7 +72,7 @@ class _FakeMcpManager:
         _FakeMcpManager.instances.append(self)
 
     async def start_all(self) -> dict:
-        return {}
+        return dict(_FakeMcpManager.tools_to_report)
 
     def skills(self) -> list[str]:
         return []
@@ -83,9 +88,11 @@ class _FakeMcpManager:
 def _reset_fake_mcp_instances():
     _FakeMcpManager.instances.clear()
     _FakeMcpManager.instructions_to_report = {}
+    _FakeMcpManager.tools_to_report = {}
     yield
     _FakeMcpManager.instances.clear()
     _FakeMcpManager.instructions_to_report = {}
+    _FakeMcpManager.tools_to_report = {}
 
 
 def _settings(**overrides) -> Settings:
@@ -174,6 +181,43 @@ async def test_start_session_workspace_supplies_profile_prompt_and_mcp(
         assert "workspace assistant" in session.messages[0].content
         assert mcp_manager is not None
         assert [s.name for s in mcp_manager.servers] == ["ws-server"]
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_start_session_warns_when_many_tools_are_enabled(
+    monkeypatch, aida_home: Path, records_home: Path, capsys
+):
+    """Bug report: an MCP group totaling 137 tools (pyirena-mcp alone
+    registers ~110) got rejected by the ANL Argo proxy with a bare
+    'array_above_max_length' 400 and no hint in AIDA about why. Once the
+    combined tool count crosses _LARGE_TOOL_COUNT_WARNING_THRESHOLD,
+    start_session should print/log a warning pointing at disabled_tools
+    before that request ever goes out, not just leave the provider's 400 as
+    the only signal."""
+    from aida.core.tools import NativeTool
+    from aida.providers.base import ToolSchema
+
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+    _FakeMcpManager.tools_to_report = {
+        f"ws-server::tool_{i}": NativeTool(
+            schema=ToolSchema(name=f"tool_{i}", description="fake", parameters={}),
+            func=None,
+        )
+        for i in range(150)
+    }
+
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
+    session, _mcp_manager = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert len(session.tools) > 150
+        out = capsys.readouterr().out
+        assert "disable unused tools" in out
+        assert "array_above_max_length" in out
     finally:
         await session.aclose()
 

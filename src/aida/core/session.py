@@ -135,6 +135,13 @@ async def cli_confirm(request: ConfirmationRequest) -> ConfirmAnswer:
 
 logger = get_logger("session")
 
+#: Advisory-only threshold for warning about a large combined tool count
+#: (native + file/document/coding/web + every active MCP server's tools).
+#: Not itself an API limit — the ANL Argo gateway's real cap is 128 tools —
+#: but comfortably below it so the warning lands with room to act on it
+#: before a request actually gets rejected.
+_LARGE_TOOL_COUNT_WARNING_THRESHOLD = 100
+
 
 class UnknownMcpServerError(Exception):
     """Raised when ``--mcp`` names a server that isn't in ``mcp.json``."""
@@ -1264,6 +1271,33 @@ async def _start_session(
         for name, error in mcp_manager.start_errors.items():
             print(f"[mcp] {name}: FAILED to start — {error}")
             logger.warning("mcp server %r failed to start: %s", name, error)
+
+    # Bug report: an MCP group that adds up to 137 tools (pyirena-mcp alone
+    # registers ~110) got a bare "Error code: 400 - invalid_request_error,
+    # param 'tools', code 'array_above_max_length'" straight out of the
+    # provider, with nothing in AIDA pointing at the cause. The 128-tool cap
+    # itself is enforced by the ANL Argo gateway proxy, not a documented
+    # Anthropic/OpenAI limit — it never shows up talking to a provider
+    # directly — but any provider imposing a tools-array cap fails the same
+    # opaque way, so this warns ahead of the request rather than only after
+    # it 400s. `disabled_tools` (McpServerConfig, set via the MCP management
+    # dialog or mcp.json directly) is the fix: a disabled tool's schema is
+    # never sent, so it doesn't count here.
+    if len(tools) > _LARGE_TOOL_COUNT_WARNING_THRESHOLD:
+        print(
+            f"[mcp] warning: {len(tools)} tool(s) enabled this session — some providers "
+            "(e.g. the ANL Argo gateway, at 128) reject the whole request once the tools "
+            "array is too long; disable unused tools per-server (Settings -> Manage MCP "
+            "Servers, or McpServerConfig.disabled_tools) if a chat message fails with "
+            "'array_above_max_length'"
+        )
+        logger.warning(
+            "session has %d tools enabled, above the %d-tool advisory threshold — some "
+            "providers reject requests past a fixed tools-array length (128 via the ANL "
+            "Argo proxy); trim with a server's disabled_tools if you hit that",
+            len(tools),
+            _LARGE_TOOL_COUNT_WARNING_THRESHOLD,
+        )
 
     if resume_conversation_id:
         recorder = ConversationRecorder(

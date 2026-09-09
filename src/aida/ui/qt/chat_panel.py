@@ -383,7 +383,18 @@ class MessageBubble(QFrame):
 class ErrorBanner(QFrame):
     """One ``AgentError``, tagged with which layer failed — "diagnostics
     are a feature" (PLAN.md): the layer name is always visible, never just
-    a bare message."""
+    a bare message.
+
+    Bug report: "I attach picture, I cannot copy text from the error
+    message. It is making debugging problematic." The message ``QLabel``
+    had no text-interaction flags set, so it behaved like a static image as
+    far as the mouse was concerned — Qt labels default to
+    ``Qt.TextInteractionFlag.NoTextInteraction``, unlike a text edit/browser.
+    Full provider error text (a 400 body with the exact array-length numbers
+    in it, say) is exactly the kind of detail worth pasting into a bug
+    report or a search, so this now matches ``MessageBubble``'s existing
+    "selectable text + a Copy button" pattern instead of being a dead end.
+    """
 
     def __init__(
         self, *, layer: str, message: str, detail: str | None = None, parent: QWidget | None = None
@@ -404,8 +415,27 @@ class ErrorBanner(QFrame):
         text = f"[{layer}] {message}"
         if detail:
             text += f" — {detail}"
+        self._raw_text = text
+
+        header = QHBoxLayout()
+        header.addStretch(1)
+        copy_button = QPushButton("⧉ Copy", self)
+        copy_button.setFlat(True)
+        copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_button.setStyleSheet(
+            "QPushButton { border: none; background: transparent; color: #7a1f1f; font-size: 10px; }"
+            "QPushButton:hover { text-decoration: underline; }"
+        )
+        copy_button.clicked.connect(lambda: QGuiApplication.clipboard().setText(self._raw_text))
+        header.addWidget(copy_button)
+        layout.addLayout(header)
+
         label = QLabel(text, self)
         label.setWordWrap(True)
+        label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        label.setCursor(Qt.CursorShape.IBeamCursor)
         layout.addWidget(label)
 
 
