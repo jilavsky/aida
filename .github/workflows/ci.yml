@@ -32,6 +32,14 @@ jobs:
       - name: Install Qt runtime libraries (Linux, headless)
         if: runner.os == 'Linux'
         run: |
+          # The runner image ships a Google Chrome apt source this job never
+          # installs from, and dl.google.com regularly serves a stale index
+          # for it ("Hash Sum mismatch" on chrome-stable's Packages.gz),
+          # which makes `apt-get update` exit 100 and fails the whole Linux
+          # matrix leg over a repo we do not use. Drop just that source —
+          # not all of sources.list.d, which on 24.04 also holds Ubuntu's
+          # own archive in ubuntu.sources.
+          sudo rm -f /etc/apt/sources.list.d/*google-chrome*
           sudo apt-get update
           sudo apt-get install -y \
             libegl1 libgl1 \

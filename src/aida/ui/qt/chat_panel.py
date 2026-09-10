@@ -433,7 +433,8 @@ class ErrorBanner(QFrame):
         label = QLabel(text, self)
         label.setWordWrap(True)
         label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
         label.setCursor(Qt.CursorShape.IBeamCursor)
         layout.addWidget(label)

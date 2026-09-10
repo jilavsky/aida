@@ -38,7 +38,7 @@ def diagnose_pyside6_import_error(exc: BaseException) -> str:
             "release built against this system's glibc instead (if pyIrena's "
             "GUI already runs here, `pip show PySide6` in its environment "
             "names a version known to work; otherwise try "
-            "`pip install \"PySide6==<version>\"` one release back at a time). "
+            '`pip install "PySide6==<version>"` one release back at a time). '
             f"See {_INSTALLATION_DOC}."
         )
     return (
