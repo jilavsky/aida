@@ -453,7 +453,14 @@ class ConversationsSidebar(QWidget):
             self.move_to_user_requested.emit(ids, name.strip())
 
     def _add_move_to_user_menu(self, menu: QMenu) -> QMenu:
-        submenu = menu.addMenu("Move to User")
+        # Constructed with ``menu`` as parent rather than via
+        # ``menu.addMenu("Move to User")``: PySide6 6.9.x lets Python
+        # garbage-collect the QMenu that overload returns, destroying the
+        # C++ submenu as soon as this function returns and leaving an
+        # action whose menu() raises "Internal C++ object already
+        # deleted". Parenting at construction keeps it C++-owned.
+        submenu = QMenu("Move to User", menu)
+        menu.addMenu(submenu)
         for name in self._known_users:
             submenu.addAction(name, lambda checked=False, n=name: self._on_move_to_user(n))
         if self._known_users:

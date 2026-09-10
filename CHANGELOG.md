@@ -76,6 +76,20 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Fixed
 
+- **The menu bar and the conversation list's "Move to User" submenu were
+  built in a way PySide6 6.9.x throws away.** Both were created with Qt's
+  `addMenu("Title")` overload, which builds the QMenu and parents it to
+  the bar (or parent menu) — so a plain reading says the menu outlives the
+  local variable holding it. On PySide6 6.9.x it does not: the binding
+  gives the returned QMenu to Python's garbage collector regardless, and
+  the C++ menu is destroyed as soon as `_build_menu_bar` /
+  `_add_move_to_user_menu` returns, leaving actions whose `menu()` raises
+  "Internal C++ object (QMenu) already deleted". Both menus are now
+  constructed with an explicit parent (`QMenu(title, parent)`) and then
+  added, which keeps ownership on the C++ side on every PySide6 the `gui`
+  extra allows. Caught by CI on the pinned 6.9.3, not locally on 6.11 —
+  6.11 does not have the bug.
+
 - **Clicking Save Tool Permissions (or restarting a server) on Linux
   briefly flashed a burst of small windows.** Bug report: "lots of little
   screens spawned, which eventually disappear" — not destructive, but

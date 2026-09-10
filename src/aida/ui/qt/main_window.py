@@ -48,6 +48,7 @@ from aida.ui.qt._qt import (
     QDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -429,7 +430,16 @@ class MainWindow(QMainWindow):
         discoverability for exactly the folders users otherwise have to
         find by hand." The app previously had no menu bar at all — every
         action lived on the toolbar."""
-        file_menu = self.menuBar().addMenu("&File")
+        # ``menuBar().addMenu("&Title")`` instead of constructing the QMenu
+        # with an explicit parent looks equivalent — Qt's own addMenu()
+        # overload parents the new menu to the bar — but PySide6 6.9.x
+        # hands the returned QMenu to Python's garbage collector anyway,
+        # so the C++ menu is destroyed the moment the local name goes out
+        # of scope and every later use raises "Internal C++ object
+        # (QMenu) already deleted". Constructing with a parent first keeps
+        # ownership on the C++ side on every supported PySide6.
+        file_menu = QMenu("&File", self.menuBar())
+        self.menuBar().addMenu(file_menu)
         open_config_action = QAction("Open Config Folder", self)
         open_config_action.triggered.connect(self._on_open_config_folder)
         file_menu.addAction(open_config_action)
@@ -490,7 +500,8 @@ class MainWindow(QMainWindow):
         # which leaves one gap: a column dragged all the way shut has no
         # handle left that is easy to find. These are the way back, and the
         # way out of any layout that ended up unusable.
-        view_menu = self.menuBar().addMenu("&View")
+        view_menu = QMenu("&View", self.menuBar())
+        self.menuBar().addMenu(view_menu)
         # Checkable rather than two "Show…"/"Hide…" pairs, so the menu also
         # *reports* the current layout; _sync_view_menu keeps the ticks
         # honest when the change came from a drag instead of from here.
@@ -519,7 +530,8 @@ class MainWindow(QMainWindow):
         reset_widths_action.triggered.connect(self._reset_column_widths)
         view_menu.addAction(reset_widths_action)
 
-        help_menu = self.menuBar().addMenu("&Help")
+        help_menu = QMenu("&Help", self.menuBar())
+        self.menuBar().addMenu(help_menu)
         docs_action = QAction("Documentation", self)
         docs_action.triggered.connect(self._on_open_documentation)
         help_menu.addAction(docs_action)
