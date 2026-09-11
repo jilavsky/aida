@@ -18,6 +18,40 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Added
 
+- **Move a whole AIDA setup to another machine: `aida config export` /
+  `aida config import`, and File → Export/Import Setup… in the GUI.**
+  Provider profiles, workspaces, MCP servers, knowledge-base definitions,
+  schedules, workflows, skills and prompt files go into one zip that can be
+  imported on a second computer or handed to a colleague. Until now this
+  was manual file-by-file copying out of `~/.aida`, with no way to tell
+  which parts were safe to share.
+  **No secret ever enters a bundle.** Provider keys live in the OS keychain
+  and are unexportable anyway, but an MCP server's `env` block is plain
+  text and routinely holds an API key — those are detected and stripped,
+  and the *names* of everything needing a value are listed in the import
+  report as ready-to-run `aida config secret set` lines.
+  **Machine-specific paths are translated rather than copied.** `${HOME}`,
+  `${AIDA_HOME}` and `${CONDA_ENV:<name>}` are substituted on export and
+  resolved against the target machine on import, so an `mcp.json` full of
+  `/opt/miniconda3/envs/pyirena/bin/pyirena-mcp` entries lands correctly on
+  a machine whose conda is elsewhere — including across platforms, where
+  the same entry finds `Scripts\pyirena-mcp.exe`. An environment that
+  isn't there falls back to the bare command on `PATH`, and failing that
+  keeps the token and says so, rather than writing a plausible-looking path
+  that does not exist.
+  Personal context and private workspace notes are excluded unless
+  `--include-personal`; per-screen settings (window geometry, font size,
+  column widths) are never exported; general settings travel but apply only
+  with `--app-settings`, so importing someone's workspaces cannot change
+  your safety mode. Importing is never destructive — a name that already
+  exists is skipped and reported (`--on-conflict overwrite|rename` for the
+  other two behaviours), and any config file with content in it is copied
+  to `<name>.bak-<timestamp>` first. The import report ends by naming what
+  a bundle *cannot* carry and this machine does not have: missing conda
+  envs, unreachable folders, secrets to set. See
+  [`docs/moving-and-sharing.md`](docs/moving-and-sharing.md) and
+  [`planning/portability.md`](planning/portability.md).
+
 - **`edit_file`: the agent can now change part of a file instead of
   rewriting all of it.** Until now the only way to modify a file was
   `write_file` with `overwrite=true` — a full rewrite. For the workflow

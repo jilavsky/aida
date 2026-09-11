@@ -31,7 +31,7 @@ _COMMANDS = {
     "workflow": "Run/list/show/validate stored named workflows (Phase 10)",
     "schedule": "Manage and run scheduled workflows (Phase 10)",
     "documents": "Inspect document extraction: `documents figures FILE`, `documents verify-ocr`",
-    "config": "Show on-device config locations; `config secret set/get/delete` manages OS-keychain secrets",
+    "config": "Config locations, OS-keychain secrets, and `config export`/`config import` of a portable setup bundle",
 }
 
 

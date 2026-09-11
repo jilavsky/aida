@@ -27,6 +27,7 @@ commented example config files, see [`examples/config/`](../examples/config/).
 | [`gui-overview.md`](gui-overview.md) | A spatial tour of the desktop app — what's where |
 | [`pyirena.md`](pyirena.md) | Using AIDA with pyIrena: one-click MCP setup, and sharing an environment between the two packages |
 | [`workflows.md`](workflows.md) | Headless `aida run`, stored named workflows, and the in-app scheduler (Phase 10) |
+| [`moving-and-sharing.md`](moving-and-sharing.md) | Exporting your setup to another machine or a colleague, and importing one |
 
 New to AIDA? Start with `installation.md`, then `providers-and-secrets.md`,
 then `workspaces.md` — that's enough to have a working chat session. The

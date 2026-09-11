@@ -193,3 +193,73 @@ def test_secret_set_stores_nothing_when_the_prompt_is_left_empty(monkeypatch, ca
     assert main(["secret", "set", "argo-claude"]) == 1
     assert secrets.get_secret("argo-claude") is None
     assert "nothing stored" in capsys.readouterr().out.lower()
+
+
+# --- `aida config export` / `aida config import` --------------------------
+#
+# The bundle format itself is covered in tests/test_portability.py; these
+# check the command wiring, and the one behaviour that only exists at the
+# CLI layer: an import that leaves an unusable MCP command behind exits
+# non-zero so a scripted machine setup notices.
+
+
+def test_export_then_import_round_trips_through_the_cli(aida_home, tmp_path, capsys, monkeypatch):
+    from aida.config.settings import ProviderProfile, ProvidersConfig, save_providers_config
+
+    save_providers_config(
+        ProvidersConfig(profiles={"argo": ProviderProfile(name="argo", model="claudesonnet5")}),
+        aida_home,
+    )
+    bundle = tmp_path / "setup.zip"
+
+    assert main(["export", str(bundle)]) == 0
+    assert bundle.is_file()
+    assert "Wrote" in capsys.readouterr().out
+
+    target = tmp_path / "target" / ".aida"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("AIDA_HOME", str(target))
+    assert main(["import", str(bundle)]) == 0
+
+    from aida.config.settings import load_settings
+
+    assert "argo" in load_settings(target).providers.profiles
+    assert "Imported" in capsys.readouterr().out
+
+
+def test_export_refuses_a_directory_destination(aida_home, tmp_path, capsys):
+    assert main(["export", str(tmp_path)]) == 1
+    assert "give the bundle a file name" in capsys.readouterr().err
+
+
+def test_import_of_a_non_bundle_fails_cleanly(aida_home, tmp_path, capsys):
+    plain = tmp_path / "notes.txt"
+    plain.write_text("not a bundle", encoding="utf-8")
+    assert main(["import", str(plain)]) == 1
+    assert "not a readable AIDA bundle" in capsys.readouterr().err
+
+
+def test_import_exits_nonzero_when_a_command_could_not_be_located(
+    aida_home, tmp_path, capsys, monkeypatch
+):
+    from aida.config.settings import McpConfig, McpServerConfig, save_mcp_config
+
+    save_mcp_config(
+        McpConfig(
+            servers={
+                "ghost": McpServerConfig(
+                    name="ghost", command="/opt/miniconda3/envs/no-such-env-here/bin/ghost-mcp"
+                )
+            }
+        ),
+        aida_home,
+    )
+    bundle = tmp_path / "setup.zip"
+    assert main(["export", str(bundle)]) == 0
+    capsys.readouterr()
+
+    target = tmp_path / "target" / ".aida"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("AIDA_HOME", str(target))
+    assert main(["import", str(bundle)]) == 2
+    assert "COULD NOT LOCATE" in capsys.readouterr().out

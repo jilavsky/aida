@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 from aida.config.paths import app_dir, ensure_records_dir
+from aida.portability import CONFLICT_POLICIES
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -57,6 +58,55 @@ def _build_parser() -> argparse.ArgumentParser:
 
     delete_parser = secret_sub.add_parser("delete", help="Remove a stored secret for a profile")
     delete_parser.add_argument("profile")
+
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Write this install's setup to a portable bundle (no secrets)",
+        description=(
+            "Export provider profiles, workspaces, MCP servers, knowledge bases, "
+            "schedules, workflows, skills and prompts to a single zip file that can "
+            "be imported on another machine. Machine-specific paths are replaced with "
+            "portable tokens. No secret value is ever written to a bundle."
+        ),
+    )
+    export_parser.add_argument("destination", help="Path of the bundle to write (a .zip file)")
+    export_parser.add_argument(
+        "--include-personal",
+        action="store_true",
+        help=(
+            "Also export your personal context, user names and private workspace notes. "
+            "For moving to your own second machine — not for a bundle you send to someone else."
+        ),
+    )
+
+    import_parser = subparsers.add_parser(
+        "import",
+        help="Merge a setup bundle into this install",
+        description=(
+            "Merge a bundle written by `aida config export` into this install. "
+            "Never destructive by default: an item whose name already exists is skipped "
+            "and listed in the report."
+        ),
+    )
+    import_parser.add_argument("source", help="Path of the bundle to import")
+    import_parser.add_argument(
+        "--on-conflict",
+        choices=CONFLICT_POLICIES,
+        default="skip",
+        help=(
+            "What to do when a name already exists here: skip it (default), overwrite it, "
+            "or import it under a '<name> (imported)' name"
+        ),
+    )
+    import_parser.add_argument(
+        "--app-settings",
+        action="store_true",
+        help=(
+            "Also apply the bundle's general settings (safety mode, allowed folders, "
+            "iteration/context caps, records and scratch folders) to config.yaml. Off by "
+            "default so importing someone else's workspaces cannot change your safety mode."
+        ),
+    )
 
     return parser
 
@@ -108,6 +158,49 @@ def _secret_main(args: argparse.Namespace) -> int:
     return 1
 
 
+def _export_main(args: argparse.Namespace) -> int:
+    from aida.portability import export_bundle, format_export
+
+    destination = Path(args.destination).expanduser()
+    if destination.is_dir():
+        print(
+            f"{destination} is a directory — give the bundle a file name, "
+            f"e.g. {destination / 'aida-setup.zip'}",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        result = export_bundle(destination, include_personal=args.include_personal)
+    except OSError as exc:
+        print(f"Could not write {destination}: {exc}", file=sys.stderr)
+        return 1
+    print(format_export(result))
+    return 0
+
+
+def _import_main(args: argparse.Namespace) -> int:
+    from aida.portability import BundleError, format_import, import_bundle
+
+    try:
+        report = import_bundle(
+            args.source,
+            conflict=args.on_conflict,
+            apply_app_settings=args.app_settings,
+        )
+    except BundleError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"Could not import {args.source}: {exc}", file=sys.stderr)
+        return 1
+    print(format_import(report))
+    # An unresolved executable is the one outcome that leaves the install in a
+    # state where something will fail later, at MCP-server-start time, far from
+    # this command — so it is worth a non-zero exit for anyone scripting a
+    # machine setup, even though the import itself succeeded.
+    return 2 if report.unresolved_commands else 0
+
+
 def _effective_records_dir() -> Path:
     """The records dir the app will actually use, honoring ``config.yaml``'s
     ``records_dir`` override.
@@ -141,6 +234,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.subcommand == "secret":
         return _secret_main(args)
+    if args.subcommand == "export":
+        return _export_main(args)
+    if args.subcommand == "import":
+        return _import_main(args)
 
     parser.print_help()
     return 1

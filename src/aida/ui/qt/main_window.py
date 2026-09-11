@@ -31,6 +31,7 @@ from aida.config.settings import (
     WorkflowConfig,
     WorkflowStep,
     list_workflow_names,
+    load_settings,
     save_app_config,
     save_workflow,
 )
@@ -472,6 +473,22 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        # Moving a setup between machines (planning/portability.md) used to
+        # be file-by-file copying out of ~/.aida, with no way to tell which
+        # of it was safe to hand to someone else — a real mcp.json here had
+        # an API key sitting in plain text in a server's env block. These
+        # two write and read a bundle that carries the configuration,
+        # tokenizes the machine-specific paths, and never carries a secret.
+        export_setup_action = QAction("Export Setup…", self)
+        export_setup_action.triggered.connect(self._on_export_setup)
+        file_menu.addAction(export_setup_action)
+
+        import_setup_action = QAction("Import Setup…", self)
+        import_setup_action.triggered.connect(self._on_import_setup)
+        file_menu.addAction(import_setup_action)
+
+        file_menu.addSeparator()
+
         # PLAN.md §1.3 / planning/context_management.md §3.4: GUI parity
         # with the CLI's /compact — summarize older turns at a natural task
         # boundary rather than only ever compacting automatically mid-turn.
@@ -569,6 +586,59 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(
             QUrl.fromLocalFile(str(ensure_scratch_dir(self.settings.app.scratch_dir)))
         )
+
+    def _on_export_setup(self) -> None:
+        from aida.portability import export_bundle, format_export
+        from aida.ui.qt.portability_dialog import BundleReportDialog, ExportSetupDialog
+
+        dialog = ExportSetupDialog(self, default_dir=Path.home())
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        destination = dialog.destination()
+        try:
+            result = export_bundle(destination, include_personal=dialog.include_personal())
+        except OSError as exc:
+            QMessageBox.warning(self, "Export Setup", f"Could not write {destination}:\n{exc}")
+            return
+        BundleReportDialog("Setup Exported", format_export(result), self).exec()
+
+    def _on_import_setup(self) -> None:
+        """Import a bundle, then reload — an import rewrites the very config
+        files this window is holding in ``self.settings``, so anything it
+        added would otherwise stay invisible until the next launch."""
+        from aida.portability import BundleError, format_import, import_bundle
+        from aida.ui.qt.portability_dialog import BundleReportDialog, ImportSetupDialog
+
+        dialog = ImportSetupDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        source = dialog.source()
+        if not source.name:
+            return
+        try:
+            report = import_bundle(
+                source,
+                conflict=dialog.conflict(),
+                apply_app_settings=dialog.apply_app_settings(),
+            )
+        except (BundleError, OSError) as exc:
+            QMessageBox.warning(self, "Import Setup", str(exc))
+            return
+        # Mutate the existing Settings in place rather than rebinding it:
+        # other objects (the bridge, the panels) hold a reference to the same
+        # instance, and swapping only MainWindow's attribute would leave them
+        # reading the pre-import config.
+        fresh = load_settings()
+        self.settings.app = fresh.app
+        self.settings.providers = fresh.providers
+        self.settings.workspaces = fresh.workspaces
+        self.settings.mcp = fresh.mcp
+        self.settings.knowledge = fresh.knowledge
+        self.settings.schedules = fresh.schedules
+        self._refresh_profile_selector()
+        self._refresh_workspace_selector()
+        self._refresh_mcp_panel()
+        BundleReportDialog("Setup Imported", format_import(report), self).exec()
 
     def _on_compact_requested(self) -> None:
         """ "Compact Conversation" File-menu action — see

@@ -149,6 +149,44 @@ the user can supply, or is a read-through rather than a mechanical edit.
       **deferred**: needs `bait_mcp`'s actual env-var names and group
       conventions; nothing to build against yet.
 
+### 1.6 Portability — moving a setup between machines
+
+Tier 1 shipped (`aida config export`/`import`, File → Export/Import Setup…,
+`aida.portability`): the configuration half — profiles, workspaces, MCP
+servers, knowledge-base definitions, schedules, workflows, skills and
+prompts — in one secret-free zip, with `${HOME}`/`${AIDA_HOME}`/
+`${CONDA_ENV:<name>}` path translation and a report naming what the target
+machine is still missing. Full analysis, inventory and effort estimates in
+[`planning/portability.md`](planning/portability.md); user-facing guide in
+[`docs/moving-and-sharing.md`](docs/moving-and-sharing.md). Two tiers
+remain, both independent of each other and of Tier 1:
+
+- [ ] **Tier 2 — selective import with dependency closure.** Pick which
+      workspaces/profiles/servers to import and bring each one's closure
+      automatically (a workspace needs its profile, skills, knowledge bases
+      and the servers in its `mcp_group`, or it imports as broken —
+      `mcp.groups.resolve_group` is the resolver to reuse). The expense is
+      the closure logic, not the widget. Wanted once someone wants *part*
+      of a colleague's setup; today's "import it all, skip what exists"
+      covers standing up your own second machine. Also in this tier: an
+      interactive mapping table for paths that did not tokenize, which Tier
+      1 imports verbatim and merely warns about.
+- [ ] **Tier 3 — full backup and restore.** `aida.db`, `artifacts/`,
+      `knowledge/` and optionally the records dir, on top of the Tier 1
+      bundle — same format, a `scope` field in the manifest. The real work
+      is rewriting the absolute paths recorded *inside* the DB
+      (`conversations.record_path`/`.attachments_path`/`.sidecar_path`,
+      `artifacts.path`) through the same token map, and guarding a restore
+      against a running AIDA (`aida.core.proc_lock` already exists for the
+      scheduler). Graduates when moving between beamline workstations
+      becomes routine rather than occasional.
+- [ ] *Decided against, recorded so it is not rediscovered:* a
+      passphrase-encrypted secrets sidecar for self-moves. It would spare
+      re-typing a handful of keys on a new machine, at the cost of a
+      `cryptography` dependency, a passphrase UX, and a file that is a
+      footgun if mishandled. Re-entering the keys is the correct trade;
+      the import report already lists them as runnable commands.
+
 ---
 
 ## 2. Considered — discussed, not committed
@@ -280,7 +318,10 @@ concrete asks for it.
 
 - **Conversation export bundles** (a zip of transcript plus artifacts) for
   sending an analysis session to a colleague. BeamlineAdvisor could export a
-  chat as JSON; graduate when someone asks.
+  chat as JSON; graduate when someone asks. Distinct from §1.6's setup
+  bundle, which deliberately carries no conversations — but if both exist
+  they should share the zip-plus-manifest format rather than inventing a
+  second one.
 - **pynika and other package MCPs** as they appear — should "just work"
   through the Phase 7 management UI; ship starter skills files alongside.
 
