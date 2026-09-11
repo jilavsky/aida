@@ -620,6 +620,8 @@ class MainWindow(QMainWindow):
                 source,
                 conflict=dialog.conflict(),
                 apply_app_settings=dialog.apply_app_settings(),
+                select=dialog.selection(),
+                path_overrides=dialog.path_overrides(),
             )
         except (BundleError, OSError) as exc:
             QMessageBox.warning(self, "Import Setup", str(exc))

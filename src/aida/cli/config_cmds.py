@@ -107,6 +107,52 @@ def _build_parser() -> argparse.ArgumentParser:
             "default so importing someone else's workspaces cannot change your safety mode."
         ),
     )
+    import_parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List what the bundle contains and exit, importing nothing",
+    )
+    import_parser.add_argument(
+        "--only",
+        action="append",
+        metavar="KIND:NAME",
+        default=[],
+        help=(
+            "Import just this item (repeatable, or comma-separated), e.g. "
+            "--only workspace:analysis. Whatever it needs to work — its profile, skills, "
+            "knowledge bases and MCP servers — comes along automatically. "
+            "Run --list to see the available names."
+        ),
+    )
+    import_parser.add_argument(
+        "--no-deps",
+        action="store_true",
+        help=(
+            "With --only, import exactly what was named and nothing else. "
+            "Likely to produce a workspace that fails validation — use when you know "
+            "the rest is already configured here."
+        ),
+    )
+    import_parser.add_argument(
+        "--map",
+        action="append",
+        metavar="FROM=TO",
+        default=[],
+        dest="path_map",
+        help=(
+            "Rewrite a path from the bundle, e.g. --map '${HOME}/Experiments=/data/usaxs'. "
+            "Matches by prefix, so one mapping redirects a whole tree. Repeatable. "
+            "Run --check to see which paths need one."
+        ),
+    )
+    import_parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "Show exactly what would be imported and which paths do not resolve here, "
+            "then exit without writing anything"
+        ),
+    )
 
     return parser
 
@@ -178,18 +224,92 @@ def _export_main(args: argparse.Namespace) -> int:
     return 0
 
 
+def _split_selectors(values: list[str]) -> list[str]:
+    """``--only a:b --only c:d`` and ``--only a:b,c:d`` mean the same thing.
+    Nobody should have to remember which form this particular command
+    wanted."""
+    out: list[str] = []
+    for value in values:
+        out.extend(part for part in (p.strip() for p in value.split(",")) if part)
+    return out
+
+
 def _import_main(args: argparse.Namespace) -> int:
-    from aida.portability import BundleError, format_import, import_bundle
+    from aida.portability import (
+        BundleError,
+        expand_selection,
+        format_contents,
+        format_import,
+        format_path_issues,
+        import_bundle,
+        inspect_paths,
+        parse_overrides,
+        parse_selection,
+        read_contents,
+    )
+    from aida.portability.paths_map import PathMapper
+
+    try:
+        contents = read_contents(args.source)
+    except BundleError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"Could not read {args.source}: {exc}", file=sys.stderr)
+        return 1
+
+    if args.list:
+        print(format_contents(contents))
+        return 0
+
+    selectors = _split_selectors(args.only)
+    select = None
+    if selectors:
+        select, problems = parse_selection(selectors, contents)
+        if problems:
+            for problem in problems:
+                print(problem, file=sys.stderr)
+            print("Run with --list to see what this bundle contains.", file=sys.stderr)
+            return 1
+
+    overrides, map_problems = parse_overrides(args.path_map)
+    if map_problems:
+        for problem in map_problems:
+            print(problem, file=sys.stderr)
+        return 1
+
+    follow = not args.no_deps
+    if args.check:
+        chosen = expand_selection(contents, select, follow_dependencies=follow)
+        issues = inspect_paths(
+            contents,
+            PathMapper(overrides=overrides),
+            chosen,
+            include_app=args.app_settings,
+        )
+        report = import_bundle(
+            args.source,
+            conflict=args.on_conflict,
+            apply_app_settings=args.app_settings,
+            select=select,
+            follow_dependencies=follow,
+            path_overrides=overrides,
+            dry_run=True,
+        )
+        print(format_import(report))
+        print()
+        print(format_path_issues(issues))
+        return 0
 
     try:
         report = import_bundle(
             args.source,
             conflict=args.on_conflict,
             apply_app_settings=args.app_settings,
+            select=select,
+            follow_dependencies=follow,
+            path_overrides=overrides,
         )
-    except BundleError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
     except OSError as exc:
         print(f"Could not import {args.source}: {exc}", file=sys.stderr)
         return 1

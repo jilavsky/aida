@@ -80,8 +80,20 @@ def resolve_system_prompt(system_prompt: str | None) -> str | None:
     return system_prompt
 
 
-def validate_workspace(settings: Settings, workspace: WorkspaceConfig) -> WorkspaceValidation:
+def validate_workspace(
+    settings: Settings, workspace: WorkspaceConfig, *, skills_root: Path | None = None
+) -> WorkspaceValidation:
+    """``skills_root`` overrides where skill files are looked for.
+
+    ``None`` means ``skills_dir()``, which is what every caller wanted until
+    the bundle importer needed two things that function cannot give it: a
+    check against a config directory other than ``~/.aida``
+    (``import_bundle`` takes a ``base_dir``), and a check that does not
+    *create* the folder — ``skills_dir()`` self-creates, which is right on
+    startup and wrong during a dry run that promises to write nothing.
+    """
     warnings: list[str] = []
+    skills_location = skills_dir() if skills_root is None else skills_root
 
     if workspace.profile is not None and workspace.profile not in settings.providers.profiles:
         return WorkspaceValidation(
@@ -98,15 +110,16 @@ def validate_workspace(settings: Settings, workspace: WorkspaceConfig) -> Worksp
                 f"'groups' in mcp.json — this workspace will have no MCP tools"
             )
 
-    missing_skills = [s for s in workspace.skills if not skill_exists(skills_dir(), s)]
+    missing_skills = [s for s in workspace.skills if not skill_exists(skills_location, s)]
     if missing_skills:
         # Actionable, not just "not found" (bug report: "may be related to
-        # the fact the skill folder does not exist?" — the *directory*
-        # always exists, ``skills_dir()`` self-creates it; what's actually
-        # missing is the specific skill file, so spell out exactly where
-        # each one is expected so the user can drop it in and move on).
+        # the fact the skill folder does not exist?" — with the default
+        # ``skills_dir()`` the *directory* always exists, it self-creates;
+        # what's actually missing is the specific skill file, so spell out
+        # exactly where each one is expected so the user can drop it in and
+        # move on).
         expected = ", ".join(
-            f"{s} (expected {skills_dir() / f'{s}.md'} or {skills_dir() / s / 'SKILL.md'})"
+            f"{s} (expected {skills_location / f'{s}.md'} or {skills_location / s / 'SKILL.md'})"
             for s in missing_skills
         )
         warnings.append(f"skill file(s) not found (will be skipped): {expected}")

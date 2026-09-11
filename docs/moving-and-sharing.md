@@ -91,6 +91,79 @@ aida config export ~/aida-setup.zip --include-personal
 (In the GUI, the "Include my personal context and private workspace notes"
 checkbox.)
 
+## Importing part of a bundle
+
+To see what a bundle holds without importing anything:
+
+```
+aida config import ~/aida-setup.zip --list
+```
+
+Every line it prints doubles as a selector. To take just one workspace:
+
+```
+aida config import ~/aida-setup.zip --only workspace:analysis
+```
+
+**Whatever that workspace needs comes along automatically** — its provider
+profile, its skills, its knowledge bases, its prompt file, and every MCP
+server in its `mcp_group`. A workspace imported without those would pass
+through cleanly and then fail the moment you tried to use it, so the import
+brings the closure and tells you what it added:
+
+```
+Pulled in as dependencies of what you selected:
+  MCP server: pyirena-mcp
+  profile: ollama-best
+  skill: pyirena-usage
+```
+
+Selectors are forgiving about spelling — `workspace:`, `workspaces:`,
+`server:`, `mcp-server:`, `kb:` and `embedding:` all work — and can be
+repeated or comma-separated. `--no-deps` imports literally what you named
+and nothing else; expect the result to fail validation unless the rest is
+already configured here.
+
+In the GUI, the import dialog's **Contents** tab is the same thing as a
+checkable tree: tick a workspace and its dependencies tick themselves, with
+a line underneath saying which ones and why.
+
+## Previewing, and fixing paths
+
+`--check` runs the whole import and writes nothing:
+
+```
+aida config import ~/aida-setup.zip --check
+```
+
+It prints what *would* land, and then the paths that do not resolve here:
+
+```
+Paths that do not resolve on this machine:
+
+  ${CONDA_ENV:bait}/bin/bait-mcp   [executable]
+      conda env 'bait' not found on this machine
+      used by: MCP server 'bait-mcp' command
+```
+
+If a folder or program is simply somewhere else on this machine, say so
+rather than editing the config afterwards:
+
+```
+aida config import ~/aida-setup.zip \
+    --map '${HOME}/Experiments=/data/usaxs' \
+    --map '${CONDA_ENV:bait}/bin/bait-mcp=/usr/local/bin/bait-mcp'
+```
+
+A mapping **matches by prefix**, so the first one above also redirects
+`${HOME}/Experiments/2026/scan1` to `/data/usaxs/2026/scan1` — one entry
+moves a whole tree. When two mappings both match, the more specific one
+wins. Leave a path unmapped to import it unchanged and fix it later.
+
+The GUI's **Paths** tab is the same table: it appears only when something
+does not resolve, has an editable "Use instead" column with a Browse
+button, and shrinks as you fill it in.
+
 ## Importing
 
 An import **never deletes anything**. If a name already exists here, the
@@ -135,12 +208,13 @@ the new machine:
 - **network reachability** — an `EPICS_CA_ADDR_LIST` only resolves on the
   beamline LAN
 
-The import report names the ones this particular bundle expects. After
-importing, `aida doctor` is the fastest way to see what is still missing:
+The import report names the ones this particular bundle expects. The usual
+sequence on a new machine is preview, fix, import, check:
 
 ```
-aida config import ~/aida-setup.zip
-aida doctor
+aida config import ~/aida-setup.zip --check     # what would land, what won't resolve
+aida config import ~/aida-setup.zip --map ...   # for real, with any paths corrected
+aida doctor                                     # what is still missing on this machine
 ```
 
 ## Conversations and knowledge indexes

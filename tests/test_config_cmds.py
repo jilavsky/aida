@@ -7,6 +7,8 @@ secret_ref because there was no supported command to do it properly)."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import keyring
 from keyring.backend import KeyringBackend
 
@@ -263,3 +265,187 @@ def test_import_exits_nonzero_when_a_command_could_not_be_located(
     monkeypatch.setenv("AIDA_HOME", str(target))
     assert main(["import", str(bundle)]) == 2
     assert "COULD NOT LOCATE" in capsys.readouterr().out
+
+
+# --- Tier 2: --list / --only / --check / --map -----------------------------
+
+
+def _linked_bundle(aida_home, tmp_path) -> Path:
+    """A bundle whose workspace actually references a profile, a skill and
+    an MCP group, so the closure has something to do."""
+    from aida.config.settings import (
+        McpConfig,
+        McpServerConfig,
+        ProviderProfile,
+        ProvidersConfig,
+        WorkspaceConfig,
+        WorkspacesConfig,
+        save_mcp_config,
+        save_providers_config,
+        save_workspaces_config,
+    )
+    from aida.portability import export_bundle
+
+    save_providers_config(
+        ProvidersConfig(
+            profiles={
+                "argo": ProviderProfile(name="argo", model="sonnet", secret_ref="argo-key"),
+                "spare": ProviderProfile(name="spare", model="gemma"),
+            }
+        ),
+        aida_home,
+    )
+    save_mcp_config(
+        McpConfig(
+            servers={
+                "pyirena-mcp": McpServerConfig(
+                    name="pyirena-mcp", command="npx", groups=["analysis"]
+                )
+            }
+        ),
+        aida_home,
+    )
+    save_workspaces_config(
+        WorkspacesConfig(
+            workspaces={
+                "analysis": WorkspaceConfig(
+                    name="analysis", profile="argo", mcp_group="analysis", skills=["saxs"]
+                ),
+                "spare-ws": WorkspaceConfig(name="spare-ws", profile="spare"),
+            }
+        ),
+        aida_home,
+    )
+    (aida_home / "skills").mkdir(exist_ok=True)
+    (aida_home / "skills" / "saxs.md").write_text("# saxs\n", encoding="utf-8")
+    bundle = tmp_path / "linked.zip"
+    export_bundle(bundle, base_dir=aida_home)
+    return bundle
+
+
+def test_list_shows_contents_and_imports_nothing(aida_home, tmp_path, capsys, monkeypatch):
+    bundle = _linked_bundle(aida_home, tmp_path)
+    target = tmp_path / "target" / ".aida"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("AIDA_HOME", str(target))
+
+    assert main(["import", str(bundle), "--list"]) == 0
+    out = capsys.readouterr().out
+    assert "analysis" in out and "pyirena-mcp" in out
+    # Every listed line doubles as a --only selector, which is the point.
+    assert "--only workspace:NAME" in out
+    assert not list(target.glob("*.yaml"))
+
+
+def test_only_imports_the_closure(aida_home, tmp_path, capsys, monkeypatch):
+    from aida.config.settings import load_settings
+
+    bundle = _linked_bundle(aida_home, tmp_path)
+    target = tmp_path / "target" / ".aida"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("AIDA_HOME", str(target))
+
+    assert main(["import", str(bundle), "--only", "workspace:analysis"]) == 0
+    settings = load_settings(target)
+    assert set(settings.workspaces.workspaces) == {"analysis"}
+    assert set(settings.providers.profiles) == {"argo"}
+    assert (target / "skills" / "saxs.md").is_file()
+    assert "Pulled in as dependencies" in capsys.readouterr().out
+
+
+def test_only_accepts_comma_separated_and_repeated_forms(aida_home, tmp_path, monkeypatch):
+    from aida.config.settings import load_settings
+
+    bundle = _linked_bundle(aida_home, tmp_path)
+    target = tmp_path / "target" / ".aida"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("AIDA_HOME", str(target))
+
+    assert main(["import", str(bundle), "--only", "profile:spare,profile:argo"]) == 0
+    assert set(load_settings(target).providers.profiles) == {"argo", "spare"}
+
+
+def test_an_unknown_selector_fails_before_writing_anything(
+    aida_home, tmp_path, capsys, monkeypatch
+):
+    bundle = _linked_bundle(aida_home, tmp_path)
+    target = tmp_path / "target" / ".aida"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("AIDA_HOME", str(target))
+
+    assert main(["import", str(bundle), "--only", "workspace:typo"]) == 1
+    err = capsys.readouterr().err
+    assert "no workspace named 'typo'" in err
+    assert "--list" in err
+    assert not (target / "workspaces.yaml").exists()
+
+
+def test_check_previews_without_writing(aida_home, tmp_path, capsys, monkeypatch):
+    bundle = _linked_bundle(aida_home, tmp_path)
+    target = tmp_path / "target" / ".aida"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("AIDA_HOME", str(target))
+
+    assert main(["import", str(bundle), "--check"]) == 0
+    out = capsys.readouterr().out
+    assert "PREVIEW" in out
+    assert "Would import" in out
+    assert not (target / "workspaces.yaml").exists()
+    assert not (target / "skills").exists()
+
+
+def test_map_resolves_a_command_that_would_otherwise_be_unresolved(
+    aida_home, tmp_path, capsys, monkeypatch
+):
+    from aida.config.settings import McpConfig, McpServerConfig, load_settings, save_mcp_config
+    from aida.portability import export_bundle
+
+    save_mcp_config(
+        McpConfig(
+            servers={
+                "ghost": McpServerConfig(
+                    name="ghost", command="/opt/miniconda3/envs/no-such-env/bin/ghost-mcp"
+                )
+            }
+        ),
+        aida_home,
+    )
+    bundle = tmp_path / "ghost.zip"
+    export_bundle(bundle, base_dir=aida_home)
+    replacement = tmp_path / "ghost-mcp"
+    replacement.write_text("", encoding="utf-8")
+
+    target = tmp_path / "target" / ".aida"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("AIDA_HOME", str(target))
+
+    # Without a mapping: imported, but flagged, and exit 2.
+    assert main(["import", str(bundle)]) == 2
+    capsys.readouterr()
+
+    # With one: resolved, and exit 0.
+    target2 = tmp_path / "target2" / ".aida"
+    target2.mkdir(parents=True)
+    monkeypatch.setenv("AIDA_HOME", str(target2))
+    assert (
+        main(
+            [
+                "import",
+                str(bundle),
+                "--map",
+                f"${{CONDA_ENV:no-such-env}}/bin/ghost-mcp={replacement}",
+            ]
+        )
+        == 0
+    )
+    assert load_settings(target2).mcp.servers["ghost"].command == str(replacement)
+
+
+def test_a_malformed_map_is_rejected(aida_home, tmp_path, capsys, monkeypatch):
+    bundle = _linked_bundle(aida_home, tmp_path)
+    target = tmp_path / "target" / ".aida"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("AIDA_HOME", str(target))
+
+    assert main(["import", str(bundle), "--map", "no-equals-sign"]) == 1
+    assert "expected FROM=TO" in capsys.readouterr().err

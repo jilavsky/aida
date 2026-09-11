@@ -533,3 +533,544 @@ def test_export_report_names_what_was_withheld(populated_home: Path, tmp_path: P
     assert "BRAVE_API_KEY" in text
     assert "aida config secret set argo-key" in text
     assert "--include-personal" in text
+
+
+# ==========================================================================
+# Tier 2 — selective import, dependency closure, path remapping
+# ==========================================================================
+
+
+@pytest.fixture
+def linked_home(aida_home: Path) -> Path:
+    """A ``~/.aida`` whose items actually reference each other, so a closure
+    has something to close over: two workspaces sharing a profile, an MCP
+    group with two servers in it, a knowledge base with an embedding
+    profile, and a workflow and schedule on top."""
+    from aida.config.settings import (
+        EmbeddingProfile,
+        ScheduleEntry,
+        SchedulesConfig,
+        WorkflowConfig,
+        WorkflowStep,
+        save_schedules_config,
+        save_workflow,
+    )
+
+    aida_home.mkdir(parents=True, exist_ok=True)
+    save_providers_config(
+        ProvidersConfig(
+            profiles={
+                "argo": ProviderProfile(name="argo", model="claudesonnet5", secret_ref="argo-key"),
+                "local": ProviderProfile(name="local", model="gemma", secret_ref="local-key"),
+            },
+            embedding_profiles={"embed": EmbeddingProfile(name="embed", model="nomic")},
+        ),
+        aida_home,
+    )
+    save_knowledge_config(
+        KnowledgeConfig(
+            knowledge_bases={
+                "vault": KnowledgeBaseConfig(
+                    name="vault", source_folders=["${HOME}/vault"], embedding_profile="embed"
+                )
+            }
+        ),
+        aida_home,
+    )
+    save_mcp_config(
+        McpConfig(
+            servers={
+                "pyirena-mcp": McpServerConfig(
+                    name="pyirena-mcp",
+                    command="npx",
+                    groups=["analysis"],
+                    skills=["pyirena-usage"],
+                ),
+                "epics-mcp": McpServerConfig(
+                    name="epics-mcp", command="npx", groups=["analysis", "instrument"]
+                ),
+                "unrelated": McpServerConfig(name="unrelated", command="npx", groups=["other"]),
+            }
+        ),
+        aida_home,
+    )
+    save_workspaces_config(
+        WorkspacesConfig(
+            workspaces={
+                "analysis": WorkspaceConfig(
+                    name="analysis",
+                    profile="argo",
+                    mcp_group="analysis",
+                    skills=["saxs-basics"],
+                    knowledge_bases=["vault"],
+                ),
+                "other": WorkspaceConfig(name="other", profile="local", mcp_group="other"),
+            }
+        ),
+        aida_home,
+    )
+    save_schedules_config(
+        SchedulesConfig(
+            schedules={"nightly": ScheduleEntry(name="nightly", workflow="reduce", at="02:00")}
+        ),
+        aida_home,
+    )
+    save_workflow(
+        WorkflowConfig(
+            name="reduce",
+            workspace="analysis",
+            steps=[WorkflowStep(prompt="reduce everything")],
+        ),
+        aida_home / "workflows",
+    )
+    skills = aida_home / "skills"
+    skills.mkdir(exist_ok=True)
+    for name in ("saxs-basics", "pyirena-usage", "unused"):
+        (skills / f"{name}.md").write_text(f"# {name}\n", encoding="utf-8")
+    return aida_home
+
+
+@pytest.fixture
+def linked_bundle(linked_home: Path, tmp_path: Path) -> Path:
+    bundle = tmp_path / "linked.zip"
+    export_bundle(bundle, base_dir=linked_home)
+    return bundle
+
+
+# --- reading contents -----------------------------------------------------
+
+
+def test_contents_lists_every_selectable_item(linked_bundle: Path):
+    from aida.portability import read_contents
+
+    contents = read_contents(linked_bundle)
+    keys = contents.all_keys()
+    assert ("workspace", "analysis") in keys
+    assert ("profile", "argo") in keys
+    assert ("embedding profile", "embed") in keys
+    assert ("MCP server", "epics-mcp") in keys
+    assert ("knowledge base", "vault") in keys
+    assert ("workflow", "reduce") in keys
+    assert ("schedule", "nightly") in keys
+    assert ("skill", "unused") in keys
+    # Details are what make a picker usable rather than a list of bare names.
+    detail = {i.name: i.detail for i in contents.items() if i.kind == "MCP server"}
+    assert "analysis" in detail["pyirena-mcp"]
+
+
+def test_contents_understands_a_folder_skill(aida_home: Path, tmp_path: Path):
+    """``<name>/SKILL.md`` plus siblings is one *item*, not three."""
+    skills = aida_home / "skills" / "big-skill"
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text("# big\n", encoding="utf-8")
+    (skills / "reference.md").write_text("more\n", encoding="utf-8")
+    bundle = tmp_path / "setup.zip"
+    export_bundle(bundle, base_dir=aida_home)
+
+    from aida.portability import read_contents
+
+    contents = read_contents(bundle)
+    assert set(contents.skill_members) == {"big-skill"}
+    assert len(contents.skill_members["big-skill"]) == 2
+
+    target = _fresh_home(tmp_path)
+    report = import_bundle(bundle, base_dir=target)
+    assert (target / "skills" / "big-skill" / "SKILL.md").is_file()
+    assert (target / "skills" / "big-skill" / "reference.md").is_file()
+    assert report.added["skill"] == ["big-skill"]  # reported once, not per file
+
+
+# --- closure --------------------------------------------------------------
+
+
+def test_workspace_pulls_its_whole_closure(linked_bundle: Path):
+    from aida.portability import expand_selection, read_contents
+
+    contents = read_contents(linked_bundle)
+    chosen = expand_selection(contents, {("workspace", "analysis")})
+
+    assert ("profile", "argo") in chosen.keys  # its profile
+    assert ("skill", "saxs-basics") in chosen.keys  # its skills
+    assert ("knowledge base", "vault") in chosen.keys  # its knowledge bases
+    assert ("embedding profile", "embed") in chosen.keys  # ...and *their* embedding profile
+    assert ("MCP server", "pyirena-mcp") in chosen.keys  # every server in its group
+    assert ("MCP server", "epics-mcp") in chosen.keys
+    assert ("skill", "pyirena-usage") in chosen.keys  # ...and the skills those attach
+    # Nothing it does not need.
+    assert ("MCP server", "unrelated") not in chosen.keys
+    assert ("profile", "local") not in chosen.keys
+    assert ("workspace", "other") not in chosen.keys
+    assert ("skill", "unused") not in chosen.keys
+
+
+def test_closure_is_transitive_through_schedule_and_workflow(linked_bundle: Path):
+    """schedule -> workflow -> workspace -> profile/skills/servers, in one
+    pass of the fixpoint rather than one level."""
+    from aida.portability import expand_selection, read_contents
+
+    contents = read_contents(linked_bundle)
+    chosen = expand_selection(contents, {("schedule", "nightly")})
+    assert ("workflow", "reduce") in chosen.keys
+    assert ("workspace", "analysis") in chosen.keys
+    assert ("profile", "argo") in chosen.keys
+    assert ("MCP server", "pyirena-mcp") in chosen.keys
+
+
+def test_closure_reports_what_the_bundle_cannot_satisfy(aida_home: Path, tmp_path: Path):
+    """A dangling reference is reported, not fatal: one stale name in a
+    colleague's config must not block everything else in it."""
+    save_workspaces_config(
+        WorkspacesConfig(
+            workspaces={
+                "broken": WorkspaceConfig(
+                    name="broken", profile="gone", mcp_group="nobody", skills=["missing"]
+                )
+            }
+        ),
+        aida_home,
+    )
+    bundle = tmp_path / "setup.zip"
+    export_bundle(bundle, base_dir=aida_home)
+
+    from aida.portability import expand_selection, read_contents
+
+    contents = read_contents(bundle)
+    chosen = expand_selection(contents, {("workspace", "broken")})
+    joined = " | ".join(chosen.missing)
+    assert "profile 'gone'" in joined
+    assert "skill 'missing'" in joined
+    assert "mcp_group 'nobody'" in joined
+    assert ("workspace", "broken") in chosen.keys  # imported anyway
+
+
+def test_no_deps_imports_exactly_what_was_named(linked_bundle: Path):
+    from aida.portability import expand_selection, read_contents
+
+    contents = read_contents(linked_bundle)
+    chosen = expand_selection(contents, {("workspace", "analysis")}, follow_dependencies=False)
+    assert chosen.keys == {("workspace", "analysis")}
+    assert not chosen.added
+
+
+def test_selection_defaults_to_everything(linked_bundle: Path):
+    from aida.portability import expand_selection, read_contents
+
+    contents = read_contents(linked_bundle)
+    assert expand_selection(contents, None).keys == contents.all_keys()
+
+
+@pytest.mark.parametrize(
+    ("selector", "expected"),
+    [
+        ("workspace:analysis", ("workspace", "analysis")),
+        ("workspaces:analysis", ("workspace", "analysis")),
+        ("server:epics-mcp", ("MCP server", "epics-mcp")),
+        ("mcp-server:epics-mcp", ("MCP server", "epics-mcp")),
+        ("MCP server:epics-mcp", ("MCP server", "epics-mcp")),
+        ("kb:vault", ("knowledge base", "vault")),
+        ("embedding_profile:embed", ("embedding profile", "embed")),
+    ],
+)
+def test_selector_kinds_are_matched_leniently(linked_bundle: Path, selector, expected):
+    """The canonical kinds contain spaces (``MCP server``); nobody should
+    have to quote a shell argument to name one."""
+    from aida.portability import parse_selection, read_contents
+
+    keys, problems = parse_selection([selector], read_contents(linked_bundle))
+    assert not problems
+    assert keys == {expected}
+
+
+def test_bad_selectors_are_reported_individually(linked_bundle: Path):
+    from aida.portability import parse_selection, read_contents
+
+    keys, problems = parse_selection(
+        ["nonsense", "sandwich:ham", "workspace:nope", "workspace:analysis"],
+        read_contents(linked_bundle),
+    )
+    assert keys == {("workspace", "analysis")}
+    assert len(problems) == 3
+    assert any("expected KIND:NAME" in p for p in problems)
+    assert any("unknown kind" in p for p in problems)
+    assert any("no workspace named" in p for p in problems)
+
+
+# --- selective import -----------------------------------------------------
+
+
+def test_selective_import_writes_only_the_closure(linked_bundle: Path, tmp_path: Path):
+    target = _fresh_home(tmp_path)
+    report = import_bundle(linked_bundle, base_dir=target, select={("workspace", "analysis")})
+
+    settings = load_settings(target)
+    assert set(settings.workspaces.workspaces) == {"analysis"}
+    assert set(settings.providers.profiles) == {"argo"}
+    assert set(settings.mcp.servers) == {"pyirena-mcp", "epics-mcp"}
+    assert set(settings.knowledge.knowledge_bases) == {"vault"}
+    assert not settings.schedules.schedules
+    assert (target / "skills" / "saxs-basics.md").is_file()
+    assert not (target / "skills" / "unused.md").exists()
+    assert not (target / "workflows" / "reduce.yaml").exists()
+    # The report says what came along and why.
+    assert ("profile", "argo") in report.pulled_in
+    assert report.selected
+
+
+def test_selective_import_only_asks_for_the_secrets_it_needs(linked_bundle: Path, tmp_path: Path):
+    """Importing one workspace should not hand back every key in the
+    bundle."""
+    report = import_bundle(
+        linked_bundle, base_dir=_fresh_home(tmp_path), select={("workspace", "analysis")}
+    )
+    assert report.secret_refs == ["argo-key"]
+    assert "local-key" not in report.secret_refs
+
+
+def test_imported_selection_validates_clean(linked_bundle: Path, tmp_path: Path):
+    """The whole point of the closure: what lands must actually work. An
+    unknown-profile failure here would mean the closure missed something."""
+    target = _fresh_home(tmp_path)
+    report = import_bundle(linked_bundle, base_dir=target, select={("workspace", "analysis")})
+    assert not any("unknown profile" in w for w in report.warnings)
+    assert not any("skill file(s) not found" in w for w in report.warnings)
+    assert not any("will have no MCP tools" in w for w in report.warnings)
+
+
+def test_import_without_closure_produces_the_broken_thing_it_warns_about(
+    linked_bundle: Path, tmp_path: Path
+):
+    """`--no-deps` is honoured literally, including the consequences —
+    which is why it is not the default."""
+    target = _fresh_home(tmp_path)
+    report = import_bundle(
+        linked_bundle,
+        base_dir=target,
+        select={("workspace", "analysis")},
+        follow_dependencies=False,
+    )
+    assert set(load_settings(target).providers.profiles) == set()
+    assert any("unknown profile" in w for w in report.warnings)
+
+
+# --- dry run --------------------------------------------------------------
+
+
+def test_dry_run_writes_absolutely_nothing(linked_bundle: Path, tmp_path: Path):
+    target = _fresh_home(tmp_path)
+    before = {p.name: p.read_bytes() for p in target.iterdir() if p.is_file()}
+
+    report = import_bundle(linked_bundle, base_dir=target, dry_run=True)
+
+    after = {p.name: p.read_bytes() for p in target.iterdir() if p.is_file()}
+    assert after == before
+    assert not (target / "skills").exists()
+    assert report.dry_run
+    assert "PREVIEW" in format_import(report)
+
+
+def test_dry_run_predicts_what_a_real_import_does(linked_bundle: Path, tmp_path: Path):
+    preview = import_bundle(linked_bundle, base_dir=_fresh_home(tmp_path, "a"), dry_run=True)
+    real = import_bundle(linked_bundle, base_dir=_fresh_home(tmp_path, "b"))
+    assert preview.added == real.added
+    assert preview.secret_refs == real.secret_refs
+    assert preview.unresolved_commands == real.unresolved_commands
+
+
+def test_dry_run_does_not_warn_about_skills_it_would_have_written(
+    linked_bundle: Path, tmp_path: Path
+):
+    """The validator looks at what is on disk *now*; in a preview the skills
+    this import would write are not there yet, and complaining about them
+    would be a phantom problem."""
+    report = import_bundle(linked_bundle, base_dir=_fresh_home(tmp_path), dry_run=True)
+    assert not any("skill file(s) not found" in w for w in report.warnings)
+
+
+# --- path overrides -------------------------------------------------------
+
+
+def test_override_redirects_a_whole_tree_by_prefix(tmp_path: Path):
+    mapper = PathMapper(
+        home=tmp_path / "home",
+        aida_home=tmp_path / "home" / ".aida",
+        overrides={"${HOME}/Experiments": "/data/usaxs"},
+    )
+    assert mapper.expand("${HOME}/Experiments") == "/data/usaxs"
+    assert mapper.expand("${HOME}/Experiments/2026/scan1") == "/data/usaxs/2026/scan1"
+    # Untouched paths still resolve the normal way.
+    assert Path(mapper.expand("${HOME}/Desktop")) == tmp_path / "home" / "Desktop"
+
+
+def test_longest_matching_override_wins(tmp_path: Path):
+    """A specific rule must be able to sit alongside a broad one."""
+    mapper = PathMapper(
+        home=tmp_path,
+        aida_home=tmp_path / ".aida",
+        overrides={"${HOME}": "/data", "${HOME}/Experiments/2026": "/archive/2026"},
+    )
+    assert mapper.expand("${HOME}/Experiments/2026/s1") == "/archive/2026/s1"
+    assert mapper.expand("${HOME}/Experiments/2025/s1") == "/data/Experiments/2025/s1"
+
+
+def test_override_fixes_an_unresolvable_command(linked_bundle: Path, tmp_path: Path):
+    """The path table's whole purpose: turn a reported problem into a
+    working config without hand-editing mcp.json afterwards."""
+    fake = tmp_path / "bin" / "ghost-mcp"
+    fake.parent.mkdir(parents=True)
+    fake.write_text("", encoding="utf-8")
+
+    settings = load_settings(tmp_path / "src-home")
+    settings.mcp.servers["ghost"] = McpServerConfig(
+        name="ghost", command="/opt/miniconda3/envs/no-such-env/bin/ghost-mcp"
+    )
+    save_mcp_config(settings.mcp, tmp_path / "src-home")
+    bundle = tmp_path / "ghost.zip"
+    export_bundle(bundle, base_dir=tmp_path / "src-home")
+
+    target = _fresh_home(tmp_path)
+    report = import_bundle(
+        bundle,
+        base_dir=target,
+        path_overrides={"${CONDA_ENV:no-such-env}/bin/ghost-mcp": str(fake)},
+    )
+    assert not report.unresolved_commands
+    assert load_settings(target).mcp.servers["ghost"].command == str(fake)
+
+
+# --- path inspection ------------------------------------------------------
+
+
+def test_inspect_paths_finds_both_kinds_of_problem(populated_home: Path, tmp_path: Path):
+    from aida.portability import ROLE_EXECUTABLE, ROLE_FOLDER, inspect_paths, read_contents
+
+    bundle = tmp_path / "setup.zip"
+    export_bundle(bundle, base_dir=populated_home)
+    contents = read_contents(bundle)
+
+    issues = inspect_paths(contents, PathMapper())
+    roles = {issue.role for issue in issues}
+    assert ROLE_FOLDER in roles  # ~/Experiments/USAXS does not exist
+    assert all(issue.where for issue in issues)
+    # Executables sort first: a missing command breaks a server outright,
+    # a missing folder is often a mount that is not up yet.
+    if ROLE_EXECUTABLE in roles:
+        assert issues[0].role == ROLE_EXECUTABLE
+
+
+def test_inspect_paths_shrinks_as_overrides_are_supplied(populated_home: Path, tmp_path: Path):
+    """What makes the dialog's table feel responsive — filling a row in has
+    to visibly remove it."""
+    from aida.portability import inspect_paths, read_contents
+
+    bundle = tmp_path / "setup.zip"
+    export_bundle(bundle, base_dir=populated_home)
+    contents = read_contents(bundle)
+
+    before = inspect_paths(contents, PathMapper())
+    assert before
+    existing = tmp_path / "somewhere-real"
+    existing.mkdir()
+    mapper = PathMapper(overrides={before[0].value: str(existing)})
+    after = inspect_paths(contents, mapper)
+    assert len(after) == len(before) - 1
+
+
+def test_inspect_paths_deduplicates_a_shared_folder(aida_home: Path, tmp_path: Path):
+    """Two workspaces pointing at the same missing folder is one row to
+    fix, not two."""
+    from aida.portability import inspect_paths, read_contents
+
+    shared = str(Path.home() / "definitely-not-here-42")
+    save_workspaces_config(
+        WorkspacesConfig(
+            workspaces={
+                "a": WorkspaceConfig(name="a", source_folders=[shared]),
+                "b": WorkspaceConfig(name="b", target_folder=shared),
+            }
+        ),
+        aida_home,
+    )
+    bundle = tmp_path / "setup.zip"
+    export_bundle(bundle, base_dir=aida_home)
+
+    issues = inspect_paths(read_contents(bundle), PathMapper())
+    matching = [i for i in issues if i.value.endswith("definitely-not-here-42")]
+    assert len(matching) == 1
+    assert len(matching[0].where) == 2
+
+
+def test_inspect_paths_respects_the_selection(linked_bundle: Path, tmp_path: Path):
+    """Paths belonging to items you did not select are not your problem."""
+    from aida.portability import expand_selection, inspect_paths, read_contents
+
+    contents = read_contents(linked_bundle)
+    everything = inspect_paths(contents, PathMapper())
+    just_other = inspect_paths(
+        contents, PathMapper(), expand_selection(contents, {("workspace", "other")})
+    )
+    assert len(just_other) < len(everything)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (["${HOME}/a=/data/a"], {"${HOME}/a": "/data/a"}),
+        (["a=b=c"], {"a": "b=c"}),  # split on the first `=` only
+        (["  x = y  "], {"x": "y"}),
+    ],
+)
+def test_parse_overrides(raw, expected):
+    from aida.portability import parse_overrides
+
+    overrides, problems = parse_overrides(raw)
+    assert overrides == expected
+    assert not problems
+
+
+def test_parse_overrides_rejects_a_malformed_mapping():
+    from aida.portability import parse_overrides
+
+    overrides, problems = parse_overrides(["no-equals-sign", "=missing-source"])
+    assert not overrides
+    assert len(problems) == 2
+
+
+# --- prompt files outside prompts/ ----------------------------------------
+
+
+def test_a_prompt_file_anywhere_under_aida_home_round_trips(aida_home: Path, tmp_path: Path):
+    """A workspace may name its prompt file at any relative path — it is
+    resolved against ``~/.aida`` — so the bundle has to carry it at that
+    same path, not force it into ``prompts/``. Otherwise the imported
+    workspace's system prompt silently becomes the literal path string."""
+    custom = aida_home / "team-prompts"
+    custom.mkdir(parents=True)
+    (custom / "reviewer.md").write_text("You are a reviewer.\n", encoding="utf-8")
+    save_workspaces_config(
+        WorkspacesConfig(
+            workspaces={
+                "review": WorkspaceConfig(name="review", system_prompt="team-prompts/reviewer.md")
+            }
+        ),
+        aida_home,
+    )
+    bundle = tmp_path / "setup.zip"
+    export_bundle(bundle, base_dir=aida_home)
+
+    target = _fresh_home(tmp_path)
+    import_bundle(bundle, base_dir=target)
+    assert (
+        (target / "team-prompts" / "reviewer.md")
+        .read_text(encoding="utf-8")
+        .startswith("You are a reviewer.")
+    )
+
+
+def test_a_selected_workspace_brings_its_prompt_file(populated_home: Path, tmp_path: Path):
+    """Prompt files are never selected directly — they arrive with the
+    workspace that names them, or that workspace is quietly broken."""
+    bundle = tmp_path / "setup.zip"
+    export_bundle(bundle, base_dir=populated_home)
+    target = _fresh_home(tmp_path)
+    import_bundle(bundle, base_dir=target, select={("workspace", "analysis")})
+    assert (target / "prompts" / "pyirena.md").is_file()

@@ -18,6 +18,32 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Added
 
+- **Import part of a setup bundle, with its dependencies, and fix its paths
+  as you go.** The bundle format shipped able to move a whole setup; this
+  makes it usable for taking a *piece* of one, and for landing it on a
+  machine whose folders are somewhere else.
+  `aida config import BUNDLE --list` shows what a bundle holds without
+  importing it, and every line it prints is a valid selector:
+  `--only workspace:analysis` imports that workspace **plus everything it
+  needs** — its provider profile, skills, knowledge bases, prompt file, and
+  every MCP server in its `mcp_group` — because a workspace imported without
+  those passes through cleanly and then fails the moment it is used. The
+  closure is transitive (a schedule pulls its workflow, which pulls its
+  workspace, which pulls its profile and servers) and says what it added and
+  why. A reference the bundle cannot satisfy is reported, not fatal.
+  `--check` runs the whole import and writes nothing, listing what would
+  land and which paths do not resolve here; `--map 'FROM=TO'` corrects one,
+  matching **by prefix** so a single entry redirects a whole tree
+  (`--map '${HOME}/Experiments=/data/usaxs'`), with the more specific of two
+  matching entries winning. In the GUI the import dialog gained a
+  **Contents** tab — a checkable tree where ticking a workspace ticks its
+  dependencies and explains which — and a **Paths** tab that appears only
+  when something does not resolve, with an editable "Use instead" column
+  that shrinks the list as it is filled in. Selectors are forgiving:
+  `workspace:`, `workspaces:`, `server:`, `mcp-server:`, `kb:` and
+  `embedding:` all work, repeated or comma-separated. `--no-deps` imports
+  literally what was named, for someone who means it.
+
 - **Move a whole AIDA setup to another machine: `aida config export` /
   `aida config import`, and File → Export/Import Setup… in the GUI.**
   Provider profiles, workspaces, MCP servers, knowledge-base definitions,
@@ -109,6 +135,21 @@ decision revised), unrelated to what shipped when. Entries below link to
   session/instrument-adjacent state.
 
 ### Fixed
+
+- **A workspace's prompt file is carried by a setup bundle wherever it
+  lives.** `system_prompt` may name any path relative to `~/.aida`, but the
+  importer only ever extracted files under `prompts/` — so a workspace
+  naming, say, `team-prompts/reviewer.md` exported the file and then never
+  unpacked it, and the imported workspace's system prompt silently became
+  the literal string `team-prompts/reviewer.md`.
+
+- **`aida config import --check` no longer creates anything.** It reported
+  "nothing was written" while `load_settings` wrote out default config files
+  and `validate_workspace` created `~/.aida/skills/`. Invisible on an
+  install that already has both, wrong on a fresh one, and wrong in what it
+  said either way. `validate_workspace` also gained a `skills_root`
+  argument, which fixes a second latent problem: it previously looked in
+  `~/.aida/skills` even when called against a different config directory.
 
 - **The menu bar and the conversation list's "Move to User" submenu were
   built in a way PySide6 6.9.x throws away.** Both were created with Qt's

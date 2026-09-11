@@ -1,15 +1,15 @@
 # Moving and sharing an AIDA setup
 
-**Status: Tier 1 shipped 2026-09-11; Tiers 2-3 open.** Written from a real
+**Status: Tiers 1 and 2 shipped 2026-09-11; Tier 3 open.** Written from a real
 need: a setup developed on one machine has to reach a work computer, a
 colleague, and — at the beamline — whichever workstation is free that day.
 Today that is manual file-by-file copying, and it is getting worse as the
 feature count grows. This doc inventories every piece of state AIDA owns,
 classifies each by whether it *can* move, and proposes two related
 deliverables (a share bundle and a full backup) built on one format. The
-share bundle is now built — `aida.portability`, `aida config export/import`,
-File → Export/Import Setup… — see §10 for what shipped and §9 for the
-decisions that shaped it. User-facing guide:
+share bundle is now built, and so is selective import — `aida.portability`,
+`aida config export/import`, File → Export/Import Setup… — see §10 for what
+shipped and §9 for the decisions that shaped it. User-facing guide:
 [`docs/moving-and-sharing.md`](../docs/moving-and-sharing.md).
 
 Related: `planning/multiuser_plan.md` (the `{user}` axis, already shipped —
@@ -370,9 +370,8 @@ nothing at startup for anyone who never runs it.
   An import reloads `Settings` **in place** (other objects hold the same
   instance) and refreshes the selectors, so imported workspaces and profiles
   appear without a restart.
-- 45 tests: 35 in `tests/test_portability.py`, 6 in
-  `tests/ui/test_portability_dialog.py`, 4 added to
-  `tests/test_config_cmds.py`. The three that matter most: the raw zip bytes must not contain a known API key; a
+- 45 tests at the time Tier 1 landed (35 + 6 GUI + 4 CLI; see §11 for the
+  count after Tier 2). The three that matter most: the raw zip bytes must not contain a known API key; a
   `bundle_version` newer than this AIDA is refused by name; a `../` member
   name cannot write outside the target folder.
 
@@ -391,10 +390,68 @@ export:
   the literal string. Both were already true before any of this; the import
   report is simply the first thing that ever said so out loud.
 
-## 11. Still open
+## 11. What Tier 2 added
 
-Unchanged from §7's Tier 2 and Tier 3, tracked in PLAN.md §1.6. Two smaller
-things noticed while building Tier 1 and deliberately left alone:
+Three separable things, all of which Tier 1 did crudely on purpose.
+
+**Reading a bundle without importing it.** `aida/portability/contents.py`
+parses a bundle into a `BundleContents` — every selectable item with a
+one-line summary — touching nothing under `~/.aida`. Everything below is
+built on it, and so is `aida config import --list`.
+
+**Dependency closure** (`closure.py`). A selection is a *seed*; the closure
+is its transitive expansion over the references the config format already
+has: a workspace pulls its profile, skills, knowledge bases and prompt file,
+plus every server whose `groups` contains its `mcp_group`; a knowledge base
+pulls its embedding profile; a workflow pulls its workspace; a schedule
+pulls its workflow. Iterated to a fixpoint, because those chain. This is the
+part that was correctly identified as the expensive half of Tier 2, and it
+is expensive in logic rather than pixels — the reason selective import
+without it is worse than useless is that a workspace missing its profile
+imports *cleanly* and fails later. A reference the bundle cannot satisfy is
+reported, never fatal: one stale name in a colleague's config must not block
+everything else in it.
+
+**Path remapping** (`path_issues.py`, plus `PathMapper.overrides`).
+`inspect_paths` answers "what will not resolve here" before anything is
+written; an override maps a bundle-side value to a real one and matches by
+**longest prefix**, so one entry redirects a whole tree and a specific rule
+can sit inside a broad one.
+
+Surfaces: `--list`, `--only KIND:NAME` (lenient kind aliases, repeatable or
+comma-separated), `--no-deps`, `--map FROM=TO`, `--check`; and in the GUI a
+Contents tab (checkable tree, ticking a workspace ticks its dependencies and
+says which) and a Paths tab that appears only when something is wrong and
+shrinks as it is filled in.
+
+Two bugs surfaced while building it, both pre-existing in Tier 1:
+
+- A workspace's `system_prompt` may name **any** path relative to `~/.aida`,
+  and the exporter carried the file at that path — but the importer only
+  ever extracted members under `prompts/`. A workspace naming
+  `team-prompts/reviewer.md` therefore shipped its prompt and never unpacked
+  it, leaving the imported workspace using the literal path string as its
+  prompt. The importer now extracts prompt-class members at their own
+  relative path.
+- `--check` claimed "nothing was written" while `load_settings` created
+  default config files and `validate_workspace` created `~/.aida/skills/`.
+  Both are correct behaviour in their own right and wrong under a promise of
+  no writes. Fixed by composing `Settings` from the per-file loaders during
+  a preview, and by giving `validate_workspace` a `skills_root` argument —
+  which also fixes a latent problem where it consulted `~/.aida/skills` even
+  when called against a different config directory.
+
+Test count is now 100 for portability across three files: 70 in
+`tests/test_portability.py`, 13 in `tests/ui/test_portability_dialog.py`,
+and 17 of the 24 in `tests/test_config_cmds.py`. The ones worth naming: a selected workspace's import must
+produce **no** validation warnings (that is the closure's actual contract),
+a dry run must leave the target byte-identical, and an override must turn a
+reported unresolvable command into a working one.
+
+## 12. Still open
+
+Tier 3 only, tracked in PLAN.md §1.6. Two smaller things noticed while
+building Tier 1 and deliberately left alone:
 
 - `knowledge.yaml` is written mode 0644 while every other config file is
   0600 (a side effect of which files predate `_atomic_write_text`). Worth

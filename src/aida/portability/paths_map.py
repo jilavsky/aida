@@ -34,6 +34,13 @@ a server fail to start.
 this: tokenizing only ever rewrites a path's *prefix*, so a stored
 ``.../scripts/{user}/`` keeps its placeholder and keeps being expanded at
 session time the way it always was.
+
+``overrides`` is the manual escape hatch on top of all of it: a mapping of
+bundle-side value to replacement, consulted before any token expansion and
+matched on the **longest prefix**, so one entry
+(``${HOME}/Experiments`` -> ``/data/usaxs``) redirects a whole tree rather
+than needing a row per folder. That is what the import dialog's path table
+and ``--map`` fill in.
 """
 
 from __future__ import annotations
@@ -128,6 +135,9 @@ class PathMapper:
     aida_home: Path = field(default_factory=app_dir)
     #: Recorded by ``tokenize``; drained by the exporter into ``paths.json``.
     inventory: list[PathInventoryEntry] = field(default_factory=list)
+    #: Bundle-side value (or prefix) -> what to use here instead. Applied
+    #: before token expansion; longest prefix wins.
+    overrides: dict[str, str] = field(default_factory=dict)
     _conda_prefixes: dict[str, Path | None] = field(default_factory=dict, init=False)
 
     # -- export -----------------------------------------------------------
@@ -184,6 +194,9 @@ class PathMapper:
         """
         if not value:
             return value
+        overridden = self.apply_override(value)
+        if overridden is not None:
+            return overridden
         raw = _posix(value)
         conda = CONDA_TOKEN_RE.match(raw)
         if conda is not None:
@@ -219,6 +232,12 @@ class PathMapper:
         """
         if not value:
             return value, None
+        overridden = self.apply_override(value)
+        if overridden is not None:
+            # An explicit override is the user telling us where it is; a
+            # "that does not exist" complaint on top of it would be noise if
+            # they are pointing at something not yet installed.
+            return overridden, None
         raw = _posix(value)
         conda = CONDA_TOKEN_RE.match(raw)
         if conda is None:
@@ -255,6 +274,33 @@ class PathMapper:
             else f"{exe!r} not found in conda env {env!r} ({prefix})"
         )
         return value, reason
+
+    def apply_override(self, value: str) -> str | None:
+        """The user-supplied replacement for ``value``, or ``None``.
+
+        Longest matching prefix wins, so a specific rule can sit alongside a
+        broad one (``${HOME}/Experiments/2026`` -> an archive disk, under a
+        general ``${HOME}`` -> ``/data`` rule) and the specific one is the
+        one that applies. The remainder after the prefix is carried over, so
+        redirecting a tree keeps its shape.
+        """
+        if not self.overrides:
+            return None
+        raw = _strip_trailing_slash(_posix(value))
+        best: str | None = None
+        for source in self.overrides:
+            candidate = _strip_trailing_slash(_posix(source))
+            matches = raw == candidate or raw.startswith(candidate + "/")
+            if matches and (best is None or len(candidate) > len(_posix(best))):
+                best = source
+        if best is None:
+            return None
+        matched = _strip_trailing_slash(_posix(best))
+        replacement = str(Path(self.overrides[best]).expanduser())
+        remainder = raw[len(matched) :]
+        if not remainder:
+            return replacement
+        return str(Path(replacement) / remainder.lstrip("/"))
 
     def conda_prefix(self, env: str) -> Path | None:
         """Locate a conda/mamba environment named ``env`` on this machine,

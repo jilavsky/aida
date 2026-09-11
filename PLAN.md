@@ -151,26 +151,19 @@ the user can supply, or is a read-through rather than a mechanical edit.
 
 ### 1.6 Portability — moving a setup between machines
 
-Tier 1 shipped (`aida config export`/`import`, File → Export/Import Setup…,
-`aida.portability`): the configuration half — profiles, workspaces, MCP
-servers, knowledge-base definitions, schedules, workflows, skills and
-prompts — in one secret-free zip, with `${HOME}`/`${AIDA_HOME}`/
-`${CONDA_ENV:<name>}` path translation and a report naming what the target
-machine is still missing. Full analysis, inventory and effort estimates in
+Tiers 1 and 2 shipped. **Tier 1** (`aida config export`/`import`, File →
+Export/Import Setup…, `aida.portability`): the configuration half —
+profiles, workspaces, MCP servers, knowledge-base definitions, schedules,
+workflows, skills and prompts — in one secret-free zip, with
+`${HOME}`/`${AIDA_HOME}`/`${CONDA_ENV:<name>}` path translation and a report
+naming what the target machine is still missing. **Tier 2**: `--list`,
+`--only KIND:NAME` with transitive dependency closure
+(`aida.portability.closure`), `--check` as a genuinely side-effect-free dry
+run, `--map FROM=TO` prefix path remapping, and the import dialog's
+Contents/Paths tabs. Full analysis in
 [`planning/portability.md`](planning/portability.md); user-facing guide in
-[`docs/moving-and-sharing.md`](docs/moving-and-sharing.md). Two tiers
-remain, both independent of each other and of Tier 1:
+[`docs/moving-and-sharing.md`](docs/moving-and-sharing.md). What remains:
 
-- [ ] **Tier 2 — selective import with dependency closure.** Pick which
-      workspaces/profiles/servers to import and bring each one's closure
-      automatically (a workspace needs its profile, skills, knowledge bases
-      and the servers in its `mcp_group`, or it imports as broken —
-      `mcp.groups.resolve_group` is the resolver to reuse). The expense is
-      the closure logic, not the widget. Wanted once someone wants *part*
-      of a colleague's setup; today's "import it all, skip what exists"
-      covers standing up your own second machine. Also in this tier: an
-      interactive mapping table for paths that did not tokenize, which Tier
-      1 imports verbatim and merely warns about.
 - [ ] **Tier 3 — full backup and restore.** `aida.db`, `artifacts/`,
       `knowledge/` and optionally the records dir, on top of the Tier 1
       bundle — same format, a `scope` field in the manifest. The real work

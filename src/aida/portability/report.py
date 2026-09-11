@@ -10,6 +10,9 @@ two front ends to describe the same import differently.
 from __future__ import annotations
 
 from aida.portability.bundle import ExportResult, ImportReport
+from aida.portability.closure import ClosureResult
+from aida.portability.contents import KIND_ORDER, BundleContents
+from aida.portability.path_issues import ROLE_EXECUTABLE, PathIssue
 
 
 def format_export(result: ExportResult) -> str:
@@ -37,14 +40,104 @@ def format_export(result: ExportResult) -> str:
     return "\n".join(lines)
 
 
+def format_contents(contents: BundleContents) -> str:
+    """List what a bundle holds, without importing it (`--list`).
+
+    Grouped by kind in dependency order, so reading top to bottom shows the
+    profiles and servers before the workspaces that use them. Each line is
+    also a valid `--only` selector, which is the point of the format.
+    """
+    lines = [f"{contents.path}"]
+    if contents.created_at:
+        lines.append(
+            f"  created {contents.created_at} by AIDA {contents.manifest.get('aida_version', '?')}"
+        )
+    if contents.include_personal:
+        lines.append("  includes personal context and workspace notes")
+
+    items = contents.items()
+    if not items:
+        lines.append("")
+        lines.append("This bundle contains nothing importable.")
+        return "\n".join(lines)
+
+    by_kind: dict[str, list[tuple[str, str]]] = {}
+    for item in items:
+        by_kind.setdefault(item.kind, []).append((item.name, item.detail))
+    width = max(len(name) for name, _ in ((n, d) for pairs in by_kind.values() for n, d in pairs))
+    for kind in KIND_ORDER:
+        entries = by_kind.get(kind)
+        if not entries:
+            continue
+        lines.append("")
+        lines.append(f"{kind} ({len(entries)}):")
+        for name, detail in entries:
+            # rstrip: a kind with no details (skills) would otherwise pad
+            # every line out to the column width with trailing blanks.
+            lines.append(f"  {name:<{width}}   {detail}".rstrip())
+
+    lines.append("")
+    lines.append("Import all of it:      aida config import <bundle>")
+    lines.append("Or part of it:         aida config import <bundle> --only workspace:NAME")
+    lines.append("                       (dependencies come along automatically)")
+    if contents.secret_refs:
+        lines.append("")
+        lines.append("Secrets it expects (no values travel in a bundle):")
+        lines += [f"  {ref}" for ref in contents.secret_refs]
+    return "\n".join(lines)
+
+
+def format_path_issues(issues: list[PathIssue]) -> str:
+    """The paths that will not resolve here, as a remappable list."""
+    if not issues:
+        return "Every path in this bundle resolves on this machine."
+    lines = ["Paths that do not resolve on this machine:"]
+    for issue in issues:
+        marker = "executable" if issue.role == ROLE_EXECUTABLE else "folder"
+        lines.append("")
+        lines.append(f"  {issue.value}   [{marker}]")
+        lines.append(f"      {issue.problem}")
+        lines.append(f"      used by: {', '.join(issue.where)}")
+        if issue.suggestion:
+            lines.append(f"      found on PATH: {issue.suggestion}")
+    lines.append("")
+    lines.append("Remap any of them with, e.g.:")
+    lines.append(f"  --map '{issues[0].value}=/the/right/path'")
+    lines.append("A mapping matches by prefix, so one entry can redirect a whole tree.")
+    return "\n".join(lines)
+
+
+def format_closure(contents: BundleContents, chosen: ClosureResult) -> str:
+    """What a `--only` selection grew into, and why."""
+    lines = [f"Selected {len(chosen.keys)} item(s) from {contents.path.name}"]
+    if chosen.added:
+        lines.append("")
+        lines.append("Pulled in as dependencies:")
+        for kind, name in sorted(chosen.added):
+            lines.append(f"  {kind}: {name}")
+    if chosen.missing:
+        lines.append("")
+        lines.append("Unsatisfied references:")
+        lines += [f"  {problem}" for problem in chosen.missing]
+    return "\n".join(lines)
+
+
 def format_import(report: ImportReport) -> str:
-    lines = [f"Imported {report.source}"]
+    verb = "Would import" if report.dry_run else "Imported"
+    lines = [f"{verb} {report.source}"]
     if report.created_at:
         lines.append(f"  bundle created {report.created_at}")
+    if report.dry_run:
+        lines.append("  PREVIEW — nothing was written")
 
     lines.extend(_section("Added", report.added))
     lines.extend(_section("Overwritten", report.overwritten))
     lines.extend(_section("Skipped (already present)", report.skipped))
+
+    if report.selected and report.pulled_in:
+        lines.append("")
+        lines.append("Pulled in as dependencies of what you selected:")
+        lines += [f"  {kind}: {name}" for kind, name in report.pulled_in]
 
     if report.renamed:
         lines.append("")
@@ -89,7 +182,8 @@ def format_import(report: ImportReport) -> str:
 
     if report.total_added == 0 and not report.overwritten:
         lines.append("")
-        lines.append("Nothing was added — every item in the bundle is already configured here.")
+        scope = "selection" if report.selected else "bundle"
+        lines.append(f"Nothing was added — every item in the {scope} is already configured here.")
     return "\n".join(lines)
 
 
@@ -104,4 +198,10 @@ def _section(title: str, bucket: dict[str, list[str]]) -> list[str]:
     return lines
 
 
-__all__ = ["format_export", "format_import"]
+__all__ = [
+    "format_closure",
+    "format_contents",
+    "format_export",
+    "format_import",
+    "format_path_issues",
+]

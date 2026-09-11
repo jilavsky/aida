@@ -67,16 +67,37 @@ from aida.config.settings import (
     McpConfig,
     McpServerConfig,
     ProvidersConfig,
-    SchedulesConfig,
+    Settings,
     WorkspaceConfig,
     WorkspacesConfig,
+    load_app_config,
+    load_knowledge_config,
+    load_mcp_config,
+    load_providers_config,
+    load_schedules_config,
     load_settings,
+    load_workspaces_config,
     save_app_config,
     save_knowledge_config,
     save_mcp_config,
     save_providers_config,
     save_schedules_config,
     save_workspaces_config,
+)
+from aida.core.context import skill_exists
+from aida.portability.closure import ClosureResult, expand_selection
+from aida.portability.contents import (
+    KIND_EMBEDDING,
+    KIND_KNOWLEDGE,
+    KIND_PROFILE,
+    KIND_PROMPT,
+    KIND_SCHEDULE,
+    KIND_SERVER,
+    KIND_SKILL,
+    KIND_WORKFLOW,
+    KIND_WORKSPACE,
+    BundleContents,
+    read_contents,
 )
 from aida.portability.paths_map import PathInventoryEntry, PathMapper
 
@@ -215,6 +236,15 @@ class ImportReport:
     source: Path | None = None
     bundle_version: int = BUNDLE_VERSION
     created_at: str = ""
+    #: True when nothing was written — every other field describes what
+    #: *would* have happened.
+    dry_run: bool = False
+    #: True when the caller asked for part of the bundle rather than all of
+    #: it, which is what makes ``pulled_in`` worth showing.
+    selected: bool = False
+    #: ``(kind, name)`` items added only because something selected needs
+    #: them — the dependency closure's work, made visible.
+    pulled_in: list[tuple[str, str]] = field(default_factory=list)
 
     def record(self, bucket: dict[str, list[str]], kind: str, name: str) -> None:
         bucket.setdefault(kind, []).append(name)
@@ -545,6 +575,10 @@ def import_bundle(
     base_dir: Path | None = None,
     conflict: str = "skip",
     apply_app_settings: bool = False,
+    select: set[tuple[str, str]] | None = None,
+    follow_dependencies: bool = True,
+    path_overrides: dict[str, str] | None = None,
+    dry_run: bool = False,
 ) -> ImportReport:
     """Merge a bundle into this install.
 
@@ -554,161 +588,196 @@ def import_bundle(
     ``apply_app_settings``: a colleague's ``default_safety_mode: relaxed``
     and iteration cap should not land on someone's install as a side effect
     of importing their workspaces.
+
+    ``select`` picks part of the bundle — a set of ``(kind, name)`` keys as
+    ``aida.portability.contents`` produces them; ``None`` means all of it.
+    Whatever is selected is grown into its dependency closure
+    (``aida.portability.closure``) unless ``follow_dependencies`` is off,
+    because importing a workspace without its profile and servers produces
+    something that looks configured and is not.
+
+    ``path_overrides`` maps a bundle-side path (or prefix) to what to use
+    here instead — see ``PathMapper.overrides``.
+
+    ``dry_run`` computes the whole thing and writes nothing, so a caller can
+    show exactly what would happen first.
     """
     if conflict not in CONFLICT_POLICIES:
         raise ValueError(f"conflict must be one of {CONFLICT_POLICIES}, got {conflict!r}")
-    path = Path(source).expanduser()
-    manifest = read_manifest(path)
+    contents = read_contents(source)
     base = base_dir or config_dir()
-    settings = load_settings(base)
-    mapper = PathMapper(aida_home=base)
+    settings = _load_settings_for_import(base, dry_run=dry_run)
+    mapper = PathMapper(aida_home=base, overrides=dict(path_overrides or {}))
+    chosen = expand_selection(contents, select, follow_dependencies=follow_dependencies)
+
     report = ImportReport(
-        source=path,
-        bundle_version=int(manifest.get("bundle_version", 1)),
-        created_at=str(manifest.get("created_at", "")),
+        source=contents.path,
+        bundle_version=contents.bundle_version,
+        created_at=contents.created_at,
+        dry_run=dry_run,
+        selected=select is not None,
+        pulled_in=sorted(chosen.added),
     )
+    report.warnings.extend(chosen.missing)
 
-    with zipfile.ZipFile(path) as archive:
-        names = set(archive.namelist())
+    # Only the secrets the selected part actually needs. Importing one
+    # skill should not hand back a list of nine keys to go and set.
+    wanted_refs = _needed_secret_refs(contents, chosen)
+    report.secret_refs = [ref for ref in contents.secret_refs if ref in wanted_refs]
+    report.redacted_env = [
+        (server, key) for server, key in contents.redacted_env if chosen.has(KIND_SERVER, server)
+    ]
 
-        secrets_blob = _read_json_member(archive, SECRETS_NAME) or {}
-        report.secret_refs = list(secrets_blob.get("secret_refs") or [])
-        report.redacted_env = [
-            (entry.get("server", ""), entry.get("key", ""))
-            for entry in secrets_blob.get("redacted_env") or []
-        ]
+    # (file, worth_backing_up). A fresh install's config files exist but are
+    # empty defaults written by `load_settings`; backing those up would put
+    # five meaningless `.bak-` files in the report of the very case this
+    # feature exists for — setting up a new machine.
+    touched: list[Path] = []
+    backup_worthy: set[Path] = set()
 
-        # (file, worth_backing_up). A fresh install's config files exist but
-        # are empty defaults written by `load_settings`; backing those up
-        # would put five meaningless `.bak-` files in the report of the very
-        # case this feature exists for — setting up a new machine.
-        touched: list[Path] = []
-        backup_worthy: set[Path] = set()
+    def touch(path: Path, had_content: bool) -> None:
+        touched.append(path)
+        if had_content:
+            backup_worthy.add(path)
 
-        def touch(path: Path, had_content: bool) -> None:
-            touched.append(path)
-            if had_content:
-                backup_worthy.add(path)
+    # -- providers -------------------------------------------------------
+    incoming_profiles = _pick(contents.providers.profiles, chosen, KIND_PROFILE)
+    incoming_embeddings = _pick(contents.providers.embedding_profiles, chosen, KIND_EMBEDDING)
+    if incoming_profiles or incoming_embeddings:
+        had = bool(settings.providers.profiles or settings.providers.embedding_profiles)
+        changed = _merge_named(
+            incoming_profiles, settings.providers.profiles, KIND_PROFILE, conflict, report
+        )
+        changed |= _merge_named(
+            incoming_embeddings,
+            settings.providers.embedding_profiles,
+            KIND_EMBEDDING,
+            conflict,
+            report,
+        )
+        if changed:
+            touch(base / "providers.yaml", had)
 
-        # -- providers ---------------------------------------------------
-        providers_data = _read_yaml_member(archive, "config/providers.yaml")
-        if providers_data:
-            had = bool(settings.providers.profiles or settings.providers.embedding_profiles)
-            incoming = ProvidersConfig.from_dict(providers_data)
-            changed = _merge_named(
-                incoming.profiles, settings.providers.profiles, "profile", conflict, report
-            )
-            changed |= _merge_named(
-                incoming.embedding_profiles,
-                settings.providers.embedding_profiles,
-                "embedding profile",
-                conflict,
-                report,
-            )
-            if changed:
-                touch(base / "providers.yaml", had)
+    # -- mcp servers ------------------------------------------------------
+    incoming_servers = _pick(contents.mcp.servers, chosen, KIND_SERVER)
+    if incoming_servers:
+        had = bool(settings.mcp.servers)
+        resolved = {
+            name: _resolve_server(name, server, mapper, report)
+            for name, server in incoming_servers.items()
+        }
+        if _merge_named(resolved, settings.mcp.servers, KIND_SERVER, conflict, report):
+            touch(base / "mcp.json", had)
 
-        # -- mcp servers -------------------------------------------------
-        mcp_data = _read_json_member(archive, "config/mcp.json")
-        if mcp_data:
-            had = bool(settings.mcp.servers)
-            incoming_mcp = McpConfig.from_dict(mcp_data)
-            resolved = {
-                name: _resolve_server(name, server, mapper, report)
-                for name, server in incoming_mcp.servers.items()
-            }
-            if _merge_named(resolved, settings.mcp.servers, "MCP server", conflict, report):
-                touch(base / "mcp.json", had)
+    # -- workspaces -------------------------------------------------------
+    incoming_workspaces = _pick(contents.workspaces.workspaces, chosen, KIND_WORKSPACE)
+    if incoming_workspaces:
+        had = bool(settings.workspaces.workspaces)
+        resolved_ws = {
+            name: _resolve_workspace(ws, mapper, report) for name, ws in incoming_workspaces.items()
+        }
+        if _merge_named(
+            resolved_ws, settings.workspaces.workspaces, KIND_WORKSPACE, conflict, report
+        ):
+            touch(base / "workspaces.yaml", had)
 
-        # -- workspaces --------------------------------------------------
-        workspaces_data = _read_yaml_member(archive, "config/workspaces.yaml")
-        if workspaces_data:
-            had = bool(settings.workspaces.workspaces)
-            incoming_ws = WorkspacesConfig.from_dict(workspaces_data)
-            resolved_ws = {
-                name: _resolve_workspace(ws, mapper, report)
-                for name, ws in incoming_ws.workspaces.items()
-            }
-            if _merge_named(
-                resolved_ws, settings.workspaces.workspaces, "workspace", conflict, report
-            ):
-                touch(base / "workspaces.yaml", had)
+    # -- knowledge bases --------------------------------------------------
+    incoming_kbs = _pick(contents.knowledge.knowledge_bases, chosen, KIND_KNOWLEDGE)
+    if incoming_kbs:
+        had = bool(settings.knowledge.knowledge_bases)
+        resolved_kb = {name: _resolve_knowledge(kb, mapper) for name, kb in incoming_kbs.items()}
+        if _merge_named(
+            resolved_kb, settings.knowledge.knowledge_bases, KIND_KNOWLEDGE, conflict, report
+        ):
+            touch(base / "knowledge.yaml", had)
 
-        # -- knowledge bases ---------------------------------------------
-        knowledge_data = _read_yaml_member(archive, "config/knowledge.yaml")
-        if knowledge_data:
-            had = bool(settings.knowledge.knowledge_bases)
-            incoming_kb = KnowledgeConfig.from_dict(knowledge_data)
-            resolved_kb = {
-                name: _resolve_knowledge(kb, mapper, report)
-                for name, kb in incoming_kb.knowledge_bases.items()
-            }
-            if _merge_named(
-                resolved_kb,
-                settings.knowledge.knowledge_bases,
-                "knowledge base",
-                conflict,
-                report,
-            ):
-                touch(base / "knowledge.yaml", had)
+    # -- schedules ---------------------------------------------------------
+    incoming_schedules = _pick(contents.schedules.schedules, chosen, KIND_SCHEDULE)
+    if incoming_schedules:
+        had = bool(settings.schedules.schedules)
+        if _merge_named(
+            incoming_schedules, settings.schedules.schedules, KIND_SCHEDULE, conflict, report
+        ):
+            touch(base / "schedules.yaml", had)
 
-        # -- schedules ----------------------------------------------------
-        schedules_data = _read_yaml_member(archive, "config/schedules.yaml")
-        if schedules_data:
-            had = bool(settings.schedules.schedules)
-            incoming_sched = SchedulesConfig.from_dict(schedules_data)
-            if _merge_named(
-                incoming_sched.schedules,
-                settings.schedules.schedules,
-                "schedule",
-                conflict,
-                report,
-            ):
-                touch(base / "schedules.yaml", had)
+    # -- app settings -------------------------------------------------------
+    if contents.app and apply_app_settings:
+        _apply_app_settings(settings.app, contents.app, mapper)
+        # Always worth a backup: config.yaml is never meaningfully empty,
+        # and this is the one section that overwrites rather than merges.
+        touch(base / "config.yaml", True)
+        report.app_settings_applied = True
+    elif contents.app:
+        report.warnings.append(
+            "app settings (safety mode, allowed folders, iteration caps, records/scratch "
+            "folders) are in the bundle but were not applied — re-run with --app-settings "
+            "to apply them"
+        )
 
-        # -- app settings --------------------------------------------------
-        app_data = _read_yaml_member(archive, "config/app.yaml")
-        if app_data and apply_app_settings:
-            _apply_app_settings(settings.app, app_data, mapper, report)
-            # Always worth a backup: config.yaml is never meaningfully empty,
-            # and this is the one section that overwrites rather than merges.
-            touch(base / "config.yaml", True)
-            report.app_settings_applied = True
-        elif app_data:
-            report.warnings.append(
-                "app settings (safety mode, allowed folders, iteration caps, records/scratch "
-                "folders) are in the bundle but were not applied — re-run with --app-settings "
-                "to apply them"
-            )
+    # -- content files -------------------------------------------------------
+    planned_files = _plan_content_files(contents, chosen, base, conflict, report)
 
-        # -- back up before the first write --------------------------------
+    if not dry_run:
         for target in dict.fromkeys(p for p in touched if p in backup_worthy):
             backup = _backup(target)
             if backup is not None:
                 report.backups.append(backup)
 
-        if base / "providers.yaml" in touched:
-            save_providers_config(settings.providers, base)
-        if base / "mcp.json" in touched:
-            save_mcp_config(settings.mcp, base)
-        if base / "workspaces.yaml" in touched:
-            save_workspaces_config(settings.workspaces, base)
-        if base / "knowledge.yaml" in touched:
-            save_knowledge_config(settings.knowledge, base)
-        if base / "schedules.yaml" in touched:
-            save_schedules_config(settings.schedules, base)
-        if base / "config.yaml" in touched:
-            save_app_config(settings.app, base)
+        savers = {
+            base / "providers.yaml": lambda: save_providers_config(settings.providers, base),
+            base / "mcp.json": lambda: save_mcp_config(settings.mcp, base),
+            base / "workspaces.yaml": lambda: save_workspaces_config(settings.workspaces, base),
+            base / "knowledge.yaml": lambda: save_knowledge_config(settings.knowledge, base),
+            base / "schedules.yaml": lambda: save_schedules_config(settings.schedules, base),
+            base / "config.yaml": lambda: save_app_config(settings.app, base),
+        }
+        for target in dict.fromkeys(touched):
+            savers[target]()
+        _write_content_files(contents.path, planned_files)
 
-        # -- content files ---------------------------------------------------
-        _extract_tree(archive, names, "skills/", base / "skills", "skill", conflict, report)
-        _extract_tree(
-            archive, names, "workflows/", base / "workflows", "workflow", conflict, report
-        )
-        _extract_tree(archive, names, "prompts/", base / "prompts", "prompt", conflict, report)
-
-    _validate_imported(base, report)
+    _validate_imported(settings, report, base=base, incoming_skills=set(chosen.names(KIND_SKILL)))
     return report
+
+
+def _load_settings_for_import(base: Path, *, dry_run: bool) -> Settings:
+    """Read the current config, without creating anything during a preview.
+
+    ``load_settings`` writes out default files for whatever is missing —
+    correct for a real command (it is how a fresh ``~/.aida`` gets valid
+    configs) and wrong for a dry run, which promises in so many words that
+    nothing was written. The per-file loaders have no such side effect, so a
+    preview composes the same ``Settings`` out of those instead.
+    """
+    if not dry_run:
+        return load_settings(base)
+    return Settings(
+        app=load_app_config(base),
+        providers=load_providers_config(base),
+        workspaces=load_workspaces_config(base),
+        mcp=load_mcp_config(base),
+        knowledge=load_knowledge_config(base),
+        schedules=load_schedules_config(base),
+    )
+
+
+def _pick(available: dict[str, Any], chosen: ClosureResult, kind: str) -> dict[str, Any]:
+    """The entries of one config section that the selection asked for."""
+    wanted = chosen.names(kind)
+    return {name: value for name, value in available.items() if name in wanted}
+
+
+def _needed_secret_refs(contents: BundleContents, chosen: ClosureResult) -> set[str]:
+    """Which keychain refs the *selected* profiles actually need."""
+    refs: set[str] = set()
+    for name in chosen.names(KIND_PROFILE):
+        profile = contents.providers.profiles.get(name)
+        if profile is not None and profile.secret_ref:
+            refs.add(profile.secret_ref)
+    for name in chosen.names(KIND_EMBEDDING):
+        profile = contents.providers.embedding_profiles.get(name)
+        if profile is not None and profile.secret_ref:
+            refs.add(profile.secret_ref)
+    return refs
 
 
 def _resolve_server(
@@ -739,16 +808,12 @@ def _resolve_workspace(
     return workspace
 
 
-def _resolve_knowledge(
-    kb: KnowledgeBaseConfig, mapper: PathMapper, report: ImportReport
-) -> KnowledgeBaseConfig:
+def _resolve_knowledge(kb: KnowledgeBaseConfig, mapper: PathMapper) -> KnowledgeBaseConfig:
     kb.source_folders = mapper.expand_all(kb.source_folders)
     return kb
 
 
-def _apply_app_settings(
-    app: AppConfig, data: dict[str, Any], mapper: PathMapper, report: ImportReport
-) -> None:
+def _apply_app_settings(app: AppConfig, data: dict[str, Any], mapper: PathMapper) -> None:
     """Copy the bundle's portable ``config.yaml`` fields onto this install's
     ``AppConfig``, expanding paths. Machine fields are never in a bundle, so
     there is nothing to filter out here — but iterate the allowlist rather
@@ -821,16 +886,16 @@ def _rename_in_place(value: Any, new_name: str) -> None:
         value.name = new_name
 
 
-def _extract_tree(
-    archive: zipfile.ZipFile,
-    names: set[str],
-    prefix: str,
-    target_root: Path,
-    kind: str,
+def _plan_content_files(
+    contents: BundleContents,
+    chosen: ClosureResult,
+    base: Path,
     conflict: str,
     report: ImportReport,
-) -> None:
-    """Copy one content folder out of the bundle.
+) -> list[tuple[str, Path]]:
+    """Decide where each selected skill/workflow/prompt file goes, recording
+    added/skipped/overwritten — without writing anything, so a dry run
+    reports exactly what a real one would do.
 
     Member names are validated rather than trusted: a zip is an untrusted
     input and ``../`` in an entry name is the classic way to write outside
@@ -838,28 +903,55 @@ def _extract_tree(
     ``aida.artifacts.store._safe_filename``, which hardens the equivalent
     path for MCP-supplied artifact filenames.
     """
-    for member in sorted(n for n in names if n.startswith(prefix) and not n.endswith("/")):
-        relative = member[len(prefix) :]
-        if not _safe_relative(relative):
+    planned: list[tuple[str, Path]] = []
+    wanted: list[tuple[str, str, str]] = []  # (member, kind, label)
+
+    for name in sorted(chosen.names(KIND_SKILL)):
+        for member in contents.skill_members.get(name, []):
+            wanted.append((member, KIND_SKILL, name))
+    for name in sorted(chosen.names(KIND_WORKFLOW)):
+        member = contents.workflow_members.get(name)
+        if member:
+            wanted.append((member, KIND_WORKFLOW, name))
+    for member in sorted(chosen.names(KIND_PROMPT)):
+        if member in contents.prompt_members:
+            wanted.append((member, KIND_PROMPT, member))
+
+    seen_labels: set[tuple[str, str]] = set()
+    for member, kind, label in wanted:
+        if not _safe_relative(member):
             report.warnings.append(f"ignored unsafe entry in bundle: {member}")
             continue
-        destination = target_root / Path(relative)
-        label = PurePosixPath(relative).stem if "/" not in relative else relative
+        destination = base / Path(member)
+        # A folder skill is several members but one *item*: report it once.
+        first_time = (kind, label) not in seen_labels
+        seen_labels.add((kind, label))
         if destination.exists():
             if conflict == "skip":
-                report.record(report.skipped, kind, label)
+                if first_time:
+                    report.record(report.skipped, kind, label)
                 continue
             if conflict == "rename":
                 destination = _unique_file(destination)
-                report.renamed.append((label, destination.stem))
-                report.record(report.added, kind, destination.stem)
-            else:
+                if first_time:
+                    report.renamed.append((label, destination.stem))
+                    report.record(report.added, kind, destination.stem)
+            elif first_time:
                 report.record(report.overwritten, kind, label)
-        else:
+        elif first_time:
             report.record(report.added, kind, label)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with archive.open(member) as src, destination.open("wb") as dst:
-            shutil.copyfileobj(src, dst)
+        planned.append((member, destination))
+    return planned
+
+
+def _write_content_files(source: Path, planned: list[tuple[str, Path]]) -> None:
+    if not planned:
+        return
+    with zipfile.ZipFile(source) as archive:
+        for member, destination in planned:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as src, destination.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
 
 
 def _safe_relative(relative: str) -> bool:
@@ -893,7 +985,15 @@ def _backup(path: Path) -> Path | None:
     return backup
 
 
-def _validate_imported(base: Path, report: ImportReport) -> None:
+#: Prefix of ``validate_workspace``'s missing-skill warning. Matched so the
+#: check can be redone against the skills this import *brings*, which the
+#: validator cannot know about — see ``_validate_imported``.
+_MISSING_SKILL_PREFIX = "skill file(s) not found"
+
+
+def _validate_imported(
+    settings: Settings, report: ImportReport, *, base: Path, incoming_skills: set[str]
+) -> None:
     """Run the existing validators over the merged config.
 
     This is the honest half of an import: a bundle can carry a workspace but
@@ -901,25 +1001,45 @@ def _validate_imported(base: Path, report: ImportReport) -> None:
     Rather than invent new checks, reuse the ones the app already runs —
     ``validate_workspace`` already reports unknown profiles, empty MCP
     groups, missing skill files and unreachable folders.
+
+    Validates the merged settings **in memory**, so a dry run gets the same
+    answer a real import would. The one thing that needs correcting is the
+    missing-skill warning: the validator looks at what is on disk *now*, and
+    in a dry run the skills this import would write are not there yet.
     """
     # Imported here, not at module scope: aida.workspace's package __init__
     # reaches aida.mcp, and importing it eagerly would drag the MCP layer
     # into every `aida config export`.
     from aida.workspace.workspaces import validate_workspace
 
-    settings = load_settings(base)
-    imported = set(report.added.get("workspace", []))
-    imported |= set(report.overwritten.get("workspace", []))
+    # `base / "skills"` rather than `skills_dir()`: that helper creates the
+    # folder, which is wrong during a dry run, and it ignores an explicit
+    # `base_dir` entirely.
+    skills_root = base / "skills"
+    imported = set(report.added.get(KIND_WORKSPACE, []))
+    imported |= set(report.overwritten.get(KIND_WORKSPACE, []))
     seen: set[str] = set()
     for name in sorted(imported):
         workspace = settings.workspaces.workspaces.get(name)
         if workspace is None:
             continue
-        validation = validate_workspace(settings, workspace)
+        validation = validate_workspace(settings, workspace, skills_root=skills_root)
         if not validation.ok:
             report.warnings.append(f"workspace {name!r}: {validation.detail}")
         for warning in validation.warnings:
+            if warning.startswith(_MISSING_SKILL_PREFIX):
+                continue  # recomputed below against what this import adds
             report.warnings.append(f"workspace {name!r}: {warning}")
+        still_missing = [
+            skill
+            for skill in workspace.skills
+            if skill not in incoming_skills and not skill_exists(skills_root, skill)
+        ]
+        if still_missing:
+            report.warnings.append(
+                f"workspace {name!r}: skill file(s) not found and not in this import "
+                f"(will be skipped): {', '.join(sorted(still_missing))}"
+            )
         for folder in workspace.source_folders:
             if folder not in seen and not Path(folder).expanduser().exists():
                 seen.add(folder)
