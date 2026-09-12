@@ -134,6 +134,24 @@ decision revised), unrelated to what shipped when. Entries below link to
   individual, since some `pyirena_ctrl_*` calls plausibly mutate live
   session/instrument-adjacent state.
 
+- **A run of tool calls is one collapsible line in the transcript, and
+  **View → Tool Calls** sets how much of it you see.** Bug report: "before
+  I get real answer, there are so many tool calls, that I do not see the
+  other prior parts of the chat... when I am trying to read the chat to see
+  what and how we did, these tool calls are distracting". Individual rows
+  were already collapsed and tightened as far as they usefully go; what was
+  left was sheer count — thirty calls in a browser-automation or plotting
+  turn is most of a screen, and the reply that prompted them has scrolled
+  off. Consecutive calls now share one grey header line
+  (`▸ 12 tool calls · 11 ✓ 1 ✗ · 8.4 s`, or the tool it is waiting on while
+  the turn runs), which opens on click. **Hidden** reduces that to a bare
+  `12 tool calls` stub for people reading a session rather than debugging
+  it; **Expanded** shows every call, as before. The calls are recorded in
+  every mode, so switching to Expanded *after* a turn goes wrong shows that
+  whole turn in full with nothing re-run — which is the mode to reach for
+  before sending a bug report. The choice is saved and travels in a setup
+  bundle.
+
 ### Fixed
 
 - **A workspace's prompt file is carried by a setup bundle wherever it

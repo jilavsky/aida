@@ -69,6 +69,12 @@ At the right-hand end, separated from the rest:
   See [context-and-limits.md](context-and-limits.md).
 - **File → Save Conversation as Workflow…** — turn the prompts you have
   already sent into a stored workflow. See [workflows.md](workflows.md).
+- **View → Conversations Column / Session Column / Reset Column Widths** —
+  show or hide either side column, or put all three back to their default
+  widths. The way back from a column you dragged shut.
+- **View → Tool Calls → Hidden / Grouped / Expanded** — how much of the
+  agent's tool use the transcript shows. See "Tool calls in the transcript"
+  below.
 - **Help → Documentation** — opens this documentation in your web browser.
 - **Help → About AIDA** — version and project link.
 
@@ -105,6 +111,36 @@ The window splits into three columns:
     running, refreshed after every start/stop. A "MCP Servers…" button below
     the checkboxes opens the full management dialog. See
     [mcp-servers.md](mcp-servers.md).
+
+### Tool calls in the transcript
+
+When the agent goes off and does things — reading files, running a fit,
+driving a browser — a whole run of those calls collapses into one grey
+line in the transcript:
+
+```
+▸ 12 tool calls · 11 ✓ 1 ✗ · 8.4 s
+```
+
+That is twelve calls, eleven of which succeeded, taking 8.4 seconds
+between them. While the turn is still running the line names the tool it
+is waiting on instead (`⏳ 12 tool calls · running pyirena_plot_iq…`), so a
+slow call still looks different from a hung one. Click the line to open
+the run and see every call; click a call's **Details** for its full
+arguments and result.
+
+**View → Tool Calls** sets how much is shown by default, and the choice is
+remembered between launches:
+
+- **Hidden** — one dim `12 tool calls` line per run, no tally or timing.
+  Reading a session rather than debugging it.
+- **Grouped** (the default) — the summary line above.
+- **Expanded** — every call visible, as its own row.
+
+Switching mode is retroactive: the calls are always recorded, whatever the
+mode, so **if a turn goes wrong, switch to Expanded and the whole failed
+turn is right there to inspect** — nothing has to be re-run. That is the
+one to reach for before sending a bug report.
 
 ## Conversations sidebar
 
