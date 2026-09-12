@@ -44,6 +44,7 @@ from aida.persistence.store import ArtifactRecord, ConversationStore
 from aida.providers.base import ImageRef
 from aida.ui.qt._qt import (
     QAction,
+    QActionGroup,
     QApplication,
     QDesktopServices,
     QDialog,
@@ -85,6 +86,7 @@ from aida.ui.qt.selectors import (
     WorkspaceSelector,
 )
 from aida.ui.qt.settings_dialog import SettingsDialog
+from aida.ui.qt.tool_call_group import DEFAULT_TOOL_CALL_DISPLAY, TOOL_CALL_DISPLAY_MODES
 from aida.ui.qt.users_dialog import UsersDialog
 from aida.ui.qt.window_state import (
     DEFAULT_WINDOW_SIZE,
@@ -212,6 +214,9 @@ class MainWindow(QMainWindow):
         # are only meaningful against the window width they were saved at,
         # and the default proportions are computed from the live width.
         self._restore_splitter_sizes()
+        # Both the transcript and the View menu exist by now (_build_ui
+        # built the menu bar first, then chat_panel) — this touches both.
+        self._apply_tool_display_mode()
         self._refresh_conversations_sidebar()
         self._refresh_workspace_selector()
         self._refresh_profile_selector()
@@ -546,6 +551,35 @@ class MainWindow(QMainWindow):
         reset_widths_action = QAction("Reset Column Widths", self)
         reset_widths_action.triggered.connect(self._reset_column_widths)
         view_menu.addAction(reset_widths_action)
+
+        view_menu.addSeparator()
+        # Bug report: "there are so many tool calls, that I do not see the
+        # other prior parts of the chat... my users at the beamline may not
+        # be that interested and want relatively short version". Three
+        # modes rather than a single on/off, because "readable" and
+        # "invisible" are different asks — see
+        # aida.ui.qt.tool_call_group. Exclusive and checkable, so the menu
+        # also reports the current mode, same pattern as the column
+        # toggles above.
+        tool_calls_menu = QMenu("Tool Calls", view_menu)
+        view_menu.addMenu(tool_calls_menu)
+        self._tool_display_group = QActionGroup(self)
+        self._tool_display_group.setExclusive(True)
+        self._tool_display_actions: dict[str, QAction] = {}
+        for mode, label in (
+            ("hidden", "Hidden"),
+            ("grouped", "Grouped"),
+            ("expanded", "Expanded"),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setData(mode)
+            self._tool_display_group.addAction(action)
+            tool_calls_menu.addAction(action)
+            self._tool_display_actions[mode] = action
+        # Bound method, not a lambda capturing self — see the column
+        # toggles' comment above for why that matters here.
+        self._tool_display_group.triggered.connect(self._on_tool_display_mode_chosen)
 
         help_menu = QMenu("&Help", self.menuBar())
         self.menuBar().addMenu(help_menu)
@@ -2005,6 +2039,40 @@ class MainWindow(QMainWindow):
         self._remembered_column_widths.clear()
         self._restore_splitter_sizes()
         self._save_splitter_sizes()
+
+    # --- tool-call display ---------------------------------------------------
+
+    def _apply_tool_display_mode(self) -> None:
+        """Push the saved mode into the transcript and tick the menu.
+
+        Called once at startup and after every change. An unrecognized
+        value — a hand-edited config.yaml, or a setting written by a newer
+        AIDA — falls back to the default here rather than reaching the
+        widget, so config can never leave the user with a transcript whose
+        state no menu item claims.
+        """
+        mode = self.settings.app.tool_call_display
+        if mode not in TOOL_CALL_DISPLAY_MODES:
+            self._logger.info(
+                "ignoring unrecognized tool_call_display %r; using %r",
+                mode,
+                DEFAULT_TOOL_CALL_DISPLAY,
+            )
+            mode = DEFAULT_TOOL_CALL_DISPLAY
+            self.settings.app.tool_call_display = mode
+        self.chat_panel.set_tool_display_mode(mode)
+        self._tool_display_actions[mode].setChecked(True)
+
+    def _on_tool_display_mode_chosen(self, action: QAction) -> None:
+        mode = action.data()
+        if mode == self.settings.app.tool_call_display:
+            return
+        self.settings.app.tool_call_display = mode
+        self.chat_panel.set_tool_display_mode(mode)
+        # Saved immediately rather than on close, same reason
+        # _on_section_toggled is: a setting the user changed by hand should
+        # survive a crash, not only a clean exit.
+        save_app_config(self.settings.app)
 
     # --- collapsible session panels ------------------------------------------
 

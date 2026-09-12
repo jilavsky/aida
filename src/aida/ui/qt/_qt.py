@@ -32,6 +32,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QClipboard,
     QCloseEvent,
     QColor,
@@ -94,6 +95,7 @@ from PySide6.QtWidgets import (
 __all__ = [
     "QAbstractItemView",
     "QAction",
+    "QActionGroup",
     "QApplication",
     "QCheckBox",
     "QClipboard",

@@ -2678,6 +2678,68 @@ def test_collapsed_panels_reopen_collapsed(
         window.close()
 
 
+# --- tool-call display modes ----------------------------------------------
+
+
+def test_tool_call_display_menu_starts_on_the_saved_mode(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    settings.app.tool_call_display = "expanded"
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        actions = window._tool_display_actions
+        assert set(actions) == {"hidden", "grouped", "expanded"}
+        assert all(action.isCheckable() for action in actions.values())
+        checked = [mode for mode, action in actions.items() if action.isChecked()]
+        assert checked == ["expanded"]
+        assert window.chat_panel.tool_display_mode == "expanded"
+    finally:
+        window.close()
+
+
+def test_choosing_a_tool_call_display_mode_applies_and_saves_it(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "my users at the beamline may not be that interested" in
+    tool calls — this is the switch that answers it, and it has to survive
+    a restart to be worth anything."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert window.chat_panel.tool_display_mode == "grouped"
+
+        window._tool_display_actions["hidden"].trigger()
+
+        assert settings.app.tool_call_display == "hidden"
+        assert window.chat_panel.tool_display_mode == "hidden"
+        assert load_app_config().tool_call_display == "hidden"
+    finally:
+        window.close()
+
+
+def test_an_unrecognized_saved_tool_call_display_falls_back_to_grouped(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A hand-edited config.yaml (or one written by a newer AIDA) must not
+    leave the transcript in a state no menu item claims."""
+    settings = _settings_with_profile()
+    settings.app.tool_call_display = "nonsense"
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert settings.app.tool_call_display == "grouped"
+        assert window.chat_panel.tool_display_mode == "grouped"
+        assert window._tool_display_actions["grouped"].isChecked()
+    finally:
+        window.close()
+
+
 # --- typing while the agent works -----------------------------------------
 
 
