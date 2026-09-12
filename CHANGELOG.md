@@ -16,6 +16,15 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+## [0.1.0b7] - 2026-09-12
+
+Moving a setup between machines — in whole or in part — is the theme:
+`aida config export`/`import`, a dependency-aware `--only`, and path
+translation so a bundle lands correctly on a machine whose conda, home
+folder and OS are all different. Alongside it, the agent can edit part of
+a file instead of rewriting it, and a long run of tool calls no longer
+buries the conversation it belongs to.
+
 ### Added
 
 - **Import part of a setup bundle, with its dependencies, and fix its paths
@@ -767,7 +776,8 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0b6...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0b7...HEAD
+[0.1.0b7]: https://github.com/jilavsky/aida/compare/v0.1.0b6...v0.1.0b7
 [0.1.0b6]: https://github.com/jilavsky/aida/compare/v0.1.0b5...v0.1.0b6
 [0.1.0b5]: https://github.com/jilavsky/aida/compare/v0.1.0b4...v0.1.0b5
 [0.1.0b4]: https://github.com/jilavsky/aida/compare/v0.1.0b3...v0.1.0b4
