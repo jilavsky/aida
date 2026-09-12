@@ -169,5 +169,19 @@ class ToolCallRow(QFrame):
     def is_expanded(self) -> bool:
         return self._expanded
 
+    @property
+    def elapsed(self) -> float | None:
+        """Seconds the call took, or ``None`` while in flight and for a
+        row rebuilt from history (see ``mark_historic``) — read by
+        ``ToolCallGroup`` to total a run without reaching into privates."""
+        return self._elapsed
+
+    @property
+    def is_historic(self) -> bool:
+        """True for a row rebuilt from persisted history rather than a
+        live event pair. Distinguishes "finished, outcome unknown" from
+        "still running", which both have ``is_error is None``."""
+        return self._historic
+
 
 __all__ = ["ToolCallRow"]
