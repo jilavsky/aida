@@ -26,6 +26,7 @@ from aida.ui.qt._qt import QGuiApplication
 from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
 from aida.ui.qt.chat_panel import ChatPanel, ErrorBanner, MessageBubble
 from aida.ui.qt.retrieval_widget import RetrievalRow
+from aida.ui.qt.tool_call_group import ToolCallGroup
 from aida.ui.qt.tool_call_widget import ToolCallRow
 from tests.mock_mcp_server import TINY_PNG_BYTES
 from tests.ui._qt_test_utils import pump_until
@@ -174,8 +175,12 @@ def test_streaming_text_builds_one_assistant_bubble(qapp):
 def test_tool_call_started_then_finished_updates_same_row(qapp):
     panel = ChatPanel()
     panel.handle_event(ToolCallStarted(call_id="c1", tool_name="get_time", arguments={"tz": "utc"}))
+    # One widget in the transcript, but it is now the run's group — the
+    # row itself lives inside it (see ToolCallGroup).
     assert panel.widget_count == 1
-    row = panel.widget_at(0)
+    group = panel.widget_at(0)
+    assert isinstance(group, ToolCallGroup)
+    row = group.rows[0]
     assert isinstance(row, ToolCallRow)
     assert row.is_error is None
 
@@ -183,7 +188,130 @@ def test_tool_call_started_then_finished_updates_same_row(qapp):
         ToolCallFinished(call_id="c1", tool_name="get_time", result="now", is_error=False)
     )
     assert panel.widget_count == 1  # same row updated, not a second widget
+    assert group.row_count == 1
     assert row.is_error is False
+    assert "1 ✓" in group.header_text()  # the header recounted
+
+
+# --- bug report: a run of tool calls hides the rest of the conversation ---
+
+
+def _tool_call(panel: ChatPanel, call_id: str, tool_name: str, *, is_error: bool = False) -> None:
+    panel.handle_event(ToolCallStarted(call_id=call_id, tool_name=tool_name, arguments={}))
+    panel.handle_event(
+        ToolCallFinished(call_id=call_id, tool_name=tool_name, result="whatever", is_error=is_error)
+    )
+
+
+def test_a_run_of_tool_calls_collapses_into_one_transcript_widget(qapp):
+    """The fix for "there are so many tool calls, that I do not see the
+    other prior parts of the chat": three calls back to back cost the
+    transcript one widget, not three."""
+    panel = ChatPanel()
+    panel.add_user_message("do the thing")
+    for i, name in enumerate(("read_file", "write_file", "plot_iq")):
+        _tool_call(panel, f"c{i}", name)
+
+    kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
+    assert kinds == ["MessageBubble", "ToolCallGroup"]
+
+    group = panel.widget_at(1)
+    assert group.row_count == 3
+    assert group.header_text().startswith("3 tool calls · 3 ✓")
+
+
+def test_a_reply_between_two_calls_starts_a_new_group(qapp):
+    """A group stands for one episode of the agent going off to do things,
+    which is what makes the header's tally mean anything — so anything else
+    landing in the transcript ends the run."""
+    panel = ChatPanel()
+    _tool_call(panel, "c1", "read_file")
+    panel.handle_event(TextStarted(message_id="m1"))
+    panel.handle_event(TextDelta(message_id="m1", text="found it, now writing"))
+    panel.handle_event(TextFinished(message_id="m1", text="found it, now writing"))
+    _tool_call(panel, "c2", "write_file")
+
+    kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
+    assert kinds == ["ToolCallGroup", "MessageBubble", "ToolCallGroup"]
+    assert panel.widget_at(0).row_count == 1
+    assert panel.widget_at(2).row_count == 1
+
+
+def test_group_header_tallies_failures(qapp):
+    panel = ChatPanel()
+    _tool_call(panel, "c1", "read_file")
+    _tool_call(panel, "c2", "write_file", is_error=True)
+
+    assert panel.widget_at(0).header_text().startswith("2 tool calls · 1 ✓ 1 ✗")
+
+
+def test_set_tool_display_mode_reaches_groups_already_on_screen(qapp):
+    """Retroactive by design: the rows exist in every mode, so switching to
+    "expanded" after a turn has gone wrong opens that turn for inspection
+    without re-running anything."""
+    panel = ChatPanel()
+    _tool_call(panel, "c1", "read_file", is_error=True)
+    group = panel.widget_at(0)
+    assert not group.is_expanded
+
+    panel.set_tool_display_mode("expanded")
+    assert panel.tool_display_mode == "expanded"
+    assert group.mode == "expanded"
+    assert group.is_expanded
+    assert group.rows[0].is_error is True
+
+
+def test_new_groups_inherit_the_current_display_mode(qapp):
+    panel = ChatPanel()
+    panel.set_tool_display_mode("hidden")
+    _tool_call(panel, "c1", "read_file")
+
+    group = panel.widget_at(0)
+    assert group.mode == "hidden"
+    assert group.header_text() == "1 tool call"
+    assert group.row_count == 1  # still built, so "expanded" can show it later
+
+
+def test_load_history_groups_consecutive_resumed_tool_messages(qapp):
+    panel = ChatPanel()
+    panel.load_history(
+        [
+            Message(role="user", content="do the thing"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    ToolCall(id="call_1", name="read_file", arguments={}),
+                    ToolCall(id="call_2", name="write_file", arguments={}),
+                ],
+            ),
+            Message(role="tool", content="contents", tool_call_id="call_1", name="read_file"),
+            Message(role="tool", content="written", tool_call_id="call_2", name="write_file"),
+            Message(role="assistant", content="done"),
+        ]
+    )
+
+    kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
+    assert kinds == ["MessageBubble", "ToolCallGroup", "MessageBubble"]
+    group = panel.widget_at(1)
+    assert [row.tool_name for row in group.rows] == ["read_file", "write_file"]
+    # Historic rows have no recorded outcome, so the header is just a count
+    # — and never the in-flight "⏳ … running …" (see ToolCallRow.is_historic).
+    assert group.header_text() == "2 tool calls"
+
+
+def test_clear_forgets_the_open_group(qapp):
+    """Otherwise the first tool call of the next conversation is added to a
+    deleted group from the previous one."""
+    panel = ChatPanel()
+    _tool_call(panel, "c1", "read_file")
+    panel.clear()
+    _tool_call(panel, "c2", "write_file")
+
+    assert panel.widget_count == 1
+    group = panel.widget_at(0)
+    assert isinstance(group, ToolCallGroup)
+    assert [row.tool_name for row in group.rows] == ["write_file"]
 
 
 # --- bug report: no empty assistant bubble for a text-less tool-call turn -
@@ -213,7 +341,10 @@ def test_text_less_tool_call_turn_produces_no_empty_bubble(qapp):
     )
 
     kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
-    assert kinds == ["ToolCallRow", "ToolCallRow"]  # no MessageBubble at all
+    # No MessageBubble at all — and both calls share one group, since
+    # nothing that appends a widget happened between them.
+    assert kinds == ["ToolCallGroup"]
+    assert [row.tool_name for row in panel.widget_at(0).rows] == ["get_time", "get_date"]
 
 
 def test_text_finished_with_text_but_no_deltas_still_shows_a_bubble(qapp):
@@ -368,11 +499,12 @@ def test_full_turn_with_tool_call_and_image_produces_expected_widget_sequence(qa
     assert kinds == [
         "MessageBubble",
         "MessageBubble",
-        "ToolCallRow",
+        "ToolCallGroup",
         "InlineImageWidget",
         "MessageBubble",
     ]
     assert panel.widget_at(1).text == "let me get that"
+    assert panel.widget_at(2).rows[0].tool_name == "mock-mcp.get_image"
     assert panel.widget_at(4).text == "here it is"
 
 
@@ -420,9 +552,9 @@ def test_load_history_renders_resumed_tool_message_as_a_collapsed_row(qapp):
         ]
     )
     kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
-    assert kinds == ["MessageBubble", "ToolCallRow", "MessageBubble"]
+    assert kinds == ["MessageBubble", "ToolCallGroup", "MessageBubble"]
 
-    row = panel.widget_at(1)
+    row = panel.widget_at(1).rows[0]
     assert row.tool_name == "get_current_time"
     assert row.arguments == {"tz": "utc"}
     assert row.is_error is None
@@ -438,7 +570,7 @@ def test_load_history_tool_row_with_unmatched_call_id_gets_empty_arguments(qapp)
     panel.load_history(
         [Message(role="tool", content="ok", tool_call_id="call_missing", name="a_tool")]
     )
-    row = panel.widget_at(0)
+    row = panel.widget_at(0).rows[0]
     assert row.arguments == {}
 
 
@@ -470,8 +602,8 @@ def test_load_history_interleaves_artifacts_at_their_recorded_seq(qapp, tmp_path
     panel.load_history(messages, seqs=[0, 1, 2, 3], artifacts_by_seq={2: [record]})
 
     kinds = [type(panel.widget_at(i)).__name__ for i in range(panel.widget_count)]
-    # user bubble, tool row (seq2's artifact right after it), image, final reply
-    assert kinds == ["MessageBubble", "ToolCallRow", "InlineImageWidget", "MessageBubble"]
+    # user bubble, tool group (seq2's artifact right after it), image, final reply
+    assert kinds == ["MessageBubble", "ToolCallGroup", "InlineImageWidget", "MessageBubble"]
 
 
 def test_load_history_artifact_with_a_missing_file_is_skipped(qapp, tmp_path: Path):
@@ -752,7 +884,7 @@ def test_refresh_fonts_leaves_the_whole_transcript_at_the_application_font(qapp)
         panel = ChatPanel()
         panel.handle_event(ToolCallStarted(call_id="c1", tool_name="read_file", arguments={}))
         qapp.processEvents()
-        row = panel.widget_at(0)
+        row = panel.widget_at(0).rows[0]
         assert isinstance(row, ToolCallRow)
 
         big = QApplication.font()

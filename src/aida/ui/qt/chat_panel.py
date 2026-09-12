@@ -39,6 +39,7 @@ from aida.ui.qt._qt import (
 )
 from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
 from aida.ui.qt.retrieval_widget import RetrievalRow
+from aida.ui.qt.tool_call_group import DEFAULT_TOOL_CALL_DISPLAY, ToolCallGroup
 from aida.ui.qt.tool_call_widget import ToolCallRow
 
 
@@ -506,12 +507,37 @@ class ChatPanel(QWidget):
         # tok/sec + duration line to (see handle_event's UsageInfo branch).
         self._last_assistant_bubble: MessageBubble | None = None
         self._tool_rows: dict[str, ToolCallRow] = {}
+        # A run of consecutive tool calls shares one collapsible group —
+        # see ToolCallGroup's docstring for the bug report. None means "no
+        # run is open": _append_widget clears it for any non-group widget,
+        # so an assistant reply, an image or an error between two calls
+        # ends the run and the next call starts a fresh group, which is
+        # what makes a group correspond to one episode rather than to the
+        # whole conversation.
+        self._current_tool_group: ToolCallGroup | None = None
+        # call_id -> the group holding that row, so ToolCallFinished can
+        # tell the right header to recount without walking the layout.
+        self._tool_groups: dict[str, ToolCallGroup] = {}
+        self._tool_display_mode = DEFAULT_TOOL_CALL_DISPLAY
 
     # --- internal helpers --------------------------------------------------
 
     def _append_widget(self, widget: QWidget) -> None:
+        if not isinstance(widget, ToolCallGroup):
+            # Anything that is not the group itself ends the current run —
+            # see _current_tool_group's comment in __init__.
+            self._current_tool_group = None
         self._content_layout.insertWidget(self._content_layout.count() - 1, widget)
         self._scroll_to_bottom()
+
+    def _ensure_tool_group(self) -> ToolCallGroup:
+        """The group the next tool row belongs in, opening a new run if the
+        previous widget was not a tool call."""
+        if self._current_tool_group is None:
+            group = ToolCallGroup(parent=self._content, mode=self._tool_display_mode)
+            self._append_widget(group)  # clears _current_tool_group; set it after
+            self._current_tool_group = group
+        return self._current_tool_group
 
     def _relay_code_editor_requests(self, bubble: MessageBubble) -> None:
         bubble.code_editor_requested.connect(self.code_editor_requested.emit)
@@ -590,6 +616,25 @@ class ChatPanel(QWidget):
         self._append_widget(bubble)
         return bubble
 
+    def set_tool_display_mode(self, mode: str) -> None:
+        """Apply one of ``TOOL_CALL_DISPLAY_MODES`` to the whole transcript,
+        including groups already on screen.
+
+        Retroactive on purpose: the rows exist in every mode, so switching
+        to "expanded" after a turn has already gone wrong shows that turn's
+        calls in full — the inspection path the bug report calls critical.
+        New groups created after this call inherit the mode too.
+        """
+        self._tool_display_mode = mode
+        for i in range(self._content_layout.count() - 1):
+            widget = self._content_layout.itemAt(i).widget()
+            if isinstance(widget, ToolCallGroup):
+                widget.set_mode(mode)
+
+    @property
+    def tool_display_mode(self) -> str:
+        return self._tool_display_mode
+
     def add_artifact_widget(self, widget: QWidget) -> None:
         """Append an already-built artifact widget (``InlineImageWidget``/
         ``FileArtifactCard``) directly — used by ``MainWindow`` when
@@ -650,11 +695,17 @@ class ChatPanel(QWidget):
                 parent=self._content,
             )
             self._tool_rows[event.call_id] = row
-            self._append_widget(row)
+            group = self._ensure_tool_group()
+            group.add_row(row)
+            self._tool_groups[event.call_id] = group
+            self._scroll_to_bottom()
         elif name == "ToolCallFinished":
             row = self._tool_rows.get(event.call_id)
             if row is not None:
                 row.mark_finished(result=event.result, is_error=event.is_error)
+            group = self._tool_groups.get(event.call_id)
+            if group is not None:
+                group.row_finished()
         elif name == "ImageArtifactCreated":
             if event.path:
                 widget = InlineImageWidget(
@@ -769,7 +820,10 @@ class ChatPanel(QWidget):
                     parent=self._content,
                 )
                 row.mark_historic(result=message.content)
-                self._append_widget(row)
+                # Consecutive tool messages land in one group for free:
+                # every other branch of this loop goes through
+                # _append_widget, which ends the run.
+                self._ensure_tool_group().add_row(row)
             elif message.role == "assistant" and not message.content and message.tool_calls:
                 pass  # tool-call-only turn — nothing to show, see docstring
             else:
@@ -821,6 +875,8 @@ class ChatPanel(QWidget):
         self._current_assistant_bubble = None
         self._last_assistant_bubble = None
         self._tool_rows.clear()
+        self._current_tool_group = None
+        self._tool_groups.clear()
 
 
 __all__ = ["ChatPanel", "ErrorBanner", "MessageBubble"]
