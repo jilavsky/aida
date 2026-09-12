@@ -129,6 +129,12 @@ _APP_PORTABLE_FIELDS = (
     "max_context_tokens",
     "command_allowlist",
     "assistant_name",
+    # Portable, not machine-specific: which of the three tool-call display
+    # modes suits you follows from your role — a beamline user reading a
+    # session versus someone debugging one — and that travels with the
+    # person, unlike collapsed_panels or a window size, which describe one
+    # screen. See aida.ui.qt.tool_call_group.
+    "tool_call_display",
     "scheduler_quiet_period_seconds",
     "scheduler_max_defer_seconds",
 )

@@ -143,3 +143,13 @@ def test_a_very_long_tool_name_is_truncated_in_the_header(qapp):
     assert long_name not in text
     assert "…" in text
     assert len(text) < 100
+
+
+def test_the_config_default_matches_this_module(qapp):
+    """``AppConfig.tool_call_display`` spells its default as a literal
+    because config must stay importable with no Qt installed (see that
+    field's comment). This is the check that keeps the two in step."""
+    from aida.config.settings import AppConfig
+
+    assert AppConfig().tool_call_display == DEFAULT_TOOL_CALL_DISPLAY
+    assert AppConfig().tool_call_display in TOOL_CALL_DISPLAY_MODES

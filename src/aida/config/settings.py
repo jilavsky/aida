@@ -398,6 +398,21 @@ class AppConfig:
     # not something to re-decide on every launch. Unknown titles are
     # ignored on load, so renaming or removing a panel can't break startup.
     collapsed_panels: list[str] = field(default_factory=list)
+    # How the chat transcript renders tool calls: "hidden" (one dim stub
+    # line per run), "grouped" (the default — one collapsible line with
+    # the run's tally and timing) or "expanded" (every row visible, the
+    # pre-2026-09 behavior). Bug report: a turn with thirty tool calls
+    # pushed the actual conversation off-screen; beamline users reading a
+    # session do not want them, and Jan debugging one does. The rows are
+    # built in every mode, so this only ever changes what is *shown* and
+    # can be flipped after the fact — see aida.ui.qt.tool_call_group.
+    # Spelled as a literal rather than imported from
+    # aida.ui.qt.tool_call_group.DEFAULT_TOOL_CALL_DISPLAY because config
+    # must stay importable with no Qt installed (tests/ui/test_qt_contract
+    # .py); the two must be kept in step by hand. An unrecognized value
+    # falls back to "grouped" at the UI boundary rather than here, so a
+    # hand-edited config.yaml cannot blank the transcript.
+    tool_call_display: str = "grouped"
     # Widths of the main window's three columns (conversations sidebar /
     # chat / session panels), left to right, as the user last dragged them.
     # Bug report: "Left one is fixed width or hidden ... I cannot fit this
@@ -525,6 +540,7 @@ class AppConfig:
             "known_users": self.known_users,
             "user_contexts": self.user_contexts,
             "collapsed_panels": self.collapsed_panels,
+            "tool_call_display": self.tool_call_display,
             "splitter_sizes": self.splitter_sizes,
             "scheduler_quiet_period_seconds": self.scheduler_quiet_period_seconds,
             "scheduler_max_defer_seconds": self.scheduler_max_defer_seconds,
@@ -559,6 +575,7 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "known_users": "list[str]",
     "user_contexts": "dict[str,str]",
     "collapsed_panels": "list[str]",
+    "tool_call_display": "str",
     "splitter_sizes": "list[int]",
     "scheduler_quiet_period_seconds": "int",
     "scheduler_max_defer_seconds": "int",
