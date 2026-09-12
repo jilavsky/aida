@@ -296,11 +296,9 @@ class PathMapper:
         if best is None:
             return None
         matched = _strip_trailing_slash(_posix(best))
-        replacement = str(Path(self.overrides[best]).expanduser())
+        replacement = os.path.expanduser(self.overrides[best])
         remainder = raw[len(matched) :]
-        if not remainder:
-            return replacement
-        return str(Path(replacement) / remainder.lstrip("/"))
+        return _join_under(replacement, remainder)
 
     def conda_prefix(self, env: str) -> Path | None:
         """Locate a conda/mamba environment named ``env`` on this machine,
@@ -316,6 +314,25 @@ class PathMapper:
                 break
         self._conda_prefixes[env] = found
         return found
+
+
+def _join_under(base: str, remainder: str) -> str:
+    """Append a ``/``-separated ``remainder`` to a user-supplied replacement
+    path, keeping the separator style the user wrote.
+
+    The replacement is otherwise echoed back **verbatim**. Running it
+    through ``Path`` would be tidier-looking but rewrites separators to the
+    host's: a ``--map`` onto ``/data/usaxs`` typed on a Windows machine
+    would come back as ``\\data\\usaxs`` — still valid there, but not what
+    was asked for, and it is this string that lands in the import report and
+    in the rewritten config.
+    """
+    sep = "\\" if "\\" in base and "/" not in base else "/"
+    tail = remainder.strip("/").replace("/", sep)
+    if not tail:
+        return base
+    trimmed = base.rstrip("/\\")
+    return f"{trimmed}{sep}{tail}" if trimmed else f"{sep}{tail}"
 
 
 def _looks_absolute(value: str) -> bool:
