@@ -83,6 +83,7 @@ _TRUNCATION_NOTE = "\n... [truncated]"
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 _TEXT_SUFFIXES = {
     ".txt",
+    ".text",
     ".md",
     ".markdown",
     ".rst",
@@ -100,18 +101,47 @@ _TEXT_SUFFIXES = {
     ".rs",
     ".go",
     ".rb",
+    ".php",
+    ".pl",
+    ".lua",
+    ".r",
+    ".swift",
+    ".kt",
+    ".kts",
+    ".m",
+    ".scala",
     ".sh",
     ".bash",
+    ".zsh",
+    ".fish",
+    # Windows shell scripts -- the same role as .sh/.bash above, just on the
+    # other OS. Reported gap: an AIDA setup-bundle .bat file (see CHANGELOG's
+    # config export/import work) failed to read on Windows with
+    # UnsupportedDocumentFormatError even though it's plain text.
+    ".bat",
+    ".cmd",
+    ".ps1",
+    ".psm1",
+    ".psd1",
+    ".vbs",
     ".yaml",
     ".yml",
     ".toml",
     ".ini",
     ".cfg",
+    ".conf",
+    ".config",
+    ".properties",
+    ".env",
     ".xml",
     ".html",
     ".htm",
     ".css",
     ".sql",
+    ".tex",
+    ".bib",
+    ".diff",
+    ".patch",
 }
 
 #: Below this many non-whitespace characters *per page*, a PDF is treated as
