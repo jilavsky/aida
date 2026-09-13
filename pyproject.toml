@@ -83,6 +83,16 @@ dev = [
 
 [project.scripts]
 aida = "aida.cli.__main__:main"
+
+# Separate from [project.scripts]/console_scripts above, deliberately: on
+# Windows, pip builds a console_scripts entry into a console-subsystem .exe
+# stub, which always allocates a console window regardless of what the
+# program does with stdout -- so aida-gui.exe popped a console behind the
+# Qt window on every launch (a shortcut included), with no equivalent
+# problem on macOS/Linux, where binaries don't carry that subsystem bit at
+# all. gui-scripts builds the windowed-subsystem stub instead (and prefers
+# pythonw.exe), matching how aida-gui already behaves everywhere else.
+[project.gui-scripts]
 aida-gui = "aida.cli.__main__:main_gui"
 
 [tool.hatch.build.targets.wheel]
