@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import socket
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -500,3 +501,141 @@ async def test_a_wedged_server_does_not_block_the_others_from_starting():
     assert "did not finish starting" in start_errors["quiet-mcp"]
     assert running == ["mock-mcp"]
     assert any(name.startswith("mock-mcp") for name in tools)
+
+
+# --- http (streamable-HTTP) transport ---------------------------------------
+#
+# Same mock_mcp_server.py, same tools, run over real streamable-HTTP instead
+# of stdio (MOCK_MCP_HTTP_PORT switches its __main__) — a real remote server
+# in a real subprocess, not a mocked ClientSession, so these exercise
+# McpServerHandle's actual streamablehttp_client() path end to end.
+
+
+def _free_tcp_port() -> int:
+    """Bind an ephemeral port and immediately release it — small race
+    window between this and the mock server binding it, acceptable for a
+    test (same technique used by e.g. pytest-asyncio's own examples; no
+    port-locking primitive is worth the complexity here)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _mock_http_config(
+    *, name: str = "mock-mcp-http", port: int, headers: dict[str, str] | None = None
+) -> McpServerConfig:
+    return McpServerConfig(
+        name=name, type="http", url=f"http://127.0.0.1:{port}/mcp", headers=headers or {}
+    )
+
+
+async def _wait_for_port(port: int, *, timeout: float = 10.0) -> None:
+    deadline = asyncio.get_event_loop().time() + timeout
+    last_error: OSError | None = None
+    while asyncio.get_event_loop().time() < deadline:
+        try:
+            _, writer = await asyncio.open_connection("127.0.0.1", port)
+        except OSError as exc:
+            last_error = exc
+            await asyncio.sleep(0.05)
+            continue
+        writer.close()
+        await writer.wait_closed()
+        return
+    raise TimeoutError(f"mock http mcp server never opened port {port}") from last_error
+
+
+@asynccontextmanager
+async def _running_http_mock_server(port: int) -> AsyncIterator[None]:
+    """Launch tests/mock_mcp_server.py as a real subprocess speaking
+    streamable-HTTP on ``port``, wait until it's actually accepting
+    connections, and kill it on exit."""
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        str(MOCK_SERVER_PATH),
+        env={**os.environ, "MOCK_MCP_HTTP_PORT": str(port)},
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        await _wait_for_port(port)
+        yield
+    finally:
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+
+
+@pytest.mark.asyncio
+async def test_http_transport_discovers_tools_and_calls_one():
+    port = _free_tcp_port()
+    async with _running_http_mock_server(port):
+        handle = McpServerHandle(_mock_http_config(port=port), call_timeout_seconds=5.0)
+        try:
+            await handle.start()
+            assert {t.name for t in handle.list_tools()} == ALL_TOOL_NAMES
+            result = await handle.call_tool("echo_text", {"message": "hi"})
+        finally:
+            await handle.stop()
+
+    artifacts = convert_result(result)
+    text_artifacts = [a for a in artifacts if isinstance(a, TextArtifact)]
+    assert len(text_artifacts) == 1
+    assert text_artifacts[0].text == "echo: hi"
+
+
+@pytest.mark.asyncio
+async def test_http_transport_missing_url_fails_fast_without_connecting():
+    handle = McpServerHandle(McpServerConfig(name="no-url", type="http", url=""))
+    with pytest.raises(McpServerError, match="no url configured"):
+        await handle.start()
+    assert handle.is_running is False
+
+
+@pytest.mark.asyncio
+async def test_http_transport_connection_refused_reports_a_clear_error():
+    port = _free_tcp_port()  # nothing is listening on it
+    handle = McpServerHandle(
+        _mock_http_config(port=port), startup_timeout_seconds=5.0, stop_timeout_seconds=2.0
+    )
+    try:
+        with pytest.raises(McpServerError, match="failed to start"):
+            await handle.start()
+    finally:
+        await handle.stop()
+
+
+@pytest.mark.asyncio
+async def test_http_transport_raises_for_missing_header_secret_without_connecting(monkeypatch):
+    """A missing/misspelled secret reference in ``headers`` fails the same
+    fast, isolated way a bad ``env`` reference does
+    (``test_start_raises_for_missing_secret_without_spawning`` above) —
+    before any HTTP connection is attempted. ``resolve_env_secrets`` itself
+    (used for both ``env`` and ``headers``) is already covered by the
+    dedicated ``test_resolve_env_secrets_*`` tests; this one checks that
+    ``McpServerHandle.start()`` actually calls it for ``headers`` too."""
+    _use_memory_backend(monkeypatch)
+    handle = McpServerHandle(
+        _mock_http_config(port=_free_tcp_port(), headers={"Authorization": "keyring:never-stored"})
+    )
+    with pytest.raises(McpServerError, match="never-stored"):
+        await handle.start()
+    assert not handle.is_running
+
+
+@pytest.mark.asyncio
+async def test_http_transport_plain_headers_reach_a_running_server():
+    port = _free_tcp_port()
+    async with _running_http_mock_server(port):
+        handle = McpServerHandle(
+            _mock_http_config(port=port, headers={"X-Test-Header": "plain-value"}),
+            call_timeout_seconds=5.0,
+        )
+        try:
+            await handle.start()
+            assert handle.is_running
+        finally:
+            await handle.stop()

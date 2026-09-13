@@ -75,13 +75,18 @@ def test_a_mix_of_new_and_conflicting_names_in_one_import():
 def test_unknown_keys_on_an_imported_server_survive_via_extra():
     """A real Claude-Desktop export carries keys AIDA doesn't model —
     importing must not silently drop them (aida.config.settings.
-    McpServerConfig.extra is what carries them through)."""
+    McpServerConfig.extra is what carries them through). ``type`` is
+    deliberately *not* used here as the unknown-key example any more — it's
+    now a modeled field (stdio/http transport selection), not one AIDA
+    passes through verbatim."""
     existing = _config()
-    incoming = {"mcpServers": {"pyirena": {"command": "/x", "disabled": False, "type": "stdio"}}}
+    incoming = {
+        "mcpServers": {"pyirena": {"command": "/x", "disabled": False, "autoApprove": ["a", "b"]}}
+    }
 
     result = merge_mcp_config(existing, incoming)
 
-    assert result.config.servers["pyirena"].extra == {"disabled": False, "type": "stdio"}
+    assert result.config.servers["pyirena"].extra == {"disabled": False, "autoApprove": ["a", "b"]}
 
 
 def test_malformed_input_imports_nothing_without_raising():

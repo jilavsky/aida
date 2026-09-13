@@ -70,6 +70,38 @@ def test_server_add_rejects_malformed_env(aida_home: Path, capsys):
     assert "pyirena" not in load_mcp_config(aida_home).servers
 
 
+def test_server_add_http_type_persists_url_and_headers(aida_home: Path, capsys):
+    rc = main(
+        [
+            "server",
+            "add",
+            "remote-instrument",
+            "--type",
+            "http",
+            "--url",
+            "https://usaxscontrol.example:8765/mcp",
+            "--header",
+            "Authorization=Bearer keyring:my_token",
+            "--groups",
+            "instrument-status",
+        ]
+    )
+    assert rc == 0
+    assert "Added" in capsys.readouterr().out
+
+    server = load_mcp_config(aida_home).servers["remote-instrument"]
+    assert server.type == "http"
+    assert server.url == "https://usaxscontrol.example:8765/mcp"
+    assert server.headers == {"Authorization": "Bearer keyring:my_token"}
+
+
+def test_server_add_rejects_malformed_header(aida_home: Path, capsys):
+    rc = main(["server", "add", "remote", "--type", "http", "--header", "NOT_KEY_VALUE"])
+    assert rc == 1
+    assert "KEY=VALUE" in capsys.readouterr().out
+    assert "remote" not in load_mcp_config(aida_home).servers
+
+
 # --- server show (populated) ---------------------------------------------
 
 
@@ -78,8 +110,32 @@ def test_server_show_known(aida_home: Path, capsys):
     rc = main(["server", "show", "pyirena"])
     assert rc == 0
     out = capsys.readouterr().out
+    assert "type:           stdio" in out
     assert "command:        /opt/pyirena-mcp" in out
     assert "groups:         analysis" in out
+
+
+def test_server_show_http_type(aida_home: Path, capsys):
+    main(
+        [
+            "server",
+            "add",
+            "remote-instrument",
+            "--type",
+            "http",
+            "--url",
+            "https://usaxscontrol.example:8765/mcp",
+            "--header",
+            "Authorization=Bearer secret-token",
+        ]
+    )
+    rc = main(["server", "show", "remote-instrument"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "type:           http" in out
+    assert "url:            https://usaxscontrol.example:8765/mcp" in out
+    assert "headers:        Authorization=***" in out
+    assert "command:" not in out, "an http server has no command to show"
 
 
 # --- server edit -----------------------------------------------------------
@@ -111,6 +167,25 @@ def test_server_edit_only_overwrites_passed_fields(aida_home: Path):
     assert server.command == "/new"
     assert server.groups == ["analysis"], "unset flags must leave existing fields untouched"
     assert server.skills == ["saxs"]
+
+
+def test_server_edit_leaves_type_unchanged_when_flag_omitted(aida_home: Path):
+    main(
+        [
+            "server",
+            "add",
+            "remote-instrument",
+            "--type",
+            "http",
+            "--url",
+            "https://old.example/mcp",
+        ]
+    )
+    main(["server", "edit", "remote-instrument", "--url", "https://new.example/mcp"])
+
+    server = load_mcp_config(aida_home).servers["remote-instrument"]
+    assert server.type == "http", "unset --type must leave the transport untouched"
+    assert server.url == "https://new.example/mcp"
 
 
 def test_server_edit_preserves_disabled_and_confirm_tools(aida_home: Path):

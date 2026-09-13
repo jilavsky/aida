@@ -237,9 +237,6 @@ concrete asks for it.
   `ToolCallRow` display, and re-deriving `confirm_tools` gating from the
   dispatched tool name rather than the wrapper's). Full analysis in
   [`planning/mcp_tool_scaling.md`](planning/mcp_tool_scaling.md).
-- **Remote MCP servers over HTTP/SSE** — instrument-side MCPs reachable from
-  an office machine. The manager was designed transport-pluggable; add when a
-  concrete remote server exists.
 - **MCP Apps / rich interactive tool outputs**, if the ecosystem standardizes
   them.
 - **Interactive plots** (a pyqtgraph pane fed by structured data artifacts) as

@@ -31,15 +31,20 @@ tools beyond AIDA's small set of built-ins. Servers are configured in
 `mcp.json` starts from the same `{"mcpServers": {...}}` shape Claude Desktop
 and other MCP clients use, so a config you already have elsewhere is
 portable — see [Importing an existing config](#importing-an-existing-config-including-claude-desktop).
-Each server entry carries the standard `command`/`args`/`env` (how to launch
-it as a stdio subprocess), plus four AIDA-specific extensions that other
-clients simply ignore:
+Each server entry is either a **stdio** server (the standard
+`command`/`args`/`env`, launched as a local subprocess) or a **remote http**
+server (`url`, optionally `headers`) — see
+[Remote HTTP MCP servers](#remote-http-mcp-servers) below — plus AIDA's own
+extensions that other clients simply ignore:
 
 | Field | Standard/AIDA | Meaning |
 |---|---|---|
-| `command` | standard | Executable to launch (stdio transport) |
-| `args` | standard | Command-line arguments, in order |
-| `env` | standard | Environment variables passed to the subprocess. A value of `keyring:NAME` or `secret:NAME` defers to the OS keychain instead of a plaintext value — see [Storing secrets in the OS keychain](#storing-secrets-in-the-os-keychain) |
+| `command` | standard | Executable to launch (stdio transport, the default) |
+| `args` | standard | Command-line arguments, in order (stdio transport) |
+| `env` | standard | Environment variables passed to the subprocess (stdio transport). A value of `keyring:NAME` or `secret:NAME` defers to the OS keychain instead of a plaintext value — see [Storing secrets in the OS keychain](#storing-secrets-in-the-os-keychain) |
+| `type` | AIDA | Transport: `"stdio"` (default) or `"http"` |
+| `url` | AIDA | Server endpoint (http transport) |
+| `headers` | AIDA | HTTP headers sent on every request (http transport), e.g. a bearer token — supports the same `keyring:NAME`/`secret:NAME` values as `env` |
 | `groups` | AIDA | Named group(s) this server belongs to (see [Groups](#groups)) |
 | `skills` | AIDA | Skill file names to load into context when this server is active |
 | `disabled_tools` | AIDA | Tool names hidden from the model entirely (see [Per-tool permissions](#per-tool-permissions)) |
@@ -60,10 +65,53 @@ clients simply ignore:
 ```
 
 Any key AIDA doesn't model itself (a Claude-Desktop export routinely has
-`disabled`, `autoApprove`, `type`, `cwd`, etc.) is preserved verbatim in an
-internal `extra` bucket rather than discarded — loading a real-world config
-never errors, and saving it back out afterward (an edit via CLI or GUI)
-never silently drops fields the file already had.
+`disabled`, `autoApprove`, `cwd`, etc.) is preserved verbatim in an internal
+`extra` bucket rather than discarded — loading a real-world config never
+errors, and saving it back out afterward (an edit via CLI or GUI) never
+silently drops fields the file already had.
+
+## Remote HTTP MCP servers
+
+Most MCP servers run as a local subprocess AIDA launches itself (the stdio
+transport above). Some instead run as a standing service reachable over the
+network — an instrument-control server on the beamline machine, say, that
+several staff laptops need to reach — and speak the
+[streamable-HTTP](https://modelcontextprotocol.io/) transport instead.
+Point AIDA at one with `"type": "http"` and `"url"` instead of
+`command`/`args`/`env`:
+
+```json
+{
+  "mcpServers": {
+    "usaxscontrol-instrument": {
+      "type": "http",
+      "url": "https://usaxscontrol.example:8765/mcp",
+      "headers": {
+        "Authorization": "Bearer keyring:usaxscontrol_token"
+      },
+      "groups": ["instrument-status"]
+    }
+  }
+}
+```
+
+`groups`/`skills`/`disabled_tools`/`confirm_tools` and the CLI's `test`/GUI's
+**Test Connection** all work identically regardless of transport — AIDA
+starts, stops, and calls tools on an http server exactly the way it does a
+stdio one, the only difference is *how* it connects. Equivalent CLI form:
+
+```bash
+aida mcp server add usaxscontrol-instrument \
+  --type http \
+  --url https://usaxscontrol.example:8765/mcp \
+  --header "Authorization=Bearer keyring:usaxscontrol_token" \
+  --groups instrument-status
+```
+
+The server itself is unaffected by any of this — whether AIDA (or any other
+MCP client) reaches it over stdio or http is entirely the connecting
+client's choice; a server that supports streamable-HTTP typically offers it
+via a `--transport http` flag of its own (check that server's docs).
 
 ## Adding a server via CLI
 
@@ -84,6 +132,9 @@ aida mcp server add bait-mcp \
   --env BAIT_LOG_LEVEL=INFO \
   --groups instrument-control
 ```
+
+`--header` is the http-transport equivalent of `--env` (also repeatable) —
+see [Remote HTTP MCP servers](#remote-http-mcp-servers) above.
 
 `--groups` and `--skills` each take a comma-separated list. Other useful
 subcommands:
@@ -152,8 +203,9 @@ then in `mcp.json`:
 ```
 
 The GUI's Add/Edit Server form has a **Store Value in Keychain…** button
-next to the Env field: pick which `KEY=VALUE` line to convert, name it in
-the keychain, enter the value once, and the form swaps that line for
+next to the Env field (and, for an http-transport server, an identical one
+next to the Headers field): pick which `KEY=VALUE` line to convert, name it
+in the keychain, enter the value once, and the form swaps that line for
 `KEY=keyring:name` for you.
 
 ## Adding/editing via the GUI
@@ -162,9 +214,11 @@ The **MCP Servers…** toolbar action opens the `McpManagementDialog`, a
 full front end over the same `mcp.json` the CLI edits (changes are saved
 immediately, no separate "Save" step for most actions).
 
-- **Add Server…** opens a form with fields for name, command, args
-  (one per line), env (`KEY=VALUE` per line, with a "Hide values" toggle to
-  mask them on screen, and a **Store Value in Keychain…** button — see
+- **Add Server…** opens a form with fields for name, a **Type** dropdown
+  (stdio/http) that shows only the fields relevant to the chosen transport,
+  command/args/env for stdio (or url/headers for http — both `env` and
+  `headers` have a "Hide values" toggle to mask them on screen and a
+  **Store Value in Keychain…** button — see
   [Storing secrets in the OS keychain](#storing-secrets-in-the-os-keychain)),
   and checkable lists for **groups** (with an inline "add a new group" box)
   and **skills**. **Edit…** opens the same form pre-filled for the selected

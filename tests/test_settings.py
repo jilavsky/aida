@@ -299,6 +299,44 @@ def test_mcp_server_config_wraps_a_hand_edited_scalar_args():
     assert server.args == ["--flag"]
 
 
+def test_mcp_server_defaults_to_stdio_type():
+    from aida.config.settings import McpServerConfig
+
+    server = McpServerConfig.from_dict("pyirena-mcp", {"command": "/opt/pyirena-mcp"})
+    assert server.type == "stdio"
+    assert server.url == ""
+    assert server.headers == {}
+
+
+def test_mcp_server_type_http_roundtrips_through_from_dict_and_to_dict():
+    from aida.config.settings import McpServerConfig
+
+    data = {
+        "type": "http",
+        "url": "https://usaxscontrol.example:8765/mcp",
+        "headers": {"Authorization": "Bearer keyring:my_token"},
+    }
+    server = McpServerConfig.from_dict("remote-instrument", data)
+    assert server.type == "http"
+    assert server.url == "https://usaxscontrol.example:8765/mcp"
+    assert server.headers == {"Authorization": "Bearer keyring:my_token"}
+    # extra must not also carry these now-modeled keys.
+    assert server.extra == {}
+
+    round_tripped = server.to_dict()
+    assert round_tripped["type"] == "http"
+    assert round_tripped["url"] == data["url"]
+    assert round_tripped["headers"] == data["headers"]
+
+
+def test_mcp_server_unknown_type_falls_back_to_stdio(caplog):
+    from aida.config.settings import McpServerConfig
+
+    server = McpServerConfig.from_dict("weird", {"type": "carrier-pigeon"})
+    assert server.type == "stdio"
+    assert "unknown type" in caplog.text
+
+
 def test_knowledge_base_config_wraps_a_hand_edited_scalar_source_folders():
     from aida.config.settings import KnowledgeBaseConfig
 
@@ -362,7 +400,10 @@ def test_unknown_mcp_server_keys_survive_a_save_and_reload(aida_home: Path):
     *survived a save* — before ``McpServerConfig.extra`` existed, the very
     first GUI/CLI edit that re-saved mcp.json silently deleted every key
     AIDA didn't model. A real Claude-Desktop export carries exactly these:
-    ``disabled``, ``autoApprove``, ``type``, ``cwd``."""
+    ``disabled``, ``autoApprove``, ``cwd`` (``type`` used to be one of these
+    too, before AIDA modeled it as the stdio/http transport selector — see
+    ``test_mcp_server_type_http_roundtrips_through_from_dict_and_to_dict``
+    for that field's own coverage)."""
 
     raw = {
         "mcpServers": {
@@ -370,7 +411,6 @@ def test_unknown_mcp_server_keys_survive_a_save_and_reload(aida_home: Path):
                 "command": "/opt/pyirena-mcp",
                 "disabled": False,
                 "autoApprove": ["plot_saxs"],
-                "type": "stdio",
                 "cwd": "/data",
             }
         }
@@ -382,7 +422,6 @@ def test_unknown_mcp_server_keys_survive_a_save_and_reload(aida_home: Path):
     assert loaded.servers["pyirena"].extra == {
         "disabled": False,
         "autoApprove": ["plot_saxs"],
-        "type": "stdio",
         "cwd": "/data",
     }
 

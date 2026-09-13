@@ -49,6 +49,7 @@ from aida.mcp.tool_grouping import group_tool_names
 from aida.ui.qt._qt import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QDesktopServices,
     QDialog,
     QDialogButtonBox,
@@ -73,6 +74,12 @@ from aida.ui.qt._qt import (
     QVBoxLayout,
     QWidget,
 )
+
+#: The two transports ``McpServerHandle`` knows how to speak — see
+#: ``McpServerConfig.type``. Matches ``SAFETY_MODES``'s pattern in
+#: ``settings_dialog.py``: a plain list of the raw values themselves, fed
+#: straight into a ``QComboBox``.
+MCP_SERVER_TYPES = ["stdio", "http"]
 
 
 def _parse_kv_lines(text: str) -> dict[str, str]:
@@ -148,6 +155,18 @@ class ServerFormDialog(QDialog):
     echo mode the way ``QLineEdit`` does; this is the "simplification of
     the plan's 'values maskable' item" called out in the phase file rather
     than a per-row masked grid.
+
+    The Type combo (stdio/http) shows only the Command/Args/Env rows or
+    only the URL/Headers rows via ``QFormLayout.setRowVisible`` — the two
+    groups are genuinely mutually exclusive (``McpServerHandle`` only ever
+    reads one set, per ``McpServerConfig.type``), so showing both at once
+    would just invite configuring a transport's fields that role
+    ignores. The Headers block reuses the same masking/keychain-storage
+    idea as Env, in its own parallel set of widgets/handlers rather than
+    a shared abstraction — ``_on_store_secret_in_keychain`` is already
+    covered by tests exercising the env path exactly as it stands, and
+    two short, obviously-parallel handlers were less risk than
+    generalizing a tested one.
     """
 
     def __init__(
@@ -170,6 +189,13 @@ class ServerFormDialog(QDialog):
         self._name_edit.setReadOnly(self._is_edit)  # name is the identity; not renameable in-place
         form.addRow("Name:", self._name_edit)
 
+        self._type_combo = QComboBox(self)
+        self._type_combo.addItems(MCP_SERVER_TYPES)
+        type_index = self._type_combo.findText(server.type if server else "stdio")
+        if type_index >= 0:
+            self._type_combo.setCurrentIndex(type_index)
+        form.addRow("Type:", self._type_combo)
+
         self._command_edit = QLineEdit(server.command if server else "", self)
         form.addRow("Command:", self._command_edit)
 
@@ -184,10 +210,10 @@ class ServerFormDialog(QDialog):
         self._env_edit.setPlaceholderText("KEY=VALUE, one per line")
         form.addRow("Env:", self._env_edit)
 
-        env_options_row = QHBoxLayout()
+        self._env_options_row = QHBoxLayout()
         self._hide_values_checkbox = QCheckBox("Hide values", self)
         self._hide_values_checkbox.toggled.connect(self._on_hide_toggled)
-        env_options_row.addWidget(self._hide_values_checkbox)
+        self._env_options_row.addWidget(self._hide_values_checkbox)
         # B6: env values previously had no home but plaintext mcp.json — the
         # one remaining hole in "secrets never touch YAML/JSON" (every other
         # secret already goes through aida.config.secrets via secret_ref).
@@ -196,11 +222,36 @@ class ServerFormDialog(QDialog):
         # resolves back to the real value at launch time.
         store_secret_button = QPushButton("Store Value in Keychain…", self)
         store_secret_button.clicked.connect(self._on_store_secret_in_keychain)
-        env_options_row.addWidget(store_secret_button)
-        env_options_row.addStretch(1)
-        form.addRow("", env_options_row)
+        self._env_options_row.addWidget(store_secret_button)
+        self._env_options_row.addStretch(1)
+        form.addRow("", self._env_options_row)
         if self._is_edit and server and server.env:
             self._hide_values_checkbox.setChecked(True)
+
+        self._url_edit = QLineEdit(server.url if server else "", self)
+        self._url_edit.setPlaceholderText("https://host:port/mcp")
+        form.addRow("URL:", self._url_edit)
+
+        self._raw_headers_text = "\n".join(
+            f"{k}={v}" for k, v in (server.headers if server else {}).items()
+        )
+        self._headers_edit = QPlainTextEdit(self._raw_headers_text, self)
+        self._headers_edit.setPlaceholderText(
+            "KEY=VALUE, one per line, e.g.\nAuthorization=Bearer keyring:my_token"
+        )
+        form.addRow("Headers:", self._headers_edit)
+
+        self._headers_options_row = QHBoxLayout()
+        self._hide_header_values_checkbox = QCheckBox("Hide values", self)
+        self._hide_header_values_checkbox.toggled.connect(self._on_header_hide_toggled)
+        self._headers_options_row.addWidget(self._hide_header_values_checkbox)
+        store_header_secret_button = QPushButton("Store Value in Keychain…", self)
+        store_header_secret_button.clicked.connect(self._on_store_header_secret_in_keychain)
+        self._headers_options_row.addWidget(store_header_secret_button)
+        self._headers_options_row.addStretch(1)
+        form.addRow("", self._headers_options_row)
+        if self._is_edit and server and server.headers:
+            self._hide_header_values_checkbox.setChecked(True)
 
         self._groups_list = QListWidget(self)
         for name in known_group_names(mcp_config):
@@ -232,6 +283,10 @@ class ServerFormDialog(QDialog):
             )
         form.addRow("Skills:", self._skills_list)
 
+        self._form = form
+        self._type_combo.currentTextChanged.connect(self._on_type_changed)
+        self._on_type_changed(self._type_combo.currentText())  # sync initial row visibility
+
         layout.addLayout(form)
 
         buttons = QDialogButtonBox(
@@ -240,6 +295,15 @@ class ServerFormDialog(QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _on_type_changed(self, type_value: str) -> None:
+        is_http = type_value == "http"
+        for widget in (self._command_edit, self._args_edit, self._env_edit):
+            self._form.setRowVisible(widget, not is_http)
+        self._form.setRowVisible(self._env_options_row, not is_http)
+        for widget in (self._url_edit, self._headers_edit):
+            self._form.setRowVisible(widget, is_http)
+        self._form.setRowVisible(self._headers_options_row, is_http)
 
     def _on_hide_toggled(self, checked: bool) -> None:
         if checked:
@@ -302,6 +366,67 @@ class ServerFormDialog(QDialog):
             self, "Stored", f"{key} now references keyring secret {secret_name!r}."
         )
 
+    def _on_header_hide_toggled(self, checked: bool) -> None:
+        if checked:
+            self._raw_headers_text = self._headers_edit.toPlainText()
+            masked = "\n".join(
+                f"{line.split('=', 1)[0]}=***"
+                for line in self._raw_headers_text.splitlines()
+                if line.strip()
+            )
+            self._headers_edit.setPlainText(masked)
+            self._headers_edit.setReadOnly(True)
+        else:
+            self._headers_edit.setPlainText(self._raw_headers_text)
+            self._headers_edit.setReadOnly(False)
+
+    def _on_store_header_secret_in_keychain(self) -> None:
+        current_text = (
+            self._raw_headers_text
+            if self._hide_header_values_checkbox.isChecked()
+            else self._headers_edit.toPlainText()
+        )
+        headers = _parse_kv_lines(current_text)
+        if not headers:
+            QMessageBox.information(self, "No Headers", "Add a header (KEY=VALUE) first.")
+            return
+
+        key, ok = QInputDialog.getItem(
+            self, "Store in Keychain", "Header:", list(headers.keys()), editable=False
+        )
+        if not ok or not key:
+            return
+
+        current_value = headers[key]
+        already_ref = current_value.startswith(("keyring:", "secret:"))
+        default_name = f"{self._name_edit.text().strip() or 'mcp'}_{key}".lower()
+        secret_name, ok = QInputDialog.getText(
+            self, "Secret Name", "Store under this name in the OS keychain:", text=default_name
+        )
+        secret_name = secret_name.strip()
+        if not ok or not secret_name:
+            return
+
+        value, ok = QInputDialog.getText(
+            self,
+            "Secret Value",
+            f"Value for {key}:",
+            QLineEdit.EchoMode.Password,
+            "" if already_ref else current_value,
+        )
+        if not ok or not value:
+            return
+
+        set_secret(secret_name, value)
+        self._raw_headers_text = _replace_env_value(current_text, key, f"keyring:{secret_name}")
+        if self._hide_header_values_checkbox.isChecked():
+            self._on_header_hide_toggled(True)  # refresh the masked view from the new raw text
+        else:
+            self._headers_edit.setPlainText(self._raw_headers_text)
+        QMessageBox.information(
+            self, "Stored", f"{key} now references keyring secret {secret_name!r}."
+        )
+
     def _on_add_group(self) -> None:
         name = self._new_group_edit.text().strip()
         if not name:
@@ -337,6 +462,14 @@ class ServerFormDialog(QDialog):
         )
         return _parse_kv_lines(text)
 
+    def headers_dict(self) -> dict[str, str]:
+        text = (
+            self._raw_headers_text
+            if self._hide_header_values_checkbox.isChecked()
+            else self._headers_edit.toPlainText()
+        )
+        return _parse_kv_lines(text)
+
     def result_config(self) -> McpServerConfig:
         return McpServerConfig(
             name=self._name_edit.text().strip(),
@@ -345,6 +478,9 @@ class ServerFormDialog(QDialog):
                 line.strip() for line in self._args_edit.toPlainText().splitlines() if line.strip()
             ],
             env=self.env_dict(),
+            type=self._type_combo.currentText(),
+            url=self._url_edit.text().strip(),
+            headers=self.headers_dict(),
             groups=self._checked_items(self._groups_list),
             skills=self._checked_items(self._skills_list),
             disabled_tools=self._existing.disabled_tools if self._existing else [],
@@ -971,9 +1107,20 @@ class McpManagementDialog(QDialog):
         detail_lines = [
             f"name: {server.name}",
             f"status: {status}",
-            f"command: {server.command}",
-            f"args: {' '.join(server.args) or '(none)'}",
-            f"env: {', '.join(server.env) or '(none)'}",
+            f"type: {server.type}",
+        ]
+        if server.type == "http":
+            detail_lines += [
+                f"url: {server.url}",
+                f"headers: {', '.join(server.headers) or '(none)'}",
+            ]
+        else:
+            detail_lines += [
+                f"command: {server.command}",
+                f"args: {' '.join(server.args) or '(none)'}",
+                f"env: {', '.join(server.env) or '(none)'}",
+            ]
+        detail_lines += [
             f"groups: {', '.join(server.groups) or '(none)'}",
             f"skills: {', '.join(server.skills) or '(none)'}",
         ]
@@ -1307,6 +1454,9 @@ class McpManagementDialog(QDialog):
             command=server.command,
             args=server.args,
             env=server.env,
+            type=server.type,
+            url=server.url,
+            headers=server.headers,
             groups=server.groups,
             skills=server.skills,
             disabled_tools=disabled,

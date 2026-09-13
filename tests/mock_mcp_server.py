@@ -103,4 +103,16 @@ def crash_process() -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    # MOCK_MCP_HTTP_PORT switches this same server (same tools, same
+    # instructions) to streamable-HTTP instead of stdio — used by
+    # test_mcp_server.py's http-transport tests, which need a real remote
+    # server to point McpServerHandle's http path at, not a mocked
+    # ClientSession. Stdio remains the default so every other test in this
+    # file (and pyirena/other real stdio servers) is unaffected.
+    http_port = os.environ.get("MOCK_MCP_HTTP_PORT")
+    if http_port:
+        mcp.settings.host = "127.0.0.1"
+        mcp.settings.port = int(http_port)
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run(transport="stdio")

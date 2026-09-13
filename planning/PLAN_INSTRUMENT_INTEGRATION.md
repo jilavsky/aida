@@ -1,7 +1,10 @@
 # AIDA — instrument integration plan (BeamlineAdvisor retirement, aievaluator, EPICS)
 
-**Status: proposal, 2026-09-03. No code. Companion to `PLAN.md`; items here
-graduate into `PLAN.md` §1 when accepted.**
+**Status: proposal, 2026-09-03. Companion to `PLAN.md`; items here graduate
+into `PLAN.md` §1 when accepted.** One item (§2.3's remote MCP transport)
+has since shipped on its own, ahead of the rest of this proposal — see the
+`[x]` there and `CHANGELOG.md` [Unreleased]; everything else here is still
+proposal-stage, no code.
 
 This document answers three questions:
 
@@ -219,11 +222,13 @@ Two AIDA-side conventions to honour in the server:
       adding a mutating tool to a workspace that reviewed the old set. It is
       cheap and it is the natural moment: the `usaxs-user` workspace should
       say *exactly* which five tools it exposes.
-- [ ] **Remote MCP transport (streamable HTTP)** for the laptop case in
-      §1.3 — `url` in `mcp.json` alongside `command`, bearer token via
-      `keyring:`, lifecycle = connect/reconnect rather than spawn/kill. The
-      first concrete remote server exists once `aievaluator-mcp --transport
-      http` does.
+- [x] **Remote MCP transport (streamable HTTP)** for the laptop case in
+      §1.3 — `type: "http"` + `url` in `mcp.json` alongside
+      `command`/`args`/`env`, `headers` for a bearer token via `keyring:`.
+      Shipped ahead of `aievaluator-mcp`/`epics-mcp` themselves, against a
+      different concrete HTTP MCP server — see `CHANGELOG.md`
+      [Unreleased]. `aievaluator-mcp --transport http` and `epics-mcp
+      --transport http` (§8 below) can now point at it the same way.
 - [ ] **Scheduled fitness report** as the first real schedule: a workflow
       "run fitness_report with write=true, then summarize problems" on the
       Phase 10 scheduler, replacing `fitness_report.sh` + cron. (The Phase 10
@@ -499,7 +504,9 @@ the next.
 7. **`epics-mcp` read-only** (§4) with the USAXS example policy; staff
    group only. Writes stay `mode: read-only` until there is a concrete
    write use case *and* the audit log has run for a while.
-8. **Remote transport** in AIDA + `--transport http` on both servers, for
+8. ~~**Remote transport** in AIDA~~ — done (§2.3), ahead of the servers
+   this order-of-work list assumed it would follow. Still needed:
+   `--transport http` on `epics-mcp`/`aievaluator-mcp` themselves, for
    staff laptops (§1.3 option 1).
 9. **Decide on BeamlineAdvisor retirement** once staff have used AIDA for
    the same tasks for a cycle; then evaluate the web-frontend spike

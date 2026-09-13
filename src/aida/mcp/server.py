@@ -14,6 +14,7 @@ import asyncio
 import itertools
 import tempfile
 import time
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -21,6 +22,7 @@ from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 from mcp.types import CallToolResult, Tool
 
 from aida.config.secrets import get_secret
@@ -39,17 +41,19 @@ DEFAULT_CALL_TIMEOUT_SECONDS = 60.0
 _SECRET_ENV_PREFIXES = ("keyring:", "secret:")
 
 
-def resolve_env_secrets(env: dict[str, str]) -> dict[str, str]:
-    """Resolve any ``keyring:NAME``/``secret:NAME`` values in an MCP
-    server's ``env`` block into real values via
-    ``aida.config.secrets.get_secret`` — plain values pass through
-    unchanged. Raises ``McpServerError`` (not e.g. KeyError) for a
-    reference with nothing stored under that name, so a missing secret
-    fails the same way any other bad server config does: isolated to that
-    one server, with a clear message, rather than launching a subprocess
-    that's missing a credential it needs and failing confusingly later."""
+def resolve_env_secrets(values: dict[str, str]) -> dict[str, str]:
+    """Resolve any ``keyring:NAME``/``secret:NAME`` values in a
+    ``dict[str, str]`` into real values via ``aida.config.secrets.get_secret``
+    — plain values pass through unchanged. Used for a stdio server's ``env``
+    block and, identically, for an http server's ``headers`` block (a
+    bearer token in a header is exactly as much a secret as one in an env
+    var). Raises ``McpServerError`` (not e.g. KeyError) for a reference with
+    nothing stored under that name, so a missing secret fails the same way
+    any other bad server config does: isolated to that one server, with a
+    clear message, rather than launching a subprocess/connection that's
+    missing a credential it needs and failing confusingly later."""
     resolved: dict[str, str] = {}
-    for key, value in env.items():
+    for key, value in values.items():
         prefix = next((p for p in _SECRET_ENV_PREFIXES if value.startswith(p)), None)
         if prefix is None:
             resolved[key] = value
@@ -58,7 +62,7 @@ def resolve_env_secrets(env: dict[str, str]) -> dict[str, str]:
         secret_value = get_secret(secret_name) if secret_name else None
         if secret_value is None:
             raise McpServerError(
-                f"env var {key!r} references secret {secret_name!r} ({value!r}), but nothing is "
+                f"{key!r} references secret {secret_name!r} ({value!r}), but nothing is "
                 f"stored under that name in the OS keychain (or AIDA_SECRET_{secret_name.upper()})"
             )
         resolved[key] = secret_value
@@ -318,6 +322,7 @@ class McpServerHandle:
         self._session: ClientSession | None = None
         self._tools: dict[str, Tool] = {}
         self._resolved_env: dict[str, str] = {}
+        self._resolved_headers: dict[str, str] = {}
         self._serve_task: asyncio.Task[None] | None = None
         self._stop_event: asyncio.Event | None = None
         self._start_error: McpServerError | None = None
@@ -340,16 +345,24 @@ class McpServerHandle:
         if self._session is not None:
             return list(self._tools.values())
 
+        if self.config.type == "http" and not self.config.url.strip():
+            raise McpServerError(
+                f"mcp server {self.config.name!r} has type='http' but no url configured"
+            )
+
         # B6: resolved here, synchronously, before the subprocess is even
         # spawned — a missing/misspelled secret reference fails immediately
         # with a clear message rather than launching a process that's
         # quietly missing a credential it needs. Scratch TMPDIR/TEMP/TMP
         # defaults go first so the server config's own `env` (if it sets
-        # any of these explicitly) always wins.
+        # any of these explicitly) always wins. `headers` goes through the
+        # same keyring:/secret: resolution as `env` — a bearer token is just
+        # as much a secret when it's an HTTP header as when it's an env var.
         self._resolved_env = {
             **_scratch_env_defaults(self._cwd),
             **resolve_env_secrets(self.config.env),
         }
+        self._resolved_headers = resolve_env_secrets(self.config.headers)
 
         self._stop_event = asyncio.Event()
         self._start_error = None
@@ -376,24 +389,48 @@ class McpServerHandle:
         return list(self._tools.values())
 
     async def _serve(self, ready: asyncio.Event) -> None:
-        """Owns ``stdio_client``/``ClientSession`` for this handle's whole
-        running lifetime, in this one task — see the class docstring for
-        why. Sets ``ready`` exactly once, whether startup succeeded or
-        failed, so ``start()`` never hangs waiting for it."""
-        stderr = StderrCapture()
+        """Owns the transport client/``ClientSession`` for this handle's
+        whole running lifetime, in this one task — see the class docstring
+        for why. Sets ``ready`` exactly once, whether startup succeeded or
+        failed, so ``start()`` never hangs waiting for it.
+
+        ``AsyncExitStack`` holds whichever set of async context managers the
+        transport needs — two for stdio (``stdio_client`` +
+        ``ClientSession``), three for http (an ``httpx.AsyncClient`` +
+        ``streamable_http_client`` + ``ClientSession``) — and unwinds them
+        together, in the same task, when this method returns; that keeps the
+        "everything entered/exited from this one task" property the class
+        docstring explains without needing two near-duplicate
+        try/except/finally bodies. ``stderr`` capture is a stdio-only
+        concept (there is no subprocess to capture from over HTTP), so it's
+        ``None`` on the http path.
+        """
+        is_http = self.config.type == "http"
+        stderr = None if is_http else StderrCapture()
         # Published before the handshake, not after it, so a start() that
         # times out waiting for `ready` can still report whatever the
         # subprocess printed on its way to going quiet.
         self.stderr = stderr
         try:
-            params = StdioServerParameters(
-                command=self.config.command,
-                args=self.config.args,
-                env=self._resolved_env or None,
-                cwd=self._cwd,
-            )
-            async with (
-                stdio_client(params, errlog=stderr) as (read_stream, write_stream),
+            async with AsyncExitStack() as stack:
+                if is_http:
+                    http_client = await stack.enter_async_context(
+                        create_mcp_http_client(headers=self._resolved_headers or None)
+                    )
+                    read_stream, write_stream, _get_session_id = await stack.enter_async_context(
+                        streamable_http_client(self.config.url, http_client=http_client)
+                    )
+                else:
+                    params = StdioServerParameters(
+                        command=self.config.command,
+                        args=self.config.args,
+                        env=self._resolved_env or None,
+                        cwd=self._cwd,
+                    )
+                    read_stream, write_stream = await stack.enter_async_context(
+                        stdio_client(params, errlog=stderr)
+                    )
+
                 # Backstop deadline on *every* request this session makes,
                 # initialize/list_tools below included: without it, a server
                 # that accepts a request and never replies leaves the await
@@ -401,12 +438,13 @@ class McpServerHandle:
                 # start()/call_tool() are the primary, tighter bounds (and
                 # give the clearer error messages); this one is deliberately
                 # a little looser so those win the race in the normal case.
-                ClientSession(
-                    read_stream,
-                    write_stream,
-                    read_timeout_seconds=timedelta(seconds=self.call_timeout_seconds + 5),
-                ) as session,
-            ):
+                session = await stack.enter_async_context(
+                    ClientSession(
+                        read_stream,
+                        write_stream,
+                        read_timeout_seconds=timedelta(seconds=self.call_timeout_seconds + 5),
+                    )
+                )
                 init_result = await session.initialize()
                 tools_result = await session.list_tools()
 
@@ -418,7 +456,7 @@ class McpServerHandle:
                 assert self._stop_event is not None
                 await self._stop_event.wait()
         except Exception as exc:
-            tail = "\n".join(stderr.tail())
+            tail = "\n".join(stderr.tail()) if stderr is not None else ""
             detail = f" — stderr: {tail}" if tail else ""
             self._start_error = McpServerError(
                 f"mcp server {self.config.name!r} failed to start: {exc}{detail}"
@@ -428,7 +466,8 @@ class McpServerHandle:
             self._session = None
             self._tools = {}
             self.instructions = None
-            stderr.close()
+            if stderr is not None:
+                stderr.close()
             self.stderr = None
 
     async def stop(self) -> None:

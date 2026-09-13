@@ -16,6 +16,19 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Added
+
+- **Remote MCP servers over streamable-HTTP.** Until now every MCP server
+  had to be a local subprocess AIDA launched itself; `PLAN.md` §2.2 parked
+  the remote-HTTP case until a concrete server existed. A server entry can
+  now set `"type": "http"` and `"url"` instead of `command`/`args`/`env`,
+  with `headers` (supporting the same `keyring:`/`secret:` values as `env`)
+  for auth — `aida mcp server add --type http --url ... --header ...` on
+  the CLI, or the new Type dropdown in the GUI's Add/Edit Server form.
+  Everything else (groups, skills, `disabled_tools`/`confirm_tools`, Test
+  Connection, Start/Stop) works identically regardless of transport. See
+  [`docs/mcp-servers.md`](docs/mcp-servers.md#remote-http-mcp-servers).
+
 ## [0.1.0b7] - 2026-09-12
 
 Moving a setup between machines — in whole or in part — is the theme:

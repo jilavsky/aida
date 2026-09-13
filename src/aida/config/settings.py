@@ -982,11 +982,42 @@ _KNOWN_SERVER_KEYS = {
     "command",
     "args",
     "env",
+    "type",
+    "url",
+    "headers",
     "groups",
     "skills",
     "disabled_tools",
     "confirm_tools",
 }
+
+#: The two transports ``McpServerHandle`` knows how to speak. "stdio" is the
+#: default (and the only one AIDA supported before remote/streamable-HTTP
+#: servers existed) so an old ``mcp.json`` with no ``type`` key at all keeps
+#: behaving exactly as it always did.
+_MCP_SERVER_TYPES = ("stdio", "http")
+
+
+def _coerce_mcp_server_type(source: str, value: Any) -> str:
+    """Coerce a server's ``type:`` field, failing closed to ``"stdio"`` on
+    anything unrecognized — same "never crash on bad input, warn and use a
+    safe default" shape as ``_coerce_safety_mode``. Falling back to
+    ``"stdio"`` here specifically (rather than e.g. refusing to load the
+    server) matters because it's the transport AIDA has always supported;
+    an unrecognized value is far more likely to be a typo than an intent to
+    use a transport that doesn't exist yet.
+    """
+    if value is None:
+        return "stdio"
+    if isinstance(value, str) and value.strip().lower() in _MCP_SERVER_TYPES:
+        return value.strip().lower()
+    _logger.warning(
+        "%s: unknown type=%r (expected %s); using 'stdio' instead",
+        source,
+        value,
+        " or ".join(repr(t) for t in _MCP_SERVER_TYPES),
+    )
+    return "stdio"
 
 
 @dataclass
@@ -996,11 +1027,20 @@ class McpServerConfig:
     ``mcp.json`` shape (PLAN.md §4: "AIDA-specific keys live in a parallel
     section or per-server extension block that other clients ignore").
 
+    ``type``/``url``/``headers`` select and configure the transport
+    (``aida.mcp.server.McpServerHandle``): ``type: "stdio"`` (the default)
+    launches ``command``/``args``/``env`` as a local subprocess exactly as
+    before; ``type: "http"`` connects to a remote streamable-HTTP MCP
+    server at ``url`` instead, with ``command``/``args``/``env`` ignored
+    and ``headers`` sent on every request (e.g. ``Authorization: Bearer
+    ...``) — same ``keyring:NAME``/``secret:NAME`` deferred-secret values
+    as ``env`` supports, see ``resolve_env_secrets``.
+
     ``extra`` (Phase 7) holds every key a real-world ``mcp.json`` entry may
     carry that AIDA doesn't model — a Claude-Desktop-exported config
-    routinely has ``disabled``, ``autoApprove``, ``type``, ``cwd``, etc.
-    Before this field existed, ``from_dict``/``to_dict`` only round-tripped
-    the 5 (now 7) known keys: loading such a file never errored
+    routinely has ``disabled``, ``autoApprove``, ``cwd``, etc. Before this
+    field existed, ``from_dict``/``to_dict`` only round-tripped the 5 (now
+    10) known keys: loading such a file never errored
     (``test_existing_claude_desktop_mcp_json_loads_unmodified``), but the
     *first* GUI/CLI save afterward silently deleted every key it didn't
     recognize — a real bug given Phase 7's own acceptance criteria
@@ -1015,6 +1055,11 @@ class McpServerConfig:
     command: str = ""
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
+    #: Transport: "stdio" (default, local subprocess) or "http" (remote
+    #: streamable-HTTP server at `url`) — see class docstring.
+    type: str = "stdio"
+    url: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
     groups: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     #: Tool names never offered to the model — its schema isn't even sent
@@ -1037,6 +1082,9 @@ class McpServerConfig:
             command=data.get("command", ""),
             args=_coerce_str_list(source, "args", data.get("args")),
             env=dict(data.get("env", {})),
+            type=_coerce_mcp_server_type(source, data.get("type")),
+            url=data.get("url", ""),
+            headers=dict(data.get("headers", {})),
             groups=_coerce_str_list(source, "groups", data.get("groups")),
             skills=_coerce_str_list(source, "skills", data.get("skills")),
             disabled_tools=_coerce_str_list(source, "disabled_tools", data.get("disabled_tools")),
@@ -1050,6 +1098,9 @@ class McpServerConfig:
             "command": self.command,
             "args": self.args,
             "env": self.env,
+            "type": self.type,
+            "url": self.url,
+            "headers": self.headers,
             "groups": self.groups,
             "skills": self.skills,
             "disabled_tools": self.disabled_tools,

@@ -101,6 +101,48 @@ def test_add_server_persists_to_settings_and_disk(qapp, aida_home: Path):
     assert dialog._server_list.count() == 1
 
 
+def test_add_http_type_server_hides_stdio_fields_and_persists_url(qapp, aida_home: Path):
+    """Switching the Type combo to http shows URL/Headers instead of
+    Command/Args/Env, and result_config() reflects the transport actually
+    selected — not just whatever text happens to still be sitting in the
+    now-hidden Command field."""
+    settings = load_settings()
+    form = ServerFormDialog(mcp_config=settings.mcp, skills_dir=aida_home / "skills")
+    form._name_edit.setText("remote-instrument")
+    form._command_edit.setText("this should be ignored for an http server")
+
+    index = form._type_combo.findText("http")
+    assert index >= 0
+    form._type_combo.setCurrentIndex(index)
+    assert form._form.isRowVisible(form._command_edit) is False
+    assert form._form.isRowVisible(form._url_edit) is True
+
+    form._url_edit.setText("https://usaxscontrol.example:8765/mcp")
+    form._headers_edit.setPlainText("Authorization=Bearer plain-token")
+
+    config = form.result_config()
+    assert config.type == "http"
+    assert config.url == "https://usaxscontrol.example:8765/mcp"
+    assert config.headers == {"Authorization": "Bearer plain-token"}
+
+
+def test_edit_existing_http_server_preselects_http_type(qapp, aida_home: Path):
+    settings = load_settings()
+    existing = McpServerConfig(
+        name="remote-instrument",
+        type="http",
+        url="https://old.example/mcp",
+        headers={"Authorization": "Bearer old-token"},
+    )
+    form = ServerFormDialog(
+        mcp_config=settings.mcp, server=existing, skills_dir=aida_home / "skills"
+    )
+    assert form._type_combo.currentText() == "http"
+    assert form._url_edit.text() == "https://old.example/mcp"
+    assert form._form.isRowVisible(form._url_edit) is True
+    assert form._form.isRowVisible(form._command_edit) is False
+
+
 def test_edit_server_via_dialog_action(qapp, aida_home: Path):
     from aida.config.settings import load_mcp_config
 

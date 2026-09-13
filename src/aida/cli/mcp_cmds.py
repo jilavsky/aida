@@ -41,14 +41,16 @@ def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def _parse_env(pairs: list[str]) -> dict[str, str]:
-    env: dict[str, str] = {}
+def _parse_kv_pairs(pairs: list[str], *, flag: str) -> dict[str, str]:
+    """Parse repeatable ``KEY=VALUE`` flag values — shared by ``--env`` and
+    ``--header``, which have the identical shape."""
+    result: dict[str, str] = {}
     for pair in pairs:
         key, sep, value = pair.partition("=")
         if not sep:
-            raise ValueError(f"--env expects KEY=VALUE, got {pair!r}")
-        env[key] = value
-    return env
+            raise ValueError(f"{flag} expects KEY=VALUE, got {pair!r}")
+        result[key] = value
+    return result
 
 
 def _get_server(settings: Settings, name: str) -> McpServerConfig | None:
@@ -57,9 +59,14 @@ def _get_server(settings: Settings, name: str) -> McpServerConfig | None:
 
 def _print_server(server: McpServerConfig) -> None:
     print(f"name:           {server.name}")
-    print(f"command:        {server.command}")
-    print(f"args:           {' '.join(server.args) or '(none)'}")
-    print(f"env:            {', '.join(f'{k}=***' for k in server.env) or '(none)'}")
+    print(f"type:           {server.type}")
+    if server.type == "http":
+        print(f"url:            {server.url}")
+        print(f"headers:        {', '.join(f'{k}=***' for k in server.headers) or '(none)'}")
+    else:
+        print(f"command:        {server.command}")
+        print(f"args:           {' '.join(server.args) or '(none)'}")
+        print(f"env:            {', '.join(f'{k}=***' for k in server.env) or '(none)'}")
     print(f"groups:         {', '.join(server.groups) or '(none)'}")
     print(f"skills:         {', '.join(server.skills) or '(none)'}")
     print(f"disabled_tools: {', '.join(server.disabled_tools) or '(none)'}")
@@ -77,8 +84,9 @@ def cmd_server_list(_args: argparse.Namespace) -> int:
         print("No MCP servers configured.")
         return 0
     for name, server in sorted(settings.mcp.servers.items()):
+        target = server.url if server.type == "http" else server.command
         print(
-            f"{name:<20} command={server.command or '(none)':<30} "
+            f"{name:<20} type={server.type:<6} target={target or '(none)':<30} "
             f"groups={','.join(server.groups) or '(none)':<20} "
             f"disabled_tools={len(server.disabled_tools)} confirm_tools={len(server.confirm_tools)}"
         )
@@ -103,7 +111,8 @@ def cmd_server_add(args: argparse.Namespace) -> int:
         print(f"MCP server {args.name!r} already exists — use `aida mcp server edit` to change it.")
         return 1
     try:
-        env = _parse_env(args.env_list or [])
+        env = _parse_kv_pairs(args.env_list or [], flag="--env")
+        headers = _parse_kv_pairs(args.header_list or [], flag="--header")
     except ValueError as exc:
         print(str(exc))
         return 1
@@ -113,6 +122,9 @@ def cmd_server_add(args: argparse.Namespace) -> int:
         command=args.command or "",
         args=list(args.args_list or []),
         env=env,
+        type=args.type,
+        url=args.url or "",
+        headers=headers,
         groups=_split_csv(args.groups or ""),
         skills=_split_csv(args.skills or ""),
     )
@@ -129,7 +141,16 @@ def cmd_server_edit(args: argparse.Namespace) -> int:
         print(f"Unknown MCP server {args.name!r} — use `aida mcp server add` to create it.")
         return 1
     try:
-        env = _parse_env(args.env_list) if args.env_list is not None else existing.env
+        env = (
+            _parse_kv_pairs(args.env_list, flag="--env")
+            if args.env_list is not None
+            else existing.env
+        )
+        headers = (
+            _parse_kv_pairs(args.header_list, flag="--header")
+            if args.header_list is not None
+            else existing.headers
+        )
     except ValueError as exc:
         print(str(exc))
         return 1
@@ -139,6 +160,9 @@ def cmd_server_edit(args: argparse.Namespace) -> int:
         command=args.command if args.command is not None else existing.command,
         args=list(args.args_list) if args.args_list is not None else existing.args,
         env=env,
+        type=args.type if args.type is not None else existing.type,
+        url=args.url if args.url is not None else existing.url,
+        headers=headers,
         groups=_split_csv(args.groups) if args.groups is not None else existing.groups,
         skills=_split_csv(args.skills) if args.skills is not None else existing.skills,
         disabled_tools=existing.disabled_tools,
@@ -316,6 +340,12 @@ def cmd_test(args: argparse.Namespace) -> int:
 
 def _add_server_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -> None:
     parser.add_argument(
+        "--type",
+        choices=["stdio", "http"],
+        default="stdio" if defaults else None,
+        help="Transport: 'stdio' (local subprocess, default) or 'http' (remote streamable-HTTP server)",
+    )
+    parser.add_argument(
         "--command", default="" if defaults else None, help="Executable to launch (stdio transport)"
     )
     parser.add_argument(
@@ -330,7 +360,17 @@ def _add_server_field_args(parser: argparse.ArgumentParser, *, defaults: bool) -
         dest="env_list",
         action="append",
         default=None,
-        help="KEY=VALUE environment variable (repeatable)",
+        help="KEY=VALUE environment variable (repeatable, stdio transport)",
+    )
+    parser.add_argument(
+        "--url", default="" if defaults else None, help="Server endpoint URL (http transport)"
+    )
+    parser.add_argument(
+        "--header",
+        dest="header_list",
+        action="append",
+        default=None,
+        help="KEY=VALUE HTTP header, e.g. Authorization=Bearer keyring:my_token (repeatable, http transport)",
     )
     parser.add_argument(
         "--groups", default="" if defaults else None, help="Comma-separated group names"
