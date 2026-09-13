@@ -14,6 +14,7 @@ from aida.workspace.safety import (
     ConfirmationRequest,
     SafetyGuard,
     deny_all,
+    normalize_path,
     relaxed_mode_warning_if_newly_enabled,
     unique_destination,
 )
@@ -574,3 +575,28 @@ async def test_run_script_and_execute_use_distinct_actions_even_with_the_same_fo
     assert scopes == {str(tmp_path.resolve())}, (
         "both requests share the same folder scope, by design"
     )
+
+
+# --- normalize_path fallback for mounts resolve() can't handle ---------
+
+
+def test_normalize_path_falls_back_when_resolve_raises_oserror(tmp_path, monkeypatch):
+    """Regression: on Windows, ``Path.resolve()`` can raise
+    ``OSError: [WinError 1005]`` against an SSHFS/WinFsp network mount that
+    doesn't support the volume-information query the call depends on — not
+    an actually-corrupt volume, just an API the FUSE-backed driver doesn't
+    implement. ``normalize_path`` must degrade to syntactic normalization
+    rather than let that exception take down every read/write against the
+    mount."""
+
+    def _boom(self, strict=False):
+        raise OSError("[WinError 1005] The volume does not contain a recognized file system")
+
+    monkeypatch.setattr(Path, "resolve", _boom)
+    messy = tmp_path / "sub" / ".." / "file.txt"
+    # The fallback only promises syntactic normalization (os.path.normpath),
+    # not symlink resolution -- verify it actually collapsed the ".." rather
+    # than propagating the OSError or returning the path untouched.
+    result = normalize_path(messy)
+    assert ".." not in result.parts
+    assert result == tmp_path / "file.txt"

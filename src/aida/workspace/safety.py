@@ -35,6 +35,7 @@ turns this off).
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,8 +67,31 @@ def normalize_path(path: str | Path) -> Path:
     incl. network mounts & symlinks") so containment checks can't be
     defeated by either. ``strict=False`` so a not-yet-existing target folder
     ("created on first write") or a not-yet-existing new file still
-    normalizes instead of raising ``FileNotFoundError``."""
-    return Path(path).expanduser().resolve(strict=False)
+    normalizes instead of raising ``FileNotFoundError``.
+
+    Falls back to syntactic normalization (``os.path.normpath``, no
+    symlink/reparse-point dereferencing) if ``resolve()`` itself raises.
+    On Windows, ``resolve()`` asks the OS to fully dereference the path via
+    ``GetFinalPathNameByHandle``; some non-NTFS network mounts — reported
+    for a drive letter mapped to an SSHFS/WinFsp share — can't answer that
+    query and raise ``OSError: [WinError 1005] The volume does not contain
+    a recognized file system``. That message is the OS's stock wording for
+    the error code, not a real finding: the volume isn't corrupt (it browses
+    fine in Explorer, which uses different, more tolerant APIs), the FUSE-
+    backed driver just doesn't implement the volume-information query this
+    one call depends on. CPython's own internal fallback for ``resolve()``
+    (``ntpath._getfinalpathname_nonstrict``) only swallows a fixed allowlist
+    of WinErrors, and 1005 isn't in it, so the exception would otherwise
+    propagate out of every ``authorize_read``/``authorize_write`` call
+    against such a mount. The cost of the fallback is not seeing through a
+    symlink placed on that mount — acceptable next to a workspace that
+    cannot read its own source folder at all.
+    """
+    expanded = Path(path).expanduser()
+    try:
+        return expanded.resolve(strict=False)
+    except OSError:
+        return Path(os.path.normpath(str(expanded)))
 
 
 # ``unique_destination`` is imported above and re-exported here (it stays in
