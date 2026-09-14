@@ -536,7 +536,7 @@ async def test_repl_max_iterations_command_raises_the_cap_mid_session(
         "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
     )
     session = ChatSession(settings, "mock-profile")
-    assert session.loop.max_iterations == 10
+    assert session.loop.max_iterations == 50
 
     lines = iter(["/max-iterations 500", "/exit"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(lines))
@@ -559,7 +559,7 @@ async def test_repl_max_iterations_command_rejects_non_numeric_input(
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(lines))
 
     await _repl_loop(session)
-    assert session.loop.max_iterations == 10  # unchanged
+    assert session.loop.max_iterations == 50  # unchanged
     assert "Not a number" in capsys.readouterr().out
 
 

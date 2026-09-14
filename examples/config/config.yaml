@@ -24,7 +24,7 @@ max_context_tokens: 120000
 # Maximum provider round-trips (tool-call iterations) in a single turn.
 # Raise it for long multi-step analyses; /max-iterations N changes it for
 # one CLI session without editing this file.
-max_agent_iterations: 10
+max_agent_iterations: 50
 
 # Default safety mode for new workspaces that don't specify their own:
 #   relaxed -> no per-action confirmation inside a workspace's allowed folders

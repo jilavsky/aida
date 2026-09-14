@@ -29,6 +29,10 @@ decision revised), unrelated to what shipped when. Entries below link to
   Connection, Start/Stop) works identically regardless of transport. See
   [`docs/mcp-servers.md`](docs/mcp-servers.md#remote-http-mcp-servers).
 
+### Changed
+
+- **`max_agent_iterations` default raised from 10 to 50.** The iteration cap counts provider round-trips per turn, not tool calls — a single round-trip can bundle several tool calls — so 10 was tight enough that ordinary multi-step tasks (not just long analyses) could hit "iteration cap reached" mid-task. Still fully configurable per install: Settings dialog's "Max tool-call iterations per turn", `aida chat --max-iterations N`, `/max-iterations N` mid-session, or `max_agent_iterations` in `config.yaml`.
+
 ## [0.1.0b7] - 2026-09-12
 
 Moving a setup between machines — in whole or in part — is the theme:

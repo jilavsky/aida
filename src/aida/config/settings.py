@@ -343,7 +343,7 @@ class AppConfig:
     # default, but is a plain literal here rather than an import — settings
     # must not import core (core.agent already imports
     # aida.config.logging_setup, so the reverse would cycle).
-    max_agent_iterations: int = 10
+    max_agent_iterations: int = 50
     # Soft budget for how much conversation history is sent to the provider
     # (estimated tokens — aida.core.context.estimate_tokens, ~4 chars each).
     # Nothing used to manage context size at all: self.messages grew for the

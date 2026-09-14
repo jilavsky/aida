@@ -42,7 +42,7 @@ from aida.providers.base import (
     ToolSchema,
 )
 
-DEFAULT_MAX_ITERATIONS = 10
+DEFAULT_MAX_ITERATIONS = 50
 
 #: What a tool call that never ran gets recorded as. Both providers reject a
 #: history where an assistant ``tool_use``/``tool_calls`` entry has no

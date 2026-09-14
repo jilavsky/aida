@@ -76,12 +76,12 @@ def test_app_config_last_workspace_defaults_to_none(aida_home: Path):
     assert loaded.last_profile_name is None
 
 
-def test_app_config_max_agent_iterations_defaults_to_ten(aida_home: Path):
+def test_app_config_max_agent_iterations_defaults_to_fifty(aida_home: Path):
     cfg = AppConfig()
     save_app_config(cfg, aida_home)
 
     loaded = load_app_config(aida_home)
-    assert loaded.max_agent_iterations == 10
+    assert loaded.max_agent_iterations == 50
 
 
 def test_app_config_max_agent_iterations_roundtrip(aida_home: Path):
