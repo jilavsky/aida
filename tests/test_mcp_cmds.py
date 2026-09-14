@@ -517,3 +517,232 @@ def test_add_pyirena_accepts_an_explicit_command_without_detection(aida_home: Pa
 
     assert main(["add-pyirena", "--command", "/custom/pyirena-mcp"]) == 0
     assert load_mcp_config().servers["pyirena"].command == "/custom/pyirena-mcp"
+
+
+# --- add-aievaluator / find-aievaluator -----------------------------------
+
+
+def _fake_aievaluator_candidate(command: str = "/opt/envs/aievaluator/bin/aievaluator-mcp"):
+    from aida.mcp.aievaluator_setup import AievaluatorMcpCandidate
+
+    return AievaluatorMcpCandidate(command=command, source="conda env 'aievaluator'")
+
+
+def test_find_aievaluator_reports_nothing_found(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_aievaluator_mcp", list)
+    assert main(["find-aievaluator"]) == 1
+    assert 'pip install "aievaluator[mcp]"' in capsys.readouterr().out
+
+
+def test_add_aievaluator_configures_the_server_and_groups(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_aievaluator_mcp", lambda: [_fake_aievaluator_candidate()]
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_aievaluator_skills_dir", lambda _c: None)
+
+    assert main(["add-aievaluator", "--epics-addr", "10.0.0.1:5064"]) == 0
+
+    saved = load_mcp_config().servers["aievaluator-mcp"]
+    assert saved.command == "/opt/envs/aievaluator/bin/aievaluator-mcp"
+    assert saved.groups == ["instrument-status", "instrument-staff"]
+    assert saved.confirm_tools == ["fitness_report"]
+    assert saved.env["EPICS_CA_ADDR_LIST"] == "10.0.0.1:5064"
+
+
+def test_add_aievaluator_installs_skills_when_found(
+    aida_home: Path, capsys, monkeypatch, tmp_path: Path
+):
+    skills_src = tmp_path / "aievaluator-checkout" / "skills"
+    skills_src.mkdir(parents=True)
+    (skills_src / "aievaluator.md").write_text("# aievaluator\n", encoding="utf-8")
+    (skills_src / "usaxs-instrument.md").write_text("# usaxs\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_aievaluator_mcp", lambda: [_fake_aievaluator_candidate()]
+    )
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_aievaluator_skills_dir", lambda _c: skills_src
+    )
+
+    assert main(["add-aievaluator"]) == 0
+
+    out = capsys.readouterr().out
+    assert "installed" in out
+    assert (aida_home / "skills" / "aievaluator.md").is_file()
+    assert (aida_home / "skills" / "usaxs-instrument.md").is_file()
+
+
+def test_add_aievaluator_skills_dir_override_wins_over_auto_detect(
+    aida_home: Path, monkeypatch, tmp_path: Path
+):
+    skills_src = tmp_path / "override-skills"
+    skills_src.mkdir()
+    (skills_src / "aievaluator.md").write_text("# aievaluator\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_aievaluator_mcp", lambda: [_fake_aievaluator_candidate()]
+    )
+
+    def _must_not_be_called(_c):
+        raise AssertionError("--skills-dir must skip auto-detection")
+
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_aievaluator_skills_dir", _must_not_be_called)
+
+    assert main(["add-aievaluator", "--skills-dir", str(skills_src)]) == 0
+    assert (aida_home / "skills" / "aievaluator.md").is_file()
+
+
+def test_add_aievaluator_asks_which_one_when_several_are_found(
+    aida_home: Path, capsys, monkeypatch
+):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_aievaluator_mcp",
+        lambda: [
+            _fake_aievaluator_candidate("/a/aievaluator-mcp"),
+            _fake_aievaluator_candidate("/b/aievaluator-mcp"),
+        ],
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_aievaluator_skills_dir", lambda _c: None)
+
+    assert main(["add-aievaluator"]) == 1
+    assert "--first" in capsys.readouterr().out
+    assert "aievaluator-mcp" not in load_mcp_config().servers
+
+    assert main(["add-aievaluator", "--first"]) == 0
+    assert load_mcp_config().servers["aievaluator-mcp"].command == "/a/aievaluator-mcp"
+
+
+def test_add_aievaluator_refuses_to_clobber_without_force(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_aievaluator_mcp", lambda: [_fake_aievaluator_candidate()]
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_aievaluator_skills_dir", lambda _c: None)
+    assert main(["add-aievaluator"]) == 0
+
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_aievaluator_mcp",
+        lambda: [_fake_aievaluator_candidate("/other/aievaluator-mcp")],
+    )
+    assert main(["add-aievaluator"]) == 1
+    assert (
+        load_mcp_config().servers["aievaluator-mcp"].command
+        == "/opt/envs/aievaluator/bin/aievaluator-mcp"
+    )
+
+    assert main(["add-aievaluator", "--force"]) == 0
+    assert load_mcp_config().servers["aievaluator-mcp"].command == "/other/aievaluator-mcp"
+
+
+def test_add_aievaluator_accepts_an_explicit_command_without_detection(
+    aida_home: Path, monkeypatch
+):
+    def _must_not_be_called():
+        raise AssertionError("--command must skip detection entirely")
+
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_aievaluator_mcp", _must_not_be_called)
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_aievaluator_skills_dir", lambda _c: None)
+
+    assert main(["add-aievaluator", "--command", "/custom/aievaluator-mcp"]) == 0
+    assert load_mcp_config().servers["aievaluator-mcp"].command == "/custom/aievaluator-mcp"
+
+
+# --- add-epics-mcp / find-epics-mcp ---------------------------------------
+
+
+def _fake_epics_mcp_candidate(command: str = "/opt/envs/epics-mcp/bin/epics-mcp"):
+    from aida.mcp.env_discovery import ScriptCandidate
+
+    return ScriptCandidate(command=command, source="conda env 'epics-mcp'")
+
+
+def test_find_epics_mcp_reports_nothing_found(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp", list)
+    assert main(["find-epics-mcp"]) == 1
+
+
+def test_add_epics_mcp_defaults_to_read_only_only(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()]
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp_examples_dir", lambda _c: None)
+
+    assert main(["add-epics-mcp", "--epics-addr", "10.0.0.1:5064"]) == 0
+
+    servers = load_mcp_config().servers
+    assert "epics-mcp-user" in servers
+    assert "epics-mcp-staff" not in servers
+    assert servers["epics-mcp-user"].args == ["--policy", "usaxs-user"]
+    assert servers["epics-mcp-user"].env["EPICS_CA_ADDR_LIST"] == "10.0.0.1:5064"
+    out = capsys.readouterr().out
+    assert "Read-only only" in out
+
+
+def test_add_epics_mcp_staff_flag_adds_the_write_capable_server(
+    aida_home: Path, capsys, monkeypatch
+):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()]
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp_examples_dir", lambda _c: None)
+
+    assert main(["add-epics-mcp", "--staff"]) == 0
+
+    servers = load_mcp_config().servers
+    assert "epics-mcp-staff" in servers
+    assert servers["epics-mcp-staff"].args == ["--policy", "usaxs-staff"]
+    assert servers["epics-mcp-staff"].confirm_tools == ["epics_pv_put"]
+
+
+def test_add_epics_mcp_installs_policies_when_examples_dir_found(
+    aida_home: Path, monkeypatch, tmp_path: Path
+):
+    examples = tmp_path / "epics-mcp-checkout" / "examples"
+    examples.mkdir(parents=True)
+    (examples / "policy_usaxs_readonly.yaml").write_text("mode: read-only\n", encoding="utf-8")
+    (examples / "policy_usaxs_staff.yaml").write_text("mode: read-write\n", encoding="utf-8")
+    (examples / "pv_catalog_usaxs.txt").write_text("usxLAX:m1\n", encoding="utf-8")
+
+    policy_dir = tmp_path / "policies"
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()]
+    )
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_epics_mcp_examples_dir", lambda _c: examples
+    )
+    monkeypatch.setattr(
+        "aida.mcp.epics_mcp_setup.default_policy_dir", lambda: policy_dir
+    )
+
+    assert main(["add-epics-mcp"]) == 0
+    assert (policy_dir / "usaxs-user.yaml").is_file()
+    assert (policy_dir / "pv_catalog_usaxs.txt").is_file()
+    assert not (policy_dir / "usaxs-staff.yaml").exists()
+
+
+def test_add_epics_mcp_refuses_to_clobber_without_force(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()]
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp_examples_dir", lambda _c: None)
+    assert main(["add-epics-mcp"]) == 0
+
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_epics_mcp",
+        lambda: [_fake_epics_mcp_candidate("/other/epics-mcp")],
+    )
+    assert main(["add-epics-mcp"]) == 1
+    assert load_mcp_config().servers["epics-mcp-user"].command == "/opt/envs/epics-mcp/bin/epics-mcp"
+
+    assert main(["add-epics-mcp", "--force"]) == 0
+    assert load_mcp_config().servers["epics-mcp-user"].command == "/other/epics-mcp"
+
+
+def test_add_epics_mcp_accepts_an_explicit_command_without_detection(aida_home: Path, monkeypatch):
+    def _must_not_be_called():
+        raise AssertionError("--command must skip detection entirely")
+
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp", _must_not_be_called)
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp_examples_dir", lambda _c: None)
+
+    assert main(["add-epics-mcp", "--command", "/custom/epics-mcp"]) == 0
+    assert load_mcp_config().servers["epics-mcp-user"].command == "/custom/epics-mcp"

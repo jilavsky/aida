@@ -18,6 +18,19 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Added
 
+- **`aida mcp add-aievaluator` / `add-epics-mcp`** — one-click presets for
+  the two USAXS/12-ID instrument-status MCP servers, the same shape as
+  `add-pyirena`: auto-detect the sibling conda env (including the beamline
+  layout, `~/.conda/envs/<name>`), write the `mcp.json` entry, and install
+  skills (aievaluator) / policy + PV-catalog files (epics-mcp) resolved from
+  the package's own editable-install checkout rather than a hardcoded path
+  — the same command now works unchanged on this Mac and on `usaxscontrol`.
+  `add-epics-mcp` installs only the read-only `epics-mcp-user` server by
+  default; `--staff` is required to also add the write-capable
+  `epics-mcp-staff` server. See `planning/PLAN_INSTRUMENT_INTEGRATION.md`
+  §2.3 and `aida.mcp.env_discovery` (the generalized search extracted from
+  `pyirena_setup.py`).
+
 - **Remote MCP servers over streamable-HTTP.** Until now every MCP server
   had to be a local subprocess AIDA launched itself; `PLAN.md` §2.2 parked
   the remote-HTTP case until a concrete server existed. A server entry can

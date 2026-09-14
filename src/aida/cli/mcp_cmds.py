@@ -22,9 +22,30 @@ import asyncio
 import json
 from pathlib import Path
 
-from aida.config.paths import ensure_scratch_dir, install_bundled_skills
+from aida.config.paths import ensure_scratch_dir, install_bundled_skills, install_skills_from
 from aida.config.settings import McpServerConfig, Settings, load_settings, save_mcp_config
+from aida.mcp.aievaluator_setup import (
+    DEFAULT_SERVER_NAME as AIEVALUATOR_DEFAULT_NAME,
+)
+from aida.mcp.aievaluator_setup import (
+    DEFAULT_SKILLS as AIEVALUATOR_SKILLS,
+)
+from aida.mcp.aievaluator_setup import (
+    AievaluatorMcpCandidate,
+    aievaluator_server_config,
+    find_aievaluator_mcp,
+    find_aievaluator_skills_dir,
+)
 from aida.mcp.config_io import merge_mcp_config
+from aida.mcp.env_discovery import ScriptCandidate, resolve_ca_addr_list
+from aida.mcp.epics_mcp_setup import (
+    STAFF_SERVER_NAME,
+    USER_SERVER_NAME,
+    epics_mcp_server_configs,
+    find_epics_mcp,
+    find_epics_mcp_examples_dir,
+    install_epics_mcp_policies,
+)
 from aida.mcp.groups import add_group, delete_group, known_group_names, rename_group, resolve_group
 from aida.mcp.manager import McpManager
 from aida.mcp.pyirena_setup import (
@@ -477,6 +498,208 @@ def cmd_find_pyirena(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_add_aievaluator(args: argparse.Namespace) -> int:
+    """``aida mcp add-aievaluator`` — find aievaluator-mcp and configure it
+    in one step, same shape as ``add-pyirena`` (see
+    ``aida.mcp.aievaluator_setup``). aievaluator is USAXS/12-ID
+    instrument-status checks (beam, energy, flux, tunes, fitness reports)
+    over EPICS; AIDA launches its MCP server as a stdio subprocess in its
+    own conda env, never importing it directly."""
+    settings = load_settings()
+
+    if args.command:
+        candidate: ScriptCandidate = AievaluatorMcpCandidate(
+            command=args.command, source="given with --command"
+        )
+    else:
+        candidates = find_aievaluator_mcp()
+        if not candidates:
+            print("Could not find aievaluator-mcp on this machine.")
+            print()
+            print("Install aievaluator's MCP server, either alongside AIDA:")
+            print('    pip install "aievaluator[mcp]"')
+            print("or in its own conda environment (AIDA talks to it over stdio, so they")
+            print("do not have to share an interpreter) — then re-run this command, or")
+            print("point it straight at the executable:")
+            print(
+                "    aida mcp add-aievaluator --command "
+                "/path/to/envs/aievaluator/bin/aievaluator-mcp"
+            )
+            return 1
+        if len(candidates) > 1 and not args.first:
+            print(f"Found {len(candidates)} aievaluator-mcp installations:")
+            for index, found in enumerate(candidates, start=1):
+                print(f"  {index}. {found.display}")
+            print()
+            print("The first is used by default. Re-run with --first to accept it, or with")
+            print("--command PATH to choose a different one.")
+            return 1
+        candidate = candidates[0]
+
+    existing = _get_server(settings, args.name)
+    if existing is not None and not args.force:
+        print(
+            f"An MCP server named {args.name!r} is already configured (command: {existing.command})."
+        )
+        print("Re-run with --force to replace it, or --name OTHER to add a second one.")
+        return 1
+
+    ca_addr_list = resolve_ca_addr_list(args.epics_addr or None)
+    server = aievaluator_server_config(
+        candidate,
+        name=args.name,
+        ca_addr_list=ca_addr_list,
+        ca_auto_addr_list=args.epics_auto_addr_list,
+    )
+    settings.mcp.servers[server.name] = server
+    save_mcp_config(settings.mcp)
+
+    print(f"Configured MCP server {server.name!r}.")
+    print(f"  command: {' '.join([server.command, *server.args])}")
+    print(f"  source:  {candidate.source}")
+    print(f"  groups:  {', '.join(server.groups) or '(none)'}")
+    if server.env:
+        print(f"  env:     {', '.join(f'{k}={v}' for k, v in server.env.items())}")
+    else:
+        print("  env:     (none — set EPICS_CA_ADDR_LIST or every PV read will fail to connect)")
+
+    skills_source = (
+        Path(args.skills_dir).expanduser() if args.skills_dir else find_aievaluator_skills_dir(candidate)
+    )
+    if skills_source is not None:
+        installed = install_skills_from(skills_source, AIEVALUATOR_SKILLS)
+        if installed:
+            print(f"  skills:  installed {', '.join(installed)} into your skills folder")
+    else:
+        print("  skills:  could not locate aievaluator's skills/ folder — copy manually, or")
+        print("           re-run with --skills-dir /path/to/aievaluator/skills")
+
+    print()
+    print("Next: point a workspace at it —")
+    print("    aida workspace edit <workspace> --mcp-group instrument-status")
+    print(f"Then check it starts:  aida mcp test {server.name}")
+    if not ca_addr_list:
+        print()
+        print("Tip: pass --epics-addr HOST:PORT (or export EPICS_CA_ADDR_LIST before running")
+        print("this command) so aievaluator-mcp can actually reach Channel Access.")
+    return 0
+
+
+def cmd_find_aievaluator(_args: argparse.Namespace) -> int:
+    """``aida mcp find-aievaluator`` — report what would be found, change
+    nothing."""
+    candidates = find_aievaluator_mcp()
+    if not candidates:
+        print("No aievaluator-mcp installation found.")
+        print('Install it with:  pip install "aievaluator[mcp]"')
+        return 1
+    print(f"Found {len(candidates)} aievaluator-mcp installation(s), best first:")
+    for index, candidate in enumerate(candidates, start=1):
+        print(f"  {index}. {candidate.display}")
+    print()
+    print("Configure the first one with:  aida mcp add-aievaluator")
+    return 0
+
+
+def cmd_add_epics_mcp(args: argparse.Namespace) -> int:
+    """``aida mcp add-epics-mcp`` — find epics-mcp and configure it in one
+    step. Installs only the read-only ``epics-mcp-user`` server by default;
+    ``--staff`` also installs the write-capable ``epics-mcp-staff`` server.
+    Read ``planning/PLAN_INSTRUMENT_INTEGRATION.md`` §4 before using
+    ``--staff`` anywhere near a live instrument — its write rules are
+    marked ``TODO(verify)`` against the real PVs."""
+    settings = load_settings()
+
+    if args.command:
+        candidate = ScriptCandidate(command=args.command, source="given with --command")
+    else:
+        candidates = find_epics_mcp()
+        if not candidates:
+            print("Could not find epics-mcp on this machine.")
+            print()
+            print("Install it in its own conda environment (AIDA talks to it over stdio, so")
+            print("they do not have to share an interpreter) — then re-run this command, or")
+            print("point it straight at the executable:")
+            print("    aida mcp add-epics-mcp --command /path/to/envs/epics-mcp/bin/epics-mcp")
+            return 1
+        if len(candidates) > 1 and not args.first:
+            print(f"Found {len(candidates)} epics-mcp installations:")
+            for index, found in enumerate(candidates, start=1):
+                print(f"  {index}. {found.display}")
+            print()
+            print("The first is used by default. Re-run with --first to accept it, or with")
+            print("--command PATH to choose a different one.")
+            return 1
+        candidate = candidates[0]
+
+    names_to_add = [USER_SERVER_NAME, *([STAFF_SERVER_NAME] if args.staff else [])]
+    clobbered = [name for name in names_to_add if _get_server(settings, name) is not None]
+    if clobbered and not args.force:
+        print(f"MCP server(s) already configured: {', '.join(clobbered)}.")
+        print("Re-run with --force to replace them, or remove them first.")
+        return 1
+
+    examples_dir = (
+        Path(args.examples_dir).expanduser()
+        if args.examples_dir
+        else find_epics_mcp_examples_dir(candidate)
+    )
+    if examples_dir is not None:
+        install_epics_mcp_policies(examples_dir, include_staff=args.staff)
+    else:
+        print("Could not locate epics-mcp's examples/ folder to install policy files —")
+        print("copy them manually (see epics-mcp's README), or re-run with")
+        print("--examples-dir /path/to/epics-mcp/examples.")
+        print()
+
+    ca_addr_list = resolve_ca_addr_list(args.epics_addr or None)
+    configs = epics_mcp_server_configs(
+        candidate,
+        ca_addr_list=ca_addr_list,
+        ca_auto_addr_list=args.epics_auto_addr_list,
+        include_staff=args.staff,
+    )
+    for server in configs.values():
+        settings.mcp.servers[server.name] = server
+    save_mcp_config(settings.mcp)
+
+    for server in configs.values():
+        print(f"Configured MCP server {server.name!r}.")
+        print(f"  command: {' '.join([server.command, *server.args])}")
+        print(f"  groups:  {', '.join(server.groups) or '(none)'}")
+        if server.confirm_tools:
+            print(f"  confirm: {', '.join(server.confirm_tools)}")
+
+    print()
+    print("Next: point a workspace at it —")
+    print("    aida workspace edit <workspace> --mcp-group instrument-status")
+    print(f"Then check it starts:  aida mcp test {USER_SERVER_NAME}")
+    if not ca_addr_list:
+        print()
+        print("Tip: pass --epics-addr HOST:PORT (or export EPICS_CA_ADDR_LIST before running")
+        print("this command) so epics-mcp can actually reach Channel Access.")
+    if not args.staff:
+        print()
+        print("Read-only only. Add --staff once the write rules in usaxs-staff.yaml are")
+        print("verified against the live instrument (see PLAN_INSTRUMENT_INTEGRATION.md §4).")
+    return 0
+
+
+def cmd_find_epics_mcp(_args: argparse.Namespace) -> int:
+    """``aida mcp find-epics-mcp`` — report what would be found, change
+    nothing."""
+    candidates = find_epics_mcp()
+    if not candidates:
+        print("No epics-mcp installation found.")
+        return 1
+    print(f"Found {len(candidates)} epics-mcp installation(s), best first:")
+    for index, candidate in enumerate(candidates, start=1):
+        print(f"  {index}. {candidate.display}")
+    print()
+    print("Configure the first one with:  aida mcp add-epics-mcp")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aida mcp")
     sub = parser.add_subparsers(dest="subcommand", required=True)
@@ -580,6 +803,78 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Replace an existing server config with the same name"
     )
 
+    sub.add_parser(
+        "find-aievaluator", help="Report where aievaluator-mcp is installed, without changing anything"
+    )
+
+    add_aievaluator = sub.add_parser(
+        "add-aievaluator", help="Find aievaluator's MCP server and configure it in one step"
+    )
+    add_aievaluator.add_argument(
+        "--command", default="", help="Path to aievaluator-mcp, skipping auto-detection"
+    )
+    add_aievaluator.add_argument(
+        "--epics-addr",
+        default="",
+        help="Sets EPICS_CA_ADDR_LIST. Falls back to $EPICS_CA_ADDR_LIST if unset",
+    )
+    add_aievaluator.add_argument(
+        "--epics-auto-addr-list", default="NO", help="Sets EPICS_CA_AUTO_ADDR_LIST (default: NO)"
+    )
+    add_aievaluator.add_argument(
+        "--name", default=AIEVALUATOR_DEFAULT_NAME, help="Server name in mcp.json"
+    )
+    add_aievaluator.add_argument(
+        "--skills-dir",
+        default="",
+        help="Path to aievaluator's skills/ folder, skipping auto-detection",
+    )
+    add_aievaluator.add_argument(
+        "--first",
+        action="store_true",
+        help="Accept the first candidate without asking when several are found",
+    )
+    add_aievaluator.add_argument(
+        "--force", action="store_true", help="Replace an existing server config with the same name"
+    )
+
+    sub.add_parser(
+        "find-epics-mcp", help="Report where epics-mcp is installed, without changing anything"
+    )
+
+    add_epics_mcp = sub.add_parser(
+        "add-epics-mcp", help="Find epics-mcp and configure it in one step (read-only by default)"
+    )
+    add_epics_mcp.add_argument(
+        "--command", default="", help="Path to epics-mcp, skipping auto-detection"
+    )
+    add_epics_mcp.add_argument(
+        "--epics-addr",
+        default="",
+        help="Sets EPICS_CA_ADDR_LIST. Falls back to $EPICS_CA_ADDR_LIST if unset",
+    )
+    add_epics_mcp.add_argument(
+        "--epics-auto-addr-list", default="NO", help="Sets EPICS_CA_AUTO_ADDR_LIST (default: NO)"
+    )
+    add_epics_mcp.add_argument(
+        "--staff",
+        action="store_true",
+        help="Also configure the write-capable epics-mcp-staff server (default: read-only only)",
+    )
+    add_epics_mcp.add_argument(
+        "--examples-dir",
+        default="",
+        help="Path to epics-mcp's examples/ folder (policy YAML + PV catalog), skipping auto-detection",
+    )
+    add_epics_mcp.add_argument(
+        "--first",
+        action="store_true",
+        help="Accept the first candidate without asking when several are found",
+    )
+    add_epics_mcp.add_argument(
+        "--force", action="store_true", help="Replace existing server config(s) with the same name(s)"
+    )
+
     return parser
 
 
@@ -616,4 +911,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_add_pyirena(args)
     if args.subcommand == "find-pyirena":
         return cmd_find_pyirena(args)
+    if args.subcommand == "add-aievaluator":
+        return cmd_add_aievaluator(args)
+    if args.subcommand == "find-aievaluator":
+        return cmd_find_aievaluator(args)
+    if args.subcommand == "add-epics-mcp":
+        return cmd_add_epics_mcp(args)
+    if args.subcommand == "find-epics-mcp":
+        return cmd_find_epics_mcp(args)
     return cmd_test(args)

@@ -208,15 +208,17 @@ Two AIDA-side conventions to honour in the server:
       aievaluator repo, linked as a workspace skill) documenting the five
       CLIs, flags, exit codes and JSON shape; a `usaxs-staff` example
       workspace with `python_interpreter` pointing at the aievaluator env.
-- [ ] **`aida mcp add-aievaluator`** — second instance of the one-click
-      preset pattern (`PLAN.md` §1.5 "extend beyond pyIrena"; the missing
-      per-server knowledge is now available: binary name `aievaluator-mcp`,
-      env vars `EPICS_CA_ADDR_LIST`, `EPICS_CA_AUTO_ADDR_LIST`,
-      `AIEVALUATOR_CONFIG`, `TILED_URL`; group `instrument-status`; skill
-      `aievaluator`; `confirm_tools: [fitness_report]` by default). Doing
-      pyIrena and aievaluator side by side is what makes the generalization
-      honest — a "preset" dataclass with command detection, env, group,
-      skills, confirm defaults and a doctor check.
+- [x] **`aida mcp add-aievaluator`** — shipped, plus `aida mcp add-epics-mcp`
+      alongside it (read-only `epics-mcp-user` by default, `--staff` opt-in
+      for the write-capable server). The sibling-conda-env search itself was
+      extracted from `pyirena_setup.py` into `aida.mcp.env_discovery` so
+      both new presets (and pyIrena's, unmodified) share one search instead
+      of three copies — see `aida.mcp.aievaluator_setup` /
+      `aida.mcp.epics_mcp_setup` and `CHANGELOG.md` [Unreleased]. Skills
+      (aievaluator) and policy/catalog files (epics-mcp) are resolved from
+      each package's own editable-install checkout rather than a hardcoded
+      `~/GitHub` vs `~/Apps` path convention, so the same command works
+      unchanged on `usaxscontrol`.
 - [ ] **`enabled_tools` allowlist per server** (`PLAN.md` §2.6). For an
       instrument-facing server this stops an upstream update from silently
       adding a mutating tool to a workspace that reviewed the old set. It is

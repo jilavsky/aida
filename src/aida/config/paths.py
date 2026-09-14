@@ -89,19 +89,21 @@ def bundled_skills_dir() -> Path | None:
     return repo if repo.is_dir() else None
 
 
-def install_bundled_skills(names: Sequence[str] | None = None) -> list[str]:
-    """Copy AIDA's bundled sample skills into `~/.aida/skills/`, skipping
-    any that already exist, and return the names actually installed.
+def install_skills_from(source_dir: Path, names: Sequence[str] | None = None) -> list[str]:
+    """Copy `*.md` skills from an arbitrary `source_dir` into
+    `~/.aida/skills/`, skipping any that already exist, and return the names
+    actually installed.
 
     Never overwrites: once a skill is in the user's skills folder it is
-    *theirs* — edited, tailored to their beamline — and a later AIDA
-    upgrade silently replacing it would be the worst kind of data loss.
-    `names` limits the copy to specific skills (the pyIrena setup path
-    installs only the two it attaches); `None` installs all of them.
+    *theirs* — edited, tailored to their beamline — and a later upgrade
+    silently replacing it would be the worst kind of data loss. `names`
+    limits the copy to specific skills; `None` installs all of them.
+
+    Generic version of what `install_bundled_skills` used to do inline —
+    factored out so a sibling package's one-click MCP setup (aievaluator's
+    skills live in *its* repo checkout, not AIDA's) can install skills from
+    wherever they actually are, not only from AIDA's own bundled folder.
     """
-    source_dir = bundled_skills_dir()
-    if source_dir is None:
-        return []
     target_dir = skills_dir()
     installed: list[str] = []
     for source in sorted(source_dir.glob("*.md")):
@@ -116,6 +118,17 @@ def install_bundled_skills(names: Sequence[str] | None = None) -> list[str]:
             continue  # a read-only or full home directory must not break setup
         installed.append(source.stem)
     return installed
+
+
+def install_bundled_skills(names: Sequence[str] | None = None) -> list[str]:
+    """Copy AIDA's own bundled sample skills into `~/.aida/skills/` — see
+    `install_skills_from` for the shared copy behavior. `names` limits the
+    copy to specific skills (the pyIrena setup path installs only the two it
+    attaches); `None` installs all of them."""
+    source_dir = bundled_skills_dir()
+    if source_dir is None:
+        return []
+    return install_skills_from(source_dir, names)
 
 
 def workflows_dir() -> Path:
