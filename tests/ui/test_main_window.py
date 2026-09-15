@@ -1117,7 +1117,7 @@ def test_settings_dialog_max_iterations_applies_to_the_running_session(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
     )
     try:
-        assert window.bridge.session.loop.max_iterations == 10  # default, unchanged so far
+        assert window.bridge.session.loop.max_iterations == 50  # default, unchanged so far
 
         def _fake_exec(self):
             self._max_iterations_spin.setValue(500)
