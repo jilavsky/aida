@@ -26,6 +26,35 @@ def _settings_with_profile(name: str = "mock-profile") -> object:
     return settings
 
 
+def test_is_busy_reads_false_for_a_future_that_finished_before_being_assigned(qapp, loop_thread):
+    """Regression for a theoretical race (planning/improvement_plan_2026-09.md
+    §3): ``send()`` assigns ``self._turn_future`` on the Qt thread *after*
+    ``run_coroutine_threadsafe`` returns, while ``_drain``'s ``finally``
+    clears it back to ``None`` on the loop thread. If ``_drain`` finishes
+    before that assignment lands (only realistic when ``session.send``
+    raises synchronously on its very first ``__anext__``, e.g. Send
+    pressed during a manual compaction), ``is_busy`` must not read the
+    just-assigned, already-finished future as "busy forever" — it has to
+    check ``.done()``, not just "is something assigned"."""
+    import concurrent.futures
+
+    bridge = ChatBridge(loop_thread)
+    future: concurrent.futures.Future = concurrent.futures.Future()
+    future.set_result(None)
+    bridge._turn_future = future
+
+    assert bridge.is_busy is False
+
+
+def test_is_busy_reads_true_for_a_future_still_running(qapp, loop_thread):
+    import concurrent.futures
+
+    bridge = ChatBridge(loop_thread)
+    bridge._turn_future = concurrent.futures.Future()  # never resolved
+
+    assert bridge.is_busy is True
+
+
 def test_start_success_fires_session_ready(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):

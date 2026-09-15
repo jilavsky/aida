@@ -358,8 +358,22 @@ class ChatBridge(QObject):
         "start a new turn" from "hand this to the turn already running"
         (see ``queue_user_message``) without having to track the
         turn_started/turn_finished signal pair itself.
+
+        Checking ``.done()`` too (not just "is it assigned at all") closes
+        a theoretical race: ``send()`` assigns ``self._turn_future`` on the
+        Qt thread *after* ``run_coroutine_threadsafe`` returns, while
+        ``_drain``'s ``finally`` clears it back to ``None`` on the loop
+        thread — if ``_drain`` finished (e.g. ``session.send`` raised
+        ``SessionBusyError`` synchronously on its very first
+        ``__anext__``, such as Send pressed during a manual compaction)
+        before that assignment lands, the clear-to-``None`` would already
+        have happened and ``is_busy`` would then read the just-assigned,
+        already-finished future as "busy" forever, routing every later
+        Enter to ``queue_user_message`` on a turn that isn't running.
+        ``.done()`` makes a completed-but-not-yet-cleared future read as
+        not busy regardless of which side wins that race.
         """
-        return self._turn_future is not None
+        return self._turn_future is not None and not self._turn_future.done()
 
     def send(
         self,

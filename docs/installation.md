@@ -203,6 +203,13 @@ you run `aida` — you don't need to hand-create any of these files.
 are the ones you'll edit (by hand, via CLI, or via the GUI); the rest
 (`aida.db`, `artifacts/`, `logs/`) are managed by AIDA itself.
 
+`aida.db` runs in SQLite's WAL journal mode (set automatically, once, the
+first time AIDA opens it) so the GUI's background session and its own
+sidebar/cleanup queries don't block each other. WAL requires the database
+file to sit on local disk — if you point `AIDA_HOME` (below) at a network
+share (NFS, SMB, a mapped drive), keep `aida.db` off it, or expect SQLite
+locking errors.
+
 Secrets (API keys, the ANL Argo username) never live in any of these
 files — see [providers-and-secrets.md](providers-and-secrets.md).
 

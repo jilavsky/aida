@@ -191,7 +191,7 @@ with an obvious test.
 
 ## 3. Hardening — cheap, do when touching the file anyway
 
-- [ ] **`ChatBridge.is_busy` has a theoretical race.** `send()` assigns
+- [x] **`ChatBridge.is_busy` has a theoretical race.** `send()` assigns
       `self._turn_future` on the Qt thread *after*
       `run_coroutine_threadsafe` returns, while `_drain`'s `finally` sets
       it to `None` on the loop thread. If `_drain` finishes before the
@@ -203,7 +203,7 @@ with an obvious test.
       it) but the fix is one line: `return self._turn_future is not None
       and not self._turn_future.done()`.
 
-- [ ] **SQLite WAL mode.** `db.connect` sets `busy_timeout` but leaves the
+- [x] **SQLite WAL mode.** `db.connect` sets `busy_timeout` but leaves the
       default rollback journal. The GUI already has two connections from
       two threads (session writer + sidebar reader), and the per-user
       beamline layout makes two AIDA processes on one `~/.aida` a real
@@ -214,7 +214,7 @@ with an obvious test.
       one-time switch. (Only caveat: WAL needs the DB on a local disk, not
       a network share — worth a line in `docs/installation.md`.)
 
-- [ ] **Scratch folder is never cleaned.** `ensure_scratch_dir` creates it;
+- [x] **Scratch folder is never cleaned.** `ensure_scratch_dir` creates it;
       `persistence/cleanup.py` knows about records, attachments and
       orphans but not scratch. After §1 starts spilling tool results
       there it will grow faster. Add "scratch files older than N days" to
@@ -226,7 +226,7 @@ with an obvious test.
       produce the same sentinel dict, so the `AgentLoop` fix covers both
       providers; just add an OpenAI-shaped test next to the Anthropic one.
 
-- [ ] **Misnamed exception in `_start_session`.** A workspace that fails
+- [x] **Misnamed exception in `_start_session`.** A workspace that fails
       `validate_workspace` raises `UnknownProfileError(f"workspace ...")`.
       Functionally harmless (both land in `_STARTUP_ERRORS`), but a log
       grep for profile errors finds workspace problems. Add

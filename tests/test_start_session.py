@@ -165,6 +165,23 @@ async def test_start_session_unknown_workspace_raises(aida_home: Path, records_h
 
 
 @pytest.mark.asyncio
+async def test_start_session_workspace_that_fails_validation_raises_unknown_workspace_not_profile(
+    aida_home: Path, records_home: Path
+):
+    """planning/improvement_plan_2026-09.md §3: a workspace that *exists*
+    by name but fails validate_workspace (here: its own configured
+    ``profile:`` doesn't exist in providers.yaml) used to raise
+    UnknownProfileError — misleading for a log grep, since the workspace
+    is what's actually broken, and a workspace can fail validation for
+    reasons that have nothing to do with a profile at all (missing skills,
+    say)."""
+    ws = _workspace(profile="does-not-exist")
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+    with pytest.raises(UnknownWorkspaceError, match="use-ws"):
+        await start_session(settings, workspace_name="use-ws")
+
+
+@pytest.mark.asyncio
 async def test_start_session_workspace_supplies_profile_prompt_and_mcp(
     monkeypatch, aida_home: Path, records_home: Path
 ):

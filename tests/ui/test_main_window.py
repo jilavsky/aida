@@ -3035,7 +3035,11 @@ def test_bridge_refuses_a_profile_switch_while_busy(
     failures: list[str] = []
     window.bridge.profile_switch_failed.connect(failures.append)
     try:
-        window.bridge._turn_future = object()  # pretend a turn is in flight
+        import concurrent.futures
+
+        # pretend a turn is in flight — is_busy now also checks .done(),
+        # so the stand-in must actually behave like an unresolved future.
+        window.bridge._turn_future = concurrent.futures.Future()
         window.bridge.switch_profile("other")
         qapp.processEvents()
 

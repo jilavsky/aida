@@ -17,13 +17,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from aida.artifacts.store import ArtifactStore
-from aida.config.paths import ensure_records_dir
+from aida.config.paths import ensure_records_dir, ensure_scratch_dir
 from aida.config.settings import Settings, load_settings
 from aida.config.users import resolve_active_user
 from aida.persistence.cleanup import (
     delete_conversation,
     delete_orphan_attachment_dirs,
+    delete_stale_scratch_files,
     find_orphan_attachment_dirs,
+    find_stale_scratch_files,
 )
 from aida.persistence.recorder import ConversationNotFoundError, ConversationRecorder
 from aida.persistence.store import ConversationStore, ConversationSummary
@@ -259,13 +261,25 @@ def cmd_resume(args: argparse.Namespace) -> int:
     )
 
 
+def _confirm(prompt: str, *, skip: bool) -> bool:
+    if skip:
+        return True
+    return input(prompt).strip().lower() in ("y", "yes")
+
+
 def cmd_gc(args: argparse.Namespace) -> int:
-    """Remove attachment folders whose conversation no longer exists.
+    """Remove attachment folders whose conversation no longer exists, plus
+    (opt-in, ``--scratch-days``) scratch files older than N days.
 
     Separate from `doctor`, which only reports: a diagnostic command should
     never delete anything. This is the one that does, and it asks first
-    unless told otherwise, because the folders hold the user's own
-    documents even if the chat around them is gone.
+    unless told otherwise, because the folders/files involved hold the
+    user's own documents (attachments) or a tool result they may not have
+    read yet (scratch) even if the chat around them is gone.
+
+    The two sweeps are independent — each reports and confirms on its own,
+    so "nothing to remove" on one side never skips the other, and
+    ``--yes`` applies to both.
     """
     settings = load_settings()
     records_dir = ensure_records_dir(settings.app.records_dir)
@@ -274,18 +288,37 @@ def cmd_gc(args: argparse.Namespace) -> int:
         orphans = find_orphan_attachment_dirs(store, records_dir=records_dir)
         if not orphans:
             print("No leftover attachment folders.")
-            return 0
-        print(f"{len(orphans)} attachment folder(s) with no conversation:")
-        for orphan in orphans:
-            files = sorted(p.name for p in orphan.iterdir() if p.is_file())
-            print(f"  {orphan}  ({', '.join(files) if files else 'empty'})")
-        if not args.yes:
-            answer = input("Delete these permanently? [y/N] ").strip().lower()
-            if answer not in ("y", "yes"):
-                print("Aborted.")
-                return 0
-        removed = delete_orphan_attachment_dirs(store, records_dir=records_dir)
-        print(f"Removed {len(removed)} folder(s).")
+        else:
+            print(f"{len(orphans)} attachment folder(s) with no conversation:")
+            for orphan in orphans:
+                files = sorted(p.name for p in orphan.iterdir() if p.is_file())
+                print(f"  {orphan}  ({', '.join(files) if files else 'empty'})")
+            if _confirm("Delete these permanently? [y/N] ", skip=args.yes):
+                removed = delete_orphan_attachment_dirs(store, records_dir=records_dir)
+                print(f"Removed {len(removed)} folder(s).")
+            else:
+                print("Skipped attachment folder cleanup.")
+
+        # Opt-in (default 0 -> disabled): a spilled tool result nobody has
+        # gotten around to reading yet (see aida.mcp.manager/aida.coding.tools'
+        # "saved to <path>; use read_file to see it" pointers) is still
+        # live, not orphaned, and there is no way to tell "read" from
+        # "unread" from the filesystem alone — see
+        # find_stale_scratch_files's docstring.
+        if args.scratch_days > 0:
+            scratch_dir = ensure_scratch_dir(settings.app.scratch_dir)
+            stale = find_stale_scratch_files(scratch_dir, days=args.scratch_days)
+            if not stale:
+                print(f"No scratch files older than {args.scratch_days} day(s).")
+            else:
+                print(f"{len(stale)} scratch file(s) older than {args.scratch_days} day(s):")
+                for path in stale:
+                    print(f"  {path}")
+                if _confirm("Delete these permanently? [y/N] ", skip=args.yes):
+                    removed = delete_stale_scratch_files(scratch_dir, days=args.scratch_days)
+                    print(f"Removed {len(removed)} scratch file(s).")
+                else:
+                    print("Skipped scratch file cleanup.")
         return 0
     finally:
         store.close()
@@ -332,6 +365,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "gc", help="Remove attachment folders left behind by conversations that no longer exist"
     )
     gc.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+    gc.add_argument(
+        "--scratch-days",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Also remove scratch files (spilled tool results, downloads, ...) older than N "
+        "days (default: 0, disabled — opt in explicitly)",
+    )
 
     delete = sub.add_parser(
         "delete", help="Delete a conversation: DB rows, artifact files, and its Markdown record"

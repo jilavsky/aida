@@ -31,6 +31,7 @@ reported in ``skipped_external_files``.
 from __future__ import annotations
 
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -237,11 +238,65 @@ def delete_orphan_attachment_dirs(store: ConversationStore, *, records_dir: Path
     return removed
 
 
+def find_stale_scratch_files(scratch_dir: Path, *, days: int) -> list[Path]:
+    """Files anywhere under ``scratch_dir`` (recursively — this now
+    includes ``tool-results/``, where an oversized MCP/script output gets
+    spilled, see ``aida.mcp.manager``/``aida.coding.tools``) whose mtime is
+    older than ``days``.
+
+    ``ensure_scratch_dir``'s own docstring is explicit that everything
+    under it is "transient working files ... that agents and MCP servers
+    need *somewhere* to write" — nothing durable is meant to live there,
+    which is what makes a plain age sweep of the whole tree safe, unlike
+    the conversation-scoped cleanup above (which has to reason carefully
+    about what it may and may not delete).
+
+    ``days <= 0`` (the default everywhere this is wired up) returns an
+    empty list rather than "everything" — opt-in only, since a spilled
+    tool result a user hasn't gotten around to reading yet
+    (``read_file``, per the pointer left in the tool result) is still
+    live, not orphaned, and there's no way to tell "read" from "not read
+    yet" from the filesystem alone. Silently missing files (deleted or
+    replaced between listing and stat) are skipped rather than raising.
+    """
+    if days <= 0 or not scratch_dir.is_dir():
+        return []
+    cutoff = time.time() - days * 86400
+    stale = []
+    for path in scratch_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            if path.stat().st_mtime < cutoff:
+                stale.append(path)
+        except OSError:
+            continue
+    return sorted(stale)
+
+
+def delete_stale_scratch_files(scratch_dir: Path, *, days: int) -> list[Path]:
+    """Remove what ``find_stale_scratch_files`` found. Each file is
+    unlinked individually (not an ``rmtree`` of the whole folder) so a
+    subprocess actively writing into scratch alongside this sweep loses
+    only its own stale leftovers, never a directory another writer still
+    has open."""
+    removed: list[Path] = []
+    for path in find_stale_scratch_files(scratch_dir, days=days):
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        removed.append(path)
+    return removed
+
+
 __all__ = [
     "DeletionResult",
     "delete_conversation",
     "delete_orphan_attachment_dirs",
+    "delete_stale_scratch_files",
     "find_orphan_attachment_dirs",
+    "find_stale_scratch_files",
     "list_conversations_by_age",
     "list_conversations_older_than",
 ]

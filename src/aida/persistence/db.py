@@ -22,6 +22,7 @@ store already writes binaries under ``~/.aida/artifacts/``):
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 import threading
 from pathlib import Path
@@ -175,6 +176,34 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     # raising "database is locked" immediately.
     conn.execute("PRAGMA busy_timeout = 5000")
     with _migrate_lock:
+        # The GUI already has two connections from two threads (a running
+        # session's writes + the sidebar's own reads), and the per-user
+        # beamline layout makes two AIDA processes sharing one ~/.aida a
+        # real possibility (PLAN.md §2.1 notes it's unguarded) — WAL lets
+        # readers never block the writer and vice versa, on top of
+        # busy_timeout above, making the residual "database is locked"
+        # path far rarer. WAL mode persists in the file itself, so this is
+        # a one-time switch per database: every connection after the first
+        # that ever ran this line just confirms the file is already in WAL
+        # mode. Requires the DB file on local disk, not a network share
+        # (SQLite's own WAL constraint) — noted in docs/installation.md.
+        #
+        # Under the same _migrate_lock as _migrate() below, not before it:
+        # this exact PRAGMA is itself a real instance of the race that
+        # lock exists for (two threads opening the same fresh DB file at
+        # once, see _migrate_lock's docstring) — switching journal mode
+        # needs a brief exclusive lock that a concurrent unprotected
+        # attempt from another thread in this same process can collide
+        # with, raising "database is locked" despite busy_timeout (that
+        # PRAGMA doesn't reliably cover a journal-mode transition the way
+        # it covers ordinary reads/writes). A failure here is never fatal
+        # to startup either way — WAL is a robustness/performance
+        # improvement, not a correctness requirement, so a database that
+        # can't switch (e.g. a genuinely cross-process lock, or a network
+        # filesystem despite the caveat above) just keeps its existing
+        # journal mode instead of crashing.
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("PRAGMA journal_mode = WAL")
         _migrate(conn)
     return conn
 

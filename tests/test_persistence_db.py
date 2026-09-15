@@ -31,6 +31,31 @@ def test_connect_sets_user_version(tmp_path: Path):
     conn.close()
 
 
+def test_connect_enables_wal_journal_mode(tmp_path: Path):
+    """planning/improvement_plan_2026-09.md §3: readers (sidebar refresh
+    queries) must never block the writer (a running session's inserts) and
+    vice versa — the default rollback journal serializes them, WAL
+    doesn't."""
+    conn = connect(tmp_path / "aida.db")
+    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode.lower() == "wal"
+    conn.close()
+
+
+def test_wal_mode_persists_across_a_reopen(tmp_path: Path):
+    """WAL is a property of the database file itself, not the connection —
+    a later connect() on the same file must find it already in WAL mode
+    without needing to set it again."""
+    path = tmp_path / "aida.db"
+    conn1 = connect(path)
+    conn1.close()
+
+    conn2 = sqlite3.connect(path)  # bypass connect() to check the raw file state
+    mode = conn2.execute("PRAGMA journal_mode").fetchone()[0]
+    conn2.close()
+    assert mode.lower() == "wal"
+
+
 def test_reopening_existing_db_is_a_no_op_migration(tmp_path: Path):
     path = tmp_path / "aida.db"
     conn1 = connect(path)

@@ -14,10 +14,12 @@ from aida.cli.conversations import (
     _resume_async,
     cmd_delete,
     cmd_export,
+    cmd_gc,
     cmd_list,
     cmd_rename,
     resolve_conversation_id,
 )
+from aida.config.paths import ensure_scratch_dir
 from aida.config.settings import ProviderProfile, load_settings
 from aida.persistence.store import ConversationStore
 from aida.providers.base import Message
@@ -155,6 +157,90 @@ def test_cmd_delete_unknown_id_reports_error(aida_home: Path, records_home: Path
     out = capsys.readouterr().out
     assert rc == 1
     assert "does-not-exist" in out
+
+
+# --- cmd_gc (planning/improvement_plan_2026-09.md §3: scratch cleanup) ------
+
+
+def _touch_with_age(path: Path, *, days_old: float) -> None:
+    import os
+    import time
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x", encoding="utf-8")
+    old_time = time.time() - days_old * 86400
+    os.utime(path, (old_time, old_time))
+
+
+def test_cmd_gc_with_no_orphans_and_scratch_disabled_reports_nothing_to_do(
+    aida_home: Path, records_home: Path, capsys
+):
+    rc = cmd_gc(_build_parser().parse_args(["gc", "--yes"]))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No leftover attachment folders." in out
+    assert "scratch" not in out.lower()  # --scratch-days defaults to 0: not even mentioned
+
+
+def test_cmd_gc_scratch_days_defaults_to_disabled(aida_home: Path, records_home: Path, capsys):
+    scratch = ensure_scratch_dir()
+    _touch_with_age(scratch / "old.txt", days_old=45)
+
+    rc = cmd_gc(_build_parser().parse_args(["gc", "--yes"]))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "scratch" not in out.lower()
+    assert (scratch / "old.txt").exists()
+
+
+def test_cmd_gc_scratch_days_removes_stale_files_with_yes_flag(
+    aida_home: Path, records_home: Path, capsys
+):
+    scratch = ensure_scratch_dir()
+    old_file = scratch / "tool-results" / "stdout-abc.txt"
+    new_file = scratch / "new.txt"
+    _touch_with_age(old_file, days_old=45)
+    _touch_with_age(new_file, days_old=1)
+
+    rc = cmd_gc(_build_parser().parse_args(["gc", "--yes", "--scratch-days", "30"]))
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "Removed 1 scratch file(s)." in out
+    assert not old_file.exists()
+    assert new_file.exists()
+
+
+def test_cmd_gc_scratch_days_without_yes_prompts_and_skips_on_no(
+    aida_home: Path, records_home: Path, monkeypatch, capsys
+):
+    scratch = ensure_scratch_dir()
+    old_file = scratch / "old.txt"
+    _touch_with_age(old_file, days_old=45)
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+    rc = cmd_gc(_build_parser().parse_args(["gc", "--scratch-days", "30"]))
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "Skipped scratch file cleanup." in out
+    assert old_file.exists()
+
+
+def test_cmd_gc_attachment_orphans_and_scratch_cleanup_are_independent(
+    aida_home: Path, records_home: Path, capsys
+):
+    """Nothing to do on one side must not skip the other."""
+    scratch = ensure_scratch_dir()
+    old_file = scratch / "old.txt"
+    _touch_with_age(old_file, days_old=45)
+
+    rc = cmd_gc(_build_parser().parse_args(["gc", "--yes", "--scratch-days", "30"]))
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "No leftover attachment folders." in out
+    assert "Removed 1 scratch file(s)." in out
 
 
 # --- cmd_rename ------------------------------------------------------------------

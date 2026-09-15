@@ -6,6 +6,8 @@ from aida.artifacts.base import ImageArtifact
 from aida.artifacts.store import ArtifactStore
 from aida.persistence.cleanup import (
     delete_conversation,
+    delete_stale_scratch_files,
+    find_stale_scratch_files,
     list_conversations_by_age,
     list_conversations_older_than,
 )
@@ -154,3 +156,75 @@ def test_delete_unknown_conversation_is_a_no_op(tmp_path: Path):
     result = delete_conversation(store, "does-not-exist", records_dir=tmp_path / "records")
     assert result.deleted_message_rows == 0
     assert result.deleted_artifact_rows == 0
+
+
+# --- scratch folder cleanup (planning/improvement_plan_2026-09.md §3:
+# ensure_scratch_dir creates it, nothing ever swept it) ----------------------
+
+
+def _touch_with_age(path: Path, *, days_old: float) -> None:
+    import os
+    import time
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x", encoding="utf-8")
+    old_time = time.time() - days_old * 86400
+    os.utime(path, (old_time, old_time))
+
+
+def test_find_stale_scratch_files_matches_files_older_than_the_cutoff(tmp_path: Path):
+    scratch = tmp_path / "scratch"
+    old_file = scratch / "old.txt"
+    new_file = scratch / "new.txt"
+    _touch_with_age(old_file, days_old=45)
+    _touch_with_age(new_file, days_old=1)
+
+    stale = find_stale_scratch_files(scratch, days=30)
+
+    assert stale == [old_file]
+
+
+def test_find_stale_scratch_files_recurses_into_subfolders(tmp_path: Path):
+    """tool-results/ (aida.mcp.manager's/aida.coding.tools' spilled output
+    from the §1 fixes) lives one level under scratch, not at its root."""
+    scratch = tmp_path / "scratch"
+    nested = scratch / "tool-results" / "stdout-abc123.txt"
+    _touch_with_age(nested, days_old=45)
+
+    assert find_stale_scratch_files(scratch, days=30) == [nested]
+
+
+def test_find_stale_scratch_files_days_zero_or_less_finds_nothing():
+    """Opt-in only: days<=0 must never mean "everything", since it's the
+    default at every call site — a spilled tool result nobody has read yet
+    is not garbage, and there is no way to tell "read" from "unread" from
+    the filesystem alone."""
+    assert find_stale_scratch_files(Path("/nonexistent"), days=0) == []
+    assert find_stale_scratch_files(Path("/nonexistent"), days=-5) == []
+
+
+def test_find_stale_scratch_files_missing_directory_returns_empty(tmp_path: Path):
+    assert find_stale_scratch_files(tmp_path / "does-not-exist", days=30) == []
+
+
+def test_delete_stale_scratch_files_removes_only_the_stale_ones(tmp_path: Path):
+    scratch = tmp_path / "scratch"
+    old_file = scratch / "old.txt"
+    new_file = scratch / "new.txt"
+    _touch_with_age(old_file, days_old=45)
+    _touch_with_age(new_file, days_old=1)
+
+    removed = delete_stale_scratch_files(scratch, days=30)
+
+    assert removed == [old_file]
+    assert not old_file.exists()
+    assert new_file.exists()
+
+
+def test_delete_stale_scratch_files_already_gone_is_not_an_error(tmp_path: Path):
+    scratch = tmp_path / "scratch"
+    old_file = scratch / "old.txt"
+    _touch_with_age(old_file, days_old=45)
+    old_file.unlink()  # simulate a race with something else cleaning up
+
+    assert delete_stale_scratch_files(scratch, days=30) == []

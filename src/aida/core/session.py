@@ -1092,7 +1092,15 @@ async def _start_session(
             print(f"[workspace] warning: {warning}")
             logger.warning("workspace %r: %s", workspace.name, warning)
         if not validation.ok:
-            raise UnknownProfileError(
+            # Misnamed until now: this is a workspace-validation failure
+            # (missing/misconfigured folders, per validate_workspace), not
+            # a profile problem. Every caller that starts a session already
+            # catches both UnknownProfileError and UnknownWorkspaceError
+            # together (see aida.ui.qt.bridge._STARTUP_ERRORS and the
+            # equivalent tuples in aida.cli.chat/run and
+            # aida.core.workflows), so this was functionally harmless — but
+            # a log grep for profile errors turned up workspace problems.
+            raise UnknownWorkspaceError(
                 f"workspace {effective_workspace_name!r}: {validation.detail}"
             )
 
