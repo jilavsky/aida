@@ -100,6 +100,18 @@ def _candidate_env_dirs() -> list[Path]:
         Path("/opt/miniconda3/envs"),
         Path("/opt/anaconda3/envs"),
     ]
+    # The Windows installers for Miniforge/Miniconda/Anaconda default to
+    # %LOCALAPPDATA% (and %PROGRAMDATA% for an all-users install), *not* the
+    # home directory the POSIX installers use. Omitting these meant the
+    # scan below found nothing at all on a stock Windows beamline machine —
+    # the exact layout this function exists to cover — and `add-pyirena`
+    # silently fell back to whatever happened to be in AIDA's own env.
+    for base in (os.environ.get("LOCALAPPDATA"), os.environ.get("PROGRAMDATA")):
+        if base:
+            roots += [
+                Path(base) / name / "envs"
+                for name in ("miniforge3", "miniconda3", "anaconda3", "mambaforge")
+            ]
     # CONDA_PREFIX points at the *active* env; its parent is the envs dir
     # for any non-base env, which covers installs in unusual locations.
     conda_prefix = os.environ.get("CONDA_PREFIX")
@@ -175,20 +187,38 @@ def find_pyirena_mcp() -> list[PyirenaMcpCandidate]:
     return candidates
 
 
+def _interpreter_for(command: str, args: list[str]) -> str | None:
+    """The Python that will run this launch form, or ``None`` if not on disk.
+
+    A console script lives next to the interpreter that will run it — on
+    POSIX. On Windows only a *venv* puts ``python.exe`` in ``Scripts\\``; a
+    conda prefix keeps it one level up, at the root beside ``Scripts\\``.
+    Looking only in the script's own directory therefore found nothing for
+    every conda install, which made ``pyirena_version`` silently answer
+    ``None`` (the version was simply omitted from the doctor row) and would
+    have made ``import_failure`` skip the check it exists to perform.
+    """
+    if args[:1] == ["-m"]:
+        return command
+    bin_dir = Path(command).parent
+    name = "python.exe" if os.name == "nt" else "python"
+    search = [bin_dir, bin_dir.parent] if os.name == "nt" else [bin_dir]
+    for directory in search:
+        python = directory / name
+        if python.exists():
+            return str(python)
+    return None
+
+
 def pyirena_version(candidate: PyirenaMcpCandidate) -> str | None:
     """The pyIrena version behind a candidate, or ``None`` if it can't be
     determined. Runs the candidate's *interpreter*, never the MCP server
     itself — starting the server would open a stdio session this function
     has no business owning. Best-effort and short-timeout: a wedged or
     broken install reports ``None`` rather than hanging a doctor run."""
-    if candidate.args[:1] == ["-m"]:
-        python = candidate.command
-    else:
-        # A console script lives next to the interpreter that will run it.
-        bin_dir = Path(candidate.command).parent
-        python = str(bin_dir / ("python.exe" if os.name == "nt" else "python"))
-        if not Path(python).exists():
-            return None
+    python = _interpreter_for(candidate.command, candidate.args)
+    if python is None:
+        return None
     try:
         proc = subprocess.run(  # noqa: S603 - a python interpreter path we resolved ourselves
             [python, "-c", "import pyirena; print(pyirena.__version__)"],
@@ -199,6 +229,113 @@ def pyirena_version(candidate: PyirenaMcpCandidate) -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return proc.stdout.strip() or None if proc.returncode == 0 else None
+
+
+def import_failure(config: McpServerConfig) -> str | None:
+    """Why a *configured* pyIrena server would fail to start, or ``None``.
+
+    Checking that ``mcp.json`` names a file that exists says almost
+    nothing: the failure this catches is a server whose command is
+    perfectly present and still cannot run, because it lives in a
+    different conda environment than AIDA and its ``PATH`` does not reach
+    that environment's shared libraries (see ``_launch_path``). On Windows
+    that kills CPython at import with exit 127 and an empty stderr, so
+    there is no diagnostic to surface from a failed launch — the only way
+    to know is to try the import under the environment the server is
+    actually configured with, which is what this does.
+
+    Runs the interpreter, not the server, for the same reason
+    ``pyirena_version`` does. Returns a one-line reason suitable for a
+    doctor row, or ``None`` when the import succeeds or when there is
+    nothing meaningful to test (no interpreter found next to the command —
+    a wrapper script or a non-Python server, neither of which this check
+    has any business grading).
+    """
+    python = _interpreter_for(config.command, list(config.args))
+    if python is None:
+        return None
+    env = {
+        **os.environ,
+        **{k: v for k, v in config.env.items() if not v.startswith(("keyring:", "secret:"))},
+    }
+    try:
+        proc = subprocess.run(  # noqa: S603 - a python interpreter path we resolved ourselves
+            [python, "-c", "import pyirena.mcp.server"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return "importing pyirena.mcp.server timed out after 30s"
+    except OSError as exc:
+        return f"could not run {python}: {exc}"
+    if proc.returncode == 0:
+        return None
+    detail = (proc.stderr or "").strip().splitlines()
+    if detail:
+        return f"{detail[-1]} (exit {proc.returncode})"
+    # The silent-DLL-failure case: no traceback at all to report, so say
+    # what it almost always means instead of printing an empty string.
+    return (
+        f"exited {proc.returncode} with no error output — usually a shared library that "
+        "cannot be found, meaning the server's PATH does not reach its own environment"
+    )
+
+
+def _env_root(candidate: PyirenaMcpCandidate) -> Path | None:
+    """The environment prefix a candidate launches from, or ``None``.
+
+    A console script lives in ``<prefix>/bin`` (``<prefix>\\Scripts`` on
+    Windows); the ``python -m`` form's command *is* ``<prefix>/bin/python``
+    on POSIX and ``<prefix>\\python.exe`` on Windows.
+    """
+    command = Path(candidate.command)
+    parent = command.parent
+    if os.name == "nt" and parent.name.lower() != _BIN_DIRNAME.lower():
+        # `<prefix>\python.exe` — the interpreter sits at the prefix root.
+        return parent if (parent / _BIN_DIRNAME).is_dir() else None
+    return parent.parent if parent.name == _BIN_DIRNAME else None
+
+
+def _launch_path(candidate: PyirenaMcpCandidate) -> str | None:
+    """A ``PATH`` that lets ``candidate`` actually load, or ``None``.
+
+    Why this is needed at all: AIDA and pyIrena usually live in *separate*
+    conda environments (the whole point of talking over stdio — see this
+    module's docstring, search order 4). The MCP SDK builds the server
+    subprocess's environment from ``get_default_environment()``, which
+    inherits **AIDA's** ``PATH``, so pyIrena's env never appears on it. On
+    Windows that is fatal and nearly undebuggable: conda keeps its shared
+    libraries in ``<prefix>\\Library\\bin``, so an extension module's DLL
+    fails to load, CPython dies at import with exit 127 and *no traceback
+    on stderr*, and the client sees only "unhandled errors in a TaskGroup
+    (1 sub-exception)" wrapping a bare "Connection closed".
+
+    The value is a snapshot taken now, at configure time, rather than a
+    reference resolved at launch: it goes into ``mcp.json`` as a literal a
+    user can read and edit, which matters because this is the setting they
+    will have to adjust by hand if they ever move the environment. The
+    prefix directories go *first* so pyIrena's env wins over AIDA's own.
+    """
+    prefix = _env_root(candidate)
+    if prefix is None:
+        return None
+    if os.name == "nt":
+        # Mirrors what `conda activate` prepends on Windows.
+        parts = [
+            prefix,
+            prefix / "Library" / "mingw-w64" / "bin",
+            prefix / "Library" / "usr" / "bin",
+            prefix / "Library" / "bin",
+            prefix / "Scripts",
+            prefix / "bin",
+        ]
+    else:
+        parts = [prefix / "bin"]
+    inherited = os.environ.get("PATH", "")
+    joined = os.pathsep.join(str(p) for p in parts)
+    return f"{joined}{os.pathsep}{inherited}" if inherited else joined
 
 
 def pyirena_server_config(
@@ -224,8 +361,15 @@ def pyirena_server_config(
     because it is the one knob that controls how much context a single
     tool result can eat, and a user tuning it should find it already in
     their ``mcp.json`` instead of having to learn it exists.
+
+    ``PATH`` is set from the candidate's own environment prefix when one
+    can be identified — see ``_launch_path`` for why a cross-environment
+    stdio server does not otherwise start on Windows.
     """
     env: dict[str, str] = {}
+    launch_path = _launch_path(candidate)
+    if launch_path:
+        env["PATH"] = launch_path
     if data_root:
         env["PYIRENA_DATA_ROOT"] = str(Path(data_root).expanduser())
     if max_array_points is not None:
@@ -246,6 +390,7 @@ __all__ = [
     "DEFAULT_SKILLS",
     "PyirenaMcpCandidate",
     "find_pyirena_mcp",
+    "import_failure",
     "pyirena_server_config",
     "pyirena_version",
 ]

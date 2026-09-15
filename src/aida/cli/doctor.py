@@ -34,7 +34,7 @@ from aida.config import paths
 from aida.config.secrets import env_var_name, keyring_available
 from aida.config.settings import Settings, load_settings
 from aida.core.context import CONTEXT_SAFETY_FRACTION
-from aida.mcp.pyirena_setup import find_pyirena_mcp, pyirena_version
+from aida.mcp.pyirena_setup import find_pyirena_mcp, import_failure, pyirena_version
 from aida.providers.profiles import ProfileValidation, validate_profile
 
 
@@ -324,21 +324,42 @@ def _check_pyirena_mcp(settings: Settings | None) -> CheckResult:
     window. So this check reports the *combination* of the two, and always
     names the one command that fixes whichever half is missing.
 
-    Never a hard failure. A user with no interest in pyIrena (running AIDA
-    for document work, say) must not see a red FAIL for a package they
-    deliberately did not install, so "not installed" reports OK with an
-    explanation — this check exists to inform, not to grade.
+    Not installed is never a failure. A user with no interest in pyIrena
+    (running AIDA for document work, say) must not see a red FAIL for a
+    package they deliberately did not install, so "not installed" reports
+    OK with an explanation — this check exists to inform, not to grade.
+
+    A server that *is* configured and cannot start is a different matter,
+    and does fail: the user has declared they want these tools, and the
+    symptom they would otherwise get is "unhandled errors in a TaskGroup
+    (1 sub-exception)" at session start, which names neither the server
+    nor the cause. Checking only that the command exists on disk missed
+    this entirely — it is the cross-environment ``PATH`` failure described
+    in ``pyirena_setup.import_failure``, where the file is present and
+    still cannot run.
     """
-    configured = []
+    servers = []
     if settings is not None:
-        configured = [
-            server.name
+        servers = [
+            server
             for server in settings.mcp.servers.values()
             if "pyirena" in Path(server.command).name.lower()
             or any("pyirena" in arg for arg in server.args)
         ]
+    configured = [server.name for server in servers]
 
     candidates = find_pyirena_mcp()
+
+    broken = [(s.name, reason) for s in servers if (reason := import_failure(s)) is not None]
+    if broken:
+        name, reason = broken[0]
+        return CheckResult(
+            "pyirena_mcp",
+            False,
+            f"configured as {name}, but it cannot start: {reason} — re-run "
+            "`aida mcp add-pyirena --force` to rewrite its PATH, or fix the `env.PATH` "
+            "entry for this server in mcp.json",
+        )
 
     if configured and candidates:
         version = pyirena_version(candidates[0])

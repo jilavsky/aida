@@ -269,6 +269,50 @@ def test_pyirena_check_recognizes_the_python_dash_m_launch_form(aida_home, monke
     assert "configured as scattering" in result.detail
 
 
+def test_pyirena_check_fails_when_a_configured_server_cannot_start(aida_home, monkeypatch):
+    """Checking only that the command exists on disk passed a server that
+    could never launch: the cross-environment PATH failure leaves the file
+    perfectly present. The user's only other symptom is "unhandled errors
+    in a TaskGroup (1 sub-exception)" at session start, which names neither
+    the server nor the cause, so this check has to be allowed to fail."""
+    from aida.cli import doctor
+    from aida.config.settings import McpServerConfig, load_settings
+
+    monkeypatch.setattr("aida.cli.doctor.find_pyirena_mcp", lambda: [_candidate()])
+    monkeypatch.setattr("aida.cli.doctor.pyirena_version", lambda _c: "1.1.0")
+    monkeypatch.setattr("aida.cli.doctor.import_failure", lambda _s: "exited 3221225781")
+    settings = load_settings()
+    settings.mcp.servers["pyirena"] = McpServerConfig(
+        name="pyirena", command="/opt/envs/pyirena/bin/pyirena-mcp"
+    )
+
+    result = doctor._check_pyirena_mcp(settings)
+
+    assert not result.ok
+    assert "cannot start" in result.detail
+    assert "3221225781" in result.detail
+    assert "add-pyirena --force" in result.detail
+
+
+def test_pyirena_check_does_not_probe_a_server_that_is_not_configured(aida_home, monkeypatch):
+    """ "Installed but not configured" must stay a non-failure — there is no
+    server to start, so nothing to grade."""
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    monkeypatch.setattr("aida.cli.doctor.find_pyirena_mcp", lambda: [_candidate()])
+    monkeypatch.setattr("aida.cli.doctor.pyirena_version", lambda _c: "1.1.0")
+    monkeypatch.setattr(
+        "aida.cli.doctor.import_failure",
+        lambda _s: pytest.fail("probed a server that is not configured"),
+    )
+
+    result = doctor._check_pyirena_mcp(load_settings())
+
+    assert result.ok
+    assert "NOT configured" in result.detail
+
+
 # --- context_windows (PLAN.md §1.3 / planning/context_management.md §3.5) --
 
 

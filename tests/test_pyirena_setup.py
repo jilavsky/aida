@@ -11,14 +11,19 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from aida.config.settings import McpServerConfig
 from aida.mcp.pyirena_setup import (
     DEFAULT_GROUP,
     DEFAULT_SKILLS,
     PyirenaMcpCandidate,
+    _candidate_env_dirs,
+    _interpreter_for,
     find_pyirena_mcp,
+    import_failure,
     pyirena_server_config,
 )
 
@@ -146,3 +151,120 @@ def test_the_python_dash_m_form_round_trips_into_command_and_args():
     config = pyirena_server_config(candidate)
     assert config.command == "/env/bin/python"
     assert config.args == ["-m", "pyirena.mcp.server"]
+
+
+# --- PATH: the cross-environment launch failure ---------------------------
+
+
+def test_windows_installer_env_locations_are_searched(monkeypatch, tmp_path: Path):
+    """Regression: the Windows Miniforge/Miniconda installers default to
+    %LOCALAPPDATA%, not the home directory the POSIX installers use. With
+    those omitted, a stock Windows machine matched *none* of the search
+    roots and `add-pyirena` never saw a sibling env at all."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+    monkeypatch.delenv("CONDA_PREFIX", raising=False)
+
+    roots = _candidate_env_dirs()
+
+    assert tmp_path / "AppData" / "Local" / "miniforge3" / "envs" in roots
+    assert tmp_path / "AppData" / "Local" / "miniconda3" / "envs" in roots
+
+
+def test_config_puts_the_servers_own_environment_first_on_path(tmp_path: Path):
+    """pyIrena normally lives in a *different* conda env than AIDA, and the
+    MCP SDK hands the subprocess AIDA's PATH. Without the server's own
+    prefix on it, Windows cannot load the env's DLLs and the process dies
+    at import with no stderr at all."""
+    prefix = tmp_path / "envs" / "pyirena"
+    _make_script(prefix / BIN_DIRNAME)
+
+    config = pyirena_server_config(
+        PyirenaMcpCandidate(command=str(prefix / BIN_DIRNAME / SCRIPT_NAME))
+    )
+
+    entries = config.env["PATH"].split(os.pathsep)
+    if os.name == "nt":
+        # `conda activate` prepends all of these; Library\bin is the one
+        # that actually carries the shared libraries.
+        assert str(prefix / "Library" / "bin") in entries
+        assert entries[0] == str(prefix)
+    else:
+        assert entries[0] == str(prefix / BIN_DIRNAME)
+    # A snapshot that *extends* the inherited PATH rather than replacing
+    # it — the SDK hands `env` to the child wholesale, so dropping the
+    # inherited entries would strip the system directories too.
+    for inherited in os.environ.get("PATH", "").split(os.pathsep):
+        if inherited:
+            assert inherited in entries
+
+
+def test_no_path_is_invented_when_the_command_is_not_in_an_environment():
+    """A bare name or a loose script has no prefix to point at; writing a
+    speculative PATH into mcp.json would be noise the user has to read."""
+    config = pyirena_server_config(PyirenaMcpCandidate(command="pyirena-mcp"))
+    assert "PATH" not in config.env
+
+
+def test_interpreter_is_found_at_a_conda_prefix_root(tmp_path: Path):
+    """Only a venv puts python.exe in Scripts\\; a conda prefix keeps it one
+    level up. Searching just the script's own directory found neither the
+    version nor the import failure on every conda install."""
+    prefix = tmp_path / "envs" / "pyirena"
+    _make_script(prefix / BIN_DIRNAME)
+    interpreter = prefix / ("python.exe" if os.name == "nt" else BIN_DIRNAME + "/python")
+    interpreter.parent.mkdir(parents=True, exist_ok=True)
+    interpreter.write_text("", encoding="utf-8")
+
+    found = _interpreter_for(str(prefix / BIN_DIRNAME / SCRIPT_NAME), [])
+
+    assert found == str(interpreter)
+
+
+def test_import_failure_reports_a_silent_nonzero_exit(monkeypatch):
+    """The Windows DLL-not-found case exits nonzero with an *empty* stderr,
+    so there is no traceback to quote — the check has to say what it means
+    instead of surfacing an empty string."""
+    monkeypatch.setattr("aida.mcp.pyirena_setup._interpreter_for", lambda _c, _a: "/env/bin/python")
+    monkeypatch.setattr(
+        "aida.mcp.pyirena_setup.subprocess.run",
+        lambda *_a, **_k: SimpleNamespace(returncode=3221225781, stdout="", stderr=""),
+    )
+
+    reason = import_failure(McpServerConfig(name="pyirena", command="/env/bin/pyirena-mcp"))
+
+    assert reason is not None
+    assert "PATH" in reason
+    assert "3221225781" in reason
+
+
+def test_import_failure_quotes_a_real_traceback_when_there_is_one(monkeypatch):
+    monkeypatch.setattr("aida.mcp.pyirena_setup._interpreter_for", lambda _c, _a: "/env/bin/python")
+    monkeypatch.setattr(
+        "aida.mcp.pyirena_setup.subprocess.run",
+        lambda *_a, **_k: SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="Traceback...\nModuleNotFoundError: No module named 'pyirena'",
+        ),
+    )
+
+    reason = import_failure(McpServerConfig(name="pyirena", command="/env/bin/pyirena-mcp"))
+
+    assert "ModuleNotFoundError" in reason
+
+
+def test_import_failure_is_silent_when_the_import_works(monkeypatch):
+    monkeypatch.setattr("aida.mcp.pyirena_setup._interpreter_for", lambda _c, _a: "/env/bin/python")
+    monkeypatch.setattr(
+        "aida.mcp.pyirena_setup.subprocess.run",
+        lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+
+    assert import_failure(McpServerConfig(name="pyirena", command="/env/bin/pyirena-mcp")) is None
+
+
+def test_import_failure_declines_to_grade_a_non_python_command(monkeypatch):
+    """No interpreter next to the command means a wrapper script or a
+    non-Python server — not something this check can speak to."""
+    monkeypatch.setattr("aida.mcp.pyirena_setup._interpreter_for", lambda _c, _a: None)
+    assert import_failure(McpServerConfig(name="pyirena", command="/usr/local/bin/wrapper")) is None
