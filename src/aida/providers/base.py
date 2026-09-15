@@ -23,6 +23,17 @@ from aida.core.events import AgentEvent
 #: ``system``, ``messages``, ``max_tokens``).
 DROPPABLE_REQUEST_PARAMS = ("temperature", "top_p", "top_k")
 
+#: The key both ``anthropic_.py`` and ``openai_compat.py`` put in
+#: ``ToolCall.arguments`` when a tool call's streamed JSON never parsed —
+#: almost always because the stream ended with ``stop_reason=max_tokens``
+#: mid ``input_json_delta``/``arguments`` and the argument string was cut
+#: off partway through. A tool asked to run with these arguments would fail
+#: with a confusing, unrelated ``KeyError`` (it goes looking for a real
+#: argument that was never there) rather than the actual, actionable
+#: problem, so ``AgentLoop._run_turns`` checks for this key *before* calling
+#: the tool and answers with an explanation instead.
+UNPARSED_ARGUMENTS_KEY = "_unparsed_arguments"
+
 #: Phrases a 400 uses to say "I know this parameter, but not for this
 #: model". Newer models reject ``temperature`` outright ("`temperature` is
 #: deprecated for this model"); OpenAI's reasoning models say

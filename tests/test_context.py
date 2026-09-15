@@ -586,7 +586,7 @@ def test_history_budget_clamps_to_the_floor_when_over_committed():
 
 
 def test_history_budget_respects_default_reserved_output_tokens_constant():
-    assert DEFAULT_RESERVED_OUTPUT_TOKENS == 4096  # Anthropic's own default
+    assert DEFAULT_RESERVED_OUTPUT_TOKENS == 8192  # aida.providers.anthropic_.DEFAULT_MAX_TOKENS
 
 
 # --- plan_trim / TrimPlan (§3.4 — the shared decision compaction and plain

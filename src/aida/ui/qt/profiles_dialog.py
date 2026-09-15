@@ -178,7 +178,7 @@ class ProviderProfileFormDialog(QDialog):
         )
         self._max_tokens_row.setToolTip(
             "Caps only the length of THIS REPLY (the model's output) — not the model's total "
-            "context window. Leave blank for a safe 4096-token default; a good explicit value is "
+            "context window. Leave blank for a safe 8192-token default; a good explicit value is "
             "usually 4096-16000. Do NOT set this to your model's full context size — that leaves "
             "no room for conversation history and every turn gets clamped to a bare minimum. Set "
             "the model's real total window in 'Context window' below instead."

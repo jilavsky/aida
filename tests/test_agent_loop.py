@@ -131,6 +131,83 @@ async def test_tool_raising_exception_becomes_error_result():
 
 
 @pytest.mark.asyncio
+async def test_tool_raising_a_keyerror_reports_the_exception_type_too():
+    """The real bug report: a KeyError's own str() is just the missing key
+    (`'path'`), unreadable on its own — `AgentLoop` must format the
+    exception's type in too, e.g. "KeyError: 'path'", not bare `str(exc)`."""
+
+    async def _boom(_args):
+        raise KeyError("path")
+
+    tool = NativeTool(
+        schema=ToolSchema(name="boom", description="", parameters={"type": "object"}), func=_boom
+    )
+    provider = MockProvider(
+        [
+            MockTurn(tool_calls=[MockToolCall(name="boom", id="call_1")]),
+            MockTurn(text="recovered"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"boom": tool})
+    messages = [Message(role="user", content="hi")]
+
+    events = [e async for e in loop.run(messages)]
+
+    finished = next(e for e in events if isinstance(e, ToolCallFinished))
+    assert finished.is_error is True
+    assert finished.result == "KeyError: 'path'"
+
+
+# --- B: a tool call whose arguments never finished parsing (almost always
+# stop_reason=max_tokens cutting off the streamed JSON mid-argument) must not
+# be run — see aida.providers.base.UNPARSED_ARGUMENTS_KEY. -------------------
+
+
+@pytest.mark.asyncio
+async def test_tool_call_with_unparsed_arguments_is_not_run_and_reports_why():
+    from aida.providers.base import UNPARSED_ARGUMENTS_KEY
+
+    called = False
+
+    async def _write_file(_args):
+        nonlocal called
+        called = True
+        return ToolResult(content="wrote it")
+
+    tool = NativeTool(
+        schema=ToolSchema(name="write_file", description="", parameters={"type": "object"}),
+        func=_write_file,
+    )
+    provider = MockProvider(
+        [
+            MockTurn(
+                tool_calls=[
+                    MockToolCall(
+                        name="write_file",
+                        id="call_1",
+                        arguments={UNPARSED_ARGUMENTS_KEY: '{"path": "report.md", "content": "..'},
+                    )
+                ]
+            ),
+            MockTurn(text="retrying with a shorter write"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"write_file": tool})
+    messages = [Message(role="user", content="write a report")]
+
+    events = [e async for e in loop.run(messages)]
+
+    assert called is False, "a call with unparsed arguments must never reach the tool"
+    finished = next(e for e in events if isinstance(e, ToolCallFinished))
+    assert finished.is_error is True
+    assert "cut off" in str(finished.result)
+    assert "output token limit" in str(finished.result)
+    # The turn must still recover — same "loop continues" contract as an
+    # unknown-tool or a raised-exception error result.
+    assert messages[-1].content == "retrying with a shorter write"
+
+
+@pytest.mark.asyncio
 async def test_iteration_cap_reached():
     # A script where the model always requests a tool call, forever.
     turns = [MockTurn(tool_calls=[MockToolCall(name="get_current_time")]) for _ in range(10)]

@@ -1199,6 +1199,18 @@ class MainWindow(QMainWindow):
                 and any(path.lower().endswith(".pdf") for path in kept)
             ):
                 message += ". Ask about its figures to read them (OCR runs then, and asks first)"
+            # Bug report: attaching an image to a profile with vision
+            # disabled silently sent only the text placeholder — the model
+            # then answered "I can't see images" with nothing in the GUI
+            # explaining why. `images` is only non-empty when at least one
+            # attachment actually was an image (see
+            # `_augment_with_attachments`), so this fires exactly when a
+            # human would otherwise be left guessing.
+            if images and not self._active_profile_supports_vision():
+                message += (
+                    " — this profile has vision disabled: the image will be described, not "
+                    "seen; enable 'Supports vision' in Providers… to let the model see it"
+                )
             self.statusBar().showMessage(message, 8000)
 
     def _queue_message_for_running_turn(self, text: str) -> None:
@@ -1231,6 +1243,16 @@ class MainWindow(QMainWindow):
             )
         else:
             self.statusBar().showMessage("Queued — the agent sees this at its next step", 5000)
+
+    def _active_profile_supports_vision(self) -> bool:
+        """Whether the currently running session's profile has
+        ``supports_vision`` on — ``True`` (assume vision is fine) when no
+        session/profile is resolvable yet, since there is nothing concrete
+        to warn about in that case."""
+        session = self.bridge.session
+        if session is None or session.profile is None:
+            return True
+        return bool(session.profile.supports_vision)
 
     def _augment_with_attachments(
         self, text: str, attachments: list[str]

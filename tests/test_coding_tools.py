@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from aida.coding.tools import default_coding_tools
+from aida.coding.tools import RUN_OUTPUT_DISPLAY_MAX_CHARS, default_coding_tools
 from aida.config.settings import WorkspaceConfig
 from aida.workspace.command_allowlist import CommandAllowlist
 from aida.workspace.safety import ConfirmationRequest, SafetyGuard
@@ -318,3 +318,62 @@ async def test_run_command_bad_quoting_is_an_error_not_a_crash(tmp_path: Path):
 
     result = await _call(tools, "run_command", command='bad "quote')
     assert result.is_error
+
+
+# --- output size cap (planning/improvement_plan_2026-09.md §1: stdout/stderr
+# went to the model uncapped, up to 256,000 bytes each) ----------------------
+
+_PRINT_N_CHARS = (
+    "import sys; sys.stdout.write('x' * {n}); sys.stdout.write('\\n')"
+)
+
+
+@pytest.mark.asyncio
+async def test_short_output_is_not_truncated(tmp_path: Path):
+    tools = default_coding_tools(
+        _guard(tmp_path), workspace=_workspace(tmp_path), scratch_dir=tmp_path / "scratch"
+    )
+
+    script = tmp_path / "print_short.py"
+    script.write_text(_PRINT_N_CHARS.format(n=100), encoding="utf-8")
+    result = await _call(tools, "run_python_script", path=str(script))
+
+    assert "x" * 100 in result.content
+    assert "omitted" not in result.content
+    assert "saved to" not in result.content
+
+
+@pytest.mark.asyncio
+async def test_oversized_stdout_is_capped_and_spilled_to_scratch(tmp_path: Path):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    tools = default_coding_tools(_guard(tmp_path), workspace=_workspace(tmp_path), scratch_dir=scratch)
+
+    n_chars = RUN_OUTPUT_DISPLAY_MAX_CHARS + 5_000
+    script = tmp_path / "print_long.py"
+    script.write_text(_PRINT_N_CHARS.format(n=n_chars), encoding="utf-8")
+    result = await _call(tools, "run_python_script", path=str(script))
+
+    assert "x" * n_chars not in result.content
+    assert "x" * 100 in result.content
+    assert "saved to" in result.content
+    assert "read_file" in result.content
+
+    spilled = list((scratch / "tool-results").glob("stdout-*.txt"))
+    assert len(spilled) == 1
+    assert "x" * n_chars in spilled[0].read_text(encoding="utf-8")
+    assert str(spilled[0]) in result.content
+
+
+@pytest.mark.asyncio
+async def test_oversized_stdout_without_a_scratch_dir_falls_back_to_truncation(tmp_path: Path):
+    tools = default_coding_tools(_guard(tmp_path), workspace=_workspace(tmp_path))
+
+    n_chars = RUN_OUTPUT_DISPLAY_MAX_CHARS + 5_000
+    script = tmp_path / "print_long.py"
+    script.write_text(_PRINT_N_CHARS.format(n=n_chars), encoding="utf-8")
+    result = await _call(tools, "run_python_script", path=str(script))
+
+    assert "x" * n_chars not in result.content
+    assert "omitted" in result.content
+    assert "saved to" not in result.content

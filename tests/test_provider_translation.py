@@ -172,6 +172,51 @@ def test_process_openai_chunk_tool_call_accumulates_streamed_arguments():
     assert call.arguments == {"tz": "utc"}
 
 
+def test_process_openai_chunk_tool_call_with_arguments_cut_off_mid_stream():
+    """B: a stream ending (e.g. finish_reason="length", the max_tokens
+    equivalent) before a tool call's argument JSON finished must not be
+    silently treated as `{}` — the model asked for something specific and
+    got it substituted with nothing, with no signal anything went wrong.
+    ``AgentLoop._run_turns`` uses this sentinel key to refuse the call with
+    an explanation instead of a bare KeyError."""
+    from openai.types.chat import ChatCompletionChunk
+    from openai.types.chat.chat_completion_chunk import (
+        Choice,
+        ChoiceDelta,
+        ChoiceDeltaToolCall,
+        ChoiceDeltaToolCallFunction,
+    )
+
+    from aida.core.events import ToolCallStarted
+    from aida.providers.base import UNPARSED_ARGUMENTS_KEY
+    from aida.providers.openai_compat import _StreamState, process_openai_chunk
+
+    state = _StreamState(message_id="m3")
+    events = []
+
+    def chunk(**kw):
+        return ChatCompletionChunk(
+            id="3", created=0, model="x", object="chat.completion.chunk", **kw
+        )
+
+    tc1 = ChoiceDeltaToolCall(
+        index=0,
+        id="call_1",
+        type="function",
+        function=ChoiceDeltaToolCallFunction(name="write_file", arguments='{"path": "a.txt"'),
+    )
+    events += process_openai_chunk(
+        chunk(choices=[Choice(index=0, delta=ChoiceDelta(tool_calls=[tc1]), finish_reason=None)]),
+        state,
+    )
+    events += process_openai_chunk(
+        chunk(choices=[Choice(index=0, delta=ChoiceDelta(), finish_reason="length")]), state
+    )
+
+    call = next(e for e in events if isinstance(e, ToolCallStarted))
+    assert call.arguments == {UNPARSED_ARGUMENTS_KEY: '{"path": "a.txt"'}
+
+
 # ---------------------------------------------------------------------------
 # anthropic_
 # ---------------------------------------------------------------------------
@@ -398,6 +443,80 @@ def test_process_anthropic_event_tool_use_accumulates_partial_json():
     assert call.call_id == "toolu_1"
     assert call.tool_name == "get_current_time"
     assert call.arguments == {"tz": "utc"}
+
+
+def test_process_anthropic_event_tool_use_with_arguments_cut_off_by_max_tokens():
+    """The real bug report: a write_file/write_markdown_report content
+    argument long enough to hit max_tokens ends the stream mid
+    input_json_delta — the partial JSON never parses. Must surface as the
+    shared sentinel key, not silently become `{}`."""
+    from anthropic.types import (
+        InputJSONDelta,
+        MessageDeltaUsage,
+        RawContentBlockDeltaEvent,
+        RawContentBlockStartEvent,
+        RawContentBlockStopEvent,
+        RawMessageDeltaEvent,
+        RawMessageStartEvent,
+        RawMessageStopEvent,
+        ToolUseBlock,
+        Usage,
+    )
+    from anthropic.types import (
+        Message as AnthropicMessage,
+    )
+    from anthropic.types.raw_message_delta_event import Delta as MsgDelta
+
+    from aida.core.events import ToolCallStarted
+    from aida.providers.anthropic_ import _StreamState, process_anthropic_event
+    from aida.providers.base import UNPARSED_ARGUMENTS_KEY
+
+    state = _StreamState(message_id="m3")
+    events = []
+
+    msg = AnthropicMessage(
+        id="msg_3",
+        content=[],
+        model="claude-x",
+        role="assistant",
+        stop_reason=None,
+        type="message",
+        usage=Usage(input_tokens=3, output_tokens=0),
+    )
+    events += process_anthropic_event(
+        RawMessageStartEvent(type="message_start", message=msg), state
+    )
+    events += process_anthropic_event(
+        RawContentBlockStartEvent(
+            type="content_block_start",
+            index=0,
+            content_block=ToolUseBlock(type="tool_use", id="toolu_1", name="write_file", input={}),
+        ),
+        state,
+    )
+    events += process_anthropic_event(
+        RawContentBlockDeltaEvent(
+            type="content_block_delta",
+            index=0,
+            delta=InputJSONDelta(type="input_json_delta", partial_json='{"path": "report.md"'),
+        ),
+        state,
+    )
+    events += process_anthropic_event(
+        RawContentBlockStopEvent(type="content_block_stop", index=0), state
+    )
+    events += process_anthropic_event(
+        RawMessageDeltaEvent(
+            type="message_delta",
+            delta=MsgDelta(stop_reason="max_tokens", stop_sequence=None),
+            usage=MessageDeltaUsage(output_tokens=8192),
+        ),
+        state,
+    )
+    events += process_anthropic_event(RawMessageStopEvent(type="message_stop"), state)
+
+    call = next(e for e in events if isinstance(e, ToolCallStarted))
+    assert call.arguments == {UNPARSED_ARGUMENTS_KEY: '{"path": "report.md"'}
 
 
 def test_completion_settings_defaults():
@@ -773,6 +892,63 @@ def test_to_cached_tools_param_handles_empty_list():
     from aida.providers.anthropic_ import to_cached_tools_param
 
     assert to_cached_tools_param([]) == []
+
+
+def test_to_cached_messages_param_wraps_a_bare_string_last_message():
+    from aida.providers.anthropic_ import to_cached_messages_param
+
+    messages = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "reply"},
+        {"role": "user", "content": "second"},
+    ]
+
+    out = to_cached_messages_param(messages)
+
+    assert out[0]["content"] == "first"  # only the last message is touched
+    assert out[1]["content"] == "reply"
+    assert out[2]["content"] == [
+        {"type": "text", "text": "second", "cache_control": {"type": "ephemeral"}}
+    ]
+    # Original list/messages untouched (no accidental shared mutation).
+    assert messages[-1]["content"] == "second"
+
+
+def test_to_cached_messages_param_marks_the_last_block_of_a_multi_block_last_message():
+    from aida.providers.anthropic_ import to_cached_messages_param
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "result 1"},
+                {"type": "tool_result", "tool_use_id": "t2", "content": "result 2"},
+            ],
+        },
+    ]
+
+    out = to_cached_messages_param(messages)
+
+    last_content = out[-1]["content"]
+    assert "cache_control" not in last_content[0]
+    assert last_content[1]["cache_control"] == {"type": "ephemeral"}
+    assert last_content[1]["tool_use_id"] == "t2"
+    # Original blocks untouched.
+    assert "cache_control" not in messages[-1]["content"][1]
+
+
+def test_to_cached_messages_param_handles_empty_list():
+    from aida.providers.anthropic_ import to_cached_messages_param
+
+    assert to_cached_messages_param([]) == []
+
+
+def test_to_cached_messages_param_leaves_a_message_with_no_content_blocks_alone():
+    from aida.providers.anthropic_ import to_cached_messages_param
+
+    messages = [{"role": "assistant", "content": []}]
+    assert to_cached_messages_param(messages) == messages
 
 
 def test_process_anthropic_event_captures_cache_token_usage():

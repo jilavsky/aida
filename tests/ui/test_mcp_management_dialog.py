@@ -172,6 +172,43 @@ def test_edit_server_via_dialog_action(qapp, aida_home: Path):
     assert load_mcp_config(aida_home).servers["pyirena"].command == "/new"
 
 
+# --- per-server call timeout override (planning/improvement_plan_2026-09.md
+# §1: McpServerHandle.DEFAULT_CALL_TIMEOUT_SECONDS was hard-coded to 60s with
+# no way to raise it for a server whose tools legitimately run long) --------
+
+
+def test_new_server_timeout_defaults_to_unset(qapp, aida_home: Path):
+    settings = load_settings()
+    form = ServerFormDialog(mcp_config=settings.mcp, skills_dir=aida_home / "skills")
+    form._name_edit.setText("pyirena")
+
+    config = form.result_config()
+    assert config.timeout_seconds is None
+
+
+def test_setting_a_timeout_override_round_trips_through_result_config(qapp, aida_home: Path):
+    settings = load_settings()
+    form = ServerFormDialog(mcp_config=settings.mcp, skills_dir=aida_home / "skills")
+    form._name_edit.setText("pyirena")
+    form._timeout_row._checkbox.setChecked(True)
+    form._timeout_row._spin.setValue(180)
+
+    config = form.result_config()
+    assert config.timeout_seconds == 180.0
+
+
+def test_editing_a_server_with_a_timeout_override_preselects_it(qapp, aida_home: Path):
+    settings = load_settings()
+    existing = McpServerConfig(name="pyirena", command="/opt/pyirena-mcp", timeout_seconds=300.0)
+    form = ServerFormDialog(
+        mcp_config=settings.mcp, server=existing, skills_dir=aida_home / "skills"
+    )
+    assert form._timeout_row.value() == 300.0
+
+    updated = form.result_config()
+    assert updated.timeout_seconds == 300.0
+
+
 # --- B6: "Store Value in Keychain" -------------------------------------
 
 

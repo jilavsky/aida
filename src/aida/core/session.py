@@ -1227,7 +1227,7 @@ async def _start_session(
     tools = default_native_tools()
     tools.update(default_file_tools(guard))
     tools.update(default_document_tools(guard, artifact_store, sidecar_dirname=sidecar_dirname))
-    tools.update(default_coding_tools(guard, workspace=workspace))
+    tools.update(default_coding_tools(guard, workspace=workspace, scratch_dir=scratch))
     tools.update(default_web_tools(guard))
     if mcp_servers:
         # Same confirm_callback SafetyGuard just got, above — a per-tool

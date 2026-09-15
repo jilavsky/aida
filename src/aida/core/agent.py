@@ -34,6 +34,7 @@ from aida.core.events import (
 )
 from aida.core.tools import NativeTool
 from aida.providers.base import (
+    UNPARSED_ARGUMENTS_KEY,
     CompletionSettings,
     ImageRef,
     LLMProvider,
@@ -280,6 +281,30 @@ class AgentLoop:
                     logger.warning(
                         "tool call to unknown tool %r (arguments=%r)", tc.name, tc.arguments
                     )
+                elif UNPARSED_ARGUMENTS_KEY in tc.arguments:
+                    # The provider's own stream ended (almost always
+                    # stop_reason=max_tokens) before this call's argument
+                    # JSON finished, so tc.arguments is not real arguments —
+                    # it's the raw partial string under this one sentinel
+                    # key (see providers/base.py's docstring on it).
+                    # Running the tool anyway means it goes looking for a
+                    # real argument that was never there and raises a bare,
+                    # unrelated KeyError — telling the model what actually
+                    # happened instead lets it retry with a shorter/split
+                    # call rather than repeating the same failing one.
+                    result_content = (
+                        "This tool call's arguments were cut off by the output token limit "
+                        "before they finished streaming, so the call was not run. Shorten the "
+                        "content or split it into smaller calls (e.g. write in parts, or a "
+                        "shorter report) and try again."
+                    )
+                    is_error = True
+                    logger.warning(
+                        "tool call to %s had unparsed arguments (stream likely ended at "
+                        "stop_reason=max_tokens): %r",
+                        tc.name,
+                        tc.arguments[UNPARSED_ARGUMENTS_KEY],
+                    )
                 else:
                     try:
                         result = await tool.func(tc.arguments)
@@ -287,7 +312,13 @@ class AgentLoop:
                         is_error = result.is_error
                         result_artifacts = result.artifacts
                     except Exception as exc:  # noqa: BLE001 - a tool crash must not kill the loop
-                        result_content = str(exc)
+                        # Bare str(exc) is unreadable for exceptions whose
+                        # message is just the offending value — a KeyError
+                        # from `arguments["path"]` stringifies to `'path'`
+                        # alone, telling the model nothing about what went
+                        # wrong. Some exceptions also stringify to "" (e.g.
+                        # a bare `assert`), which is worse.
+                        result_content = f"{type(exc).__name__}: {exc}"
                         is_error = True
                         logger.warning(
                             "tool %s(%r) raised: %s", tc.name, tc.arguments, exc, exc_info=True

@@ -42,6 +42,7 @@ ALL_TOOL_NAMES = {
     "get_multi_part",
     "echo_env",
     "get_cwd",
+    "get_long_text",
     "always_fails",
     "hang_forever",
     "crash_process",

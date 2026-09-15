@@ -39,6 +39,7 @@ from aida.core.events import (
     UsageInfo,
 )
 from aida.providers.base import (
+    UNPARSED_ARGUMENTS_KEY,
     CompletionSettings,
     LLMProvider,
     Message,
@@ -50,7 +51,17 @@ from aida.providers.vision import read_image_b64, select_images_within_cap
 
 _logger = get_logger("provider")
 
-DEFAULT_MAX_TOKENS = 4096
+#: Anthropic's own documented default is 4096, but that applies uniformly to
+#: *every* output the model streams — including a tool call's arguments, not
+#: just a plain-text reply. A large write_file/write_markdown_report content
+#: argument hits this exact wall mid `input_json_delta`: the stream ends with
+#: stop_reason=max_tokens, `json.loads` on the partial JSON fails, and the
+#: call is issued with `_unparsed_arguments` instead of real ones (see
+#: `AgentLoop._run_turns`'s handling of that key). Every current Claude model
+#: accepts 8192 (and the 3.5+/4 family accepts far more); raising the default
+#: here means a normal-sized report doesn't need `max_tokens` set explicitly
+#: in the profile to avoid this.
+DEFAULT_MAX_TOKENS = 8192
 
 #: Anthropic's cache_control marker for a "cache this, reuse for ~5 min"
 #: breakpoint (B3). Ephemeral is the only kind AIDA needs — there is no
@@ -215,6 +226,41 @@ def to_cached_tools_param(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return tools
 
 
+def to_cached_messages_param(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mark the last message's last content block as a cache breakpoint —
+    B3's ``to_cached_system_param``/``to_cached_tools_param`` cache the
+    system prompt and tool schemas, but the message *history* itself, which
+    is what actually grows large, was never marked at all: every tool
+    round-trip within one turn resent the *entire* history uncached, on the
+    exact path where it's largest (a 20-call analysis turn pays for the
+    history 20 times over).
+
+    Anthropic caches everything up to and including a ``cache_control``
+    marker, and allows up to 4 such breakpoints total (this uses one, on
+    top of the system prompt's and the tool list's, leaving headroom).
+    Placing it on the very last block of the very last message means the
+    *next* round trip — which only appends the tool results this call's
+    ``tool_use`` blocks asked for — reads everything before that from
+    cache instead of paying full price for it again.
+
+    A bare string ``content`` is turned into a single-block list so the
+    marker has somewhere to attach; a message that already carries a list
+    of blocks (a multi-part user message, a list of ``tool_result``/
+    ``tool_use`` blocks) gets the marker added to its last block instead.
+    Returns ``messages`` unchanged if empty, or if the last message somehow
+    has no content blocks to mark."""
+    if not messages:
+        return messages
+    content = messages[-1]["content"]
+    blocks = [{"type": "text", "text": content}] if isinstance(content, str) else list(content)
+    if not blocks:
+        return messages
+    blocks[-1] = {**blocks[-1], "cache_control": dict(_EPHEMERAL_CACHE_CONTROL)}
+    messages = list(messages)
+    messages[-1] = {**messages[-1], "content": blocks}
+    return messages
+
+
 def to_anthropic_tools(tools: list[ToolSchema]) -> list[dict[str, Any]]:
     return [
         {"name": t.name, "description": t.description, "input_schema": t.parameters} for t in tools
@@ -302,7 +348,7 @@ def process_anthropic_event(event: Any, state: _StreamState) -> list[AgentEvent]
             try:
                 arguments = json.loads(builder["partial_json"] or "{}")
             except json.JSONDecodeError:
-                arguments = {"_unparsed_arguments": builder["partial_json"]}
+                arguments = {UNPARSED_ARGUMENTS_KEY: builder["partial_json"]}
             events.append(
                 ToolCallStarted(
                     call_id=builder["id"] or f"call-{idx}",
@@ -406,7 +452,9 @@ class AnthropicProvider(LLMProvider):
 
         kwargs: dict[str, Any] = {
             "model": settings.model or self.model,
-            "messages": anthropic_messages,
+            # B3 follow-up: caches the history itself, not just the system
+            # prompt/tools below — see to_cached_messages_param's docstring.
+            "messages": to_cached_messages_param(anthropic_messages),
             "max_tokens": settings.max_tokens or DEFAULT_MAX_TOKENS,
             "stream": True,
             **settings.extra,
@@ -528,6 +576,7 @@ __all__ = [
     "process_anthropic_event",
     "to_anthropic_params",
     "to_anthropic_tools",
+    "to_cached_messages_param",
     "to_cached_system_param",
     "to_cached_tools_param",
 ]

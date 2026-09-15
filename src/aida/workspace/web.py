@@ -38,6 +38,25 @@ DEFAULT_FETCH_TIMEOUT_SECONDS = 15.0
 #: Same "large enough that no real page hits the ceiling, not unlimited"
 #: reasoning as knowledge/rag/ingest.py's own size caps.
 DEFAULT_FETCH_MAX_CHARS = 20_000
+#: How many *raw* bytes are read off the wire before extraction — deliberately
+#: much larger than DEFAULT_FETCH_MAX_CHARS. A modern article page is
+#: 200 KB-1 MB with the actual body after a large inlined <head> (fonts,
+#: analytics, a huge <style> block); reading only enough raw bytes for
+#: DEFAULT_FETCH_MAX_CHARS *before* stripping <script>/<style> and nav
+#: chrome meant the 20k chars actually handed to the model were almost
+#: entirely boilerplate, with the article itself cut off before it began.
+#: The final text is still capped at DEFAULT_FETCH_MAX_CHARS below — this
+#: only widens what extraction gets to work with first.
+DEFAULT_FETCH_MAX_BYTES = 4_000_000
+#: Sent as-is (no version tied to AIDA's own version number, which would
+#: need updating every release for no benefit): urllib's default
+#: User-Agent ("Python-urllib/3.x") is blocked outright by many publishers
+#: and by anything behind Cloudflare's bot checks, turning an ordinary
+#: fetch_url call into a 403 the model can't do anything about.
+_FETCH_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
 
 _tool = wrap_tool_errors(ConfirmationDenied, URLError, OSError, ValueError)
 
@@ -76,8 +95,9 @@ def _html_to_text(html: str) -> str:
 
 
 def _fetch_sync(url: str) -> str:
-    with urllib.request.urlopen(url, timeout=DEFAULT_FETCH_TIMEOUT_SECONDS) as response:  # noqa: S310 - http(s)-only, checked by the caller
-        raw = response.read(DEFAULT_FETCH_MAX_CHARS * 4)
+    request = urllib.request.Request(url, headers={"User-Agent": _FETCH_USER_AGENT})
+    with urllib.request.urlopen(request, timeout=DEFAULT_FETCH_TIMEOUT_SECONDS) as response:  # noqa: S310 - http(s)-only, checked by the caller
+        raw = response.read(DEFAULT_FETCH_MAX_BYTES)
         content_type = response.headers.get("Content-Type", "")
     match = _CHARSET_RE.search(content_type)
     charset = match.group(1) if match else "utf-8"
@@ -123,4 +143,9 @@ def default_web_tools(guard: SafetyGuard) -> dict[str, NativeTool]:
     }
 
 
-__all__ = ["DEFAULT_FETCH_MAX_CHARS", "DEFAULT_FETCH_TIMEOUT_SECONDS", "default_web_tools"]
+__all__ = [
+    "DEFAULT_FETCH_MAX_BYTES",
+    "DEFAULT_FETCH_MAX_CHARS",
+    "DEFAULT_FETCH_TIMEOUT_SECONDS",
+    "default_web_tools",
+]

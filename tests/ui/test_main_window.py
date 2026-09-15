@@ -2411,6 +2411,71 @@ def test_send_with_image_attachment_records_an_image_ref_on_the_sent_message(
         window.close()
 
 
+def test_send_with_image_attachment_and_vision_disabled_warns_in_status_bar(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    """planning/improvement_plan_2026-09.md §1: attaching an image to a
+    profile with supports_vision=False (the default — see
+    _settings_with_profile above) used to silently send only the text
+    placeholder, with nothing in the GUI explaining why the model then says
+    it can't see the image."""
+    import base64
+
+    image_path = tmp_path / "plot.png"
+    image_path.write_bytes(base64.b64decode(_TINY_PNG_B64))
+
+    settings = _settings_with_profile()  # supports_vision defaults to False
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="got it")],
+        profile_name="mock-profile",
+    )
+    try:
+        window.input_box.add_attachment(str(image_path))
+        window.input_box.set_text("what is this?")
+        window.input_box._send_button.click()
+
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+        assert "vision disabled" in window.statusBar().currentMessage()
+        assert "Supports vision" in window.statusBar().currentMessage()
+    finally:
+        window.close()
+
+
+def test_send_with_image_attachment_and_vision_enabled_has_no_warning(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    import base64
+
+    image_path = tmp_path / "plot.png"
+    image_path.write_bytes(base64.b64decode(_TINY_PNG_B64))
+
+    settings = load_settings()
+    settings.providers.profiles["mock-profile"] = ProviderProfile(
+        name="mock-profile", kind="openai_compat", model="mock-model", supports_vision=True
+    )
+    window = _make_window(
+        qapp,
+        loop_thread,
+        settings,
+        monkeypatch,
+        [MockTurn(text="got it")],
+        profile_name="mock-profile",
+    )
+    try:
+        window.input_box.add_attachment(str(image_path))
+        window.input_box.set_text("what is this?")
+        window.input_box._send_button.click()
+
+        assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
+        assert "vision disabled" not in window.statusBar().currentMessage()
+    finally:
+        window.close()
+
+
 def test_send_with_non_image_attachment_records_no_image_ref(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
 ):
@@ -3455,6 +3520,33 @@ def test_augment_with_attachments_arity_matches_its_caller(tmp_path: Path):
     assert "file body" in text
     assert failures == []
     assert texts[str(attachment)], "the extracted text must travel with the path"
+
+
+def test_active_profile_supports_vision_reads_the_running_sessions_profile():
+    """No MainWindow needed — same stub-object pattern as the arity test
+    above, since the method only reaches ``self.bridge.session``."""
+
+    class _Session:
+        def __init__(self, supports_vision: bool) -> None:
+            self.profile = ProviderProfile(
+                name="p", kind="openai_compat", model="m", supports_vision=supports_vision
+            )
+
+    class _Bridge:
+        def __init__(self, session) -> None:
+            self.session = session
+
+    class _Stub:
+        _active_profile_supports_vision = MainWindow._active_profile_supports_vision
+
+        def __init__(self, session) -> None:
+            self.bridge = _Bridge(session)
+
+    assert _Stub(_Session(supports_vision=True))._active_profile_supports_vision() is True
+    assert _Stub(_Session(supports_vision=False))._active_profile_supports_vision() is False
+    assert _Stub(None)._active_profile_supports_vision() is True, (
+        "no session yet -> nothing concrete to warn about, so assume vision is fine"
+    )
 
 
 def test_documentation_button_is_last_on_the_toolbar_and_opens_the_docs(

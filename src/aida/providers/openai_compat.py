@@ -37,6 +37,7 @@ from aida.core.events import (
     UsageInfo,
 )
 from aida.providers.base import (
+    UNPARSED_ARGUMENTS_KEY,
     CompletionSettings,
     LLMProvider,
     Message,
@@ -229,7 +230,7 @@ def process_openai_chunk(chunk: Any, state: _StreamState) -> list[AgentEvent]:
             try:
                 arguments = json.loads(builder["arguments"] or "{}")
             except json.JSONDecodeError:
-                arguments = {"_unparsed_arguments": builder["arguments"]}
+                arguments = {UNPARSED_ARGUMENTS_KEY: builder["arguments"]}
             events.append(
                 ToolCallStarted(
                     call_id=builder["id"] or f"call-{idx}",
@@ -276,7 +277,7 @@ def finalize_stream(state: _StreamState) -> list[AgentEvent]:
         try:
             arguments = json.loads(builder["arguments"] or "{}")
         except json.JSONDecodeError:
-            arguments = {"_unparsed_arguments": builder["arguments"]}
+            arguments = {UNPARSED_ARGUMENTS_KEY: builder["arguments"]}
         events.append(
             ToolCallStarted(
                 call_id=builder["id"] or f"call-{idx}",

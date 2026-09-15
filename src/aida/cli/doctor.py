@@ -415,7 +415,7 @@ def _check_max_tokens_vs_context_window(settings: Settings | None) -> CheckResul
     ``context_window`` (see ``ProviderProfile``'s docstring): someone reads
     "max tokens" as the model's total window and sets it to that model's
     full context size — e.g. a 262k-context Ollama model with
-    ``max_tokens: 262000`` — instead of leaving it unset (a safe 4096
+    ``max_tokens: 262000`` — instead of leaving it unset (a safe 8192
     default) or a modest reply budget like 4096-16000.
 
     That single mistake breaks history budgeting unconditionally:
@@ -447,7 +447,7 @@ def _check_max_tokens_vs_context_window(settings: Settings | None) -> CheckResul
             bad.append(
                 f"{name!r}: max_tokens ({profile.max_tokens:,}) leaves no room in context_window "
                 f"({profile.context_window:,}) for history — max_tokens caps only the reply's "
-                "OUTPUT length, it is not the model's total window; unset it (4096 default) or use "
+                "OUTPUT length, it is not the model's total window; unset it (8192 default) or use "
                 "a modest reply budget like 4096-16000, not the context_window value"
             )
     if not bad:

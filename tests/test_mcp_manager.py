@@ -16,7 +16,7 @@ from mcp.types import Tool as McpTool
 from aida.artifacts.base import ImageArtifact
 from aida.artifacts.store import ArtifactStore
 from aida.config.settings import McpServerConfig
-from aida.mcp.manager import McpManager, namespaced_tool_name
+from aida.mcp.manager import MCP_RESULT_MAX_CHARS, McpManager, namespaced_tool_name
 
 MOCK_SERVER_PATH = Path(__file__).parent / "mock_mcp_server.py"
 
@@ -84,6 +84,69 @@ def test_handle_kwargs_omits_cwd_when_no_scratch_dir_given():
 def test_handle_kwargs_includes_cwd_when_scratch_dir_given(tmp_path):
     manager = McpManager([], scratch_dir=tmp_path)
     assert manager._handle_kwargs()["cwd"] == tmp_path
+
+
+# --- per-server call_timeout_seconds override (planning/improvement_plan_
+# 2026-09.md §1: McpServerHandle.DEFAULT_CALL_TIMEOUT_SECONDS was hard-coded
+# to 60s and nothing — manager-wide or per-server — could raise it) ----------
+
+
+def test_handle_kwargs_omits_call_timeout_when_nothing_set():
+    manager = McpManager([])
+    assert "call_timeout_seconds" not in manager._handle_kwargs()
+    assert "call_timeout_seconds" not in manager._handle_kwargs(_mock_server_config())
+
+
+def test_handle_kwargs_uses_manager_wide_timeout_when_config_has_none():
+    manager = McpManager([], call_timeout_seconds=45.0)
+    assert manager._handle_kwargs(_mock_server_config())["call_timeout_seconds"] == 45.0
+
+
+def test_handle_kwargs_per_server_timeout_overrides_manager_wide_default():
+    manager = McpManager([], call_timeout_seconds=45.0)
+    config = _mock_server_config()
+    config.timeout_seconds = 300.0
+    assert manager._handle_kwargs(config)["call_timeout_seconds"] == 300.0
+
+
+def test_handle_kwargs_per_server_timeout_applies_with_no_manager_wide_default():
+    manager = McpManager([])
+    config = _mock_server_config()
+    config.timeout_seconds = 120.0
+    assert manager._handle_kwargs(config)["call_timeout_seconds"] == 120.0
+
+
+@pytest.mark.asyncio
+async def test_start_all_passes_the_per_server_timeout_to_the_handle(tmp_path, monkeypatch):
+    """End-to-end through start_all (not just _handle_kwargs directly):
+    McpServerHandle actually receives the per-server override."""
+    from aida.mcp import manager as manager_module
+
+    received: dict = {}
+
+    class _RecordingFakeHandle:
+        def __init__(self, config: McpServerConfig, **kwargs: object) -> None:
+            received.update(kwargs)
+            self.instructions: str | None = None
+
+        async def start(self) -> list:
+            return []
+
+        def list_tools(self) -> list:
+            return []
+
+        async def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(manager_module, "McpServerHandle", _RecordingFakeHandle)
+    config = _mock_server_config()
+    config.timeout_seconds = 222.0
+    manager = McpManager([config], artifact_store=ArtifactStore(base_dir=tmp_path))
+    try:
+        await manager.start_all()
+        assert received["call_timeout_seconds"] == 222.0
+    finally:
+        await manager.aclose()
 
 
 @pytest.mark.asyncio
@@ -576,6 +639,93 @@ async def test_recent_calls_content_preview_has_no_raw_image_bytes(tmp_path):
         assert image_preview["mime_type"] == "image/png"
         assert image_preview["base64_length"] > 0
         assert "data" not in image_preview
+    finally:
+        await manager.aclose()
+
+
+# --- MCP result size cap (planning/improvement_plan_2026-09.md §1: results
+# were silently cut at aida.artifacts.policy.DEFAULT_MAX_CHARS == 4000, with
+# nothing keeping the rest) ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_result_under_the_cap_is_not_truncated(tmp_path):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    manager = McpManager(
+        [_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path), scratch_dir=scratch
+    )
+    try:
+        tools = await manager.start_all()
+        result = await tools["mock-mcp__get_long_text"].func({"n_chars": 1000})
+        assert "x" * 1000 in result.content
+        assert "truncated" not in result.content
+        assert "omitted" not in result.content
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_result_well_past_the_old_4000_char_cap_is_not_cut_short(tmp_path):
+    """The exact regression the plan describes: a pyIrena-sized metadata dump
+    or Playwright accessibility snapshot is comfortably larger than 4,000
+    characters but well under a realistic tool result. It must reach the
+    model whole, not truncated to the old GUI-preview cap."""
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    manager = McpManager(
+        [_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path), scratch_dir=scratch
+    )
+    try:
+        tools = await manager.start_all()
+        result = await tools["mock-mcp__get_long_text"].func({"n_chars": 10_000})
+        assert "x" * 10_000 in result.content
+        assert "truncated" not in result.content
+        assert "omitted" not in result.content
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_result_past_the_new_cap_is_spilled_to_scratch_with_a_pointer(tmp_path):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    manager = McpManager(
+        [_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path), scratch_dir=scratch
+    )
+    try:
+        tools = await manager.start_all()
+        n_chars = MCP_RESULT_MAX_CHARS + 5000
+        result = await tools["mock-mcp__get_long_text"].func({"n_chars": n_chars})
+
+        # The full "x" * n_chars run is longer than the cap, so it cannot
+        # appear whole in what went to the model — only a head of it does.
+        assert "x" * n_chars not in result.content
+        assert "x" * 100 in result.content
+        assert "omitted" in result.content
+        assert "read_file" in result.content
+
+        spilled = list((scratch / "tool-results").glob("mock-mcp__get_long_text-*.txt"))
+        assert len(spilled) == 1
+        assert "x" * n_chars in spilled[0].read_text(encoding="utf-8")
+        assert str(spilled[0]) in result.content
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_result_past_the_new_cap_without_a_scratch_dir_falls_back_to_truncation(tmp_path):
+    """No real construction site ever leaves ``scratch_dir`` unset, but the
+    constructor default is ``None`` — must degrade to a hard truncation
+    rather than handing the model an unbounded string."""
+    manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
+    try:
+        tools = await manager.start_all()
+        n_chars = MCP_RESULT_MAX_CHARS + 5000
+        result = await tools["mock-mcp__get_long_text"].func({"n_chars": n_chars})
+        assert "x" * n_chars not in result.content
+        assert len(result.content) <= MCP_RESULT_MAX_CHARS + len("\n... [truncated]")
+        assert "truncated" in result.content
     finally:
         await manager.aclose()
 

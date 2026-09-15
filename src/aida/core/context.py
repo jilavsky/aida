@@ -49,11 +49,12 @@ IMAGE_TOKEN_ESTIMATE = 1600
 # top of this one.
 CONTEXT_SAFETY_FRACTION = 0.85
 
-# Anthropic's own default max_tokens when a profile doesn't set one — a
-# reasonable stand-in for an OpenAI-compatible endpoint too, where output is
-# otherwise unbounded and *something* has to be reserved out of the window
-# for the reply that's about to be generated.
-DEFAULT_RESERVED_OUTPUT_TOKENS = 4096
+# aida.providers.anthropic_.DEFAULT_MAX_TOKENS — the default when a profile
+# doesn't set its own max_tokens — a reasonable stand-in for an
+# OpenAI-compatible endpoint too, where output is otherwise unbounded and
+# *something* has to be reserved out of the window for the reply that's
+# about to be generated.
+DEFAULT_RESERVED_OUTPUT_TOKENS = 8192
 
 # Below this, the computed budget is not "tight", it is a misconfiguration —
 # a window too small for the tool set actually enabled (see

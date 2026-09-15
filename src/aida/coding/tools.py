@@ -14,9 +14,11 @@ are a per-workspace on/off switch away from being registered at all
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from aida.coding.runner import RunResult, run_subprocess
+from aida.artifacts.base import new_artifact_id
+from aida.coding.runner import RunResult, _BoundedCapture, run_subprocess
 from aida.coding.runner import run_python_script as _run_python_script
 from aida.config.settings import WorkspaceConfig
 from aida.core.tools import NativeTool, ToolResult, wrap_tool_errors
@@ -26,15 +28,62 @@ from aida.workspace.safety import ConfirmationDenied, SafetyGuard
 
 _tool = wrap_tool_errors(ConfirmationDenied, OSError, TimeoutError, ValueError)
 
+#: What one stream (stdout or stderr) is allowed to cost the model, in
+#: characters. ``aida.coding.runner.MAX_CAPTURED_BYTES`` (256,000) bounds
+#: *memory* while draining a process's pipes — it says nothing about what a
+#: tool result should cost every subsequent round trip of the turn. Before
+#: this cap, a reduction script's per-iteration fit-progress prints, or a
+#: ``print(df)`` on a big frame, went to the model whole: up to ~128k tokens
+#: from one `run_python_script` call, routinely blowing the context window
+#: and 400ing the provider mid-turn with nothing recovering until the next
+#: user message (`_trim_context` only runs at the *start* of a turn). Sized
+#: like `aida.mcp.manager.MCP_RESULT_MAX_CHARS`, split per stream so a long
+#: stdout can't crowd out a short-but-important stderr traceback.
+RUN_OUTPUT_DISPLAY_MAX_CHARS = 8_000
 
-def _format_run_result(result: RunResult) -> str:
+
+def _capped_stream_text(
+    text: str, *, label: str, scratch_dir: Path | None, run_id: str
+) -> str:
+    """One stream's text, bounded to ``RUN_OUTPUT_DISPLAY_MAX_CHARS``.
+
+    Under the cap, returned untouched. Over it, ``_BoundedCapture`` (already
+    used to bound a live process's output in memory) is reused here to keep
+    head and tail of the *already-captured* text — the useful parts of a
+    long log are almost always its beginning and its end — and, when a
+    scratch folder is available, the untruncated text is written there with
+    a pointer so the model can page through it with the existing
+    ``read_file`` (the scratch folder is already in every session's
+    ``global_allowed_folders``, see ``aida.core.session``)."""
+    if len(text) <= RUN_OUTPUT_DISPLAY_MAX_CHARS:
+        return text
+    capture = _BoundedCapture(limit=RUN_OUTPUT_DISPLAY_MAX_CHARS)
+    capture.feed(text.encode("utf-8"))
+    capped = capture.text()
+    if scratch_dir is None:
+        return capped
+    results_dir = scratch_dir / "tool-results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    path = results_dir / f"{label}-{run_id}.txt"
+    path.write_text(text, encoding="utf-8")
+    return f"{capped}\n[full {label} saved to {path}; use read_file to see it]"
+
+
+def _format_run_result(result: RunResult, *, scratch_dir: Path | None = None) -> str:
     lines = [f"exit code: {result.returncode}", f"duration: {result.duration_seconds:.2f}s"]
     if result.timed_out:
         lines.append("TIMED OUT — process was killed")
+    run_id = new_artifact_id()
     if result.stdout:
-        lines.append(f"stdout:\n{result.stdout}")
+        stdout = _capped_stream_text(
+            result.stdout, label="stdout", scratch_dir=scratch_dir, run_id=run_id
+        )
+        lines.append(f"stdout:\n{stdout}")
     if result.stderr:
-        lines.append(f"stderr:\n{result.stderr}")
+        stderr = _capped_stream_text(
+            result.stderr, label="stderr", scratch_dir=scratch_dir, run_id=run_id
+        )
+        lines.append(f"stderr:\n{stderr}")
     return "\n".join(lines)
 
 
@@ -66,11 +115,20 @@ def _effective_timeout(arguments: dict[str, Any], workspace: WorkspaceConfig) ->
 
 
 def default_coding_tools(
-    guard: SafetyGuard, *, workspace: WorkspaceConfig | None
+    guard: SafetyGuard,
+    *,
+    workspace: WorkspaceConfig | None,
+    scratch_dir: Path | None = None,
 ) -> dict[str, NativeTool]:
     """Empty for ``workspace=None`` (no folders configured, nothing to run
     in) or ``workspace.scripting_enabled=False`` — same "lazy, only if
-    configured" philosophy as MCP servers and knowledge bases."""
+    configured" philosophy as MCP servers and knowledge bases.
+
+    ``scratch_dir`` (optional — omitted in most existing tests, which don't
+    exercise output past ``RUN_OUTPUT_DISPLAY_MAX_CHARS``) is where an
+    oversized stdout/stderr gets spilled; without it, an oversized stream is
+    hard-truncated instead, same fallback ``aida.mcp.manager.McpManager``
+    uses when it has no scratch dir either."""
     if workspace is None or not workspace.scripting_enabled:
         return {}
 
@@ -91,7 +149,8 @@ def default_coding_tools(
             timeout=timeout,
         )
         return ToolResult(
-            content=_format_run_result(result), is_error=result.timed_out or result.returncode != 0
+            content=_format_run_result(result, scratch_dir=scratch_dir),
+            is_error=result.timed_out or result.returncode != 0,
         )
 
     @_tool
@@ -111,7 +170,8 @@ def default_coding_tools(
         timeout = _effective_timeout(arguments, workspace)
         result = await run_subprocess(argv, cwd=cwd, timeout=timeout)
         return ToolResult(
-            content=_format_run_result(result), is_error=result.timed_out or result.returncode != 0
+            content=_format_run_result(result, scratch_dir=scratch_dir),
+            is_error=result.timed_out or result.returncode != 0,
         )
 
     tools = [
@@ -178,4 +238,4 @@ def default_coding_tools(
     return {t.schema.name: t for t in tools}
 
 
-__all__ = ["default_coding_tools"]
+__all__ = ["RUN_OUTPUT_DISPLAY_MAX_CHARS", "default_coding_tools"]

@@ -82,6 +82,14 @@ def get_cwd() -> str:
 
 
 @mcp.tool()
+def get_long_text(n_chars: int) -> str:
+    """Return a string of exactly ``n_chars`` characters — used to test the
+    MCP-result size cap (aida.mcp.manager.MCP_RESULT_MAX_CHARS) and its
+    scratch-folder spill without needing a real oversized tool response."""
+    return "x" * n_chars
+
+
+@mcp.tool()
 def always_fails() -> str:
     """Always raises, to exercise the tool-level error path."""
     raise RuntimeError("intentional failure for testing")

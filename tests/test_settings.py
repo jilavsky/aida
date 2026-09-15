@@ -337,6 +337,47 @@ def test_mcp_server_unknown_type_falls_back_to_stdio(caplog):
     assert "unknown type" in caplog.text
 
 
+# --- per-server timeout_seconds (planning/improvement_plan_2026-09.md §1) ---
+
+
+def test_mcp_server_timeout_seconds_defaults_to_none():
+    from aida.config.settings import McpServerConfig
+
+    server = McpServerConfig.from_dict("pyirena-mcp", {"command": "/opt/pyirena-mcp"})
+    assert server.timeout_seconds is None
+
+
+def test_mcp_server_timeout_seconds_roundtrips_through_from_dict_and_to_dict():
+    from aida.config.settings import McpServerConfig
+
+    server = McpServerConfig.from_dict(
+        "pyirena-mcp", {"command": "/opt/pyirena-mcp", "timeout_seconds": 180}
+    )
+    assert server.timeout_seconds == 180.0
+    assert server.extra == {}, "timeout_seconds must be modeled, not fall through to extra"
+    assert server.to_dict()["timeout_seconds"] == 180.0
+
+
+def test_mcp_server_timeout_seconds_rejects_non_positive_value(caplog):
+    from aida.config.settings import McpServerConfig
+
+    server = McpServerConfig.from_dict(
+        "pyirena-mcp", {"command": "/opt/pyirena-mcp", "timeout_seconds": 0}
+    )
+    assert server.timeout_seconds is None
+    assert "timeout_seconds" in caplog.text
+
+
+def test_mcp_server_timeout_seconds_rejects_non_numeric_value(caplog):
+    from aida.config.settings import McpServerConfig
+
+    server = McpServerConfig.from_dict(
+        "pyirena-mcp", {"command": "/opt/pyirena-mcp", "timeout_seconds": "a while"}
+    )
+    assert server.timeout_seconds is None
+    assert "timeout_seconds" in caplog.text
+
+
 def test_knowledge_base_config_wraps_a_hand_edited_scalar_source_folders():
     from aida.config.settings import KnowledgeBaseConfig
 

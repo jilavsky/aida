@@ -44,7 +44,7 @@ from aida.mcp.groups import add_group, delete_group, known_group_names, rename_g
 from aida.mcp.manager import ConnectionTestResult
 from aida.mcp.pyirena_setup import DEFAULT_SERVER_NAME as PYIRENA_SERVER_NAME
 from aida.mcp.pyirena_setup import find_pyirena_mcp, pyirena_server_config, pyirena_version
-from aida.mcp.server import ToolCallRecord
+from aida.mcp.server import DEFAULT_CALL_TIMEOUT_SECONDS, ToolCallRecord
 from aida.mcp.tool_grouping import group_tool_names
 from aida.ui.qt._qt import (
     QAbstractItemView,
@@ -74,6 +74,7 @@ from aida.ui.qt._qt import (
     QVBoxLayout,
     QWidget,
 )
+from aida.ui.qt.profiles_dialog import _OptionalNumberRow
 
 #: The two transports ``McpServerHandle`` knows how to speak — see
 #: ``McpServerConfig.type``. Matches ``SAFETY_MODES``'s pattern in
@@ -283,6 +284,22 @@ class ServerFormDialog(QDialog):
             )
         form.addRow("Skills:", self._skills_list)
 
+        self._timeout_row = _OptionalNumberRow(
+            initial=server.timeout_seconds if server else None,
+            minimum=1,
+            maximum=3600,
+            decimals=0,
+            step=15,
+            suffix=" s",
+        )
+        self._timeout_row.setToolTip(
+            "How long one tool call on this server may run before it's reported as failed. "
+            f"Leave unchecked for the {DEFAULT_CALL_TIMEOUT_SECONDS:.0f}s default — raise this for "
+            "a server whose tools legitimately run long (a size-distribution/modeling run over a "
+            "real data folder, a slow page wait)."
+        )
+        form.addRow("Timeout:", self._timeout_row)
+
         self._form = form
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
         self._on_type_changed(self._type_combo.currentText())  # sync initial row visibility
@@ -485,6 +502,7 @@ class ServerFormDialog(QDialog):
             skills=self._checked_items(self._skills_list),
             disabled_tools=self._existing.disabled_tools if self._existing else [],
             confirm_tools=self._existing.confirm_tools if self._existing else [],
+            timeout_seconds=self._timeout_row.value(),
             extra=self._existing.extra if self._existing else {},
         )
 

@@ -256,6 +256,25 @@ def _coerce_optional_number(source: str, field_name: str, value: Any, *, kind: t
         return None
 
 
+def _coerce_optional_positive_number(source: str, field_name: str, value: Any) -> float | None:
+    """Like ``_coerce_optional_number`` but also rejects non-positive values
+    — a timeout of 0 or negative means "fail before the call even starts",
+    never what a config author intends (same reasoning as
+    ``_coerce_positive_number``). Unlike that helper, "not set" stays
+    ``None`` rather than falling back to some other numeric default: for a
+    per-server ``timeout_seconds`` override, ``None`` means "leave whatever
+    built-in default the caller already has in effect," which may itself
+    change over time — baking a copy of that default in here would drift.
+    """
+    coerced = _coerce_optional_number(source, field_name, value, kind=float)
+    if coerced is not None and coerced <= 0:
+        _logger.warning(
+            "%s: %s=%r must be greater than 0; ignoring override", source, field_name, value
+        )
+        return None
+    return coerced
+
+
 def _coerced_fields(
     data: dict[str, Any], field_kinds: dict[str, str], *, source: str
 ) -> dict[str, Any]:
@@ -989,6 +1008,7 @@ _KNOWN_SERVER_KEYS = {
     "skills",
     "disabled_tools",
     "confirm_tools",
+    "timeout_seconds",
 }
 
 #: The two transports ``McpServerHandle`` knows how to speak. "stdio" is the
@@ -1071,6 +1091,15 @@ class McpServerConfig:
     #: `aida.workspace.safety.SafetyGuard`'s own mode, for tools whose risk
     #: isn't about the filesystem (e.g. an instrument-control write).
     confirm_tools: list[str] = field(default_factory=list)
+    #: Per-server override of one tool call's wall-clock budget. ``None``
+    #: (the default — most servers don't need one) leaves
+    #: ``aida.mcp.server.McpServerHandle.DEFAULT_CALL_TIMEOUT_SECONDS`` (60s)
+    #: in effect. A pyIrena size-distribution/modeling run over a real data
+    #: folder, or a Playwright wait on a slow page, can legitimately run
+    #: longer than that — same per-workspace escape hatch
+    #: ``script_timeout_seconds`` already gives ``run_python_script``/
+    #: ``run_command``, just missing for MCP until now.
+    timeout_seconds: float | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -1089,6 +1118,9 @@ class McpServerConfig:
             skills=_coerce_str_list(source, "skills", data.get("skills")),
             disabled_tools=_coerce_str_list(source, "disabled_tools", data.get("disabled_tools")),
             confirm_tools=_coerce_str_list(source, "confirm_tools", data.get("confirm_tools")),
+            timeout_seconds=_coerce_optional_positive_number(
+                source, "timeout_seconds", data.get("timeout_seconds")
+            ),
             extra=extra,
         )
 
@@ -1105,6 +1137,7 @@ class McpServerConfig:
             "skills": self.skills,
             "disabled_tools": self.disabled_tools,
             "confirm_tools": self.confirm_tools,
+            "timeout_seconds": self.timeout_seconds,
         }
 
 

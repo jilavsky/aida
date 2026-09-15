@@ -22,7 +22,7 @@ from typing import Any
 
 from mcp.types import Tool as McpTool
 
-from aida.artifacts.base import Artifact, FileArtifact, ImageArtifact
+from aida.artifacts.base import Artifact, FileArtifact, ImageArtifact, new_artifact_id
 from aida.artifacts.policy import describe_for_model
 from aida.artifacts.store import ArtifactStore
 from aida.config.logging_setup import get_logger
@@ -35,6 +35,24 @@ from aida.mcp.server import McpServerError, McpServerHandle, ToolCallRecord
 from aida.providers.base import ToolSchema
 
 logger = get_logger("mcp")
+
+#: What an MCP tool result is allowed to cost the model, in characters.
+#: ``aida.artifacts.policy.DEFAULT_MAX_CHARS`` (4,000 — ~1,000 tokens) is
+#: sized for a *GUI preview*, not for what a real tool returns: a pyIrena
+#: metadata dump, a `list_files` over a run folder, or a Playwright
+#: accessibility snapshot routinely runs past it, and the model then reasons
+#: from the first screenful and guesses the rest — indistinguishable from a
+#: "dumb model" without knowing the cap exists. `read_file` gets
+#: `aida.documents.readers.INTERACTIVE_MAX_CHARS` (100,000) for the same kind
+#: of content; this is deliberately smaller (6-8k tokens) because every tool
+#: result rides along in *every* subsequent round trip of the turn, not read
+#: once on demand like a file.
+MCP_RESULT_MAX_CHARS = 28_000
+
+#: Passed to ``describe_for_model`` in place of its own (much smaller)
+#: default so a text/JSON/table artifact is rendered whole here — capping
+#: happens once, on the joined result, in ``McpManager._cap_or_spill``.
+_UNTRUNCATED = 10_000_000
 
 # A "." separator looked natural but is invalid: both Anthropic and
 # OpenAI-compatible tool-calling APIs require a tool's name to match
@@ -221,7 +239,7 @@ class McpManager:
         async def _start_one(
             name: str, config: McpServerConfig
         ) -> tuple[McpServerHandle, dict[str, NativeTool]] | None:
-            handle = McpServerHandle(config, **self._handle_kwargs())
+            handle = McpServerHandle(config, **self._handle_kwargs(config))
             try:
                 mcp_tools = await handle.start()
             except McpServerError as exc:
@@ -242,10 +260,19 @@ class McpManager:
             tools.update(server_tools)
         return tools
 
-    def _handle_kwargs(self) -> dict[str, Any]:
+    def _handle_kwargs(self, config: McpServerConfig | None = None) -> dict[str, Any]:
+        """``config.timeout_seconds`` (per-server, set in ``mcp.json`` or the
+        Add/Edit Server form) wins over the manager-wide
+        ``call_timeout_seconds`` this ``McpManager`` was constructed with,
+        which in turn wins over ``McpServerHandle``'s own 60s default — same
+        precedence order a per-workspace ``script_timeout_seconds`` already
+        has over a tool's hardcoded fallback."""
         kwargs: dict[str, Any] = {}
-        if self._call_timeout_seconds is not None:
-            kwargs["call_timeout_seconds"] = self._call_timeout_seconds
+        timeout = (config.timeout_seconds if config is not None else None) or (
+            self._call_timeout_seconds
+        )
+        if timeout is not None:
+            kwargs["call_timeout_seconds"] = timeout
         if self._startup_timeout_seconds is not None:
             kwargs["startup_timeout_seconds"] = self._startup_timeout_seconds
         if self._scratch_dir is not None:
@@ -301,7 +328,7 @@ class McpManager:
         if name in self._handles:
             return self._tools_for(name, config, self._handles[name].list_tools())
 
-        handle = McpServerHandle(config, **self._handle_kwargs())
+        handle = McpServerHandle(config, **self._handle_kwargs(config))
         try:
             mcp_tools = await handle.start()
         except McpServerError as exc:
@@ -353,7 +380,7 @@ class McpManager:
                 ok=True, tool_count=len(existing.list_tools()), elapsed_seconds=0.0
             )
 
-        handle = McpServerHandle(config, **self._handle_kwargs())
+        handle = McpServerHandle(config, **self._handle_kwargs(config))
         start = time.monotonic()
         try:
             tools = await handle.start()
@@ -451,9 +478,46 @@ class McpManager:
         except McpServerError as exc:
             return ToolResult(content=str(exc), is_error=True)
 
+        # describe_for_model's own per-artifact truncation (DEFAULT_MAX_CHARS
+        # == 4000, sized for a GUI preview) is deliberately not used here —
+        # it would cut the text before this method ever saw it long enough to
+        # spill. Render each artifact whole instead and let
+        # _cap_or_spill enforce the real, MCP-sized cap on the joined result.
         artifacts = [self._persist(a) for a in convert_result(result)]
-        text = "\n".join(describe_for_model(a) for a in artifacts) if artifacts else ""
+        text = (
+            "\n".join(describe_for_model(a, max_chars=_UNTRUNCATED) for a in artifacts)
+            if artifacts
+            else ""
+        )
+        text = self._cap_or_spill(text, server_name, tool_name)
         return ToolResult(content=text, is_error=bool(result.isError), artifacts=artifacts)
+
+    def _cap_or_spill(self, text: str, server_name: str, tool_name: str) -> str:
+        """Enforce ``MCP_RESULT_MAX_CHARS`` on one tool result. When it fits,
+        return it untouched; when it doesn't, write the full text to the
+        scratch folder and hand the model a pointer instead of a silently
+        cut-off tail — the scratch folder is already in every session's
+        ``global_allowed_folders`` (see ``aida.core.session``), so
+        ``read_file`` can page through it with no new tool needed. Without a
+        scratch dir configured (not the case in real use — both real
+        construction sites always pass one — but defensive since this is a
+        constructor default) there is nowhere to spill to, so fall back to a
+        hard truncation instead of handing the model an unbounded string."""
+        if len(text) <= MCP_RESULT_MAX_CHARS:
+            return text
+        if self._scratch_dir is None:
+            return text[:MCP_RESULT_MAX_CHARS] + "\n... [truncated]"
+        results_dir = self._scratch_dir / "tool-results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        call_id = new_artifact_id()
+        path = results_dir / f"{server_name}__{tool_name}-{call_id}.txt"
+        path.write_text(text, encoding="utf-8")
+        omitted = len(text) - MCP_RESULT_MAX_CHARS
+        head = text[:MCP_RESULT_MAX_CHARS]
+        return (
+            f"{head}\n... [{omitted} chars omitted — full result saved to {path}; "
+            "use read_file to see it]"
+        )
 
     def _persist(self, artifact: Artifact) -> Artifact:
         """Save binary artifacts to the artifact store immediately so a

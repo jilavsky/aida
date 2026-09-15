@@ -34,6 +34,24 @@ class _Handler(BaseHTTPRequestHandler):
             body = b"x" * (DEFAULT_FETCH_MAX_CHARS * 10)
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
+        elif self.path == "/big-head-real-article":
+            # planning/improvement_plan_2026-09.md §1: the article text sits
+            # after a large inlined <head> — old behavior read only enough
+            # raw bytes for DEFAULT_FETCH_MAX_CHARS (~80,000) *before*
+            # extraction, so a page shaped like this had the real content
+            # entirely cut off by the boilerplate ahead of it.
+            padding = "<style>.cookie-banner{color:red}</style>" * 4000
+            body = (
+                f"<html><head>{padding}</head><body>"
+                "<p>THE ACTUAL ARTICLE TEXT IS HERE</p>"
+                "</body></html>"
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+        elif self.path == "/user-agent":
+            body = self.headers.get("User-Agent", "").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
         else:
             self.send_response(404)
             body = b""
@@ -151,3 +169,24 @@ async def test_fetch_url_404_is_not_a_crash(http_server: str):
     tools = default_web_tools(_guard())
     result = await _call(tools, "fetch_url", url=f"{http_server}/does-not-exist")
     assert result.is_error
+
+
+# --- planning/improvement_plan_2026-09.md §1: raw-byte cap raised so a real
+# article's text (after a large inlined <head>) isn't cut off before
+# extraction, and a browser-like User-Agent is sent -------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_reaches_real_content_past_a_large_head(http_server: str):
+    tools = default_web_tools(_guard())
+    result = await _call(tools, "fetch_url", url=f"{http_server}/big-head-real-article")
+    assert "THE ACTUAL ARTICLE TEXT IS HERE" in result.content
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_sends_a_browser_like_user_agent(http_server: str):
+    tools = default_web_tools(_guard())
+    result = await _call(tools, "fetch_url", url=f"{http_server}/user-agent")
+    assert not result.is_error
+    assert "python-urllib" not in result.content.lower()
+    assert "mozilla" in result.content.lower()

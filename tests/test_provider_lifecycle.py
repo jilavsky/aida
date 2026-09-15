@@ -122,8 +122,13 @@ async def test_anthropic_provider_complete_attaches_image_pixels_only_when_suppo
     ]
 
     # Vision disabled (the default) -> plain text content, no image block.
+    # (Wrapped in a single-block list by the B3 prompt-cache breakpoint on
+    # the last message — see to_cached_messages_param — rather than staying
+    # a bare string.)
     [e async for e in provider.complete(messages, [], CompletionSettings(model="claude-x"))]
-    assert captured["messages"][0]["content"] == "what is this?"
+    assert captured["messages"][0]["content"] == [
+        {"type": "text", "text": "what is this?", "cache_control": {"type": "ephemeral"}}
+    ]
 
     # Vision enabled -> the image's pixels are attached.
     [
