@@ -149,6 +149,12 @@ class ConversationsSidebar(QWidget):
     #: wrong name selected when a conversation was started. Nothing else
     #: could fix it — rename_user moves *everything* a name owns.
     move_to_user_requested = Signal(list, str)
+    #: The search box's live text, re-emitted verbatim. This widget stays
+    #: "dumb about persistence" (see class docstring) — it cannot itself
+    #: query ``messages.content`` (``aida.persistence.store.
+    #: ConversationStore.search_conversations``), so ``MainWindow`` does
+    #: that and hands the matching ids back via ``set_content_matches``.
+    search_query_changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -164,6 +170,12 @@ class ConversationsSidebar(QWidget):
         #: real switch without stamping on a choice made here.
         self._last_active_user: str | None = None
         self._known_users: list[str] = []
+        #: Ids ``MainWindow`` reported as having a matching message,
+        #: for the search text currently in the box — ``None`` means "no
+        #: content search has run for this text" (too short, or none typed
+        #: yet), which must not be confused with "ran and found nothing" (an
+        #: empty set, still merged in below and changing nothing).
+        self._content_match_ids: set[str] | None = None
 
         layout = QVBoxLayout(self)
         # Everything below is built to *shrink*: the column's width is the
@@ -192,7 +204,7 @@ class ConversationsSidebar(QWidget):
         self._search_edit = QLineEdit(self)
         self._search_edit.setPlaceholderText("Search conversations…")
         self._search_edit.setClearButtonEnabled(True)
-        self._search_edit.textChanged.connect(self._apply_filter)
+        self._search_edit.textChanged.connect(self._on_search_text_changed)
         self._search_edit.setMinimumWidth(0)
         layout.addWidget(self._search_edit)
 
@@ -297,13 +309,36 @@ class ConversationsSidebar(QWidget):
         self._user_filter.blockSignals(False)
         self._apply_filter(self._search_edit.text())
 
+    def _on_search_text_changed(self, text: str) -> None:
+        """Every keystroke in the search box.
+
+        Clears any previous ``set_content_matches`` result *before*
+        re-applying the filter and telling ``MainWindow`` about the new
+        text — those matches were computed for the query that just
+        changed, not this one, and would otherwise keep showing a stale
+        conversation until ``MainWindow``'s (synchronous, but still a
+        separate call) response for the new text arrives.
+        """
+        self._content_match_ids = None
+        self._apply_filter(text)
+        self.search_query_changed.emit(text)
+
+    def set_content_matches(self, ids: set[str] | None) -> None:
+        """Ids ``MainWindow`` found with a matching message for the current
+        search text (``None`` to clear — see ``_content_match_ids``'s
+        docstring for the ``None`` vs. empty-set distinction). Re-applies
+        the filter immediately so results appear as soon as the query comes
+        back, not only on the next keystroke."""
+        self._content_match_ids = ids
+        self._apply_filter(self._search_edit.text())
+
     def _apply_filter(self, query: str) -> None:
         query = query.strip().lower()
-        visible = (
-            self._all_summaries
-            if not query
-            else [s for s in self._all_summaries if _matches(s, query)]
-        )
+        if not query:
+            visible = self._all_summaries
+        else:
+            match_ids = self._content_match_ids or set()
+            visible = [s for s in self._all_summaries if _matches(s, query) or s.id in match_ids]
         selected = self._user_filter.currentText()
         if selected == NO_USER_LABEL:
             visible = [summary for summary in visible if summary.user is None]

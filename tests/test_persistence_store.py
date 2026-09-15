@@ -136,6 +136,69 @@ def test_list_conversations_orders_by_updated_at_desc(tmp_path: Path):
     assert [s.id for s in summaries] == [newer, older]
 
 
+# --- search_conversations (planning/improvement_plan_2026-09.md §2:
+# sidebar search only ever matched title/workspace_name/user) ---------------
+
+
+def test_search_conversations_matches_message_content(tmp_path: Path):
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.append_message(
+        conv_id, Message(role="user", content="analyze sample X01 today"), timestamp=T0
+    )
+
+    assert store.search_conversations("sample X01") == {conv_id}
+
+
+def test_search_conversations_is_case_insensitive(tmp_path: Path):
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.append_message(conv_id, Message(role="user", content="Sample X01"), timestamp=T0)
+
+    assert store.search_conversations("sample x01") == {conv_id}
+
+
+def test_search_conversations_matches_across_multiple_conversations(tmp_path: Path):
+    store = _store(tmp_path)
+    conv_a = store.create_conversation(timestamp=T0)
+    conv_b = store.create_conversation(timestamp=T1)
+    store.append_message(conv_a, Message(role="user", content="plot sample X01"), timestamp=T0)
+    store.append_message(conv_b, Message(role="assistant", content="X01 looks good"), timestamp=T1)
+
+    assert store.search_conversations("X01") == {conv_a, conv_b}
+
+
+def test_search_conversations_no_match_returns_empty_set(tmp_path: Path):
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.append_message(conv_id, Message(role="user", content="hello"), timestamp=T0)
+
+    assert store.search_conversations("nonexistent term") == set()
+
+
+def test_search_conversations_blank_term_matches_nothing(tmp_path: Path):
+    """A bare LIKE '%%' would match every row — an empty/whitespace-only
+    search must not silently become "show all"."""
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.append_message(conv_id, Message(role="user", content="hello"), timestamp=T0)
+
+    assert store.search_conversations("") == set()
+    assert store.search_conversations("   ") == set()
+
+
+def test_search_conversations_does_not_duplicate_ids_for_multiple_matching_messages(
+    tmp_path: Path,
+):
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.append_message(conv_id, Message(role="user", content="sample X01"), timestamp=T0)
+    store.append_message(conv_id, Message(role="assistant", content="X01 done"), timestamp=T1)
+
+    result = store.search_conversations("X01")
+    assert result == {conv_id}  # a set — duplicates are structurally impossible either way
+
+
 def test_set_title_and_record_path(tmp_path: Path):
     store = _store(tmp_path)
     conv_id = store.create_conversation(timestamp=T0)

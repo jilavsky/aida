@@ -262,6 +262,79 @@ def test_search_filters_by_workspace_and_user(qapp):
     assert sidebar._ids_by_row == ["id2"]
 
 
+# --- planning/improvement_plan_2026-09.md §2: content search, not just
+# title/workspace/user ------------------------------------------------------
+
+
+def test_search_edit_emits_search_query_changed(qapp):
+    sidebar = ConversationsSidebar()
+    seen = []
+    sidebar.search_query_changed.connect(seen.append)
+
+    sidebar._search_edit.setText("sample X01")
+
+    assert seen == ["sample X01"]
+
+
+def test_content_match_ids_are_merged_into_the_visible_set(qapp):
+    """A conversation whose *title* doesn't match but whose content search
+    (run by MainWindow, handed back via set_content_matches) does is still
+    shown — this is the whole point of the feature."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [
+            _summary("id1", title="unrelated title"),
+            _summary("id2", title="also unrelated"),
+        ]
+    )
+    sidebar._search_edit.setText("sample X01")
+    assert sidebar._ids_by_row == []  # no title/workspace/user match yet
+
+    sidebar.set_content_matches({"id1"})
+
+    assert sidebar._ids_by_row == ["id1"]
+
+
+def test_content_matches_do_not_leak_into_an_unrelated_later_query(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", title="unrelated")])
+    sidebar._search_edit.setText("sample X01")
+    sidebar.set_content_matches({"id1"})
+    assert sidebar._ids_by_row == ["id1"]
+
+    # A fresh query with content_matches not yet updated for it must not
+    # keep showing the previous query's matches.
+    sidebar._search_edit.setText("something else entirely")
+    assert sidebar._ids_by_row == []
+
+
+def test_content_matches_cleared_with_none_stops_merging_stale_ids(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1", title="unrelated")])
+    sidebar._search_edit.setText("sample X01")
+    sidebar.set_content_matches({"id1"})
+    assert sidebar._ids_by_row == ["id1"]
+
+    sidebar.set_content_matches(None)
+    assert sidebar._ids_by_row == []
+
+
+def test_content_matches_still_apply_alongside_a_title_match(qapp):
+    """Both mechanisms contribute to the same visible set — a content match
+    doesn't hide an ordinary title match, and vice versa."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [
+            _summary("id1", title="sample X01 analysis"),
+            _summary("id2", title="unrelated"),
+        ]
+    )
+    sidebar._search_edit.setText("sample X01")
+    sidebar.set_content_matches({"id2"})
+
+    assert set(sidebar._ids_by_row) == {"id1", "id2"}
+
+
 def test_user_filter_is_visible_only_when_user_labels_exist(qapp):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1", user="Alice"), _summary("id2", user="Bob")])

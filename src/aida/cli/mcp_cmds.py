@@ -564,7 +564,9 @@ def cmd_add_aievaluator(args: argparse.Namespace) -> int:
         print("  env:     (none — set EPICS_CA_ADDR_LIST or every PV read will fail to connect)")
 
     skills_source = (
-        Path(args.skills_dir).expanduser() if args.skills_dir else find_aievaluator_skills_dir(candidate)
+        Path(args.skills_dir).expanduser()
+        if args.skills_dir
+        else find_aievaluator_skills_dir(candidate)
     )
     if skills_source is not None:
         installed = install_skills_from(skills_source, AIEVALUATOR_SKILLS)
@@ -804,7 +806,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser(
-        "find-aievaluator", help="Report where aievaluator-mcp is installed, without changing anything"
+        "find-aievaluator",
+        help="Report where aievaluator-mcp is installed, without changing anything",
     )
 
     add_aievaluator = sub.add_parser(
@@ -872,7 +875,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Accept the first candidate without asking when several are found",
     )
     add_epics_mcp.add_argument(
-        "--force", action="store_true", help="Replace existing server config(s) with the same name(s)"
+        "--force",
+        action="store_true",
+        help="Replace existing server config(s) with the same name(s)",
     )
 
     return parser

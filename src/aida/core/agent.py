@@ -16,7 +16,7 @@ from __future__ import annotations
 import dataclasses
 import time
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from aida.artifacts.base import Artifact, FileArtifact, ImageArtifact
 from aida.config.logging_setup import get_logger
@@ -85,11 +85,24 @@ class AgentLoop:
         tools: dict[str, NativeTool] | None = None,
         *,
         max_iterations: int = DEFAULT_MAX_ITERATIONS,
+        before_round_trip: Callable[[], Awaitable[AgentEvent | None]] | None = None,
     ) -> None:
         self.provider = provider
         self.settings = settings
         self.tools = tools or {}
         self.max_iterations = max_iterations
+        # planning/improvement_plan_2026-09.md §2: context trimming used to
+        # run once, before the turn even started (ChatSession._run_turn) —
+        # with max_agent_iterations now 50, a single turn's tool results can
+        # grow the history by hundreds of thousands of characters with
+        # nothing re-checking it until the *next* user message. Awaited (and
+        # its event yielded, if any) at the top of every round trip below,
+        # including the first — ``ChatSession`` passes its own
+        # ``_trim_context``, which is safe to call repeatedly (a no-op,
+        # returning ``None``, whenever there is nothing to trim) and only
+        # ever drops whole *older* turns, so the one currently in progress
+        # is never at risk.
+        self._before_round_trip = before_round_trip
         self._cancelled = False
         # Text the user typed while a turn was already running, waiting to
         # be handed to the model at the next round trip — see
@@ -194,6 +207,11 @@ class AgentLoop:
             # queue_user_message.
             for event in self._deliver_queued_messages(messages):
                 yield event
+
+            if self._before_round_trip is not None:
+                trim_event = await self._before_round_trip()
+                if trim_event is not None:
+                    yield trim_event
 
             iterations += 1
             if iterations > self.max_iterations:

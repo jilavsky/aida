@@ -35,6 +35,7 @@ from aida.ui.qt._qt import (
     QPlainTextEdit,
     QPushButton,
     Qt,
+    QTextCursor,
     QTimer,
     QVBoxLayout,
     QWidget,
@@ -72,6 +73,13 @@ QPushButton:pressed { background-color: #96281b; }
 #: while the elapsed seconds it also shows only change every other tick.
 _BUSY_TICK_MS = 500
 
+#: How many recent submissions Up/Down can cycle through (session-only, in
+#: memory — beamline work is repetitive, "plot the last 5 files"/"summarize
+#: this run" typed many times a day, same idea as a shell's command
+#: history). Not persisted across a restart; that's a bigger step
+#: (AppConfig schema, migration) this cheap in-memory version doesn't need.
+_MAX_PROMPT_HISTORY = 50
+
 
 class _AttachmentChip(QWidget):
     """One small "filename ×" pill in the attachments row."""
@@ -91,8 +99,21 @@ class _AttachmentChip(QWidget):
 
 
 class _InputTextEdit(QPlainTextEdit):
-    """Enter submits; Shift+Enter (or Ctrl+Enter, for muscle memory from
-    other chat apps) inserts a literal newline instead.
+    """Enter or Ctrl+Enter submits; only Shift+Enter inserts a literal
+    newline instead.
+
+    Ctrl+Enter is not actually handled below: ``keyPressEvent`` treats any
+    modified Enter (Shift *or* Control held) the same way, falling through
+    to ``super()`` — which inserts a newline for Shift+Enter but does
+    nothing special for Ctrl+Enter (``QPlainTextEdit`` only binds a newline
+    to plain Enter). What actually sends on Ctrl+Enter is ``InputBox``'s
+    own Send button, whose ``Ctrl+Return`` shortcut (see
+    ``InputBox.__init__``) fires regardless of which widget has focus,
+    since this widget never consumes the key event in a way that would
+    block it. The net effect — two keystrokes that both send, matching the
+    muscle memory of other chat apps — is intentional; a previous version
+    of this docstring described Ctrl+Enter as inserting a newline, which it
+    never actually did.
 
     Also hands file drops back to the ``InputBox`` around it. Bug report:
     "I think dropping the file into the message area is different than
@@ -112,6 +133,31 @@ class _InputTextEdit(QPlainTextEdit):
     #: nothing about who owns it.
     urls_dropped = Signal(list)
 
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._history: list[str] = []
+        #: Index into ``_history`` currently shown, or ``None`` when not
+        #: recalling (the box holds a fresh draft, not a history entry).
+        self._history_index: int | None = None
+        #: What was being typed before the first Up press of one recall
+        #: session — restored when Down cycles back past the newest entry.
+        self._history_draft = ""
+
+    def push_history(self, text: str) -> None:
+        """Record one just-submitted message for Up/Down recall.
+
+        Called by ``InputBox._on_submit`` with the exact text that was
+        sent, right before the box is cleared. A submission identical to
+        the most recent history entry is not duplicated — pressing Up twice
+        in a row for the same recent prompt should not collapse into two
+        adjacent copies of it."""
+        if not text:
+            return
+        if not self._history or self._history[-1] != text:
+            self._history.append(text)
+            del self._history[:-_MAX_PROMPT_HISTORY]
+        self._history_index = None
+
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt override
         is_enter = event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
         if is_enter and not (
@@ -120,7 +166,49 @@ class _InputTextEdit(QPlainTextEdit):
         ):
             self.submit_requested.emit()
             return
+        if self._try_history_recall(event):
+            return
         super().keyPressEvent(event)
+
+    def _try_history_recall(self, event) -> bool:
+        """Up/Down cycle through ``_history``, exactly like a shell —
+        Up only recalls further back when the cursor is already on the
+        text's first line (otherwise it's just moving the cursor up
+        through a multi-line draft), and likewise Down only advances
+        forward on the last line. Returns whether the event was handled."""
+        key = event.key()
+        if key not in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            return False
+        cursor = self.textCursor()
+
+        if key == Qt.Key.Key_Up:
+            if cursor.blockNumber() != 0 or not self._history:
+                return False
+            if self._history_index is None:
+                self._history_draft = self.toPlainText()
+                self._history_index = len(self._history)
+            if self._history_index == 0:
+                return True  # already at the oldest entry — nothing further back
+            self._history_index -= 1
+            self._show_history_entry(self._history[self._history_index])
+            return True
+
+        # Key_Down
+        if self._history_index is None or cursor.blockNumber() != self.document().blockCount() - 1:
+            return False
+        self._history_index += 1
+        if self._history_index >= len(self._history):
+            self._history_index = None
+            self._show_history_entry(self._history_draft)
+        else:
+            self._show_history_entry(self._history[self._history_index])
+        return True
+
+    def _show_history_entry(self, text: str) -> None:
+        self.setPlainText(text)
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.setTextCursor(cursor)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt override
         if event.mimeData().hasUrls():
@@ -278,6 +366,12 @@ class InputBox(QWidget):
     def set_text(self, text: str) -> None:
         self._text_edit.setPlainText(text)
 
+    def focus_input(self) -> None:
+        """Give the text edit keyboard focus (Ctrl/Cmd+L in ``MainWindow``)
+        — a beamline user typing several short prompts a minute benefits
+        from a shortcut that doesn't require reaching for the mouse."""
+        self._text_edit.setFocus()
+
     # --- attachments -----------------------------------------------------
 
     def attached_paths(self) -> list[str]:
@@ -379,6 +473,7 @@ class InputBox(QWidget):
         text = self.text().strip()
         if not text and not self._attachments:
             return  # nothing to send: no typed text and nothing attached
+        self._text_edit.push_history(text)
         self.clear()
         self.send_requested.emit(text)
 

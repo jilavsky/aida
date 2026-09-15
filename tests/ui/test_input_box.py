@@ -142,6 +142,119 @@ def test_enter_while_busy_sends_for_the_owner_to_queue(qapp):
     assert box.text() == ""  # cleared, like any other send
 
 
+# --- planning/improvement_plan_2026-09.md §2: prompt history recall --------
+
+
+def _submit(box: InputBox, text: str) -> None:
+    box._text_edit.setPlainText(text)
+    box._on_submit()
+
+
+def test_up_arrow_recalls_previous_submissions_most_recent_first(qapp):
+    from PySide6.QtTest import QTest
+
+    box = InputBox()
+    _submit(box, "first")
+    _submit(box, "second")
+
+    QTest.keyClick(box._text_edit, Qt.Key.Key_Up)
+    assert box.text() == "second"
+
+    QTest.keyClick(box._text_edit, Qt.Key.Key_Up)
+    assert box.text() == "first"
+
+    # Nothing further back — stays put rather than clearing or erroring.
+    QTest.keyClick(box._text_edit, Qt.Key.Key_Up)
+    assert box.text() == "first"
+
+
+def test_down_arrow_returns_to_the_unsent_draft(qapp):
+    from PySide6.QtTest import QTest
+
+    box = InputBox()
+    _submit(box, "sent earlier")
+    box._text_edit.setPlainText("unsent draft")
+
+    QTest.keyClick(box._text_edit, Qt.Key.Key_Up)
+    assert box.text() == "sent earlier"
+
+    QTest.keyClick(box._text_edit, Qt.Key.Key_Down)
+    assert box.text() == "unsent draft"
+
+
+def test_down_arrow_before_any_recall_does_not_touch_the_draft(qapp):
+    """Down must never start a recall on its own — only Up does; otherwise
+    an ordinary Down keystroke while composing a fresh multi-line message
+    would unexpectedly wipe it."""
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtTest import QTest
+
+    box = InputBox()
+    _submit(box, "earlier")
+    box._text_edit.setPlainText("line one\nline two")
+    box._text_edit.moveCursor(QTextCursor.MoveOperation.Start)
+
+    QTest.keyClick(box._text_edit, Qt.Key.Key_Down)
+
+    assert box.text() == "line one\nline two"
+
+
+def test_history_recall_ignored_when_cursor_is_not_on_the_boundary_line(qapp):
+    """Up/Down inside a multi-line draft, away from the first/last line,
+    must move the cursor normally — not hijack it for history recall."""
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtTest import QTest
+
+    box = InputBox()
+    _submit(box, "earlier")
+    box._text_edit.setPlainText("line one\nline two\nline three")
+    cursor = box._text_edit.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.Start)
+    cursor.movePosition(QTextCursor.MoveOperation.Down)  # now on the middle line
+    box._text_edit.setTextCursor(cursor)
+
+    QTest.keyClick(box._text_edit, Qt.Key.Key_Up)
+
+    assert box.text() == "line one\nline two\nline three"
+
+
+def test_consecutive_identical_submissions_do_not_duplicate_in_history(qapp):
+    box = InputBox()
+    _submit(box, "same thing")
+    _submit(box, "same thing")
+
+    assert box._text_edit._history == ["same thing"]
+
+
+def test_prompt_history_is_capped(qapp):
+    from aida.ui.qt.input_box import _MAX_PROMPT_HISTORY
+
+    box = InputBox()
+    for i in range(_MAX_PROMPT_HISTORY + 10):
+        _submit(box, f"message {i}")
+
+    assert len(box._text_edit._history) == _MAX_PROMPT_HISTORY
+    assert box._text_edit._history[0] == "message 10"
+    assert box._text_edit._history[-1] == f"message {_MAX_PROMPT_HISTORY + 9}"
+
+
+def test_recalling_history_then_sending_resets_the_recall_position(qapp):
+    """A submitted recall must not leave the box still "mid-navigation" —
+    the next Up press should start over from the newest entry again."""
+    from PySide6.QtTest import QTest
+
+    box = InputBox()
+    _submit(box, "first")
+    _submit(box, "second")
+
+    QTest.keyClick(box._text_edit, Qt.Key.Key_Up)  # recall "second"
+    QTest.keyClick(box._text_edit, Qt.Key.Key_Up)  # recall "first"
+    box._on_submit()  # re-send "first"
+
+    QTest.keyClick(box._text_edit, Qt.Key.Key_Up)
+    assert box.text() == "first"  # most recent again, not "second"
+
+
 # --- Phase 6: attachments (Attach button + drag-and-drop) --------------------
 
 

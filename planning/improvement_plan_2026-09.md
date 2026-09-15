@@ -140,7 +140,7 @@ with an obvious test.
 
 ## 2. Usability — small GUI additions a beamline user will feel
 
-- [ ] **Keyboard shortcuts.** The only shortcut in the whole main window is
+- [x] **Keyboard shortcuts.** The only shortcut in the whole main window is
       Ctrl+Return on Send (`grep setShortcut` finds nothing else). Cheap
       and expected by anyone coming from Claude/ChatGPT desktop: **Esc →
       Stop** while a turn runs; **Ctrl/Cmd+N → New Chat**; **Ctrl/Cmd+, →
@@ -153,7 +153,7 @@ with an obvious test.
       Ctrl+Enter *sends*. Behaviour is fine (two ways to send); fix the
       docstring or drop the button shortcut so the two agree.
 
-- [ ] **Prompt history recall (Up/Down in an empty input box).** Beamline
+- [x] **Prompt history recall (Up/Down in an empty input box).** Beamline
       work is repetitive — "plot the last 5 files", "summarize this run"
       typed many times a day. Keep the last ~50 prompts of the session in
       `InputBox` (in memory, or in `AppConfig` if it should survive a
@@ -162,7 +162,7 @@ with an obvious test.
       keyPressEvent`. Pairs well with the existing Quick Tasks panel
       without overlapping it (Quick Tasks are curated; this is recent).
 
-- [ ] **"Continue" button on the two cut-off notices.** Both the
+- [x] **"Continue" button on the two cut-off notices.** Both the
       `TruncationNotice` (`stop_reason == "length"`) and the
       `ErrorBanner` for `iteration cap reached (N)` end a turn the user
       almost always wants to resume. A button that sends "Please continue
@@ -170,7 +170,7 @@ with an obvious test.
       `MainWindow._on_send_requested`. (After the §1 `max_tokens` fix this
       triggers far less often, but the iteration cap still will.)
 
-- [ ] **Search inside conversations, not just titles.** The sidebar filter
+- [x] **Search inside conversations, not just titles.** The sidebar filter
       matches `title`, `workspace_name`, `user` only (`_matches`). "Which
       chat did I analyze sample X in?" needs a `LIKE` over
       `messages.content` — one extra query in `ConversationStore`
@@ -179,7 +179,7 @@ with an obvious test.
       the upgrade if it ever feels slow; a `LIKE` over a few thousand rows
       is instant.
 
-- [ ] **Mid-turn context check.** `_trim_context` runs once, before the
+- [x] **Mid-turn context check.** `_trim_context` runs once, before the
       turn. With `max_agent_iterations` now 50, a single turn can grow by
       hundreds of thousands of characters of tool results and only the
       *next* user message triggers a trim. Give `AgentLoop` an optional

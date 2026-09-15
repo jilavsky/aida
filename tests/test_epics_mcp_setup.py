@@ -51,9 +51,7 @@ def test_finds_a_sibling_conda_environment(monkeypatch, tmp_path: Path):
 
 
 def test_default_configs_are_read_only_only():
-    configs = epics_mcp_server_configs(
-        ScriptCandidate(command="/opt/envs/epics-mcp/bin/epics-mcp")
-    )
+    configs = epics_mcp_server_configs(ScriptCandidate(command="/opt/envs/epics-mcp/bin/epics-mcp"))
     assert set(configs) == {USER_SERVER_NAME}
     user = configs[USER_SERVER_NAME]
     assert user.args == ["--policy", "usaxs-user"]
@@ -62,9 +60,7 @@ def test_default_configs_are_read_only_only():
 
 
 def test_include_staff_adds_the_write_capable_server():
-    configs = epics_mcp_server_configs(
-        ScriptCandidate(command="epics-mcp"), include_staff=True
-    )
+    configs = epics_mcp_server_configs(ScriptCandidate(command="epics-mcp"), include_staff=True)
     assert set(configs) == {USER_SERVER_NAME, STAFF_SERVER_NAME}
     staff = configs[STAFF_SERVER_NAME]
     assert staff.args == ["--policy", "usaxs-staff"]

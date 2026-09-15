@@ -756,3 +756,82 @@ async def test_blank_queued_message_is_ignored():
     loop = AgentLoop(MockProvider([MockTurn(text="ok")]), _settings())
     loop.queue_user_message("   \n  ")
     assert loop.take_undelivered_messages() == []
+
+
+# --- before_round_trip hook (planning/improvement_plan_2026-09.md §2: mid-
+# turn context check — _trim_context used to run only once, before the turn
+# started, with nothing re-checking history size across a long tool-calling
+# turn) -----------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_before_round_trip_hook_runs_once_per_round_trip():
+    calls = []
+
+    async def hook():
+        calls.append(True)
+        return None
+
+    provider = MockProvider(
+        [
+            MockTurn(tool_calls=[MockToolCall(name="get_current_time", id="call_1")]),
+            MockTurn(tool_calls=[MockToolCall(name="get_current_time", id="call_2")]),
+            MockTurn(text="done"),
+        ]
+    )
+    loop = AgentLoop(
+        provider, _settings(), tools={"get_current_time": TIME_TOOL}, before_round_trip=hook
+    )
+    messages = [Message(role="user", content="hi")]
+
+    [e async for e in loop.run(messages)]
+
+    assert len(calls) == 3  # once before each of the three provider calls
+
+
+@pytest.mark.asyncio
+async def test_before_round_trip_hook_event_is_yielded():
+    from aida.core.events import ContextTrimmed
+
+    async def hook():
+        return ContextTrimmed(dropped_turns=2, estimated_tokens=1234)
+
+    provider = MockProvider([MockTurn(text="done")])
+    loop = AgentLoop(provider, _settings(), before_round_trip=hook)
+    messages = [Message(role="user", content="hi")]
+
+    events = [e async for e in loop.run(messages)]
+
+    trimmed = [e for e in events if isinstance(e, ContextTrimmed)]
+    assert len(trimmed) == 1
+    assert trimmed[0].dropped_turns == 2
+    assert trimmed[0].estimated_tokens == 1234
+
+
+@pytest.mark.asyncio
+async def test_before_round_trip_hook_returning_none_yields_nothing_extra():
+    async def hook():
+        return None
+
+    provider = MockProvider([MockTurn(text="done")])
+    loop = AgentLoop(provider, _settings(), before_round_trip=hook)
+    messages = [Message(role="user", content="hi")]
+
+    events = [e async for e in loop.run(messages)]
+
+    types = [type(e).__name__ for e in events]
+    assert types == ["TextStarted", "TextDelta", "TextFinished", "MessageFinished"]
+
+
+@pytest.mark.asyncio
+async def test_no_hook_given_is_the_same_as_before():
+    """Default (no before_round_trip) must behave exactly as it did before
+    this hook existed — nothing to await, nothing extra yielded."""
+    provider = MockProvider([MockTurn(text="done")])
+    loop = AgentLoop(provider, _settings())
+    messages = [Message(role="user", content="hi")]
+
+    events = [e async for e in loop.run(messages)]
+
+    types = [type(e).__name__ for e in events]
+    assert types == ["TextStarted", "TextDelta", "TextFinished", "MessageFinished"]

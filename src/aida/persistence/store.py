@@ -176,6 +176,32 @@ class ConversationStore:
         rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_summary(row, row["message_count"]) for row in rows]
 
+    def search_conversations(self, term: str) -> set[str]:
+        """Ids of every conversation with at least one message whose
+        content contains ``term`` (a plain case-insensitive substring
+        match — SQLite's ``LIKE`` is already case-insensitive for ASCII).
+
+        The sidebar's own filter (``aida.ui.qt.conversations_sidebar.
+        _matches``) only ever matched title/workspace_name/user — "which
+        chat did I analyze sample X in?" had no way to answer without
+        opening every conversation by hand. A bare ``LIKE '%term%'`` full
+        scan over ``messages`` (no index on ``content``) is the simple
+        first cut: instant at the few-thousand-row scale one AIDA install
+        accumulates. SQLite FTS5 is the upgrade if that ever stops being
+        true — not needed yet, so not built yet.
+
+        Returns an empty set for a blank/whitespace-only term rather than
+        matching every conversation, which a bare ``LIKE '%%'`` would
+        otherwise do."""
+        term = term.strip()
+        if not term:
+            return set()
+        rows = self._conn.execute(
+            "SELECT DISTINCT conversation_id FROM messages WHERE content LIKE ?",
+            (f"%{term}%",),
+        ).fetchall()
+        return {row["conversation_id"] for row in rows}
+
     def set_conversation_user(
         self, conversation_ids: list[str], user: str, *, timestamp: str
     ) -> int:

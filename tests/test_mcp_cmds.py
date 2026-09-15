@@ -560,9 +560,7 @@ def test_add_aievaluator_installs_skills_when_found(
     monkeypatch.setattr(
         "aida.cli.mcp_cmds.find_aievaluator_mcp", lambda: [_fake_aievaluator_candidate()]
     )
-    monkeypatch.setattr(
-        "aida.cli.mcp_cmds.find_aievaluator_skills_dir", lambda _c: skills_src
-    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_aievaluator_skills_dir", lambda _c: skills_src)
 
     assert main(["add-aievaluator"]) == 0
 
@@ -661,9 +659,7 @@ def test_find_epics_mcp_reports_nothing_found(aida_home: Path, capsys, monkeypat
 
 
 def test_add_epics_mcp_defaults_to_read_only_only(aida_home: Path, capsys, monkeypatch):
-    monkeypatch.setattr(
-        "aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()]
-    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()])
     monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp_examples_dir", lambda _c: None)
 
     assert main(["add-epics-mcp", "--epics-addr", "10.0.0.1:5064"]) == 0
@@ -680,9 +676,7 @@ def test_add_epics_mcp_defaults_to_read_only_only(aida_home: Path, capsys, monke
 def test_add_epics_mcp_staff_flag_adds_the_write_capable_server(
     aida_home: Path, capsys, monkeypatch
 ):
-    monkeypatch.setattr(
-        "aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()]
-    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()])
     monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp_examples_dir", lambda _c: None)
 
     assert main(["add-epics-mcp", "--staff"]) == 0
@@ -703,15 +697,9 @@ def test_add_epics_mcp_installs_policies_when_examples_dir_found(
     (examples / "pv_catalog_usaxs.txt").write_text("usxLAX:m1\n", encoding="utf-8")
 
     policy_dir = tmp_path / "policies"
-    monkeypatch.setattr(
-        "aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()]
-    )
-    monkeypatch.setattr(
-        "aida.cli.mcp_cmds.find_epics_mcp_examples_dir", lambda _c: examples
-    )
-    monkeypatch.setattr(
-        "aida.mcp.epics_mcp_setup.default_policy_dir", lambda: policy_dir
-    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()])
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp_examples_dir", lambda _c: examples)
+    monkeypatch.setattr("aida.mcp.epics_mcp_setup.default_policy_dir", lambda: policy_dir)
 
     assert main(["add-epics-mcp"]) == 0
     assert (policy_dir / "usaxs-user.yaml").is_file()
@@ -720,9 +708,7 @@ def test_add_epics_mcp_installs_policies_when_examples_dir_found(
 
 
 def test_add_epics_mcp_refuses_to_clobber_without_force(aida_home: Path, capsys, monkeypatch):
-    monkeypatch.setattr(
-        "aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()]
-    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp", lambda: [_fake_epics_mcp_candidate()])
     monkeypatch.setattr("aida.cli.mcp_cmds.find_epics_mcp_examples_dir", lambda _c: None)
     assert main(["add-epics-mcp"]) == 0
 
@@ -731,7 +717,9 @@ def test_add_epics_mcp_refuses_to_clobber_without_force(aida_home: Path, capsys,
         lambda: [_fake_epics_mcp_candidate("/other/epics-mcp")],
     )
     assert main(["add-epics-mcp"]) == 1
-    assert load_mcp_config().servers["epics-mcp-user"].command == "/opt/envs/epics-mcp/bin/epics-mcp"
+    assert (
+        load_mcp_config().servers["epics-mcp-user"].command == "/opt/envs/epics-mcp/bin/epics-mcp"
+    )
 
     assert main(["add-epics-mcp", "--force"]) == 0
     assert load_mcp_config().servers["epics-mcp-user"].command == "/other/epics-mcp"

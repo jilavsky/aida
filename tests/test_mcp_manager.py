@@ -653,7 +653,9 @@ async def test_result_under_the_cap_is_not_truncated(tmp_path):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     manager = McpManager(
-        [_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path), scratch_dir=scratch
+        [_mock_server_config()],
+        artifact_store=ArtifactStore(base_dir=tmp_path),
+        scratch_dir=scratch,
     )
     try:
         tools = await manager.start_all()
@@ -674,7 +676,9 @@ async def test_result_well_past_the_old_4000_char_cap_is_not_cut_short(tmp_path)
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     manager = McpManager(
-        [_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path), scratch_dir=scratch
+        [_mock_server_config()],
+        artifact_store=ArtifactStore(base_dir=tmp_path),
+        scratch_dir=scratch,
     )
     try:
         tools = await manager.start_all()
@@ -691,7 +695,9 @@ async def test_result_past_the_new_cap_is_spilled_to_scratch_with_a_pointer(tmp_
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     manager = McpManager(
-        [_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path), scratch_dir=scratch
+        [_mock_server_config()],
+        artifact_store=ArtifactStore(base_dir=tmp_path),
+        scratch_dir=scratch,
     )
     try:
         tools = await manager.start_all()

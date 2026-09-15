@@ -397,8 +397,22 @@ class ErrorBanner(QFrame):
     "selectable text + a Copy button" pattern instead of being a dead end.
     """
 
+    #: planning/improvement_plan_2026-09.md §2: a turn ended by the
+    #: iteration cap is almost always one the user wants resumed, exactly
+    #: like ``TruncationNotice`` below. Only offered when ``continuable``
+    #: (set by ``ChatPanel.handle_event`` for that one specific error, not
+    #: every ``AgentError`` — "cancelled" or a real provider failure are not
+    #: things a bare retry fixes).
+    continue_requested = Signal()
+
     def __init__(
-        self, *, layer: str, message: str, detail: str | None = None, parent: QWidget | None = None
+        self,
+        *,
+        layer: str,
+        message: str,
+        detail: str | None = None,
+        continuable: bool = False,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.layer = layer
@@ -420,6 +434,17 @@ class ErrorBanner(QFrame):
 
         header = QHBoxLayout()
         header.addStretch(1)
+        if continuable:
+            continue_button = QPushButton("▶ Continue", self)
+            continue_button.setFlat(True)
+            continue_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            continue_button.setStyleSheet(
+                "QPushButton { border: none; background: transparent; color: #7a1f1f; "
+                "font-size: 10px; font-weight: bold; }"
+                "QPushButton:hover { text-decoration: underline; }"
+            )
+            continue_button.clicked.connect(self.continue_requested.emit)
+            header.addWidget(continue_button)
         copy_button = QPushButton("⧉ Copy", self)
         copy_button.setFlat(True)
         copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -448,17 +473,34 @@ class TruncationNotice(QFrame):
     warning rather than ``ErrorBanner``'s red, since this isn't a failure —
     the turn otherwise succeeded."""
 
+    #: planning/improvement_plan_2026-09.md §2: a cut-off reply is almost
+    #: always one the user wants resumed — "Continue" sends the exact same
+    #: text ``MainWindow`` would type by hand, one click instead of it.
+    continue_requested = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setStyleSheet("background-color: #fff3cd; color: #664d03;")
         layout = QVBoxLayout(self)
+        header = QHBoxLayout()
         label = QLabel(
             "Reply hit the max-tokens limit and was cut off — raise max_tokens in the profile settings.",
             self,
         )
         label.setWordWrap(True)
-        layout.addWidget(label)
+        header.addWidget(label, stretch=1)
+        continue_button = QPushButton("▶ Continue", self)
+        continue_button.setFlat(True)
+        continue_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        continue_button.setStyleSheet(
+            "QPushButton { border: none; background: transparent; color: #664d03; "
+            "font-size: 10px; font-weight: bold; }"
+            "QPushButton:hover { text-decoration: underline; }"
+        )
+        continue_button.clicked.connect(self.continue_requested.emit)
+        header.addWidget(continue_button, alignment=Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header)
 
 
 class ChatPanel(QWidget):
@@ -485,6 +527,12 @@ class ChatPanel(QWidget):
     #: the Attach… button end at, so a drop behaves identically wherever
     #: in the window it lands.
     urls_dropped = Signal(list)
+
+    #: Re-emitted from whichever ``TruncationNotice``/``ErrorBanner``'s own
+    #: "Continue" button was clicked — MainWindow connects this once to
+    #: sending "Please continue where you left off.", same one-connection-
+    #: not-one-per-widget shape as code_editor_requested above.
+    continue_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -729,7 +777,9 @@ class ChatPanel(QWidget):
             self._append_widget(row)
         elif name == "MessageFinished":
             if event.stop_reason == "length":
-                self._append_widget(TruncationNotice(parent=self._content))
+                notice = TruncationNotice(parent=self._content)
+                notice.continue_requested.connect(self.continue_requested.emit)
+                self._append_widget(notice)
         elif name == "UsageInfo":
             # Bug report: "Add time stamps to each message, may be tok/sec
             # if available and wallclock time." Attaches to the bubble that
@@ -763,9 +813,19 @@ class ChatPanel(QWidget):
             bubble = self.add_user_message(event.text)
             bubble.append_meta("sent while the agent was working")
         elif name == "AgentError":
+            # "Continue" only for the one AgentError a resend actually
+            # fixes — the iteration cap (aida.core.agent.AgentLoop's exact
+            # message, "iteration cap reached (N)"). Every other AgentError
+            # (a real provider failure, "cancelled") has no reason to
+            # believe a bare retry does anything different.
             banner = ErrorBanner(
-                layer=event.layer, message=event.message, detail=event.detail, parent=self._content
+                layer=event.layer,
+                message=event.message,
+                detail=event.detail,
+                continuable=event.message.startswith("iteration cap reached"),
+                parent=self._content,
             )
+            banner.continue_requested.connect(self.continue_requested.emit)
             self._append_widget(banner)
 
     def load_history(

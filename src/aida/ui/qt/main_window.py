@@ -48,6 +48,7 @@ from aida.ui.qt._qt import (
     QApplication,
     QDesktopServices,
     QDialog,
+    QKeySequence,
     QLabel,
     QMainWindow,
     QMenu,
@@ -248,6 +249,7 @@ class MainWindow(QMainWindow):
         # _on_new_chat_requested reuses the same _restart_session machinery
         # pinned to the workspace/profile already active.
         new_chat_action = QAction("New Chat", self)
+        new_chat_action.setShortcut(QKeySequence("Ctrl+N"))
         new_chat_action.triggered.connect(self._on_new_chat_requested)
         toolbar.addAction(new_chat_action)
 
@@ -291,6 +293,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(schedules_action)
 
         settings_action = QAction("Settings…", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
         settings_action.triggered.connect(self.open_settings_dialog)
         toolbar.addAction(settings_action)
 
@@ -505,6 +508,7 @@ class MainWindow(QMainWindow):
         # that is simply greyed out is a better answer than one that can be
         # clicked only to report an error.
         self.compact_action = QAction("Compact Conversation", self)
+        self.compact_action.setShortcut(QKeySequence("Ctrl+Shift+C"))
         self.compact_action.triggered.connect(self._on_compact_requested)
         file_menu.addAction(self.compact_action)
 
@@ -590,6 +594,33 @@ class MainWindow(QMainWindow):
         about_action = QAction("About AIDA", self)
         about_action.triggered.connect(self._on_show_about)
         help_menu.addAction(about_action)
+
+        # Two shortcut-only actions (Claude/ChatGPT-desktop-familiar), not
+        # menu items — registered directly on the window (`self.addAction`)
+        # rather than a QMenu, since there is nothing sensible to click.
+        # Both are wired to a small wrapper method rather than the object
+        # they act on directly: `self.bridge`/`self.input_box` don't exist
+        # yet at this point in construction (`_build_menu_bar` runs first,
+        # before either is built — see `__init__`/`_build_ui`), but a bound
+        # method on `self` resolves its own attributes lazily, only when
+        # actually triggered, by which point both exist.
+        self.stop_action = QAction("Stop", self)
+        self.stop_action.setShortcut(QKeySequence("Esc"))
+        self.stop_action.setEnabled(False)  # enabled only while a turn is running
+        self.stop_action.triggered.connect(self._on_stop_shortcut)
+        self.addAction(self.stop_action)
+
+        focus_input_action = QAction("Focus Input", self)
+        focus_input_action.setShortcut(QKeySequence("Ctrl+L"))
+        focus_input_action.triggered.connect(self._on_focus_input_shortcut)
+        self.addAction(focus_input_action)
+
+    def _on_stop_shortcut(self) -> None:
+        if self.bridge.is_busy:
+            self.bridge.cancel()
+
+    def _on_focus_input_shortcut(self) -> None:
+        self.input_box.focus_input()
 
     def _on_open_config_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(config_dir())))
@@ -725,10 +756,12 @@ class MainWindow(QMainWindow):
         self.sidebar.move_to_user_requested.connect(self._on_move_conversations_to_user)
         self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
         self.sidebar.rename_requested.connect(self._on_rename_requested)
+        self.sidebar.search_query_changed.connect(self._on_conversations_search_query_changed)
         self.chat_panel.code_editor_requested.connect(self._on_code_editor_requested)
         self.chat_panel.open_in_code_editor_requested.connect(
             self._on_open_in_code_editor_requested
         )
+        self.chat_panel.continue_requested.connect(self._on_continue_requested)
         # A file dropped on the transcript attaches exactly as one dropped
         # on the prompt box does — the transcript is where people look
         # while they work, so it is where they aim. The InputBox owns what
@@ -832,12 +865,14 @@ class MainWindow(QMainWindow):
     def _on_turn_started(self) -> None:
         self.input_box.set_busy(True)
         self._set_session_mutating(True)
+        self.stop_action.setEnabled(True)
         self._usage_refresh_timer.start()
         self.scheduler_bridge.activity.turn_in_flight = True
         self._note_user_activity()
 
     def _on_turn_finished(self) -> None:
         self.input_box.set_busy(False)
+        self.stop_action.setEnabled(False)
         self._set_session_mutating(False)
         self._usage_refresh_timer.stop()
         self._restore_undelivered_messages()
@@ -1745,6 +1780,30 @@ class MainWindow(QMainWindow):
             store.close()
         self._refresh_conversations_sidebar()
 
+    #: Below this length a substring search is too broad to be worth a full
+    #: table scan of every message ever recorded — matches the sidebar's
+    #: own docstring on ``search_query_changed``.
+    _MIN_CONTENT_SEARCH_CHARS = 3
+
+    def _on_conversations_search_query_changed(self, query: str) -> None:
+        """U5 follow-up: the sidebar's own filter only ever matched title/
+        workspace/user (``aida.ui.qt.conversations_sidebar._matches``) —
+        "which chat did I analyze sample X in?" had no answer short of
+        opening every conversation by hand. The sidebar stays "dumb about
+        persistence" (its own docstring), so the actual
+        ``messages.content`` query happens here, and the matching ids are
+        handed back via ``set_content_matches``."""
+        query = query.strip()
+        if len(query) < self._MIN_CONTENT_SEARCH_CHARS:
+            self.sidebar.set_content_matches(None)
+            return
+        store = ConversationStore()
+        try:
+            matches = store.search_conversations(query)
+        finally:
+            store.close()
+        self.sidebar.set_content_matches(matches)
+
     # --- selectors / panels ------------------------------------------------
 
     def _refresh_workspace_selector(self) -> None:
@@ -2226,6 +2285,12 @@ class MainWindow(QMainWindow):
 
     def _on_open_in_code_editor_requested(self, path: str) -> None:
         self.open_code_editor_dialog(initial_path=path)
+
+    def _on_continue_requested(self) -> None:
+        """The "Continue" button on a ``TruncationNotice``/iteration-cap
+        ``ErrorBanner`` — sends exactly what a user would type by hand to
+        resume a turn that ended before it meant to."""
+        self._on_send_requested("Please continue where you left off.")
 
     # --- settings ------------------------------------------------------------
 

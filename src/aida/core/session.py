@@ -277,6 +277,16 @@ class ChatSession:
             self.completion_settings,
             self.tools,
             max_iterations=settings.app.max_agent_iterations,
+            # planning/improvement_plan_2026-09.md §2: before this,
+            # _trim_context only ran once, before the turn even started —
+            # a single long-running turn (max_agent_iterations now 50)
+            # could grow the history by hundreds of thousands of characters
+            # of tool results with nothing re-checking it until the *next*
+            # user message. Safe to hand over directly: _trim_context only
+            # ever drops whole *older* turns, so the turn currently
+            # in progress is never at risk, and it's a no-op (returns
+            # None) whenever there's nothing to trim.
+            before_round_trip=self._trim_context,
         )
         self.recorder = recorder
         # Phase 8 (RAG): resolved once at session-start (start_session),
@@ -297,7 +307,11 @@ class ChatSession:
         # see SessionBusyError. Held for the whole of send()/compact_now()/
         # switch_profile(); the internal helpers they call (_trim_context,
         # _apply_trim_plan, ...) deliberately do *not* take it, since they
-        # only ever run underneath one of those three.
+        # only ever run underneath one of those three — including when
+        # _trim_context runs mid-turn as self.loop's before_round_trip hook
+        # (planning/improvement_plan_2026-09.md §2), since that hook only
+        # ever fires from inside AgentLoop.run(messages), itself only ever
+        # awaited from send()'s _run_turn, underneath this same lock.
         self._mutation_lock = asyncio.Lock()
         # Bumped every time self.messages is structurally rewritten or
         # appended to on behalf of a turn. _apply_trim_plan captures it
@@ -375,6 +389,7 @@ class ChatSession:
                 new_completion_settings,
                 self.tools,
                 max_iterations=self.loop.max_iterations,
+                before_round_trip=self._trim_context,
             )
 
             # Nothing below here can fail, so the swap is all-or-nothing.

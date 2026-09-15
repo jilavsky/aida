@@ -32,6 +32,7 @@ from aida.persistence.store import ConversationStore
 from aida.providers.base import Message
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
 from aida.ui.qt._qt import (
+    QAction,
     QApplication,
     QDesktopServices,
     QDialog,
@@ -2891,6 +2892,122 @@ def test_profile_selector_and_compaction_are_disabled_while_a_turn_runs(
         window.close()
 
 
+# --- planning/improvement_plan_2026-09.md §2: keyboard shortcuts -----------
+
+
+def test_new_chat_settings_and_compact_actions_have_the_expected_shortcuts(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        toolbar_actions = {a.text(): a for a in window.findChildren(QAction)}
+        assert toolbar_actions["New Chat"].shortcut().toString() == "Ctrl+N"
+        assert toolbar_actions["Settings…"].shortcut().toString() == "Ctrl+,"
+        assert window.compact_action.shortcut().toString() == "Ctrl+Shift+C"
+        assert toolbar_actions["Focus Input"].shortcut().toString() == "Ctrl+L"
+    finally:
+        window.close()
+
+
+def test_stop_action_is_esc_and_enabled_only_while_a_turn_runs(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert window.stop_action.shortcut().toString() == "Esc"
+        assert not window.stop_action.isEnabled()
+
+        window._on_turn_started()
+        assert window.stop_action.isEnabled()
+
+        window._on_turn_finished()
+        assert not window.stop_action.isEnabled()
+    finally:
+        window.close()
+
+
+def test_stop_shortcut_cancels_a_running_turn(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    cancelled = []
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        monkeypatch.setattr(window.bridge, "cancel", lambda: cancelled.append(True))
+        monkeypatch.setattr(type(window.bridge), "is_busy", property(lambda self: True))
+        window._on_turn_started()  # enables stop_action — a disabled QAction.trigger() is a no-op
+
+        window.stop_action.trigger()
+
+        assert cancelled == [True]
+    finally:
+        window.close()
+
+
+def test_stop_shortcut_is_a_noop_when_not_busy(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Belt-and-suspenders: the action is disabled while idle (see the
+    enablement test above), but the handler itself must also refuse to act
+    in case it's ever triggered anyway (e.g. programmatically)."""
+    cancelled = []
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        monkeypatch.setattr(window.bridge, "cancel", lambda: cancelled.append(True))
+        window._on_stop_shortcut()
+        assert cancelled == []
+    finally:
+        window.close()
+
+
+def test_focus_input_shortcut_focuses_the_text_edit(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        focused = []
+        monkeypatch.setattr(window.input_box, "focus_input", lambda: focused.append(True))
+        window._on_focus_input_shortcut()
+        assert focused == [True]
+    finally:
+        window.close()
+
+
+def test_continue_requested_from_chat_panel_sends_the_continue_message(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """The Continue button on a TruncationNotice/iteration-cap ErrorBanner
+    is wired all the way through ChatPanel.continue_requested to a real
+    send, not just a no-op signal with nothing connected."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        sent = []
+        monkeypatch.setattr(window, "_on_send_requested", sent.append)
+
+        window.chat_panel.continue_requested.emit()
+
+        assert sent == ["Please continue where you left off."]
+    finally:
+        window.close()
+
+
 def test_bridge_refuses_a_profile_switch_while_busy(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
@@ -3451,6 +3568,58 @@ def test_switching_user_filters_the_sidebar_to_that_user(
 
         assert window.sidebar._user_filter.currentText() == "Alice"
         assert window.sidebar.count == 0, "a brand-new user has no history to show"
+    finally:
+        window.close()
+
+
+# --- planning/improvement_plan_2026-09.md §2: search inside conversations,
+# not just titles -------------------------------------------------------
+
+
+def test_sidebar_content_search_finds_a_conversation_by_message_text(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """End to end: MainWindow answers ConversationsSidebar.search_query_changed
+    by querying ConversationStore.search_conversations and handing the
+    matching ids back — "which chat did I analyze sample X01 in?" now has
+    an answer even though the title never mentions it."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        store = ConversationStore()
+        try:
+            conv = store.create_conversation(timestamp="2026-01-01", title="untitled analysis")
+            store.append_message(
+                conv, Message(role="user", content="please plot sample X01"), timestamp="2026-01-02"
+            )
+        finally:
+            store.close()
+        window._refresh_conversations_sidebar()
+        assert window.sidebar.count >= 1
+
+        window.sidebar._search_edit.setText("sample X01")
+
+        assert window.sidebar._ids_by_row == [conv]
+    finally:
+        window.close()
+
+
+def test_sidebar_content_search_below_minimum_length_does_not_query(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        called = []
+        monkeypatch.setattr(window.sidebar, "set_content_matches", called.append)
+
+        window._on_conversations_search_query_changed("ab")
+
+        assert called == [None]
     finally:
         window.close()
 

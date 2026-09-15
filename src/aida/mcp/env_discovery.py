@@ -113,7 +113,9 @@ def find_console_script(
         if key in seen:
             return
         seen.add(key)
-        candidates.append(ScriptCandidate(command=str(command), args=list(args or []), source=source))
+        candidates.append(
+            ScriptCandidate(command=str(command), args=list(args or []), source=source)
+        )
 
     executable = own_executable or sys.executable
     own_bin = Path(executable).parent / file_name

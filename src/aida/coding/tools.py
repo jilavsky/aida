@@ -42,9 +42,7 @@ _tool = wrap_tool_errors(ConfirmationDenied, OSError, TimeoutError, ValueError)
 RUN_OUTPUT_DISPLAY_MAX_CHARS = 8_000
 
 
-def _capped_stream_text(
-    text: str, *, label: str, scratch_dir: Path | None, run_id: str
-) -> str:
+def _capped_stream_text(text: str, *, label: str, scratch_dir: Path | None, run_id: str) -> str:
     """One stream's text, bounded to ``RUN_OUTPUT_DISPLAY_MAX_CHARS``.
 
     Under the cap, returned untouched. Over it, ``_BoundedCapture`` (already

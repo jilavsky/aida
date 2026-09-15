@@ -323,9 +323,7 @@ async def test_run_command_bad_quoting_is_an_error_not_a_crash(tmp_path: Path):
 # --- output size cap (planning/improvement_plan_2026-09.md §1: stdout/stderr
 # went to the model uncapped, up to 256,000 bytes each) ----------------------
 
-_PRINT_N_CHARS = (
-    "import sys; sys.stdout.write('x' * {n}); sys.stdout.write('\\n')"
-)
+_PRINT_N_CHARS = "import sys; sys.stdout.write('x' * {n}); sys.stdout.write('\\n')"
 
 
 @pytest.mark.asyncio
@@ -347,7 +345,9 @@ async def test_short_output_is_not_truncated(tmp_path: Path):
 async def test_oversized_stdout_is_capped_and_spilled_to_scratch(tmp_path: Path):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    tools = default_coding_tools(_guard(tmp_path), workspace=_workspace(tmp_path), scratch_dir=scratch)
+    tools = default_coding_tools(
+        _guard(tmp_path), workspace=_workspace(tmp_path), scratch_dir=scratch
+    )
 
     n_chars = RUN_OUTPUT_DISPLAY_MAX_CHARS + 5_000
     script = tmp_path / "print_long.py"

@@ -184,3 +184,82 @@ async def test_context_fullness_prefers_the_profiles_own_context_window(
     _, budget = session.context_fullness()
     assert budget < 999_999_999  # must be derived from context_window, not the huge global default
     await session.aclose()
+
+
+# --- planning/improvement_plan_2026-09.md §2: mid-turn context check —
+# AgentLoop.before_round_trip, wired to ChatSession._trim_context -----------
+
+
+@pytest.mark.asyncio
+async def test_context_is_rechecked_mid_turn_not_only_before_it(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """Before AgentLoop grew a before_round_trip hook, _trim_context ran
+    exactly once, before the turn even started (_run_turn's own call,
+    still present) — a single tool result big enough to blow the budget on
+    its own went completely unchecked until the *next* user message.
+
+    History here is comfortably under budget when the turn starts (the
+    pre-turn check finds nothing to do) and only tips over once one huge
+    tool result is appended mid-turn, before the second provider round
+    trip — proving the recheck actually happens *during* the turn, not
+    only at its edges."""
+    from aida.core.tools import NativeTool, ToolResult
+    from aida.providers.base import ToolSchema
+    from aida.providers.mock import MockToolCall
+
+    settings = _settings_with_profile()
+    settings.app.max_context_tokens = 2000  # clamped up to MIN_HISTORY_BUDGET (8000 tokens)
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider(
+            [
+                MockTurn(tool_calls=[MockToolCall(name="huge_tool", id="call_1")]),
+                MockTurn(text="done"),
+            ]
+        ),
+    )
+
+    async def _huge_tool(_args):
+        return ToolResult(content="z" * 40_000)
+
+    tools = {
+        "huge_tool": NativeTool(
+            schema=ToolSchema(name="huge_tool", description="", parameters={"type": "object"}),
+            func=_huge_tool,
+        )
+    }
+    session = ChatSession(settings, "mock-profile", tools=tools)
+    _add_old_turns(session, 5, size=1500)  # ~15k chars — comfortably under the ~32k-char floor
+
+    events = [e async for e in session.send("trigger the tool")]
+
+    tool_finished_index = next(
+        i for i, e in enumerate(events) if type(e).__name__ == "ToolCallFinished"
+    )
+    trim_indices = [i for i, e in enumerate(events) if isinstance(e, ContextTrimmed)]
+    assert trim_indices, "expected a mid-turn ContextTrimmed event once the huge result landed"
+    assert trim_indices[0] > tool_finished_index
+    await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_before_round_trip_hook_is_the_sessions_trim_context(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """Direct wiring check, independent of the scenario above actually
+    triggering a trim: session.loop must be constructed with its own
+    _trim_context as before_round_trip, both at session start and after a
+    /profile switch (aida.core.session.ChatSession.switch_profile)."""
+    settings = _settings_with_profile()
+    settings.providers.profiles["other-profile"] = ProviderProfile(
+        name="other-profile", kind="openai_compat", model="mock-model"
+    )
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: MockProvider([]))
+
+    session = ChatSession(settings, "mock-profile")
+    assert session.loop._before_round_trip == session._trim_context
+
+    await session.switch_profile("other-profile")
+    assert session.loop._before_round_trip == session._trim_context
+    await session.aclose()

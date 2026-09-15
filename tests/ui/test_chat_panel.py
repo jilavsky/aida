@@ -24,7 +24,7 @@ from aida.persistence.store import ArtifactRecord
 from aida.providers.base import Message, ToolCall
 from aida.ui.qt._qt import QGuiApplication
 from aida.ui.qt.artifact_widgets import FileArtifactCard, InlineImageWidget
-from aida.ui.qt.chat_panel import ChatPanel, ErrorBanner, MessageBubble
+from aida.ui.qt.chat_panel import ChatPanel, ErrorBanner, MessageBubble, TruncationNotice
 from aida.ui.qt.retrieval_widget import RetrievalRow
 from aida.ui.qt.tool_call_group import ToolCallGroup
 from aida.ui.qt.tool_call_widget import ToolCallRow
@@ -461,6 +461,49 @@ def test_agent_error_adds_error_banner_with_layer(qapp):
     assert isinstance(banner, ErrorBanner)
     assert banner.layer == "provider"
     assert banner.message == "boom"
+
+
+# --- planning/improvement_plan_2026-09.md §2: "Continue" button on the two
+# cut-off notices -------------------------------------------------------
+
+
+def test_truncated_reply_shows_a_truncation_notice_with_continue_button(qapp):
+    panel = ChatPanel()
+    panel.handle_event(MessageFinished(message_id="m1", stop_reason="length"))
+    notice = panel.widget_at(0)
+    assert isinstance(notice, TruncationNotice)
+
+    requested = []
+    panel.continue_requested.connect(lambda: requested.append(True))
+    notice.continue_requested.emit()
+    assert requested == [True]
+
+
+def test_iteration_cap_error_banner_is_continuable(qapp):
+    panel = ChatPanel()
+    panel.handle_event(AgentError(layer="core", message="iteration cap reached (50)"))
+    banner = panel.widget_at(0)
+    assert isinstance(banner, ErrorBanner)
+
+    requested = []
+    panel.continue_requested.connect(lambda: requested.append(True))
+    banner.continue_requested.emit()
+    assert requested == [True]
+
+
+def test_ordinary_agent_error_is_not_continuable(qapp):
+    """Only the iteration-cap AgentError gets a Continue button — a real
+    provider failure or a "cancelled" turn is not something a bare retry
+    fixes, and offering the button there would be misleading."""
+    from aida.ui.qt._qt import QPushButton
+
+    panel = ChatPanel()
+    panel.handle_event(AgentError(layer="provider", message="boom"))
+    banner = panel.widget_at(0)
+    assert isinstance(banner, ErrorBanner)
+    # Only the Copy button in the banner's header row — no Continue button.
+    button_texts = [b.text() for b in banner.findChildren(QPushButton)]
+    assert button_texts == ["⧉ Copy"]
 
 
 def test_full_turn_with_tool_call_and_image_produces_expected_widget_sequence(qapp, tmp_path: Path):
