@@ -3,7 +3,7 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 0.1.0b7 (beta), reconciled 2026-09-12.** Phases 1–10's automation
+**Status: 0.1.0, reconciled 2026-09-16.** Phases 1–10's automation
 half are implemented, tested (2,000+ tests, three OSes) and in daily use.
 This file holds **only what is not done** — anything ticked here has been
 moved to `planning/COMPLETED.md`, and anything shipped is dated in
@@ -50,13 +50,13 @@ gets a dated note appended there; error messages say *which* layer failed.
 
 Nothing here is speculative work; it is what a beta is for.
 
-- [ ] Publish `aida-workbench` 0.1.0b7 to PyPI and verify
-      `pip install --pre "aida-workbench[gui,docs]"` → working `aida-gui` on
-      a clean macOS, Windows, and Linux machine. (`--pre` is required: pip
-      never prefers a pre-release over a stable one, so every prior
-      `0.1.0bN` publish left the bare `pip install aida-workbench` silently
-      resolving to the abandoned `0.0.1` snapshot instead — fixed in
-      README.md/docs/ for this release, but worth re-verifying end to end.)
+- [ ] Publish `aida-workbench` 0.1.0 to PyPI and verify
+      `pip install "aida-workbench[gui,docs]"` → working `aida-gui` on a
+      clean macOS, Windows, and Linux machine. 0.1.0 is the first
+      non-pre-release version, so this is also the first release where a
+      bare `pip install aida-workbench` resolves correctly instead of
+      silently landing on the abandoned `0.0.1` snapshot — worth verifying
+      end to end rather than assuming the version-number fix is enough.
 - [ ] First outside users installing from PyPI, with issues triaged into this
       file rather than fixed ad hoc.
 - [ ] Watch for the two things most likely to bite a new user: a provider

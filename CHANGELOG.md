@@ -2,9 +2,10 @@
 
 All notable changes to AIDA are recorded here, newest first. The format
 loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
-versioning follows [SemVer](https://semver.org/), with a `bN` beta
-pre-release identifier until 1.0 — see [`PLAN.md`](PLAN.md) for what 1.0
-requires.
+versioning follows [SemVer](https://semver.org/): `bN` marks a pre-release
+beta cycle leading up to a release (as `0.1.0b1`–`0.1.0b7` did for `0.1.0`),
+and 0.x versioning continues until 1.0 — see [`PLAN.md`](PLAN.md) for what
+1.0 requires.
 
 This file is the terse, dated "what changed and for whom," by release. Two
 other files are easy to confuse it with: [`planning/COMPLETED.md`](planning/COMPLETED.md)
@@ -15,6 +16,14 @@ decision revised), unrelated to what shipped when. Entries below link to
 `COMPLETED.md` where useful; `PLAN.md` tracks what's still open.
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-09-16
+
+First non-beta release. No design or format changes over 0.1.0b7 — this
+release exists to mark the point where AIDA moved from "beta, seeking
+outside testers" to daily use at the APS 12-ID/9-ID beamlines, and to fix
+the `pip install aida-workbench` resolution problem that every prior
+`0.1.0bN` pre-release had (see `docs/installation.md`).
 
 ### Added
 
@@ -806,7 +815,8 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0b7...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/jilavsky/aida/compare/v0.0.1b7...v0.1.0
 [0.1.0b7]: https://github.com/jilavsky/aida/compare/v0.1.0b6...v0.1.0b7
 [0.1.0b6]: https://github.com/jilavsky/aida/compare/v0.1.0b5...v0.1.0b6
 [0.1.0b5]: https://github.com/jilavsky/aida/compare/v0.1.0b4...v0.1.0b5

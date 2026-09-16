@@ -1,10 +1,10 @@
 # AIDA — AI Data Assistant
 
-> **Status: beta (0.1.0b7).** Everything described below works today and is
-> in daily use. Config formats and CLI commands are stable enough to build
+> **Status: 0.1.0.** First public release; in daily use at APS beamlines
+> 12-ID/9-ID. Config formats and CLI commands are stable enough to build
 > on; breaking changes before 1.0 will be called out in
-> [`CHANGELOG.md`](CHANGELOG.md). Bug reports and rough edges are exactly
-> what this beta is for — [open an issue](https://github.com/jilavsky/aida/issues).
+> [`CHANGELOG.md`](CHANGELOG.md). Bug reports and rough edges are still
+> very much welcome — [open an issue](https://github.com/jilavsky/aida/issues).
 
 AIDA is a local scientific agent workbench: a simple, reliable desktop GUI
 (and CLI) for using AI agents in scientific work — conversation with local or
@@ -49,7 +49,7 @@ a general-purpose AI platform — see [`PLAN.md`](PLAN.md) §1 for the rationale
 From PyPI (recommended):
 
 ```bash
-pip install --pre "aida-workbench[gui,docs]"
+pip install "aida-workbench[gui,docs]"
 aida doctor
 aida-gui
 ```
@@ -59,16 +59,15 @@ console scripts are `aida` / `aida-gui`. Extras: `gui` (PySide6 desktop app),
 `docs` (PDF/DOCX/XLSX/PPTX reading, image handling), `ocr` (the optional
 Mistral OCR backend for figure extraction).
 
-`--pre` matters: every release so far is a `0.1.0bN` pre-release, and pip
-never installs a pre-release over a stable one unless asked — omit it and
-you silently get the long-abandoned `0.0.1` snapshot instead of current
-beta, with no error to say so.
+0.1.0 is the first non-pre-release version, so a bare `pip install` resolves
+correctly — no `--pre` flag needed, and no risk of landing on the
+long-abandoned `0.0.1` snapshot the way every prior `0.1.0bN` install did.
 
 Already using pyIrena? Install both — in either order, in one environment or
 two — and wire up its MCP tools with a single command:
 
 ```bash
-pip install --pre "aida-workbench[gui,docs]" "pyirena[all]"
+pip install "aida-workbench[gui,docs]" "pyirena[all]"
 aida mcp add-pyirena
 ```
 
