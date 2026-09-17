@@ -22,7 +22,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aida.config.logging_setup import get_logger
 from aida.config.settings import ScheduleEntry, Settings, load_settings, load_workflow
@@ -30,6 +30,7 @@ from aida.core.headless import build_headless_confirm_callback
 from aida.core.proc_lock import try_acquire_scheduler_lock
 from aida.core.scheduling import ScheduleConfigError, due_since, parse_schedule_timing
 from aida.core.workflows import WorkflowConfigError, run_workflow
+from aida.persistence.recorder import ConversationNotFoundError
 from aida.persistence.store import ScheduleRunStore
 
 logger = get_logger("scheduler")
@@ -210,6 +211,24 @@ async def run_due_schedules(
     return ran
 
 
+def _pinned_conversation_id(
+    entry: ScheduleEntry, run_store: ScheduleRunStore, *, now: datetime
+) -> str | None:
+    """The conversation this fire should resume, or ``None`` to start
+    fresh — because reuse is off, nothing has been pinned yet, or
+    ``reuse_rollover_hours`` has elapsed since the current pin was made."""
+    if not entry.reuse_chat:
+        return None
+    pin = run_store.get_pin(entry.name)
+    if pin is None:
+        return None
+    if entry.reuse_rollover_hours is not None:
+        age = now - datetime.fromisoformat(pin.pinned_at)
+        if age >= timedelta(hours=entry.reuse_rollover_hours):
+            return None
+    return pin.conversation_id
+
+
 async def _fire(
     name: str,
     entry: ScheduleEntry,
@@ -237,14 +256,34 @@ async def _fire(
         yes_in_allowed=entry.yes_in_allowed,
         preapproved_tools=set(entry.preapproved_tools) | set(workflow.preapproved_tools),
     )
+    resume_conversation_id = _pinned_conversation_id(entry, run_store, now=now)
     try:
-        result = await run_workflow(
-            settings,
-            workflow,
-            var_overrides=entry.vars,
-            confirm_callback=confirm_callback,
-            origin="schedule",
-        )
+        try:
+            result = await run_workflow(
+                settings,
+                workflow,
+                var_overrides=entry.vars,
+                confirm_callback=confirm_callback,
+                origin="schedule",
+                resume_conversation_id=resume_conversation_id,
+            )
+        except ConversationNotFoundError:
+            # The pinned chat was deleted (by the user, from the sidebar)
+            # out from under this schedule. Forget the pin and retry once,
+            # fresh, rather than losing the whole run over a stale pointer.
+            logger.warning(
+                "schedule %r's pinned conversation %r no longer exists — starting a new chat",
+                name,
+                resume_conversation_id,
+            )
+            run_store.clear_pin(name)
+            result = await run_workflow(
+                settings,
+                workflow,
+                var_overrides=entry.vars,
+                confirm_callback=confirm_callback,
+                origin="schedule",
+            )
     except WorkflowConfigError as exc:
         logger.warning("schedule %r failed to start: %s", name, exc)
         run_store.record_run(
@@ -261,6 +300,8 @@ async def _fire(
         conversation_id=result.conversation_id,
         error=result.error,
     )
+    if entry.reuse_chat and result.conversation_id:
+        run_store.set_pin(name, result.conversation_id, fired_at)
     if on_run_finished is not None:
         on_run_finished(name, result.ok, result.conversation_id, result.error)
 

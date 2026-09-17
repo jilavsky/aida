@@ -28,11 +28,14 @@ import contextlib
 
 from keyring.errors import KeyringError
 
+from aida.config.paths import providers_config_path
 from aida.config.secrets import describe_keyring_error, set_secret
 from aida.config.settings import (
     EmbeddingProfile,
     ProviderProfile,
     Settings,
+    config_mtime,
+    load_providers_config,
     save_providers_config,
 )
 from aida.ui.qt._qt import (
@@ -56,6 +59,7 @@ from aida.ui.qt._qt import (
     QVBoxLayout,
     QWidget,
 )
+from aida.ui.qt.config_conflict import save_or_warn_conflict
 
 PROVIDER_KINDS = ["openai_compat", "anthropic"]
 EMBEDDING_KINDS = ["openai_compat"]
@@ -403,6 +407,7 @@ class ProfilesDialog(QDialog):
         self.setWindowTitle("Providers")
         self.resize(640, 480)
         self._settings = settings
+        self._providers_mtime = config_mtime(providers_config_path())
         self._bridge = bridge
 
         layout = QVBoxLayout(self)
@@ -536,8 +541,25 @@ class ProfilesDialog(QDialog):
             return
         self._provider_details_label.setText("\n".join(_provider_detail_lines(profile)))
 
-    def _save_providers(self) -> None:
-        save_providers_config(self._settings.providers)
+    def _save_providers(self) -> bool:
+        """Saves ``self._settings.providers``, warning (rather than
+        silently overwriting) if another AIDA window changed
+        ``providers.yaml`` since this dialog opened. On conflict, the
+        pending in-memory edit is discarded and replaced with what's
+        actually on disk. Returns whether the save actually happened;
+        callers should refresh their list either way."""
+        result = save_or_warn_conflict(
+            self,
+            lambda: save_providers_config(
+                self._settings.providers, expected_mtime=self._providers_mtime
+            ),
+        )
+        if result is None:
+            self._settings.providers = load_providers_config()
+            self._providers_mtime = config_mtime(providers_config_path())
+            return False
+        self._providers_mtime = config_mtime(providers_config_path())
+        return True
 
     def _store_secret(self, secret_ref: str, value: str) -> None:
         """Store a secret, warning rather than crashing on a locked/broken

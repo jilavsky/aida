@@ -25,10 +25,36 @@ import yaml
 
 from aida.config.paths import config_dir
 from aida.config.paths import workflows_dir as _workflows_dir
+from aida.core.proc_lock import config_write_lock
 
 CURRENT_CONFIG_VERSION = 1
 
 _logger = logging.getLogger("aida.config")
+
+
+class ConfigConflictError(RuntimeError):
+    """Raised by a ``save_*_config`` call when the caller's ``expected_mtime``
+    no longer matches the file on disk — another AIDA process (or another
+    dialog in this one) saved a change since the caller loaded its copy.
+    The file is left untouched; the caller should reload and let the user
+    reapply their edit rather than silently overwriting someone else's."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(
+            f"{path} was changed by another AIDA process since it was loaded — reload before saving"
+        )
+        self.path = path
+
+
+def config_mtime(path: Path) -> float | None:
+    """The file's current modification time, or ``None`` if it doesn't
+    exist yet. Callers capture this right after a ``load_*_config()`` call
+    and pass it back as ``expected_mtime`` on the matching save, to detect
+    (not silently lose) a concurrent edit from another AIDA instance."""
+    try:
+        return path.stat().st_mtime
+    except FileNotFoundError:
+        return None
 
 
 def _coerce(kind: str, value: Any) -> Any:
@@ -1378,6 +1404,20 @@ class ScheduleEntry:
     #: widens it. See ``aida.core.headless``.
     yes_in_allowed: bool = False
     enabled: bool = True
+    #: Pin every fire of this schedule to one ``ChatSession`` instead of
+    #: starting a fresh one each time (e.g. an hourly check-and-plot
+    #: schedule that would otherwise flood the sidebar with near-identical
+    #: chats overnight). *Policy* only — which conversation is currently
+    #: pinned is machine-written run state, kept in SQLite
+    #: (``aida.persistence.store.ScheduleRunStore``'s ``schedule_pins``
+    #: table) for the same reason last-fired/status is: this user-edited
+    #: file must never be rewritten by the scheduler itself.
+    reuse_chat: bool = False
+    #: Hours after which a reused chat is retired and a new one pinned in
+    #: its place, bounding how much history one chat accumulates. ``None``
+    #: means reuse the same pinned chat forever once ``reuse_chat`` is set.
+    #: Ignored when ``reuse_chat`` is ``False``.
+    reuse_rollover_hours: float | None = None
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> ScheduleEntry:
@@ -1386,6 +1426,12 @@ class ScheduleEntry:
         vars_ = {str(k): str(v) for k, v in raw_vars.items()} if isinstance(raw_vars, dict) else {}
         if raw_vars and not isinstance(raw_vars, dict):
             _logger.warning("%s: vars must be a mapping — ignoring", source)
+        raw_rollover = data.get("reuse_rollover_hours")
+        try:
+            reuse_rollover_hours = float(raw_rollover) if raw_rollover is not None else None
+        except (TypeError, ValueError):
+            _logger.warning("%s: reuse_rollover_hours must be a number — ignoring", source)
+            reuse_rollover_hours = None
         return cls(
             name=name,
             workflow=str(data.get("workflow") or ""),
@@ -1400,6 +1446,8 @@ class ScheduleEntry:
                 source, "yes_in_allowed", data.get("yes_in_allowed"), default=False
             ),
             enabled=_coerce_bool(source, "enabled", data.get("enabled"), default=True),
+            reuse_chat=_coerce_bool(source, "reuse_chat", data.get("reuse_chat"), default=False),
+            reuse_rollover_hours=reuse_rollover_hours,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -1412,6 +1460,8 @@ class ScheduleEntry:
             "preapproved_tools": self.preapproved_tools,
             "yes_in_allowed": self.yes_in_allowed,
             "enabled": self.enabled,
+            "reuse_chat": self.reuse_chat,
+            "reuse_rollover_hours": self.reuse_rollover_hours,
         }
 
 
@@ -1451,7 +1501,7 @@ def _read_yaml(path: Path) -> dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
+def _atomic_write_text(path: Path, text: str, *, expected_mtime: float | None = None) -> None:
     """Write ``text`` to ``path`` without ever leaving a truncated file on
     disk. A crash or power loss mid-write to ``path`` directly would corrupt
     a config file the whole app depends on (config.yaml, providers.yaml,
@@ -1459,23 +1509,37 @@ def _atomic_write_text(path: Path, text: str) -> None:
     and ``os.replace()``-ing it into place makes the swap atomic — readers
     either see the old complete file or the new complete file, never a
     partial one. Same directory matters so the replace is a same-filesystem
-    rename, not a cross-filesystem copy."""
+    rename, not a cross-filesystem copy.
+
+    Two AIDA instances can share one ``~/.aida`` (a deliberate, supported
+    setup — see ``aida.core.proc_lock``), so the write itself is serialized
+    against other processes via ``config_write_lock``. When ``expected_mtime``
+    is given, it's checked *inside* that lock against the file's current
+    mtime; a mismatch means someone else saved a change since the caller
+    loaded its copy, and raises ``ConfigConflictError`` instead of writing —
+    silently overwriting a concurrent edit would be worse than a caller
+    having to reload and retry."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_name, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_name)
-        raise
+    with config_write_lock(path):
+        if expected_mtime is not None and config_mtime(path) != expected_mtime:
+            raise ConfigConflictError(path)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(text)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_name, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_name)
+            raise
 
 
-def _write_yaml(path: Path, data: dict[str, Any]) -> None:
-    _atomic_write_text(path, yaml.safe_dump(data, sort_keys=False))
+def _write_yaml(path: Path, data: dict[str, Any], *, expected_mtime: float | None = None) -> None:
+    _atomic_write_text(path, yaml.safe_dump(data, sort_keys=False), expected_mtime=expected_mtime)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -1485,8 +1549,8 @@ def _read_json(path: Path) -> dict[str, Any]:
         return json.load(fh) or {}
 
 
-def _write_json(path: Path, data: dict[str, Any]) -> None:
-    _atomic_write_text(path, json.dumps(data, indent=2) + "\n")
+def _write_json(path: Path, data: dict[str, Any], *, expected_mtime: float | None = None) -> None:
+    _atomic_write_text(path, json.dumps(data, indent=2) + "\n", expected_mtime=expected_mtime)
 
 
 def load_app_config(base_dir: Path | None = None) -> AppConfig:
@@ -1494,9 +1558,11 @@ def load_app_config(base_dir: Path | None = None) -> AppConfig:
     return AppConfig.from_dict(_read_yaml(path))
 
 
-def save_app_config(cfg: AppConfig, base_dir: Path | None = None) -> Path:
+def save_app_config(
+    cfg: AppConfig, base_dir: Path | None = None, *, expected_mtime: float | None = None
+) -> Path:
     path = (base_dir or config_dir()) / "config.yaml"
-    _write_yaml(path, cfg.to_dict())
+    _write_yaml(path, cfg.to_dict(), expected_mtime=expected_mtime)
     return path
 
 
@@ -1505,9 +1571,11 @@ def load_providers_config(base_dir: Path | None = None) -> ProvidersConfig:
     return ProvidersConfig.from_dict(_read_yaml(path))
 
 
-def save_providers_config(cfg: ProvidersConfig, base_dir: Path | None = None) -> Path:
+def save_providers_config(
+    cfg: ProvidersConfig, base_dir: Path | None = None, *, expected_mtime: float | None = None
+) -> Path:
     path = (base_dir or config_dir()) / "providers.yaml"
-    _write_yaml(path, cfg.to_dict())
+    _write_yaml(path, cfg.to_dict(), expected_mtime=expected_mtime)
     return path
 
 
@@ -1516,9 +1584,11 @@ def load_workspaces_config(base_dir: Path | None = None) -> WorkspacesConfig:
     return WorkspacesConfig.from_dict(_read_yaml(path))
 
 
-def save_workspaces_config(cfg: WorkspacesConfig, base_dir: Path | None = None) -> Path:
+def save_workspaces_config(
+    cfg: WorkspacesConfig, base_dir: Path | None = None, *, expected_mtime: float | None = None
+) -> Path:
     path = (base_dir or config_dir()) / "workspaces.yaml"
-    _write_yaml(path, cfg.to_dict())
+    _write_yaml(path, cfg.to_dict(), expected_mtime=expected_mtime)
     return path
 
 
@@ -1527,9 +1597,11 @@ def load_mcp_config(base_dir: Path | None = None) -> McpConfig:
     return McpConfig.from_dict(_read_json(path))
 
 
-def save_mcp_config(cfg: McpConfig, base_dir: Path | None = None) -> Path:
+def save_mcp_config(
+    cfg: McpConfig, base_dir: Path | None = None, *, expected_mtime: float | None = None
+) -> Path:
     path = (base_dir or config_dir()) / "mcp.json"
-    _write_json(path, cfg.to_dict())
+    _write_json(path, cfg.to_dict(), expected_mtime=expected_mtime)
     return path
 
 
@@ -1538,9 +1610,11 @@ def load_knowledge_config(base_dir: Path | None = None) -> KnowledgeConfig:
     return KnowledgeConfig.from_dict(_read_yaml(path))
 
 
-def save_knowledge_config(cfg: KnowledgeConfig, base_dir: Path | None = None) -> Path:
+def save_knowledge_config(
+    cfg: KnowledgeConfig, base_dir: Path | None = None, *, expected_mtime: float | None = None
+) -> Path:
     path = (base_dir or config_dir()) / "knowledge.yaml"
-    _write_yaml(path, cfg.to_dict())
+    _write_yaml(path, cfg.to_dict(), expected_mtime=expected_mtime)
     return path
 
 
@@ -1549,9 +1623,11 @@ def load_schedules_config(base_dir: Path | None = None) -> SchedulesConfig:
     return SchedulesConfig.from_dict(_read_yaml(path))
 
 
-def save_schedules_config(cfg: SchedulesConfig, base_dir: Path | None = None) -> Path:
+def save_schedules_config(
+    cfg: SchedulesConfig, base_dir: Path | None = None, *, expected_mtime: float | None = None
+) -> Path:
     path = (base_dir or config_dir()) / "schedules.yaml"
-    _write_yaml(path, cfg.to_dict())
+    _write_yaml(path, cfg.to_dict(), expected_mtime=expected_mtime)
     return path
 
 
@@ -1575,10 +1651,12 @@ def load_workflow(name: str, directory: Path | None = None) -> WorkflowConfig:
     return WorkflowConfig.from_dict(name, _read_yaml(path))
 
 
-def save_workflow(cfg: WorkflowConfig, directory: Path | None = None) -> Path:
+def save_workflow(
+    cfg: WorkflowConfig, directory: Path | None = None, *, expected_mtime: float | None = None
+) -> Path:
     d = directory or _workflows_dir()
     path = d / f"{cfg.name}.yaml"
-    _write_yaml(path, cfg.to_dict())
+    _write_yaml(path, cfg.to_dict(), expected_mtime=expected_mtime)
     return path
 
 

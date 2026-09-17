@@ -20,8 +20,14 @@ from __future__ import annotations
 
 import contextlib
 
-from aida.config.paths import knowledge_db_path
-from aida.config.settings import KnowledgeBaseConfig, Settings, save_knowledge_config
+from aida.config.paths import knowledge_config_path, knowledge_db_path
+from aida.config.settings import (
+    KnowledgeBaseConfig,
+    Settings,
+    config_mtime,
+    load_knowledge_config,
+    save_knowledge_config,
+)
 from aida.knowledge.rag import index as kb_index
 from aida.knowledge.rag.ingest import IngestResult, normalize_source_folder
 from aida.ui.qt._qt import (
@@ -44,6 +50,7 @@ from aida.ui.qt._qt import (
     QVBoxLayout,
     QWidget,
 )
+from aida.ui.qt.config_conflict import save_or_warn_conflict
 
 
 def _chunk_count_for(name: str) -> int:
@@ -170,6 +177,7 @@ class KnowledgeManagementDialog(QDialog):
         self.setWindowTitle("Knowledge Bases")
         self.resize(680, 460)
         self._settings = settings
+        self._knowledge_mtime = config_mtime(knowledge_config_path())
         self._bridge = bridge
 
         outer = QHBoxLayout(self)
@@ -236,6 +244,26 @@ class KnowledgeManagementDialog(QDialog):
 
     def _configs(self) -> dict[str, KnowledgeBaseConfig]:
         return self._settings.knowledge.knowledge_bases
+
+    def _save_knowledge_config(self) -> bool:
+        """Saves ``self._settings.knowledge``, warning (rather than
+        silently overwriting) if another AIDA window changed
+        ``knowledge.yaml`` since this dialog opened. On conflict, the
+        pending in-memory edit is discarded and replaced with what's
+        actually on disk. Returns whether the save actually happened;
+        ``_refresh_kb_list()`` is always safe to call afterward."""
+        result = save_or_warn_conflict(
+            self,
+            lambda: save_knowledge_config(
+                self._settings.knowledge, expected_mtime=self._knowledge_mtime
+            ),
+        )
+        if result is None:
+            self._settings.knowledge = load_knowledge_config()
+            self._knowledge_mtime = config_mtime(knowledge_config_path())
+            return False
+        self._knowledge_mtime = config_mtime(knowledge_config_path())
+        return True
 
     def _selected_name(self) -> str | None:
         item = self._kb_list.currentItem()
@@ -306,7 +334,7 @@ class KnowledgeManagementDialog(QDialog):
             )
             return
         self._settings.knowledge.knowledge_bases[config.name] = config
-        save_knowledge_config(self._settings.knowledge)
+        self._save_knowledge_config()
         self._refresh_kb_list()
 
     def _on_edit(self) -> None:
@@ -321,7 +349,7 @@ class KnowledgeManagementDialog(QDialog):
             return
         updated = dialog.result_config()
         self._settings.knowledge.knowledge_bases[name] = updated
-        save_knowledge_config(self._settings.knowledge)
+        self._save_knowledge_config()
         self._refresh_kb_list()
 
     def _on_remove(self) -> None:
@@ -348,8 +376,13 @@ class KnowledgeManagementDialog(QDialog):
         if answer == QMessageBox.StandardButton.Cancel:
             return
         del self._settings.knowledge.knowledge_bases[name]
-        save_knowledge_config(self._settings.knowledge)
-        if answer == QMessageBox.StandardButton.Yes:
+        saved = self._save_knowledge_config()
+        # Only unlink the index file once its config entry is actually
+        # gone — on a conflict, _save_knowledge_config() just reloaded
+        # self._settings.knowledge from disk, where this knowledge base
+        # still exists, so deleting its index file here would orphan a
+        # config entry that's still pointing at it.
+        if saved and answer == QMessageBox.StandardButton.Yes:
             knowledge_db_path(name).unlink(missing_ok=True)
         self._refresh_kb_list()
 

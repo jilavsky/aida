@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from aida.config.settings import (
     AppConfig,
+    ConfigConflictError,
     KnowledgeConfig,
     McpConfig,
     ProvidersConfig,
     WorkspacesConfig,
+    config_mtime,
     load_app_config,
     load_mcp_config,
     load_providers_config,
@@ -48,6 +51,48 @@ def test_app_config_roundtrip(aida_home: Path):
     assert loaded.log_level == "DEBUG"
     assert loaded.default_safety_mode == "relaxed"
     assert loaded.config_version == 1
+
+
+# --- concurrent-write guard (two AIDA instances sharing ~/.aida) ---------
+
+
+def test_save_succeeds_with_matching_expected_mtime(aida_home: Path):
+    path = save_app_config(AppConfig(log_level="DEBUG"), aida_home)
+    mtime = config_mtime(path)
+
+    save_app_config(AppConfig(log_level="INFO"), aida_home, expected_mtime=mtime)
+
+    assert load_app_config(aida_home).log_level == "INFO"
+
+
+def test_save_raises_conflict_on_stale_expected_mtime(aida_home: Path):
+    path = save_app_config(AppConfig(log_level="DEBUG"), aida_home)
+    stale_mtime = config_mtime(path) - 1000  # deliberately wrong, no real second writer needed
+
+    with pytest.raises(ConfigConflictError):
+        save_app_config(AppConfig(log_level="INFO"), aida_home, expected_mtime=stale_mtime)
+
+    # The conflicting write must not have happened.
+    assert load_app_config(aida_home).log_level == "DEBUG"
+
+
+def test_save_conflict_error_names_the_path(aida_home: Path):
+    path = save_app_config(AppConfig(), aida_home)
+    with pytest.raises(ConfigConflictError) as excinfo:
+        save_app_config(AppConfig(), aida_home, expected_mtime=-1.0)
+    assert excinfo.value.path == path
+
+
+def test_save_with_no_expected_mtime_never_conflicts(aida_home: Path):
+    """Default behavior (CLI call sites, which don't opt into conflict
+    detection) is unchanged: no expected_mtime means no check."""
+    save_app_config(AppConfig(log_level="DEBUG"), aida_home)
+    save_app_config(AppConfig(log_level="INFO"), aida_home)  # no expected_mtime -> always succeeds
+    assert load_app_config(aida_home).log_level == "INFO"
+
+
+def test_config_mtime_none_for_missing_file(tmp_path: Path):
+    assert config_mtime(tmp_path / "does-not-exist.yaml") is None
 
 
 def test_app_config_allowed_folders_roundtrip(aida_home: Path):
@@ -888,6 +933,72 @@ def test_schedules_config_roundtrip(aida_home: Path):
     assert entry.preapproved_tools == ["pyirena__reduce_scan"]
     assert entry.yes_in_allowed is True
     assert entry.enabled is True
+
+
+def test_schedule_entry_reuse_chat_roundtrip(aida_home: Path):
+    from aida.config.settings import (
+        ScheduleEntry,
+        SchedulesConfig,
+        load_schedules_config,
+        save_schedules_config,
+    )
+
+    cfg = SchedulesConfig(
+        schedules={
+            "hourly-check": ScheduleEntry(
+                name="hourly-check",
+                workflow="w",
+                every="1h",
+                reuse_chat=True,
+                reuse_rollover_hours=24.0,
+            )
+        }
+    )
+    save_schedules_config(cfg, aida_home)
+    loaded = load_schedules_config(aida_home)
+
+    entry = loaded.schedules["hourly-check"]
+    assert entry.reuse_chat is True
+    assert entry.reuse_rollover_hours == 24.0
+
+
+def test_schedule_entry_reuse_chat_forever_has_no_rollover(aida_home: Path):
+    from aida.config.settings import (
+        ScheduleEntry,
+        SchedulesConfig,
+        load_schedules_config,
+        save_schedules_config,
+    )
+
+    cfg = SchedulesConfig(
+        schedules={
+            "forever": ScheduleEntry(name="forever", workflow="w", every="1h", reuse_chat=True)
+        }
+    )
+    save_schedules_config(cfg, aida_home)
+    loaded = load_schedules_config(aida_home)
+
+    entry = loaded.schedules["forever"]
+    assert entry.reuse_chat is True
+    assert entry.reuse_rollover_hours is None
+
+
+def test_schedule_entry_reuse_chat_defaults_false_for_old_files(aida_home: Path):
+    """An old ``schedules.yaml`` written before ``reuse_chat`` existed must
+    still load — old configs always load (PLAN.md §10.3 / this module's own
+    docstring)."""
+    from aida.config.settings import load_schedules_config
+
+    path = aida_home / "schedules.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "config_version: 1\nschedules:\n  nightly:\n    workflow: daily\n    at: '07:00'\n",
+        encoding="utf-8",
+    )
+    loaded = load_schedules_config(aida_home)
+    entry = loaded.schedules["nightly"]
+    assert entry.reuse_chat is False
+    assert entry.reuse_rollover_hours is None
 
 
 def test_schedules_config_defaults_when_file_missing(aida_home: Path):

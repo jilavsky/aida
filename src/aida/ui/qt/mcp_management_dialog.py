@@ -35,9 +35,16 @@ import contextlib
 import json
 from pathlib import Path
 
-from aida.config.paths import install_bundled_skills
+from aida.config.paths import install_bundled_skills, mcp_config_path
 from aida.config.secrets import set_secret
-from aida.config.settings import McpConfig, McpServerConfig, Settings, save_mcp_config
+from aida.config.settings import (
+    McpConfig,
+    McpServerConfig,
+    Settings,
+    config_mtime,
+    load_mcp_config,
+    save_mcp_config,
+)
 from aida.core.context import list_skills
 from aida.mcp.config_io import merge_mcp_config
 from aida.mcp.groups import add_group, delete_group, known_group_names, rename_group, resolve_group
@@ -74,6 +81,7 @@ from aida.ui.qt._qt import (
     QVBoxLayout,
     QWidget,
 )
+from aida.ui.qt.config_conflict import save_or_warn_conflict
 from aida.ui.qt.profiles_dialog import _OptionalNumberRow
 
 #: The two transports ``McpServerHandle`` knows how to speak — see
@@ -630,6 +638,7 @@ class GroupsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("MCP Groups")
         self._mcp_config = mcp_config
+        self._mcp_mtime = config_mtime(mcp_config_path())
         self._on_changed = on_changed
         self._bridge = bridge
 
@@ -654,6 +663,24 @@ class GroupsDialog(QDialog):
         close_row.rejected.connect(self.accept)
         close_row.accepted.connect(self.accept)
         layout.addWidget(close_row)
+
+    def _save_mcp_config(self) -> bool:
+        """Saves ``self._mcp_config``, warning (rather than silently
+        overwriting) if another AIDA window changed ``mcp.json`` since this
+        dialog opened. On conflict, the pending in-memory edit is discarded
+        and replaced with what's actually on disk (simpler and more
+        reliable than hand-inverting the mutation just made). Returns
+        whether the save actually happened; ``_refresh()`` is always safe to
+        call afterward since ``self._mcp_config`` is valid either way."""
+        result = save_or_warn_conflict(
+            self, lambda: save_mcp_config(self._mcp_config, expected_mtime=self._mcp_mtime)
+        )
+        if result is None:
+            self._mcp_config = load_mcp_config()
+            self._mcp_mtime = config_mtime(mcp_config_path())
+            return False
+        self._mcp_mtime = config_mtime(mcp_config_path())
+        return True
 
     def _refresh(self) -> None:
         self._list.clear()
@@ -705,9 +732,10 @@ class GroupsDialog(QDialog):
             if answer != QMessageBox.StandardButton.Yes:
                 return
         add_group(self._mcp_config, name, dialog.selected_servers())
-        save_mcp_config(self._mcp_config)
+        saved = self._save_mcp_config()
         self._refresh()
-        self._on_changed()
+        if saved:
+            self._on_changed()
 
     def _on_rename(self) -> None:
         old = self._selected_group_name()
@@ -717,9 +745,10 @@ class GroupsDialog(QDialog):
         if not ok or not new.strip():
             return
         rename_group(self._mcp_config, old, new.strip())
-        save_mcp_config(self._mcp_config)
+        saved = self._save_mcp_config()
         self._refresh()
-        self._on_changed()
+        if saved:
+            self._on_changed()
 
     def _on_delete(self) -> None:
         name = self._selected_group_name()
@@ -735,9 +764,10 @@ class GroupsDialog(QDialog):
         if answer != QMessageBox.StandardButton.Yes:
             return
         delete_group(self._mcp_config, name)
-        save_mcp_config(self._mcp_config)
+        saved = self._save_mcp_config()
         self._refresh()
-        self._on_changed()
+        if saved:
+            self._on_changed()
 
 
 # --- Skills browser ------------------------------------------------------
@@ -975,6 +1005,7 @@ class McpManagementDialog(QDialog):
         self.setWindowTitle("MCP Servers")
         self.resize(760, 520)
         self._settings = settings
+        self._mcp_mtime = config_mtime(mcp_config_path())
         self._bridge = bridge
         self._skills_dir = skills_dir
         self._tool_rows: list[_ToolPermissionRow] = []
@@ -1091,6 +1122,25 @@ class McpManagementDialog(QDialog):
         super().done(result)
 
     # --- rendering -----------------------------------------------------------
+
+    def _save_mcp_config(self) -> bool:
+        """Saves ``self._settings.mcp``, warning (rather than silently
+        overwriting) if another AIDA window changed ``mcp.json`` since this
+        dialog opened. On conflict, the pending in-memory edit is discarded
+        and ``self._settings.mcp`` is replaced with what's actually on disk
+        — reloading is simpler and more reliable than hand-inverting
+        whatever mutation each caller just made. Returns whether the save
+        actually happened; callers should refresh their list/detail views
+        either way, since a conflict changes what's showing."""
+        result = save_or_warn_conflict(
+            self, lambda: save_mcp_config(self._settings.mcp, expected_mtime=self._mcp_mtime)
+        )
+        if result is None:
+            self._settings.mcp = load_mcp_config()
+            self._mcp_mtime = config_mtime(mcp_config_path())
+            return False
+        self._mcp_mtime = config_mtime(mcp_config_path())
+        return True
 
     def _configs(self) -> dict[str, McpServerConfig]:
         return self._settings.mcp.servers
@@ -1250,8 +1300,8 @@ class McpManagementDialog(QDialog):
             )
             return
         self._settings.mcp.servers[config.name] = config
-        save_mcp_config(self._settings.mcp)
-        if self._bridge is not None:
+        saved = self._save_mcp_config()
+        if saved and self._bridge is not None:
             self._bridge.register_mcp_server(config)
         self._refresh_server_list()
 
@@ -1337,11 +1387,13 @@ class McpManagementDialog(QDialog):
             return
 
         self._settings.mcp.servers[config.name] = config
-        save_mcp_config(self._settings.mcp)
+        saved = self._save_mcp_config()
+        self._refresh_server_list()
+        if not saved:
+            return
         installed = install_bundled_skills(config.skills)
         if self._bridge is not None:
             self._bridge.register_mcp_server(config)
-        self._refresh_server_list()
 
         note = (
             f"\n\nInstalled the {', '.join(installed)} skill file(s) into your skills folder."
@@ -1387,8 +1439,8 @@ class McpManagementDialog(QDialog):
             return
         updated = dialog.result_config()
         self._settings.mcp.servers[name] = updated
-        save_mcp_config(self._settings.mcp)
-        if self._bridge is not None:
+        saved = self._save_mcp_config()
+        if saved and self._bridge is not None:
             self._bridge.register_mcp_server(updated)
         self._refresh_server_list()
 
@@ -1406,8 +1458,8 @@ class McpManagementDialog(QDialog):
         if answer != QMessageBox.StandardButton.Yes:
             return
         del self._settings.mcp.servers[name]
-        save_mcp_config(self._settings.mcp)
-        if self._bridge is not None:
+        saved = self._save_mcp_config()
+        if saved and self._bridge is not None:
             self._bridge.unregister_mcp_server(name)
         self._refresh_server_list()
 
@@ -1482,8 +1534,8 @@ class McpManagementDialog(QDialog):
             extra=server.extra,
         )
         self._settings.mcp.servers[name] = updated
-        save_mcp_config(self._settings.mcp)
-        if self._bridge is not None:
+        saved = self._save_mcp_config()
+        if saved and self._bridge is not None:
             self._bridge.register_mcp_server(updated)
             # Disabled/confirm-flagged tools are only applied when a
             # server's tools are (re)built (McpManager._tools_for, at
@@ -1526,13 +1578,15 @@ class McpManagementDialog(QDialog):
                 result = merge_mcp_config(self._settings.mcp, raw, overwrite=overwrite)
 
         self._settings.mcp = result.config
-        save_mcp_config(self._settings.mcp)
-        QMessageBox.information(
-            self,
-            "Import Complete",
-            f"Added: {', '.join(result.added) or '(none)'}\nOverwritten: {', '.join(result.overwritten) or '(none)'}",
-        )
+        saved = self._save_mcp_config()
         self._refresh_server_list()
+        if saved:
+            QMessageBox.information(
+                self,
+                "Import Complete",
+                f"Added: {', '.join(result.added) or '(none)'}\n"
+                f"Overwritten: {', '.join(result.overwritten) or '(none)'}",
+            )
 
     def _on_groups(self) -> None:
         dialog = GroupsDialog(

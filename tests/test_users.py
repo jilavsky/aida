@@ -206,6 +206,11 @@ def test_migration_4_adds_the_user_column_to_an_existing_v3_database(tmp_path: P
             id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, call_id TEXT,
             kind TEXT NOT NULL, path TEXT, mime_type TEXT, created_at TEXT NOT NULL, seq INTEGER
         );
+        CREATE TABLE schedule_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, schedule_name TEXT NOT NULL,
+            fired_at TEXT NOT NULL, status TEXT NOT NULL,
+            conversation_id TEXT REFERENCES conversations(id), error TEXT
+        );
         INSERT INTO conversations (id, title, created_at, updated_at)
         VALUES ('old1', 'From before users existed', '2026-01-01', '2026-01-01');
         PRAGMA user_version = 3;

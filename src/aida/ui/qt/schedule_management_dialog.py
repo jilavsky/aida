@@ -18,10 +18,13 @@ from __future__ import annotations
 
 import contextlib
 
+from aida.config.paths import schedules_path
 from aida.config.settings import (
     ScheduleEntry,
     Settings,
+    config_mtime,
     list_workflow_names,
+    load_schedules_config,
     save_schedules_config,
 )
 from aida.core.scheduling import ScheduleConfigError, parse_schedule_timing
@@ -32,6 +35,7 @@ from aida.ui.qt._qt import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -46,6 +50,7 @@ from aida.ui.qt._qt import (
     QVBoxLayout,
     QWidget,
 )
+from aida.ui.qt.config_conflict import save_or_warn_conflict
 
 #: Deliberately a QComboBox choice, not a pair of QRadioButtons — every
 #: other Qt widget type this dialog needs is already re-exported from
@@ -53,6 +58,17 @@ from aida.ui.qt._qt import (
 #: the first new entry in that shim just for this one field.
 AT_LABEL = "At a daily time"
 EVERY_LABEL = "Every interval"
+
+#: The GUI presents chat reuse as one choice rather than exposing
+#: ``ScheduleEntry.reuse_chat``/``reuse_rollover_hours`` directly — mapping:
+#: Off -> reuse_chat=False; Forever -> reuse_chat=True, rollover=None;
+#: Daily -> reuse_chat=True, rollover=24.0; Custom -> reuse_chat=True,
+#: rollover=<spin box value>.
+REUSE_OFF_LABEL = "Off — new chat every run"
+REUSE_FOREVER_LABEL = "Reuse forever"
+REUSE_DAILY_LABEL = "Reuse for a day, then start fresh"
+REUSE_CUSTOM_LABEL = "Reuse for a custom number of hours"
+_DAILY_ROLLOVER_HOURS = 24.0
 
 
 def _last_run_summary(name: str) -> str:
@@ -67,6 +83,17 @@ def _last_run_summary(name: str) -> str:
     if last.error:
         detail += f" — {last.error}"
     return detail
+
+
+def _pinned_chat_summary(name: str) -> str:
+    store = ScheduleRunStore()
+    try:
+        pin = store.get_pin(name)
+    finally:
+        store.close()
+    if pin is None:
+        return "(none yet)"
+    return f"{pin.conversation_id} (pinned {pin.pinned_at})"
 
 
 # --- Add/Edit schedule sub-dialog --------------------------------------------
@@ -138,6 +165,30 @@ class ScheduleFormDialog(QDialog):
         self._preapproved_edit.setMaximumHeight(60)
         form.addRow("Preapproved tools:", self._preapproved_edit)
 
+        self._reuse_combo = QComboBox(self)
+        self._reuse_combo.addItems(
+            [REUSE_OFF_LABEL, REUSE_FOREVER_LABEL, REUSE_DAILY_LABEL, REUSE_CUSTOM_LABEL]
+        )
+        self._reuse_hours_spin = QDoubleSpinBox(self)
+        self._reuse_hours_spin.setRange(1.0, 24.0 * 365)
+        self._reuse_hours_spin.setSuffix(" h")
+        self._reuse_hours_spin.setValue(_DAILY_ROLLOVER_HOURS)
+        reuse_chat = entry.reuse_chat if entry else False
+        rollover = entry.reuse_rollover_hours if entry else None
+        if not reuse_chat:
+            self._reuse_combo.setCurrentText(REUSE_OFF_LABEL)
+        elif rollover is None:
+            self._reuse_combo.setCurrentText(REUSE_FOREVER_LABEL)
+        elif rollover == _DAILY_ROLLOVER_HOURS:
+            self._reuse_combo.setCurrentText(REUSE_DAILY_LABEL)
+        else:
+            self._reuse_combo.setCurrentText(REUSE_CUSTOM_LABEL)
+            self._reuse_hours_spin.setValue(rollover)
+        self._reuse_combo.currentTextChanged.connect(self._on_reuse_kind_changed)
+        self._on_reuse_kind_changed(self._reuse_combo.currentText())
+        form.addRow("Chat reuse:", self._reuse_combo)
+        form.addRow("Rollover after:", self._reuse_hours_spin)
+
         self._yes_in_allowed_checkbox = QCheckBox(
             "Auto-approve writes/deletes inside the workflow's own allowed folders", self
         )
@@ -159,6 +210,19 @@ class ScheduleFormDialog(QDialog):
 
     def _on_timing_kind_changed(self, label: str) -> None:
         self._timing_value_edit.setPlaceholderText("07:00" if label == AT_LABEL else "4h")
+
+    def _on_reuse_kind_changed(self, label: str) -> None:
+        self._reuse_hours_spin.setVisible(label == REUSE_CUSTOM_LABEL)
+
+    def _reuse_kwargs(self) -> tuple[bool, float | None]:
+        label = self._reuse_combo.currentText()
+        if label == REUSE_OFF_LABEL:
+            return False, None
+        if label == REUSE_FOREVER_LABEL:
+            return True, None
+        if label == REUSE_DAILY_LABEL:
+            return True, _DAILY_ROLLOVER_HOURS
+        return True, self._reuse_hours_spin.value()
 
     def _timing_kwargs(self) -> tuple[str | None, str | None]:
         value = self._timing_value_edit.text().strip() or None
@@ -193,6 +257,7 @@ class ScheduleFormDialog(QDialog):
 
     def result_entry(self) -> ScheduleEntry:
         at, every = self._timing_kwargs()
+        reuse_chat, reuse_rollover_hours = self._reuse_kwargs()
         return ScheduleEntry(
             name=self._name_edit.text().strip(),
             workflow=self._workflow_combo.currentText().strip(),
@@ -206,6 +271,8 @@ class ScheduleFormDialog(QDialog):
             ],
             yes_in_allowed=self._yes_in_allowed_checkbox.isChecked(),
             enabled=self._enabled_checkbox.isChecked(),
+            reuse_chat=reuse_chat,
+            reuse_rollover_hours=reuse_rollover_hours,
         )
 
 
@@ -218,6 +285,7 @@ class ScheduleManagementDialog(QDialog):
         self.setWindowTitle("Schedules")
         self.resize(680, 460)
         self._settings = settings
+        self._schedules_mtime = config_mtime(schedules_path())
         self._scheduler_bridge = scheduler_bridge
         #: Names with a run currently in flight (started, not yet
         #: finished) — purely a display nicety so "Run Now" gives visible
@@ -240,6 +308,7 @@ class ScheduleManagementDialog(QDialog):
             ("Disable", self._on_disable),
             ("Remove…", self._on_remove),
             ("Run Now", self._on_run_now),
+            ("Forget Pinned Chat", self._on_forget_pin),
         ]:
             button = QPushButton(label, self)
             button.clicked.connect(handler)
@@ -282,6 +351,26 @@ class ScheduleManagementDialog(QDialog):
     def _configs(self) -> dict[str, ScheduleEntry]:
         return self._settings.schedules.schedules
 
+    def _save_schedules_config(self) -> bool:
+        """Saves ``self._settings.schedules``, warning (rather than
+        silently overwriting) if another AIDA window changed
+        ``schedules.yaml`` since this dialog opened. On conflict, the
+        pending in-memory edit is discarded and replaced with what's
+        actually on disk. Returns whether the save actually happened;
+        ``_refresh_schedule_list()`` is always safe to call afterward."""
+        result = save_or_warn_conflict(
+            self,
+            lambda: save_schedules_config(
+                self._settings.schedules, expected_mtime=self._schedules_mtime
+            ),
+        )
+        if result is None:
+            self._settings.schedules = load_schedules_config()
+            self._schedules_mtime = config_mtime(schedules_path())
+            return False
+        self._schedules_mtime = config_mtime(schedules_path())
+        return True
+
     def _selected_name(self) -> str | None:
         item = self._schedule_list.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
@@ -310,6 +399,12 @@ class ScheduleManagementDialog(QDialog):
         if entry is None:
             self._details_label.setText("(no schedule selected)")
             return
+        if not entry.reuse_chat:
+            reuse_summary = "off — new chat every run"
+        elif entry.reuse_rollover_hours is None:
+            reuse_summary = "on — reused forever"
+        else:
+            reuse_summary = f"on — reused for {entry.reuse_rollover_hours:g}h, then a fresh chat"
         lines = [
             f"name: {entry.name}",
             f"workflow: {entry.workflow}",
@@ -320,6 +415,8 @@ class ScheduleManagementDialog(QDialog):
             f"vars: {entry.vars or '(none)'}",
             f"preapproved_tools: {', '.join(entry.preapproved_tools) or '(none)'}",
             f"yes_in_allowed: {entry.yes_in_allowed}",
+            f"chat reuse: {reuse_summary}",
+            f"pinned chat: {_pinned_chat_summary(name)}",
             "",
             f"status: {'running now' if name in self._running_names else _last_run_summary(name)}",
         ]
@@ -338,7 +435,7 @@ class ScheduleManagementDialog(QDialog):
             )
             return
         self._configs()[entry.name] = entry
-        save_schedules_config(self._settings.schedules)
+        self._save_schedules_config()
         self._refresh_schedule_list()
 
     def _on_edit(self) -> None:
@@ -351,7 +448,7 @@ class ScheduleManagementDialog(QDialog):
             return
         updated = dialog.result_entry()
         self._configs()[updated.name] = updated
-        save_schedules_config(self._settings.schedules)
+        self._save_schedules_config()
         self._refresh_schedule_list()
 
     def _set_enabled(self, *, enabled: bool) -> None:
@@ -360,7 +457,7 @@ class ScheduleManagementDialog(QDialog):
         if entry is None:
             return
         entry.enabled = enabled
-        save_schedules_config(self._settings.schedules)
+        self._save_schedules_config()
         self._refresh_schedule_list()
 
     def _on_enable(self) -> None:
@@ -383,8 +480,23 @@ class ScheduleManagementDialog(QDialog):
         if answer != QMessageBox.StandardButton.Yes:
             return
         del self._configs()[name]
-        save_schedules_config(self._settings.schedules)
+        self._save_schedules_config()
         self._refresh_schedule_list()
+
+    def _on_forget_pin(self) -> None:
+        """Clears the selected schedule's pinned chat (if any), so its next
+        fire starts a brand-new conversation instead of resuming the old
+        one — a manual escape hatch, e.g. after a long-running reused chat
+        has grown large, without waiting for ``reuse_rollover_hours``."""
+        name = self._selected_name()
+        if not name:
+            return
+        store = ScheduleRunStore()
+        try:
+            store.clear_pin(name)
+        finally:
+            store.close()
+        self._refresh_detail()
 
     # --- run now (SchedulerBridge) -------------------------------------------
 

@@ -23,13 +23,20 @@ from pathlib import Path
 from aida import __version__ as AIDA_VERSION
 from aida.coding.runner import DEFAULT_RUN_TIMEOUT_SECONDS
 from aida.config.logging_setup import configure_logging, get_logger
-from aida.config.paths import config_dir, ensure_records_dir, ensure_scratch_dir, skills_dir
+from aida.config.paths import (
+    app_config_path,
+    config_dir,
+    ensure_records_dir,
+    ensure_scratch_dir,
+    skills_dir,
+)
 from aida.config.secrets import set_secret
 from aida.config.settings import (
     QuickTask,
     Settings,
     WorkflowConfig,
     WorkflowStep,
+    config_mtime,
     list_workflow_names,
     load_settings,
     save_app_config,
@@ -68,6 +75,7 @@ from aida.ui.qt.bridge import AsyncLoopThread, ChatBridge
 from aida.ui.qt.chat_panel import ChatPanel
 from aida.ui.qt.code_editor_dialog import CodeEditorDialog
 from aida.ui.qt.collapsible import CollapsibleSection
+from aida.ui.qt.config_conflict import save_or_warn_conflict
 from aida.ui.qt.conversations_sidebar import ConversationsSidebar
 from aida.ui.qt.icon import app_icon
 from aida.ui.qt.input_box import InputBox
@@ -2403,6 +2411,17 @@ class MainWindow(QMainWindow):
         save_app_config(self.settings.app)
 
     def open_settings_dialog(self) -> None:
+        # Captured at dialog-open, not at save: this is the one
+        # `save_app_config` call site in this class that follows a user
+        # sitting in a modal dialog for a while (every other call here is
+        # automatic background bookkeeping — last workspace, splitter
+        # sizes, panel collapse state — saved continuously as a matter of
+        # course, where a conflict warning would be constant, meaningless
+        # noise for the two-instances-on-purpose workflow this file
+        # otherwise leaves unguarded on purpose). Only this one save is
+        # worth telling the user about if another AIDA window changed
+        # config.yaml in the meantime.
+        app_mtime = config_mtime(app_config_path())
         dialog = SettingsDialog(self.settings.app, self.settings.providers.profiles, self)
         if not dialog.exec():
             return
@@ -2448,7 +2467,17 @@ class MainWindow(QMainWindow):
         self.scheduler_bridge.activity.quiet_period_seconds = (
             self.settings.app.scheduler_quiet_period_seconds
         )
-        save_app_config(self.settings.app)
+        # Not reloaded-on-conflict the way the MCP/Schedule dialogs are:
+        # every change above already took effect live in this running
+        # session regardless of whether the disk write below succeeds, so
+        # replacing self.settings.app with whatever's on disk would revert
+        # the visible UI out from under settings the user can see just
+        # changed. A conflict here just means this particular save didn't
+        # reach disk — the warning says so; the user's edits still apply
+        # for the rest of this session.
+        save_or_warn_conflict(
+            self, lambda: save_app_config(self.settings.app, expected_mtime=app_mtime)
+        )
 
     # --- shutdown ----------------------------------------------------------
 

@@ -207,6 +207,119 @@ def test_migrating_from_v2_adds_origin_column_and_schedule_runs_table(tmp_path: 
     conn.close()
 
 
+def test_connect_creates_schedule_pins_table(tmp_path: Path):
+    conn = connect(tmp_path / "aida.db")
+    tables = {
+        row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    assert "schedule_pins" in tables
+    conn.close()
+
+
+def test_migrating_from_v5_adds_schedule_pins_table(tmp_path: Path):
+    """Same "build a genuine old-version DB by hand" pattern as the earlier
+    migration tests — proving the v5->v6 step is additive and an existing
+    conversation row is untouched (schedule_pins references it by id, but
+    creating no rows there doesn't touch conversations at all)."""
+    path = tmp_path / "aida.db"
+    raw = sqlite3.connect(path)
+    for version in range(1, 6):
+        raw.executescript(_MIGRATIONS[version])
+    raw.execute("PRAGMA user_version = 5")
+    raw.execute(
+        "INSERT INTO conversations (id, created_at, updated_at) VALUES (?, ?, ?)",
+        ("c1", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+    )
+    raw.commit()
+    raw.close()
+
+    conn = connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+    row = conn.execute("SELECT * FROM conversations WHERE id = 'c1'").fetchone()
+    assert row["id"] == "c1"  # pre-migration row survived
+    conn.execute(
+        "INSERT INTO schedule_pins (schedule_name, conversation_id, pinned_at) VALUES (?, ?, ?)",
+        ("hourly-check", "c1", "2026-01-01T00:00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_migrating_from_v6_recreates_schedule_runs_with_on_delete_set_null(tmp_path: Path):
+    """v3 shipped ``schedule_runs.conversation_id`` with no ``ON DELETE``
+    clause, which meant deleting *any* conversation a schedule had ever run
+    against raised a bare ``IntegrityError`` — this is the migration that
+    fixes existing (already-shipped, schema v5+) databases in place, and
+    must preserve every existing row while doing the rename/recreate/copy."""
+    path = tmp_path / "aida.db"
+    raw = sqlite3.connect(path)
+    for version in range(1, 7):
+        raw.executescript(_MIGRATIONS[version])
+    raw.execute("PRAGMA user_version = 6")
+    raw.execute(
+        "INSERT INTO conversations (id, created_at, updated_at) VALUES (?, ?, ?)",
+        ("c1", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+    )
+    raw.execute(
+        "INSERT INTO schedule_runs (schedule_name, fired_at, status, conversation_id) "
+        "VALUES (?, ?, ?, ?)",
+        ("nightly", "2026-01-01T00:00:00", "ok", "c1"),
+    )
+    raw.commit()
+    raw.close()
+
+    conn = connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+    row = conn.execute("SELECT * FROM schedule_runs WHERE schedule_name = 'nightly'").fetchone()
+    assert row["conversation_id"] == "c1"  # pre-migration row survived, unchanged
+
+    conn.execute("DELETE FROM conversations WHERE id = 'c1'")  # must not raise post-fix
+    conn.commit()
+    row = conn.execute("SELECT * FROM schedule_runs WHERE schedule_name = 'nightly'").fetchone()
+    assert row["conversation_id"] is None  # SET NULL, run history row itself survives
+    conn.close()
+
+
+def test_deleting_a_conversation_referenced_by_schedule_runs_nulls_the_reference(tmp_path: Path):
+    conn = connect(tmp_path / "aida.db")
+    conn.execute(
+        "INSERT INTO conversations (id, created_at, updated_at) VALUES (?, ?, ?)",
+        ("c1", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+    )
+    conn.execute(
+        "INSERT INTO schedule_runs (schedule_name, fired_at, status, conversation_id) "
+        "VALUES (?, ?, ?, ?)",
+        ("nightly", "2026-01-01T00:00:00", "ok", "c1"),
+    )
+    conn.commit()
+
+    conn.execute("DELETE FROM conversations WHERE id = 'c1'")  # used to raise IntegrityError
+    conn.commit()
+
+    row = conn.execute("SELECT * FROM schedule_runs WHERE schedule_name = 'nightly'").fetchone()
+    assert row["conversation_id"] is None
+    conn.close()
+
+
+def test_deleting_a_conversation_removes_its_schedule_pin(tmp_path: Path):
+    conn = connect(tmp_path / "aida.db")
+    conn.execute(
+        "INSERT INTO conversations (id, created_at, updated_at) VALUES (?, ?, ?)",
+        ("c1", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+    )
+    conn.execute(
+        "INSERT INTO schedule_pins (schedule_name, conversation_id, pinned_at) VALUES (?, ?, ?)",
+        ("hourly-check", "c1", "2026-01-01T00:00:00"),
+    )
+    conn.commit()
+
+    conn.execute("DELETE FROM conversations WHERE id = 'c1'")  # cascades
+    conn.commit()
+
+    assert conn.execute("SELECT * FROM schedule_pins").fetchone() is None
+    conn.close()
+
+
 def test_foreign_keys_enforced(tmp_path: Path):
     conn = connect(tmp_path / "aida.db")
     try:

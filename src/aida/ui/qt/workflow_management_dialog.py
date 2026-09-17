@@ -24,10 +24,12 @@ disk, even though a ``WorkflowConfig`` object already describes it.
 
 from __future__ import annotations
 
+from aida.config.paths import workflows_dir
 from aida.config.settings import (
     Settings,
     WorkflowConfig,
     WorkflowStep,
+    config_mtime,
     delete_workflow,
     list_workflow_names,
     load_workflow,
@@ -53,6 +55,7 @@ from aida.ui.qt._qt import (
     QVBoxLayout,
     QWidget,
 )
+from aida.ui.qt.config_conflict import save_or_warn_conflict
 
 NO_PROFILE_LABEL = "(workspace default)"
 NO_MCP_GROUP_LABEL = "(workspace default)"
@@ -445,10 +448,18 @@ class WorkflowManagementDialog(QDialog):
             workflow = load_workflow(name)
         except FileNotFoundError:
             return
+        # Captured right after the load this form is seeded from — each
+        # workflow is its own file (unlike mcp.json/schedules.yaml, there's
+        # no single shared file this whole dialog holds open), so the
+        # conflict window is just "since this one workflow was loaded for
+        # editing."
+        workflow_mtime = config_mtime(workflows_dir() / f"{name}.yaml")
         dialog = WorkflowFormDialog(settings=self._settings, workflow=workflow, parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        save_workflow(dialog.result_config())
+        save_or_warn_conflict(
+            self, lambda: save_workflow(dialog.result_config(), expected_mtime=workflow_mtime)
+        )
         self._refresh_workflow_list()
 
     def _on_remove(self) -> None:

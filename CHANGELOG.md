@@ -17,6 +17,38 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Added
+
+- **Schedules can reuse one chat across every fire** (`ScheduleEntry.reuse_chat`
+  / `reuse_rollover_hours`, GUI "Chat reuse" combo in the Schedules dialog,
+  `aida schedule add --reuse-chat --rollover-hours`). Previously every
+  scheduled run started a brand-new conversation, so an hourly
+  check-and-plot schedule flooded the sidebar with near-identical chats
+  overnight. Opting in pins the schedule to one conversation (optionally
+  retired and replaced after a configurable number of hours); a pinned
+  conversation deleted from the sidebar is detected and the schedule falls
+  back to a fresh chat rather than failing. Which conversation is pinned is
+  machine-written state (`schedule_pins` table), never written into the
+  user-edited `schedules.yaml`.
+
+### Fixed
+
+- **Concurrent writes to `~/.aida`'s config files** (`mcp.json`,
+  `schedules.yaml`, `config.yaml`, `providers.yaml`, `workspaces.yaml`,
+  `knowledge.yaml`) are now guarded: a save takes a short cross-process
+  lock and detects whether the file changed since it was loaded, raising a
+  clear conflict instead of silently overwriting another AIDA instance's
+  edit. Running two AIDA instances at once (e.g. one for instrument
+  control, one for analysis) is an intentional, supported setup with no
+  single-instance lock — this closes the one real gap in it (`PLAN.md`
+  §2.1) without restricting it.
+- **Deleting a conversation that a schedule had ever run against** raised a
+  bare `sqlite3.IntegrityError` (`schedule_runs.conversation_id` had no
+  `ON DELETE` clause) — found while testing the reuse-chat fallback above.
+  Deleting such a conversation now succeeds; its run-history rows survive
+  with the reference cleared, and a `schedule_pins` row is removed outright
+  since a pin is meaningless without its conversation.
+
 ## [0.1.0] - 2026-09-16
 
 First non-beta release. No design or format changes over 0.1.0b7 — this

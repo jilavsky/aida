@@ -463,3 +463,174 @@ async def test_fire_schedule_now_is_refused_while_the_lock_is_held(
 
     assert finished[0][1] is False
     assert "already in progress" in finished[0][3]
+
+
+# --- reuse_chat (pin one conversation across fires) ------------------------
+
+
+@pytest.mark.asyncio
+async def test_reuse_chat_off_creates_a_new_conversation_each_fire(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="done")] * 2),
+    )
+    _workflow()
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")})
+    )
+    now = datetime(2026, 9, 2, 10, 0)
+
+    finished = []
+    await run_due_schedules(settings, now=now, on_run_finished=lambda *a: finished.append(a))
+    await run_due_schedules(
+        settings, now=now + timedelta(hours=1), on_run_finished=lambda *a: finished.append(a)
+    )
+
+    assert finished[0][2] != finished[1][2]  # two different conversation_ids
+
+    store = ScheduleRunStore()
+    pin = store.get_pin("s")
+    store.close()
+    assert pin is None  # reuse_chat off -> nothing ever pinned
+
+
+@pytest.mark.asyncio
+async def test_reuse_chat_on_resumes_the_same_conversation(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="done")] * 2),
+    )
+    _workflow()
+    settings = _settings(
+        SchedulesConfig(
+            schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h", reuse_chat=True)}
+        )
+    )
+    now = datetime(2026, 9, 2, 10, 0)
+
+    finished = []
+    await run_due_schedules(settings, now=now, on_run_finished=lambda *a: finished.append(a))
+    await run_due_schedules(
+        settings, now=now + timedelta(hours=1), on_run_finished=lambda *a: finished.append(a)
+    )
+
+    assert finished[0][2] == finished[1][2]  # same conversation_id both times
+
+    store = ScheduleRunStore()
+    pin = store.get_pin("s")
+    store.close()
+    assert pin.conversation_id == finished[1][2]
+
+
+@pytest.mark.asyncio
+async def test_reuse_chat_rolls_over_to_a_fresh_conversation_after_the_window(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="done")] * 2),
+    )
+    _workflow()
+    settings = _settings(
+        SchedulesConfig(
+            schedules={
+                "s": ScheduleEntry(
+                    name="s",
+                    workflow="daily",
+                    every="1h",
+                    reuse_chat=True,
+                    reuse_rollover_hours=1.0,
+                )
+            }
+        )
+    )
+    now = datetime(2026, 9, 2, 10, 0)
+
+    finished = []
+    await run_due_schedules(settings, now=now, on_run_finished=lambda *a: finished.append(a))
+    # Due again 2h later — past the 1h rollover window, so the pin expires.
+    await run_due_schedules(
+        settings, now=now + timedelta(hours=2), on_run_finished=lambda *a: finished.append(a)
+    )
+
+    assert finished[0][2] != finished[1][2]
+
+
+@pytest.mark.asyncio
+async def test_reuse_chat_within_rollover_window_still_resumes(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="done")] * 2),
+    )
+    _workflow()
+    settings = _settings(
+        SchedulesConfig(
+            schedules={
+                "s": ScheduleEntry(
+                    name="s",
+                    workflow="daily",
+                    every="1h",
+                    reuse_chat=True,
+                    reuse_rollover_hours=24.0,
+                )
+            }
+        )
+    )
+    now = datetime(2026, 9, 2, 10, 0)
+
+    finished = []
+    await run_due_schedules(settings, now=now, on_run_finished=lambda *a: finished.append(a))
+    await run_due_schedules(
+        settings, now=now + timedelta(hours=1), on_run_finished=lambda *a: finished.append(a)
+    )
+
+    assert finished[0][2] == finished[1][2]  # still well within the 24h window
+
+
+@pytest.mark.asyncio
+async def test_reuse_chat_falls_back_to_a_fresh_conversation_if_the_pin_is_stale(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """If the pinned conversation was deleted (e.g. from the sidebar), the
+    next fire must not lose the whole run — it clears the stale pin and
+    starts a fresh conversation instead of raising."""
+    from aida.persistence.store import ConversationStore
+
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="done")] * 2),
+    )
+    _workflow()
+    settings = _settings(
+        SchedulesConfig(
+            schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h", reuse_chat=True)}
+        )
+    )
+    now = datetime(2026, 9, 2, 10, 0)
+
+    finished = []
+    await run_due_schedules(settings, now=now, on_run_finished=lambda *a: finished.append(a))
+    first_conversation_id = finished[0][2]
+
+    conv_store = ConversationStore()
+    conv_store.delete_conversation(first_conversation_id)
+    conv_store.close()
+
+    await run_due_schedules(
+        settings, now=now + timedelta(hours=1), on_run_finished=lambda *a: finished.append(a)
+    )
+
+    assert finished[1][1] is True  # ok — recovered rather than erroring
+    assert finished[1][2] is not None
+    assert finished[1][2] != first_conversation_id
+
+    store = ScheduleRunStore()
+    pin = store.get_pin("s")
+    store.close()
+    assert pin.conversation_id == finished[1][2]  # re-pinned to the fresh conversation

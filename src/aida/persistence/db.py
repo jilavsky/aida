@@ -29,7 +29,7 @@ from pathlib import Path
 
 from aida.config.paths import db_path
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 7
 
 # The Phase 5 GUI opens the first-ever connection to a fresh DB file from
 # two threads at once (MainWindow.__init__ starts a session on the
@@ -158,6 +158,57 @@ _MIGRATIONS: dict[int, str] = {
     5: """
     ALTER TABLE conversations ADD COLUMN attachments_path TEXT;
     ALTER TABLE conversations ADD COLUMN sidecar_path TEXT;
+    """,
+    # Which conversation a schedule with `reuse_chat: true` (schedules.yaml,
+    # aida.config.settings.ScheduleEntry) currently reuses, and since when —
+    # a single upsertable row per schedule, unlike the append-only
+    # `schedule_runs` log, since "the pinned conversation for X" needs a
+    # direct answer rather than "the most recent non-null conversation_id
+    # among X's runs" (fragile once failed/config_error runs interleave).
+    # Machine-written, like `schedule_runs` — never touches schedules.yaml.
+    #
+    # `ON DELETE CASCADE`: a pin is meaningless once its conversation is
+    # gone (the column is NOT NULL, so `SET NULL` isn't an option) —
+    # deleting the conversation from the sidebar should silently forget the
+    # pin, not leave a dangling row or block the delete outright.
+    6: """
+    CREATE TABLE IF NOT EXISTS schedule_pins (
+        schedule_name TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        pinned_at TEXT NOT NULL
+    );
+    """,
+    # `schedule_runs.conversation_id` (migration 3, already shipped in
+    # 0.1.0) had no `ON DELETE` clause, which meant deleting *any*
+    # conversation a schedule had ever run against — not just a reused one
+    # — raised a bare `sqlite3.IntegrityError` instead of actually deleting
+    # it, found while testing this migration's own `schedule_pins` sibling.
+    # `SET NULL` rather than `CASCADE` here: the column is nullable
+    # (config_error runs already record NULL) and the run history row
+    # itself is worth keeping — "Its run history is left in place" is
+    # already the promise `ScheduleManagementDialog._on_remove` makes when
+    # a *schedule* is deleted; a deleted *conversation* deserves the same
+    # treatment. SQLite has no `ALTER TABLE ... ALTER CONSTRAINT`, so
+    # changing an existing FK means rebuild-in-place: rename, recreate with
+    # the new clause, copy every row across unchanged, drop the old table.
+    7: """
+    ALTER TABLE schedule_runs RENAME TO schedule_runs_old;
+
+    CREATE TABLE schedule_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        schedule_name TEXT NOT NULL,
+        fired_at TEXT NOT NULL,
+        status TEXT NOT NULL,
+        conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+        error TEXT
+    );
+
+    INSERT INTO schedule_runs (id, schedule_name, fired_at, status, conversation_id, error)
+        SELECT id, schedule_name, fired_at, status, conversation_id, error FROM schedule_runs_old;
+
+    DROP TABLE schedule_runs_old;
+
+    CREATE INDEX IF NOT EXISTS idx_schedule_runs_name ON schedule_runs(schedule_name, fired_at);
     """,
 }
 

@@ -573,13 +573,26 @@ class ScheduleRun:
     error: str | None
 
 
+@dataclass
+class SchedulePin:
+    """One row of ``schedule_pins`` — which conversation a
+    ``reuse_chat: true`` schedule (``aida.config.settings.ScheduleEntry``)
+    is currently reusing, and since when. Same separation-of-concerns
+    reasoning as ``ScheduleRun``: this is machine-written run state, not
+    part of the user-edited ``schedules.yaml``."""
+
+    schedule_name: str
+    conversation_id: str
+    pinned_at: str
+
+
 class ScheduleRunStore:
-    """CRUD over the ``schedule_runs`` table. A separate small class rather
-    than more methods on ``ConversationStore``: it has nothing to do with
-    conversation content, just scheduler run history, but it shares the same
-    DB file/connection helper (``aida.persistence.db.connect``) since a
-    dedicated second SQLite file for a handful of rows would be
-    disproportionate."""
+    """CRUD over the ``schedule_runs`` and ``schedule_pins`` tables. A
+    separate small class rather than more methods on ``ConversationStore``:
+    it has nothing to do with conversation content, just scheduler run
+    history and reuse-chat state, but it shares the same DB file/connection
+    helper (``aida.persistence.db.connect``) since a dedicated second
+    SQLite file for a handful of rows would be disproportionate."""
 
     def __init__(self, db_path: Path | None = None) -> None:
         self._conn = connect(db_path)
@@ -633,6 +646,45 @@ class ScheduleRunStore:
             conversation_id=row["conversation_id"],
             error=row["error"],
         )
+
+    def get_pin(self, schedule_name: str) -> SchedulePin | None:
+        """The conversation currently pinned to ``schedule_name`` (a
+        ``reuse_chat: true`` schedule's target for its next fire), or
+        ``None`` if it has never fired with reuse on."""
+        row = self._conn.execute(
+            "SELECT * FROM schedule_pins WHERE schedule_name = ?", (schedule_name,)
+        ).fetchone()
+        return (
+            SchedulePin(
+                schedule_name=row["schedule_name"],
+                conversation_id=row["conversation_id"],
+                pinned_at=row["pinned_at"],
+            )
+            if row is not None
+            else None
+        )
+
+    def set_pin(self, schedule_name: str, conversation_id: str, pinned_at: str) -> None:
+        """Upsert: a schedule has at most one pinned conversation at a
+        time — a fresh pin (first fire, or rollover past
+        ``reuse_rollover_hours``) simply replaces whatever was pinned
+        before, it never accumulates rows the way ``schedule_runs`` does."""
+        self._conn.execute(
+            "INSERT INTO schedule_pins (schedule_name, conversation_id, pinned_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(schedule_name) DO UPDATE SET "
+            "conversation_id = excluded.conversation_id, pinned_at = excluded.pinned_at",
+            (schedule_name, conversation_id, pinned_at),
+        )
+        self._conn.commit()
+
+    def clear_pin(self, schedule_name: str) -> None:
+        """Forget the pinned conversation — the next fire starts fresh and
+        pins whatever conversation that run creates. Used when a schedule's
+        pinned conversation was deleted out from under it, and available to
+        the GUI as a manual "start a new chat next time" action."""
+        self._conn.execute("DELETE FROM schedule_pins WHERE schedule_name = ?", (schedule_name,))
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()

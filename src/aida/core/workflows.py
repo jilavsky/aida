@@ -187,12 +187,23 @@ async def run_workflow(
     confirm_callback: ConfirmCallback,
     origin: str,
     on_event: OnEvent | None = None,
+    resume_conversation_id: str | None = None,
 ) -> WorkflowResult:
-    """Runs every step of ``workflow`` in one new ``ChatSession``, stopping
+    """Runs every step of ``workflow`` in one ``ChatSession`` — a new one,
+    unless ``resume_conversation_id`` is given, in which case every step
+    appends to that existing conversation instead (the scheduler's
+    ``reuse_chat`` support, ``aida.core.scheduler_runtime._fire``). Stops
     at the first step that fails (see this module's docstring for exactly
     what "fails" means). Always closes the session/MCP manager it opened,
     and always writes the reproducibility manifest when there's a target
-    folder to put it in, regardless of whether the run succeeded."""
+    folder to put it in, regardless of whether the run succeeded.
+
+    ``ConversationNotFoundError`` (from ``aida.core.session``, via
+    ``aida.persistence.recorder``) is deliberately left to propagate rather
+    than being folded into ``WorkflowConfigError`` here: a stale
+    ``resume_conversation_id`` (the pinned conversation was deleted) is
+    something only the caller holding the pin — ``_fire`` — knows how to
+    recover from (clear the pin, retry fresh), not a plain config error."""
     if not workflow.workspace:
         raise WorkflowConfigError(f"workflow {workflow.name!r} has no workspace configured")
 
@@ -209,6 +220,7 @@ async def run_workflow(
             mcp_group=workflow.mcp_group or "",
             confirm_callback=confirm_callback,
             origin=origin,
+            resume_conversation_id=resume_conversation_id,
         )
     except (UnknownWorkspaceError, UnknownProfileError, UnknownMcpServerError) as exc:
         raise WorkflowConfigError(str(exc)) from exc

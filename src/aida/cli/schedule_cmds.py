@@ -54,6 +54,10 @@ def cmd_add(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return EXIT_CONFIG_ERROR
 
+    if args.rollover_hours is not None and not args.reuse_chat:
+        print("--rollover-hours only applies with --reuse-chat", file=sys.stderr)
+        return EXIT_CONFIG_ERROR
+
     try:
         var_overrides = _parse_vars(args.var)
     except ValueError as exc:
@@ -77,6 +81,8 @@ def cmd_add(args: argparse.Namespace) -> int:
         preapproved_tools=list(args.preapproved_tools),
         yes_in_allowed=args.yes_in_allowed,
         enabled=True,
+        reuse_chat=args.reuse_chat,
+        reuse_rollover_hours=args.rollover_hours,
     )
     save_schedules_config(config)
     print(f"Added schedule {args.name!r}.")
@@ -187,6 +193,19 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SERVER__TOOL",
         dest="preapproved_tools",
         help="A namespaced MCP tool name to approve for this schedule's runs (repeatable)",
+    )
+    add.add_argument(
+        "--reuse-chat",
+        action="store_true",
+        help="Pin every fire of this schedule to one chat instead of starting a new one each time",
+    )
+    add.add_argument(
+        "--rollover-hours",
+        type=float,
+        default=None,
+        metavar="HOURS",
+        help="With --reuse-chat, retire the pinned chat and start a fresh one after this many "
+        "hours (default: reuse forever)",
     )
 
     for name, help_text in (

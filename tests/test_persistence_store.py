@@ -360,6 +360,23 @@ def test_schedule_run_store_recent_failures_excludes_ok(tmp_path: Path):
     assert [f.status for f in failures] == ["failed"]
 
 
+def test_delete_conversation_referenced_by_a_schedule_run_succeeds(tmp_path: Path):
+    """Regression: schedule_runs.conversation_id used to have no ``ON
+    DELETE`` clause, so deleting a conversation a schedule had ever run
+    against raised a bare ``sqlite3.IntegrityError`` from this exact call —
+    found while testing the ``reuse_chat`` stale-pin fallback."""
+    conv_store = _store(tmp_path)
+    conv_id = conv_store.create_conversation(timestamp=T0, origin="schedule")
+
+    run_store = ScheduleRunStore(tmp_path / "aida.db")
+    run_store.record_run(schedule_name="nightly", fired_at=T0, status="ok", conversation_id=conv_id)
+    run_store.close()
+
+    conv_store.delete_conversation(conv_id)  # must not raise
+
+    assert conv_store.get_conversation(conv_id) is None
+
+
 def test_schedule_run_store_conversation_id_round_trips(tmp_path: Path):
     """``schedule_runs.conversation_id`` has a real foreign key into
     ``conversations`` (both tables live in the same DB file), so the
@@ -370,3 +387,70 @@ def test_schedule_run_store_conversation_id_round_trips(tmp_path: Path):
     store = _schedule_store(tmp_path)
     store.record_run(schedule_name="nightly", fired_at=T0, status="ok", conversation_id=conv_id)
     assert store.last_run("nightly").conversation_id == conv_id
+
+
+# --- schedule_pins (reuse_chat) -------------------------------------------
+
+
+def test_get_pin_missing_schedule_returns_none(tmp_path: Path):
+    store = _schedule_store(tmp_path)
+    assert store.get_pin("does-not-exist") is None
+
+
+def test_set_pin_then_get_pin_round_trips(tmp_path: Path):
+    conv_id = _store(tmp_path).create_conversation(timestamp=T0, origin="schedule")
+    store = _schedule_store(tmp_path)
+
+    store.set_pin("hourly-check", conv_id, T0)
+
+    pin = store.get_pin("hourly-check")
+    assert pin is not None
+    assert pin.schedule_name == "hourly-check"
+    assert pin.conversation_id == conv_id
+    assert pin.pinned_at == T0
+
+
+def test_set_pin_upserts_rather_than_accumulating(tmp_path: Path):
+    """Unlike ``schedule_runs``, a schedule has at most one pin — a fresh
+    pin (rollover, or a stale pin cleared and re-pinned) replaces the old
+    one rather than adding a second row."""
+    conv_store = _store(tmp_path)
+    conv_1 = conv_store.create_conversation(timestamp=T0, origin="schedule")
+    conv_2 = conv_store.create_conversation(timestamp=T1, origin="schedule")
+    store = _schedule_store(tmp_path)
+
+    store.set_pin("hourly-check", conv_1, T0)
+    store.set_pin("hourly-check", conv_2, T1)
+
+    pin = store.get_pin("hourly-check")
+    assert pin.conversation_id == conv_2
+    assert pin.pinned_at == T1
+
+
+def test_clear_pin_removes_it(tmp_path: Path):
+    conv_id = _store(tmp_path).create_conversation(timestamp=T0, origin="schedule")
+    store = _schedule_store(tmp_path)
+    store.set_pin("hourly-check", conv_id, T0)
+
+    store.clear_pin("hourly-check")
+
+    assert store.get_pin("hourly-check") is None
+
+
+def test_clear_pin_on_unpinned_schedule_is_a_no_op(tmp_path: Path):
+    store = _schedule_store(tmp_path)
+    store.clear_pin("never-pinned")  # must not raise
+    assert store.get_pin("never-pinned") is None
+
+
+def test_pins_for_different_schedules_are_independent(tmp_path: Path):
+    conv_store = _store(tmp_path)
+    conv_a = conv_store.create_conversation(timestamp=T0, origin="schedule")
+    conv_b = conv_store.create_conversation(timestamp=T1, origin="schedule")
+    store = _schedule_store(tmp_path)
+
+    store.set_pin("a", conv_a, T0)
+    store.set_pin("b", conv_b, T1)
+
+    assert store.get_pin("a").conversation_id == conv_a
+    assert store.get_pin("b").conversation_id == conv_b

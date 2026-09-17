@@ -205,11 +205,16 @@ concrete asks for it.
   including a traced map of the eight places a secret lands in AIDA today,
   none of them redacted. No decision taken; the manual "log in once a day,
   work inside that session" practice covers the attended case meanwhile.
-- **Two AIDA instances sharing `~/.aida`** (SQLite + config writes) is
-  unguarded. The single-user assumption is fine today; a lock file would at
-  least make the failure mode explicit. §1.3 makes this materially more
-  likely (two people at one beamline machine), so it may need to graduate
-  with it — see `planning/multiuser_plan.md` §6.
+- **Two AIDA instances sharing `~/.aida`** — the config-write half is no
+  longer unguarded: `aida.core.proc_lock.config_write_lock` plus an
+  `expected_mtime` check on every `save_*_config` call (`CHANGELOG.md`
+  Unreleased) turns a silently-lost concurrent edit into an explicit
+  conflict the caller can react to, without adding a single-instance lock
+  that would block the two-instances-on-purpose beamline workflow this
+  exists to support. The SQLite half was already covered (WAL +
+  `busy_timeout`, `aida.persistence.db`). §1.3 makes concurrent instances
+  materially more likely (two people at one beamline machine); see
+  `planning/multiuser_plan.md` §6 for what else that graduation needs.
 - **Preinstall Node/npx and offer common npx-based MCP servers** (Playwright
   and friends). Two separable pieces: `environment.yml` could pull `nodejs`
   from conda-forge so `npx` comes along, and AIDA could ship ready-to-enable

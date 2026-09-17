@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -67,4 +68,41 @@ def try_acquire_scheduler_lock(path: Path | None = None) -> Iterator[bool]:
                 _unlock(fh)
 
 
-__all__ = ["try_acquire_scheduler_lock"]
+class ConfigLockTimeoutError(RuntimeError):
+    """Raised when another process held a config file's write lock for
+    longer than the timeout. Should be rare in practice — a config save is a
+    fast atomic-write, not a long-held open — so this signals something
+    genuinely stuck rather than ordinary contention."""
+
+
+@contextlib.contextmanager
+def config_write_lock(config_path: Path, *, timeout: float = 2.0) -> Iterator[None]:
+    """Cross-process lock guarding writes to a single ``~/.aida`` config
+    file (``mcp.json``, ``schedules.yaml``, etc.), so two AIDA instances
+    saving the same file around the same moment are serialized rather than
+    racing. Unlike ``try_acquire_scheduler_lock`` (non-blocking, "skip this
+    tick" semantics), a config save is a discrete user-initiated action that
+    should briefly wait for the other instance's save to finish rather than
+    silently drop the user's edit — hence blocking-with-timeout instead of
+    skip. The lock file lives next to the file it guards
+    (``mcp.json.lock``), matching how ``scheduler.lock`` lives next to
+    ``aida.db``."""
+    lock_path = config_path.with_name(config_path.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout
+    with lock_path.open("a+") as fh:
+        acquired = _try_lock(fh)
+        while not acquired:
+            if time.monotonic() >= deadline:
+                raise ConfigLockTimeoutError(
+                    f"timed out waiting for the write lock on {config_path}"
+                )
+            time.sleep(0.05)
+            acquired = _try_lock(fh)
+        try:
+            yield
+        finally:
+            _unlock(fh)
+
+
+__all__ = ["ConfigLockTimeoutError", "config_write_lock", "try_acquire_scheduler_lock"]

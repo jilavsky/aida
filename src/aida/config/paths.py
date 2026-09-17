@@ -159,6 +159,33 @@ def scheduler_lock_path() -> Path:
     return app_dir() / "scheduler.lock"
 
 
+def app_config_path() -> Path:
+    """Path to ``config.yaml`` (general app settings)."""
+    return config_dir() / "config.yaml"
+
+
+def providers_config_path() -> Path:
+    """Path to ``providers.yaml`` (LLM provider/profile config)."""
+    return config_dir() / "providers.yaml"
+
+
+def workspaces_config_path() -> Path:
+    """Path to ``workspaces.yaml``."""
+    return config_dir() / "workspaces.yaml"
+
+
+def mcp_config_path() -> Path:
+    """Path to ``mcp.json`` (MCP server definitions)."""
+    return config_dir() / "mcp.json"
+
+
+def knowledge_config_path() -> Path:
+    """Path to ``knowledge.yaml`` (RAG knowledge-base definitions — not to
+    be confused with ``knowledge_dir()``, which holds the actual per-KB
+    SQLite index files)."""
+    return config_dir() / "knowledge.yaml"
+
+
 def knowledge_dir() -> Path:
     """Directory holding one SQLite file per RAG knowledge base
     (``<kb_name>.db``, created lazily by ``aida.knowledge.rag.index``) —

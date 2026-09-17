@@ -239,6 +239,11 @@ def test_migration_5_adds_the_path_columns_to_an_existing_v4_database(tmp_path: 
             sidecar_dirname TEXT NOT NULL DEFAULT 'figures', created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL, record_path TEXT, origin TEXT, "user" TEXT
         );
+        CREATE TABLE schedule_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, schedule_name TEXT NOT NULL,
+            fired_at TEXT NOT NULL, status TEXT NOT NULL,
+            conversation_id TEXT REFERENCES conversations(id), error TEXT
+        );
         INSERT INTO conversations (id, title, created_at, updated_at)
         VALUES ('old1', 'Before attachments', '2026-01-01', '2026-01-01');
         PRAGMA user_version = 4;
