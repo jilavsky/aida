@@ -505,7 +505,17 @@ def test_context_menu_on_a_single_row_offers_resume_rename_delete(qapp):
     sidebar._list.item(0).setSelected(True)
     menu = sidebar._build_context_menu()
     labels = [action.text() for action in menu.actions() if not action.isSeparator()]
-    assert labels == ["Resume", "Rename…", "Move to User", "Delete…"]
+    assert labels == ["Resume", "Rename…", "Export…", "Move to User", "Delete…"]
+
+
+def test_export_clicked_emits_export_requested(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_summary("id1")])
+    sidebar.select_row(0)
+    exported = []
+    sidebar.export_requested.connect(exported.append)
+    sidebar._on_export_clicked()
+    assert exported == ["id1"]
 
 
 def test_context_menu_on_multiple_rows_offers_move_and_delete(qapp):

@@ -186,6 +186,36 @@ def test_updated_app_config_includes_edited_assistant_name_and_user_context(qapp
     assert cfg.assistant_name == "Aida"  # original untouched
 
 
+# --- transcript_tool_results (Export Conversation As… / clean records) --
+
+
+def test_dialog_seeds_transcript_tool_results_from_app_config(qapp):
+    cfg = AppConfig(transcript_tool_results="summary")
+    dialog = SettingsDialog(cfg)
+    assert dialog.transcript_tool_results() == "summary"
+
+
+def test_dialog_defaults_transcript_tool_results_to_full(qapp):
+    dialog = SettingsDialog(AppConfig())
+    assert dialog.transcript_tool_results() == "full"
+
+
+def test_editing_transcript_tool_results_and_reading_back(qapp):
+    dialog = SettingsDialog(AppConfig())
+    dialog._transcript_tool_results_combo.setCurrentText("off")
+    assert dialog.transcript_tool_results() == "off"
+
+
+def test_updated_app_config_includes_edited_transcript_tool_results(qapp):
+    cfg = AppConfig(transcript_tool_results="full")
+    dialog = SettingsDialog(cfg)
+    dialog._transcript_tool_results_combo.setCurrentText("summary")
+
+    updated = dialog.updated_app_config()
+    assert updated.transcript_tool_results == "summary"
+    assert cfg.transcript_tool_results == "full"  # original untouched
+
+
 def test_profiles_shown_read_only(qapp):
     profiles = {
         "argo-claude": ProviderProfile(name="argo-claude", kind="anthropic", model="claude-x"),

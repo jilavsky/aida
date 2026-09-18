@@ -62,6 +62,14 @@ At the right-hand end, separated from the rest:
   them.
 - **File → Open Conversation Folder** — the current conversation's
   attachment folder. See [documents.md](documents.md).
+- **File → Export Conversation As…** — write a standalone snapshot of the
+  current conversation's Markdown transcript to any folder (an Obsidian
+  vault, say), with its own choice of how much tool-result text to include.
+  Independent of the transcript this conversation already keeps up to date
+  in the configured Records folder — see
+  [`moving-and-sharing.md`](moving-and-sharing.md). The conversations
+  sidebar's right-click menu has the same **Export…** for any past
+  conversation, not just the open one.
 - **File → Manage Users…** — rename a label (renaming onto an existing name
   merges them), or clear one. Also **New User…**, which starts using a
   name. See [organizing-conversations.md](organizing-conversations.md).
@@ -155,10 +163,13 @@ list to one name, to **(no user)**, or to **All users**. The filter follows
 the toolbar's User box when you switch, and otherwise leaves your choice
 alone.
 
-Right-clicking gives **Resume**, **Rename…**, **Move to User** and
-**Delete…**; a multi-row selection gives **Move to User** and **Delete…**.
-**Move to User** is how a conversation started under the wrong name is put
-right. See [organizing-conversations.md](organizing-conversations.md).
+Right-clicking gives **Resume**, **Rename…**, **Export…**, **Move to User**
+and **Delete…**; a multi-row selection gives **Move to User** and
+**Delete…**. **Move to User** is how a conversation started under the wrong
+name is put right. See [organizing-conversations.md](organizing-conversations.md).
+**Export…** writes that conversation's transcript to a folder you pick,
+without opening it — the same "Export Conversation As…" dialog as the File
+menu's, see above.
 
 ## Dialogs reachable from the toolbar
 
@@ -172,6 +183,12 @@ right. See [organizing-conversations.md](organizing-conversations.md).
     pipeline"). It is prepended to the system prompt of every session, so
     you don't have to repeat it in each workspace's own system prompt.
     Empty by default — nothing about you is sent until you fill it in.
+  - **Transcript tool results** (Off/Summary/Full, default Full) — how much
+    of a tool result's own text is written into every conversation's
+    exported Markdown transcript. Off and Summary exist so a long
+    instrument-run record reads like a lab notebook instead of a dump of
+    every raw tool payload the agent needed; images and files a tool
+    produced are always linked regardless of this setting.
 - **MCP Servers dialog** (`mcp_management_dialog.py`) — add/edit/remove MCP
   servers, per-tool permissions, groups, skills, live start/stop/restart,
   connection tests, and a tool-call log. See [mcp-servers.md](mcp-servers.md).

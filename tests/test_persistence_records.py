@@ -187,6 +187,179 @@ def test_write_transcript_creates_real_file_with_working_image_link(tmp_path: Pa
     assert f"figures/{CONV_ID[:8]}/abc.png" in text
 
 
+def test_render_transcript_links_file_artifact_for_tool_message():
+    """Non-image artifacts (a saved script, a generated report) get linked
+    the same way images already are — "what did the agent write" should be
+    answerable from the transcript alone."""
+    messages = [
+        Message(
+            role="tool",
+            content="wrote fit_script.py",
+            tool_call_id="call_1",
+            name="save_script",
+        ),
+    ]
+    artifacts = [
+        ArtifactRecord(
+            id="script1",
+            conversation_id=CONV_ID,
+            call_id="call_1",
+            kind="FileArtifact",
+            path="/home/user/.aida/artifacts/fit_script.py",
+            mime_type="text/x-python",
+            created_at="2026-08-19T00:00:00",
+        )
+    ]
+    text = render_transcript(
+        conversation_id=CONV_ID,
+        title=None,
+        workspace_name=None,
+        profile_name=None,
+        messages=messages,
+        artifacts=artifacts,
+        sidecar_dirname="figures",
+    )
+    assert f"[fit_script.py](figures/{CONV_ID[:8]}/fit_script.py)" in text
+    # Not an image link — no leading "!".
+    assert "![fit_script.py]" not in text
+
+
+def test_render_transcript_tool_result_mode_off_hides_text_but_keeps_image():
+    messages = [
+        Message(
+            role="tool",
+            content="a huge raw JSON dump nobody wants to read",
+            tool_call_id="call_1",
+        ),
+    ]
+    artifacts = [
+        ArtifactRecord(
+            id="abc",
+            conversation_id=CONV_ID,
+            call_id="call_1",
+            kind="ImageArtifact",
+            path="/home/user/.aida/artifacts/abc.png",
+            mime_type="image/png",
+            created_at="2026-08-19T00:00:00",
+        )
+    ]
+    text = render_transcript(
+        conversation_id=CONV_ID,
+        title=None,
+        workspace_name=None,
+        profile_name=None,
+        messages=messages,
+        artifacts=artifacts,
+        sidecar_dirname="figures",
+        tool_result_mode="off",
+    )
+    assert "a huge raw JSON dump" not in text
+    assert f"![abc](figures/{CONV_ID[:8]}/abc.png)" in text
+
+
+def test_render_transcript_tool_result_mode_off_skips_empty_heading():
+    """A tool result with no artifact and mode "off" should leave no trace
+    at all — not even an empty "## Tool result" heading."""
+    messages = [
+        Message(role="user", content="run the calibration"),
+        Message(role="tool", content="calibration complete, see log.txt", tool_call_id="call_1"),
+    ]
+    text = render_transcript(
+        conversation_id=CONV_ID,
+        title=None,
+        workspace_name=None,
+        profile_name=None,
+        messages=messages,
+        artifacts=[],
+        sidecar_dirname="figures",
+        tool_result_mode="off",
+    )
+    assert "## Tool result" not in text
+    assert "calibration complete" not in text
+
+
+def test_render_transcript_tool_result_mode_summary_truncates_to_first_line():
+    messages = [
+        Message(
+            role="tool",
+            content="first line summary\nsecond line of detail\nthird line",
+            tool_call_id="call_1",
+        ),
+    ]
+    text = render_transcript(
+        conversation_id=CONV_ID,
+        title=None,
+        workspace_name=None,
+        profile_name=None,
+        messages=messages,
+        artifacts=[],
+        sidecar_dirname="figures",
+        tool_result_mode="summary",
+    )
+    assert "first line summary" in text
+    assert "second line of detail" not in text
+
+
+def test_render_transcript_unrecognized_tool_result_mode_falls_back_to_full():
+    messages = [
+        Message(role="tool", content="the full raw content", tool_call_id="call_1"),
+    ]
+    text = render_transcript(
+        conversation_id=CONV_ID,
+        title=None,
+        workspace_name=None,
+        profile_name=None,
+        messages=messages,
+        artifacts=[],
+        sidecar_dirname="figures",
+        tool_result_mode="bogus",
+    )
+    assert "the full raw content" in text
+
+
+def test_write_transcript_copies_and_links_a_file_artifact(tmp_path: Path):
+    records_dir = tmp_path / "records"
+    artifacts_base = tmp_path / "aida-artifacts"
+    store = ArtifactStore(base_dir=artifacts_base)
+
+    artifacts_base.mkdir(parents=True, exist_ok=True)
+    saved_script = artifacts_base / "fit_script.py"
+    saved_script.write_text("print('hello')", encoding="utf-8")
+
+    messages = [
+        Message(role="tool", content="wrote a script", tool_call_id="call_1"),
+    ]
+    artifacts = [
+        ArtifactRecord(
+            id="script1",
+            conversation_id=CONV_ID,
+            call_id="call_1",
+            kind="FileArtifact",
+            path=str(saved_script),
+            mime_type="text/x-python",
+            created_at="2026-08-19T00:00:00",
+        )
+    ]
+
+    path = record_file_path(records_dir, CONV_ID, None)
+    write_transcript(
+        path=path,
+        records_dir=records_dir,
+        artifact_store=store,
+        conversation_id=CONV_ID,
+        title=None,
+        workspace_name=None,
+        profile_name=None,
+        messages=messages,
+        artifacts=artifacts,
+    )
+
+    link_target = records_dir / f"figures/{CONV_ID[:8]}/fit_script.py"
+    assert link_target.exists()
+    assert link_target.read_text(encoding="utf-8") == "print('hello')"
+    assert f"figures/{CONV_ID[:8]}/fit_script.py" in path.read_text(encoding="utf-8")
+
+
 def test_write_transcript_overwrites_on_repeat_calls(tmp_path: Path):
     records_dir = tmp_path / "records"
     store = ArtifactStore(base_dir=tmp_path / "artifacts")

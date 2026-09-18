@@ -522,3 +522,57 @@ def test_validate_embedding_provider_profile_emits_embedding_profile_validated(
     name, result = results[0]
     assert name == "local-embed"
     assert result.ok
+
+
+# --- export_conversation (bug report: "Export Conversation As…" for the
+# active session raised sqlite3.ProgrammingError — the recorder's store
+# connection is created on this bridge's background loop thread, so the
+# write must be dispatched there rather than called directly from the Qt
+# thread that owns the menu action) -----------------------------------------
+
+
+def test_export_conversation_emits_finished_with_a_real_path(
+    qapp, loop_thread, aida_home: Path, records_home: Path, tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider([MockTurn(text="hello there")]),
+    )
+    settings = _settings_with_profile()
+
+    bridge = ChatBridge(loop_thread)
+    ready = []
+    bridge.session_ready.connect(lambda: ready.append(True))
+    bridge.start(settings, profile_name="mock-profile")
+    assert pump_until(qapp, lambda: ready)
+
+    finished_turn = []
+    bridge.turn_finished.connect(lambda: finished_turn.append(True))
+    bridge.send("plot dataset X")
+    assert pump_until(qapp, lambda: finished_turn)
+
+    finished = []
+    failed = []
+    bridge.conversation_export_finished.connect(finished.append)
+    bridge.conversation_export_failed.connect(failed.append)
+
+    destination = tmp_path / "vault"
+    bridge.export_conversation(str(destination), "full")
+
+    assert pump_until(qapp, lambda: finished or failed), "neither signal fired"
+    assert not failed
+    path = Path(finished[0])
+    assert path.parent == destination
+    assert "plot dataset X" in path.read_text(encoding="utf-8")
+
+    bridge.shutdown()
+
+
+def test_export_conversation_with_no_session_emits_failed(qapp, loop_thread):
+    bridge = ChatBridge(loop_thread)
+    failed = []
+    bridge.conversation_export_failed.connect(failed.append)
+
+    bridge.export_conversation("/tmp/somewhere", "full")
+
+    assert failed == ["No conversation open yet."]

@@ -137,6 +137,10 @@ _APP_PORTABLE_FIELDS = (
     "tool_call_display",
     "scheduler_quiet_period_seconds",
     "scheduler_max_defer_seconds",
+    # Same reasoning as tool_call_display just above: how verbose the
+    # *exported* transcript's tool-result sections are follows from the
+    # person/role, not the machine.
+    "transcript_tool_results",
 )
 
 #: About a *person*, not a setup. Portable, but wrong to hand to a

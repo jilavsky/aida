@@ -30,6 +30,22 @@ decision revised), unrelated to what shipped when. Entries below link to
   back to a fresh chat rather than failing. Which conversation is pinned is
   machine-written state (`schedule_pins` table), never written into the
   user-edited `schedules.yaml`.
+- **Cleaner, more complete conversation transcripts, plus on-demand export.**
+  A long instrument-control session's auto-exported Markdown transcript used
+  to dump every tool result's raw text verbatim — EPICS readbacks, JSON
+  payloads — making it a poor lab-notebook record. **Settings → Transcript
+  tool results** (`AppConfig.transcript_tool_results`: off/summary/full,
+  default unchanged) now controls how much of that text lands in the saved
+  `.md`; images and files a tool produced are always linked regardless.
+  Non-image `FileArtifact`s (a saved script, a generated report) are now
+  copied into the sidecar folder and linked, the same way images already
+  were — previously they were invisible in the transcript. **File → Export
+  Conversation As…** (and the conversations sidebar's right-click **Export…**)
+  snapshots a conversation's transcript to any folder — e.g. an Obsidian
+  vault — with its own tool-results choice, independent of the always-on
+  background transcript in the configured Records folder; `aida
+  conversations export <id> --dest DIR --tool-results {off,summary,full}` is
+  the CLI equivalent.
 
 ### Fixed
 

@@ -47,6 +47,7 @@ from aida.core.cost import estimate_cost_usd
 from aida.core.events import ContextTrimmed
 from aida.documents.ocr.mistral import SECRET_REF as OCR_SECRET_REF
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
+from aida.persistence.recorder import ConversationRecorder
 from aida.persistence.store import ArtifactRecord, ConversationStore
 from aida.providers.base import ImageRef
 from aida.ui.qt._qt import (
@@ -487,6 +488,15 @@ class MainWindow(QMainWindow):
         open_scratch_action.triggered.connect(self._on_open_scratch_folder)
         file_menu.addAction(open_scratch_action)
 
+        # Bug report: users doing a long instrument-run analysis wanted a
+        # clean, self-contained snapshot of the current conversation (not
+        # the always-on background transcript this session already keeps
+        # in the configured Records folder) to drop into e.g. an Obsidian
+        # vault — see aida.persistence.recorder.export_transcript_to.
+        export_conversation_action = QAction("Export Conversation As…", self)
+        export_conversation_action.triggered.connect(self._on_export_current_conversation)
+        file_menu.addAction(export_conversation_action)
+
         file_menu.addSeparator()
 
         # Moving a setup between machines (planning/portability.md) used to
@@ -675,6 +685,111 @@ class MainWindow(QMainWindow):
             return
         BundleReportDialog("Setup Exported", format_export(result), self).exec()
 
+    def _prompt_export_destination(self) -> tuple[str, str] | None:
+        """The dialog half of both "Export Conversation As…" entry points,
+        shared because it never touches a recorder — only *how* the actual
+        write happens differs between them (see the two call sites): the
+        active session's recorder must be driven from the bridge's
+        background loop thread that owns its SQLite connection
+        (``ChatBridge.export_conversation``), while a past conversation's
+        freshly-built ``ConversationRecorder`` can be used directly, right
+        here on the Qt thread, since nothing else is using it.
+
+        Returns ``(destination, tool_result_mode)``, or ``None`` if the
+        dialog was cancelled or no destination was given."""
+        from aida.ui.qt.export_conversation_dialog import ExportConversationDialog
+
+        default_destination = str(ensure_records_dir(self.settings.app.records_dir))
+        dialog = ExportConversationDialog(
+            default_destination=default_destination,
+            default_tool_result_mode=self.settings.app.transcript_tool_results,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        destination = dialog.destination()
+        if not destination:
+            QMessageBox.warning(self, "Export Conversation", "Choose a destination folder.")
+            return None
+        return destination, dialog.tool_result_mode()
+
+    def _on_export_current_conversation(self) -> None:
+        """File → Export Conversation As…, for the *active* session.
+
+        Bug report: this used to call ``session.recorder.export_transcript_to``
+        directly here on the Qt thread, which raised ``sqlite3.
+        ProgrammingError: SQLite objects created in a thread can only be
+        used in that same thread`` — the recorder's ``ConversationStore``
+        connection was created on ``ChatBridge``'s background
+        ``AsyncLoopThread`` (inside ``_start``/``start_session``), not the
+        Qt thread this menu action runs on. The actual write is now
+        dispatched onto that same loop thread via
+        ``ChatBridge.export_conversation``; the result comes back via its
+        ``conversation_export_finished``/``_failed`` signals, wired in
+        ``_wire_bridge_signals``.
+        """
+        session = self.bridge.session
+        if session is None or session.recorder is None:
+            self.statusBar().showMessage("No conversation open yet.", 5000)
+            return
+        prompt = self._prompt_export_destination()
+        if prompt is None:
+            return
+        destination, tool_result_mode = prompt
+        self.statusBar().showMessage("Exporting conversation…")
+        self.bridge.export_conversation(destination, tool_result_mode)
+
+    def _on_conversation_export_finished(self, path: str) -> None:
+        self.statusBar().clearMessage()
+        QMessageBox.information(self, "Conversation Exported", f"Exported transcript to:\n{path}")
+
+    def _on_conversation_export_failed(self, message: str) -> None:
+        self.statusBar().clearMessage()
+        QMessageBox.warning(self, "Export Conversation", message)
+
+    def _on_export_requested(self, conversation_id: str) -> None:
+        """Sidebar context menu's "Export…" for a past conversation — builds
+        a ``resume=True`` recorder the same way
+        ``aida.cli.conversations.cmd_export`` does, purely to reach
+        ``export_transcript_to``; this never opens/resumes the chat. Safe to
+        call directly on the Qt thread (unlike the active-session path
+        above): this ``ConversationStore`` is freshly opened right here and
+        used nowhere else, so it never crosses threads."""
+        from aida.artifacts.store import ArtifactStore
+        from aida.persistence.recorder import ConversationNotFoundError
+
+        prompt = self._prompt_export_destination()
+        if prompt is None:
+            return
+        destination, tool_result_mode = prompt
+
+        store = ConversationStore()
+        try:
+            try:
+                recorder = ConversationRecorder(
+                    store,
+                    ArtifactStore(),
+                    ensure_records_dir(self.settings.app.records_dir),
+                    conversation_id=conversation_id,
+                    resume=True,
+                    transcript_tool_results=self.settings.app.transcript_tool_results,
+                )
+            except ConversationNotFoundError as exc:
+                QMessageBox.warning(self, "Export Conversation", str(exc))
+                return
+            try:
+                path = recorder.export_transcript_to(
+                    Path(destination), tool_result_mode=tool_result_mode
+                )
+            except OSError as exc:
+                QMessageBox.warning(
+                    self, "Export Conversation", f"Could not write to {destination}:\n{exc}"
+                )
+                return
+        finally:
+            store.close()
+        QMessageBox.information(self, "Conversation Exported", f"Exported transcript to:\n{path}")
+
     def _on_import_setup(self) -> None:
         """Import a bundle, then reload — an import rewrites the very config
         files this window is holding in ``self.settings``, so anything it
@@ -764,6 +879,7 @@ class MainWindow(QMainWindow):
         self.sidebar.move_to_user_requested.connect(self._on_move_conversations_to_user)
         self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
         self.sidebar.rename_requested.connect(self._on_rename_requested)
+        self.sidebar.export_requested.connect(self._on_export_requested)
         self.sidebar.search_query_changed.connect(self._on_conversations_search_query_changed)
         self.chat_panel.code_editor_requested.connect(self._on_code_editor_requested)
         self.chat_panel.open_in_code_editor_requested.connect(
@@ -834,6 +950,8 @@ class MainWindow(QMainWindow):
         self.bridge.compaction_failed.connect(self._on_compaction_failed)
         self.bridge.mcp_server_status_changed.connect(self._on_mcp_server_status_changed)
         self.bridge.mcp_server_action_failed.connect(self._on_mcp_server_action_failed)
+        self.bridge.conversation_export_finished.connect(self._on_conversation_export_finished)
+        self.bridge.conversation_export_failed.connect(self._on_conversation_export_failed)
         self.input_box.cancel_requested.connect(self.bridge.cancel)
         self.profile_selector.profile_changed.connect(self.bridge.switch_profile)
 

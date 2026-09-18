@@ -26,7 +26,12 @@ from aida.artifacts.base import Artifact
 from aida.artifacts.store import ArtifactStore
 from aida.config.logging_setup import get_logger
 from aida.documents.attachments import IngestResult, store_attachments
-from aida.persistence.records import attachments_dir, record_file_path, write_transcript
+from aida.persistence.records import (
+    DEFAULT_TOOL_RESULT_MODE,
+    attachments_dir,
+    record_file_path,
+    write_transcript,
+)
 from aida.persistence.store import ConversationStore
 from aida.providers.base import ImageRef, Message
 
@@ -81,11 +86,19 @@ class ConversationRecorder:
         transcript_min_interval_seconds: float = DEFAULT_TRANSCRIPT_MIN_INTERVAL_SECONDS,
         origin: str | None = None,
         user: str | None = None,
+        transcript_tool_results: str = DEFAULT_TOOL_RESULT_MODE,
     ) -> None:
         self.store = store
         self.artifact_store = artifact_store
         self.records_dir = records_dir
         self.transcript_min_interval_seconds = transcript_min_interval_seconds
+        #: How much of a tool-result message's text lands in the Markdown
+        #: transcript — see aida.persistence.records.TOOL_RESULT_MODES.
+        #: Read from AppConfig.transcript_tool_results by callers
+        #: (aida.core.session.start_session); defaulted here so every
+        #: existing construction site (tests included) keeps today's
+        #: full-text behavior without having to know this field exists.
+        self.transcript_tool_results = transcript_tool_results
         #: Set whenever a message lands but the transcript wasn't rewritten
         #: for it; cleared by every actual export. ``flush_transcript``
         #: exists so a caller can settle this at a natural boundary (end of
@@ -322,6 +335,7 @@ class ConversationRecorder:
             # created as a side effect of writing a transcript, so an
             # ordinary conversation leaves no empty folder behind.
             attachments_path=self._attachments_path,
+            tool_result_mode=self.transcript_tool_results,
         )
         self.store.set_record_path(
             self.conversation_id, str(self._record_path), timestamp=_now_iso()
@@ -329,6 +343,47 @@ class ConversationRecorder:
         self._transcript_dirty = False
         self._last_transcript_export = time.monotonic()
         return self._record_path
+
+    def export_transcript_to(
+        self,
+        destination_dir: Path,
+        *,
+        tool_result_mode: str | None = None,
+        sidecar_dirname: str | None = None,
+    ) -> Path:
+        """Write a one-off snapshot of this conversation's transcript to
+        ``destination_dir`` — e.g. a folder the user picked in an "Export
+        Conversation As…" dialog, which need not be the configured Records
+        folder at all.
+
+        Deliberately independent of ``export_transcript``'s bookkeeping: it
+        does not touch ``self._record_path``/``_transcript_dirty`` and never
+        calls ``ConversationStore.set_record_path`` — those track the one
+        *canonical* transcript in ``self.records_dir`` that ``record_message``
+        keeps up to date, and a snapshot written somewhere else must not be
+        mistaken for that file (e.g. by a later delete or resume). Reads
+        messages/artifacts straight from the store, so it is always current
+        even if the last periodic export was deferred.
+        """
+        destination_dir = Path(destination_dir)
+        path = record_file_path(destination_dir, self.conversation_id, self.title)
+        write_transcript(
+            path=path,
+            records_dir=destination_dir,
+            artifact_store=self.artifact_store,
+            conversation_id=self.conversation_id,
+            title=self.title,
+            workspace_name=self.workspace_name,
+            profile_name=self.profile_name,
+            messages=self.store.load_messages(self.conversation_id),
+            artifacts=self.store.load_artifacts(self.conversation_id),
+            sidecar_dirname=sidecar_dirname or self.sidecar_dirname,
+            attachments_path=self._attachments_path,
+            tool_result_mode=(
+                tool_result_mode if tool_result_mode is not None else self.transcript_tool_results
+            ),
+        )
+        return path
 
     def load_history(self) -> list[Message]:
         """All messages persisted so far, in order — used to rebuild

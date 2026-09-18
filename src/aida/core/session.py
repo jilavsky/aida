@@ -1324,7 +1324,12 @@ async def _start_session(
 
     if resume_conversation_id:
         recorder = ConversationRecorder(
-            store, artifact_store, records_dir, conversation_id=resume_conversation_id, resume=True
+            store,
+            artifact_store,
+            records_dir,
+            conversation_id=resume_conversation_id,
+            resume=True,
+            transcript_tool_results=settings.app.transcript_tool_results,
         )
         initial_messages: list[Message] | None = recorder.load_history()
         print(f"[conversations] resumed with {len(initial_messages)} prior message(s)")
@@ -1338,6 +1343,7 @@ async def _start_session(
             sidecar_dirname=sidecar_dirname,
             origin=origin,
             user=active_user,
+            transcript_tool_results=settings.app.transcript_tool_results,
         )
         initial_messages = None
 

@@ -486,6 +486,22 @@ class AppConfig:
     # aida.core.scheduler_runtime.DeferralRequest.hard). 0 disables the cap
     # entirely: jobs then wait indefinitely for a real idle moment.
     scheduler_max_defer_seconds: int = 3600
+    # How the *exported Markdown transcript* renders a tool-result message's
+    # text: "full" (the original behavior — the raw tool output verbatim),
+    # "summary" (its first line only, truncated) or "off" (the text is
+    # omitted entirely; any image/file the tool produced is still copied
+    # into the sidecar folder and linked). Bug report: a beamline user
+    # running one long instrument-control conversation wanted the on-disk
+    # record to read as a clean lab notebook (what was asked, what came
+    # back, the figures) without every EPICS readback/JSON dump the agent
+    # needed but nobody re-reads. Independent of tool_call_display, which
+    # governs the *live* on-screen scrollback, not this durable on-disk
+    # record — a user debugging a session live can want Expanded there while
+    # keeping the saved transcript at Summary. An unrecognized value falls
+    # back to "full" at the point of use (aida.persistence.records), same
+    # rule tool_call_display follows, so a hand-edited config.yaml can't
+    # blank the transcript.
+    transcript_tool_results: str = "full"  # "off" | "summary" | "full"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -589,6 +605,7 @@ class AppConfig:
             "splitter_sizes": self.splitter_sizes,
             "scheduler_quiet_period_seconds": self.scheduler_quiet_period_seconds,
             "scheduler_max_defer_seconds": self.scheduler_max_defer_seconds,
+            "transcript_tool_results": self.transcript_tool_results,
         }
 
 
@@ -624,6 +641,7 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "splitter_sizes": "list[int]",
     "scheduler_quiet_period_seconds": "int",
     "scheduler_max_defer_seconds": "int",
+    "transcript_tool_results": "str",
 }
 
 

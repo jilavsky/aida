@@ -227,3 +227,17 @@ rebuild any knowledge base whose source folders moved
 (`aida kb build <name>`). A supported full-backup command that also fixes
 the absolute paths recorded inside the database is planned — see
 [`planning/portability.md`](../planning/portability.md).
+
+To hand off or archive *one* conversation rather than the whole database,
+use **File → Export Conversation As…** (or the conversations sidebar's
+right-click **Export…**) to write a self-contained Markdown + images
+snapshot to any folder — an Obsidian vault, a colleague's shared drive,
+wherever — without touching the database at all:
+
+```
+aida conversations export <id> --dest ~/ObsidianVault/beamline-logs
+```
+
+Pointing **Settings → Records folder** itself at such a folder gets the same
+effect automatically for every conversation, going forward, with no export
+step needed.

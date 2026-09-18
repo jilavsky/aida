@@ -6,13 +6,13 @@ a records/target folder stays fully portable (move it, zip it, open it in
 Obsidian on another machine — links never break because nothing is
 absolute).
 
-``copy_images_to_sidecar`` is the one shared low-level mechanic between this
-writer's ``write_markdown_document`` (a freeform "title + body + images"
-document — what the ``write_markdown_report`` agent tool in
+``copy_artifacts_to_sidecar`` is the one shared low-level mechanic between
+this writer's ``write_markdown_document`` (a freeform "title + body +
+images" document — what the ``write_markdown_report`` agent tool in
 ``aida.workspace.files`` uses) and ``aida.persistence.records``'s
 conversation-transcript writer, which is why the task list calls the
 transcript exporter "refactored onto ``md_obsidian.py`` (one writer)":
-both funnel their image-copying through ``ArtifactStore.copy_to_target``
+both funnel their image/file-copying through ``ArtifactStore.copy_to_target``
 via this one function rather than each having its own copy of that logic,
 even though the two callers' text rendering is different in shape (a
 transcript is role-structured dialogue; a report is freeform prose the
@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from aida.artifacts.base import ImageArtifact
+from aida.artifacts.base import FileArtifact, ImageArtifact
 from aida.artifacts.store import ArtifactStore
 from aida.workspace.safety import unique_destination
 
@@ -49,16 +49,20 @@ class ImageToEmbed:
     alt_text: str = ""
 
 
-def copy_images_to_sidecar(
-    images: list[ImageArtifact], sidecar_dir: Path, artifact_store: ArtifactStore
+def copy_artifacts_to_sidecar(
+    artifacts: list[ImageArtifact | FileArtifact], sidecar_dir: Path, artifact_store: ArtifactStore
 ) -> dict[str, Path]:
-    """Copies each already-saved (``artifact.path`` set) image into
+    """Copies each already-saved (``artifact.path`` set) image or file into
     ``sidecar_dir`` via ``ArtifactStore.copy_to_target``, creating it if
-    needed. Returns ``{artifact_id: copied_path}``."""
-    if not images:
+    needed. Returns ``{artifact_id: copied_path}``.
+
+    Takes both artifact kinds (not just images) so a transcript can link a
+    script or report the agent produced the same way it already links a
+    plot — ``copy_to_target`` already accepts either."""
+    if not artifacts:
         return {}
     sidecar_dir.mkdir(parents=True, exist_ok=True)
-    return {image.id: artifact_store.copy_to_target(image, sidecar_dir) for image in images}
+    return {artifact.id: artifact_store.copy_to_target(artifact, sidecar_dir) for artifact in artifacts}
 
 
 def _is_relative(path: Path, base: Path) -> bool:
@@ -110,7 +114,7 @@ def write_markdown_document(
 
     lines = [f"# {title}", ""]
 
-    copied = copy_images_to_sidecar([img.artifact for img in images], sidecar_dir, artifact_store)
+    copied = copy_artifacts_to_sidecar([img.artifact for img in images], sidecar_dir, artifact_store)
     by_id = {img.artifact.id: img for img in images}
     referenced: set[str] = set()
 
@@ -146,7 +150,7 @@ def write_markdown_document(
 
 __all__ = [
     "ImageToEmbed",
-    "copy_images_to_sidecar",
+    "copy_artifacts_to_sidecar",
     "markdown_image_link",
     "write_markdown_document",
 ]

@@ -267,3 +267,57 @@ def test_the_db_write_is_still_immediate(tmp_path: Path):
         rec.record_message(Message(role="user", content=f"m{i}"))
 
     assert [m.content for m in rec.load_history()] == ["m0", "m1", "m2", "m3", "m4"]
+
+
+# --- export_transcript_to: a one-off snapshot elsewhere ---------------------
+#
+# "Export Conversation As…" — a snapshot to an arbitrary destination (e.g. an
+# Obsidian vault folder) that must never disturb the always-on background
+# transcript's own bookkeeping in the configured Records folder.
+
+
+def test_export_transcript_to_writes_a_snapshot_at_the_destination(tmp_path: Path):
+    rec = _recorder(tmp_path)
+    rec.record_message(Message(role="user", content="plot dataset X"))
+    dest = tmp_path / "vault"
+
+    path = rec.export_transcript_to(dest)
+
+    assert path.parent == dest
+    assert "plot dataset X" in path.read_text(encoding="utf-8")
+
+
+def test_export_transcript_to_does_not_touch_the_canonical_record_path(tmp_path: Path):
+    rec = _recorder(tmp_path)
+    rec.record_message(Message(role="user", content="hello"))
+    canonical_path = rec._record_path
+
+    rec.export_transcript_to(tmp_path / "elsewhere")
+
+    assert rec._record_path == canonical_path
+    summary = rec.store.get_conversation(rec.conversation_id)
+    assert summary.record_path == str(canonical_path)
+
+
+def test_export_transcript_to_respects_an_explicit_tool_result_mode(tmp_path: Path):
+    rec = _recorder(tmp_path)
+    rec.record_message(Message(role="user", content="run the fit"))
+    rec.record_message(
+        Message(role="tool", content="a very long raw payload", tool_call_id="call_1")
+    )
+
+    path = rec.export_transcript_to(tmp_path / "vault", tool_result_mode="off")
+
+    assert "a very long raw payload" not in path.read_text(encoding="utf-8")
+
+
+def test_export_transcript_to_defaults_to_the_recorder_s_own_mode(tmp_path: Path):
+    rec = _recorder(tmp_path, transcript_tool_results="off")
+    rec.record_message(Message(role="user", content="run the fit"))
+    rec.record_message(
+        Message(role="tool", content="a very long raw payload", tool_call_id="call_1")
+    )
+
+    path = rec.export_transcript_to(tmp_path / "vault")
+
+    assert "a very long raw payload" not in path.read_text(encoding="utf-8")

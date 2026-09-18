@@ -28,6 +28,7 @@ from aida.persistence.cleanup import (
     find_stale_scratch_files,
 )
 from aida.persistence.recorder import ConversationNotFoundError, ConversationRecorder
+from aida.persistence.records import TOOL_RESULT_MODES
 from aida.persistence.store import ConversationStore, ConversationSummary
 
 
@@ -172,9 +173,21 @@ def cmd_export(args: argparse.Namespace) -> int:
         settings = load_settings()
         artifact_store = ArtifactStore()
         recorder = ConversationRecorder(
-            store, artifact_store, _records_dir(settings), conversation_id=conv_id, resume=True
+            store,
+            artifact_store,
+            _records_dir(settings),
+            conversation_id=conv_id,
+            resume=True,
+            transcript_tool_results=settings.app.transcript_tool_results,
         )
-        path = recorder.export_transcript()
+        dest = getattr(args, "dest", "") or ""
+        tool_results = getattr(args, "tool_results", "") or None
+        if dest:
+            path = recorder.export_transcript_to(Path(dest), tool_result_mode=tool_results)
+        else:
+            if tool_results:
+                recorder.transcript_tool_results = tool_results
+            path = recorder.export_transcript()
         print(f"Exported transcript to {path}")
         return 0
     except ConversationNotFoundError as exc:
@@ -388,6 +401,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "export", help="Re-export a conversation's Markdown transcript on demand"
     )
     export.add_argument("id", help="Conversation id, or an unambiguous prefix")
+    export.add_argument(
+        "--dest",
+        default="",
+        metavar="DIR",
+        help="Write a standalone snapshot here instead of the configured Records folder — "
+        "e.g. an Obsidian vault folder. Does not affect the conversation's regular "
+        "background transcript.",
+    )
+    export.add_argument(
+        "--tool-results",
+        choices=TOOL_RESULT_MODES,
+        default="",
+        help="Override how much tool-result text is written (default: config.yaml's "
+        "transcript_tool_results, i.e. what the live session would have written)",
+    )
 
     return parser
 

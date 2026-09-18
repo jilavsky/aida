@@ -138,6 +138,11 @@ class ConversationsSidebar(QWidget):
     # use." set_title already exists on ConversationStore (used once, by
     # auto-titling) — this is the missing "rename it again" entry point.
     rename_requested = Signal(str, str)  # conversation_id, new_title
+    #: A snapshot export was requested for one past conversation, distinct
+    #: from resume_requested — this never opens the conversation, just
+    #: writes its transcript somewhere the user picks. MainWindow owns the
+    #: destination/options dialog; this widget only knows which id.
+    export_requested = Signal(str)  # conversation_id
     # Bug report: "Enable multiple file selection ... useful for deleting
     # multiple chats." A separate signal from delete_requested (rather than
     # a list there too) keeps every existing single-delete connection/test
@@ -437,6 +442,11 @@ class ConversationsSidebar(QWidget):
         if ok and new_title:
             self.rename_requested.emit(conv_id, new_title)
 
+    def _on_export_clicked(self) -> None:
+        conv_id = self.selected_conversation_id()
+        if conv_id:
+            self.export_requested.emit(conv_id)
+
     def _on_cleanup_clicked(self) -> None:
         days = CleanupDialog.get_cutoff_days(self)
         if days is not None:
@@ -514,6 +524,7 @@ class ConversationsSidebar(QWidget):
         if len(self.selected_conversation_ids()) == 1:
             menu.addAction("Resume", self._on_resume_clicked)
             menu.addAction("Rename…", self._on_rename_clicked)
+            menu.addAction("Export…", self._on_export_clicked)
             menu.addSeparator()
         # Offered for a multi-selection too: putting a run of chats under
         # the right name is exactly when several are wrong at once.

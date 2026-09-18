@@ -43,6 +43,7 @@ from aida.ui.qt._qt import (
 
 LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
 SAFETY_MODES = ["confirm", "relaxed"]
+TRANSCRIPT_TOOL_RESULT_MODES = ["off", "summary", "full"]
 
 
 class SettingsDialog(QDialog):
@@ -98,6 +99,23 @@ class SettingsDialog(QDialog):
         browse_button.clicked.connect(self._on_browse_records_dir)
         records_row.addWidget(browse_button)
         form.addRow("Records folder:", records_row)
+
+        # Bug report: a long instrument-control conversation's exported
+        # transcript was unreadable as a lab notebook — every raw tool
+        # result (EPICS readbacks, JSON dumps) the agent needed showed up
+        # verbatim. This only trims the *text* of tool-result messages in
+        # the saved .md; any image/file a tool produced is still linked
+        # regardless of this setting. See aida.persistence.records.
+        self._transcript_tool_results_combo = QComboBox(self)
+        self._transcript_tool_results_combo.addItems(TRANSCRIPT_TOOL_RESULT_MODES)
+        index = self._transcript_tool_results_combo.findText(app_config.transcript_tool_results)
+        if index >= 0:
+            self._transcript_tool_results_combo.setCurrentIndex(index)
+        self._transcript_tool_results_combo.setToolTip(
+            "How much of a tool result's text is written into the exported Markdown "
+            "transcript — Off/Summary keep images and saved files linked either way."
+        )
+        form.addRow("Transcript tool results:", self._transcript_tool_results_combo)
 
         # Bug report: "Agents seem to be saving temporary files ... in
         # random places." One well-known, overridable scratch folder every
@@ -315,6 +333,9 @@ class SettingsDialog(QDialog):
     def default_safety_mode(self) -> str:
         return self._default_safety_combo.currentText()
 
+    def transcript_tool_results(self) -> str:
+        return self._transcript_tool_results_combo.currentText()
+
     def allowed_folders(self) -> list[str]:
         return [
             line.strip()
@@ -361,6 +382,7 @@ class SettingsDialog(QDialog):
             max_context_tokens=self.max_context_tokens(),
             scheduler_quiet_period_seconds=self.scheduler_quiet_period_seconds(),
             scheduler_max_defer_seconds=self.scheduler_max_defer_seconds(),
+            transcript_tool_results=self.transcript_tool_results(),
         )
 
 

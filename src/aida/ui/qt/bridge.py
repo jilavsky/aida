@@ -227,6 +227,15 @@ class ChatBridge(QObject):
     # subprocess) so the Qt thread never blocks while a script runs.
     script_run_finished = Signal(object)  # RunResult
     script_run_failed = Signal(str)  # error message
+    # "Export Conversation As…" for the *active* session — one
+    # finished/failed pair, same shape as script_run_finished/failed above.
+    # Must run on this bridge's background loop, not be called directly
+    # from the Qt thread: ConversationRecorder.store's sqlite3 connection
+    # was created on that loop thread (ChatSession/ConversationRecorder are
+    # built inside _start, itself run via run_coroutine_threadsafe below),
+    # and sqlite3 raises ProgrammingError on any other thread touching it.
+    conversation_export_finished = Signal(str)  # path written to
+    conversation_export_failed = Signal(str)  # error message
 
     def __init__(self, loop_thread: AsyncLoopThread, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -761,6 +770,38 @@ class ChatBridge(QObject):
             self._running_script_proc = None
 
         self.script_run_finished.emit(result)
+
+    # --- export conversation (bug report: a same-thread sqlite3
+    # ProgrammingError when "Export Conversation As…" called the active
+    # session's recorder directly from the Qt thread) ------------------------
+
+    def export_conversation(self, destination: str, tool_result_mode: str) -> None:
+        """Snapshot the active session's conversation to ``destination`` —
+        dispatched onto the background loop because the recorder's store
+        connection lives there; see this class's ``conversation_export_*``
+        signals' docstring."""
+        if self.session is None or self.session.recorder is None:
+            self.conversation_export_failed.emit("No conversation open yet.")
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._export_conversation(destination, tool_result_mode), self._loop_thread.loop
+        )
+
+    async def _export_conversation(self, destination: str, tool_result_mode: str) -> None:
+        # Re-checked rather than trusting export_conversation's guard: the
+        # session can be torn down (window closed, New Chat) in the gap
+        # between scheduling this coroutine and it actually running.
+        if self.session is None or self.session.recorder is None:
+            self.conversation_export_failed.emit("No conversation open yet.")
+            return
+        try:
+            path = self.session.recorder.export_transcript_to(
+                Path(destination), tool_result_mode=tool_result_mode
+            )
+        except OSError as exc:
+            self.conversation_export_failed.emit(str(exc))
+            return
+        self.conversation_export_finished.emit(str(path))
 
     # --- shutdown ------------------------------------------------------------
 

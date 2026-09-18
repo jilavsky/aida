@@ -115,6 +115,48 @@ def test_cmd_export_unknown_id_reports_error(aida_home: Path, records_home: Path
     assert "does-not-exist" in out
 
 
+def test_cmd_export_dest_writes_to_a_different_folder(
+    aida_home: Path, records_home: Path, tmp_path: Path, capsys
+):
+    """Export Conversation As… equivalent — a snapshot elsewhere must not
+    touch the conversation's regular background transcript."""
+    store = _store(aida_home)
+    conv_id = store.create_conversation(timestamp=T0, title="hi")
+    store.append_message(conv_id, Message(role="user", content="hello"), timestamp=T0)
+    store.close()
+
+    dest = tmp_path / "vault"
+    rc = cmd_export(_build_parser().parse_args(["export", conv_id[:8], "--dest", str(dest)]))
+    out = capsys.readouterr().out
+    assert rc == 0
+
+    path_str = out.split("Exported transcript to", 1)[1].strip()
+    path = Path(path_str)
+    assert path.parent == dest
+    assert "hello" in path.read_text(encoding="utf-8")
+
+
+def test_cmd_export_tool_results_flag_overrides_default_mode(
+    aida_home: Path, records_home: Path, tmp_path: Path, capsys
+):
+    store = _store(aida_home)
+    conv_id = store.create_conversation(timestamp=T0, title="hi")
+    store.append_message(
+        conv_id, Message(role="tool", content="a raw payload", tool_call_id="call_1"), timestamp=T0
+    )
+    store.close()
+
+    rc = cmd_export(
+        _build_parser().parse_args(
+            ["export", conv_id[:8], "--dest", str(tmp_path / "vault"), "--tool-results", "off"]
+        )
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    path = Path(out.split("Exported transcript to", 1)[1].strip())
+    assert "a raw payload" not in path.read_text(encoding="utf-8")
+
+
 # --- cmd_delete ------------------------------------------------------------------
 
 
