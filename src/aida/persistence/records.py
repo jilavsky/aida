@@ -254,7 +254,9 @@ def write_transcript(
     # placeholder would otherwise get a brand-new random id and the link
     # lookup in render_transcript would never match), so the links below
     # point at the filename each artifact actually got in the sidecar folder.
-    copied = copy_artifacts_to_sidecar(image_placeholders + file_placeholders, target_dir, artifact_store)
+    copied = copy_artifacts_to_sidecar(
+        image_placeholders + file_placeholders, target_dir, artifact_store
+    )
     sidecar_filenames = {artifact_id: path.name for artifact_id, path in copied.items()}
 
     # Read off disk rather than tracked separately: the folder is the

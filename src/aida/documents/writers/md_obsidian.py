@@ -62,7 +62,9 @@ def copy_artifacts_to_sidecar(
     if not artifacts:
         return {}
     sidecar_dir.mkdir(parents=True, exist_ok=True)
-    return {artifact.id: artifact_store.copy_to_target(artifact, sidecar_dir) for artifact in artifacts}
+    return {
+        artifact.id: artifact_store.copy_to_target(artifact, sidecar_dir) for artifact in artifacts
+    }
 
 
 def _is_relative(path: Path, base: Path) -> bool:
@@ -114,7 +116,9 @@ def write_markdown_document(
 
     lines = [f"# {title}", ""]
 
-    copied = copy_artifacts_to_sidecar([img.artifact for img in images], sidecar_dir, artifact_store)
+    copied = copy_artifacts_to_sidecar(
+        [img.artifact for img in images], sidecar_dir, artifact_store
+    )
     by_id = {img.artifact.id: img for img in images}
     referenced: set[str] = set()
 
