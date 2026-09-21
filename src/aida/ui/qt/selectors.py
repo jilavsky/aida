@@ -267,6 +267,7 @@ class FolderDisplay(QGroupBox):
         self._sidecar_folder_name: str = "figures"
         self._command_patterns: list[str] = []
         self._python_interpreter: str = ""
+        self._unsaved = False
 
         layout = QVBoxLayout(self)
 
@@ -327,6 +328,14 @@ class FolderDisplay(QGroupBox):
         self._save_button = QPushButton("Save to Workspace", self)
         self._save_button.clicked.connect(self.save_to_workspace_requested.emit)
         layout.addWidget(self._save_button)
+        # Bug report (2026-09): a folder edited here applies to the running
+        # chat immediately, but keeping it for *future* chats still takes
+        # this button — and nothing said so, so "I added the folder" and
+        # "the workspace has the folder" quietly meant different things.
+        self._unsaved_label = QLabel("", self)
+        self._unsaved_label.setWordWrap(True)
+        layout.addWidget(self._unsaved_label)
+        self.set_unsaved(False)
 
     def set_folders(
         self,
@@ -373,6 +382,26 @@ class FolderDisplay(QGroupBox):
             row = _RemovableFolderRow(pattern, self)
             row.remove_requested.connect(self._on_remove_command)
             self._command_rows_layout.addWidget(row)
+
+    def set_unsaved(self, unsaved: bool) -> None:
+        """Show (or clear) the "applied to this chat, not yet saved" state.
+
+        The wording carries the whole distinction, so it says both halves
+        explicitly rather than just marking the button dirty: users read
+        an unsaved marker as "nothing has happened yet", which is exactly
+        the wrong conclusion here."""
+        self._unsaved = unsaved
+        self._save_button.setText("Save to Workspace *" if unsaved else "Save to Workspace")
+        self._unsaved_label.setText(
+            "Applied to this chat. Click Save to Workspace to keep it for future chats."
+            if unsaved
+            else ""
+        )
+        self._unsaved_label.setVisible(unsaved)
+
+    @property
+    def has_unsaved_changes(self) -> bool:
+        return self._unsaved
 
     @property
     def source_folders(self) -> list[str]:

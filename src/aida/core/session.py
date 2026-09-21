@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from aida.artifacts.store import ArtifactStore
@@ -52,6 +53,7 @@ from aida.core.agent import AgentLoop
 from aida.core.confirmation import REMEMBERABLE_ACTIONS, ConfirmAnswer, RememberingConfirm
 from aida.core.context import (
     DEFAULT_RESERVED_OUTPUT_TOKENS,
+    WORKSPACE_FOLDERS_HEADING,
     TrimPlan,
     build_coding_context_block,
     build_identity_context_block,
@@ -157,6 +159,12 @@ class UnknownWorkspaceError(Exception):
     ``workspaces.yaml``."""
 
 
+class NoWorkspaceFoldersError(Exception):
+    """Raised by ``ChatSession.update_workspace_folders`` for a session that
+    has no workspace behind it (``aida chat --profile ...`` with no
+    workspace), so there are no source/target folders to change."""
+
+
 class SessionBusyError(Exception):
     """Raised when a second mutation of a session's state is attempted while
     one is already in flight.
@@ -246,6 +254,39 @@ def _format_retrieved_context(passages_by_kb: dict[str, list[RetrievedPassage]])
     return "\n".join(lines)
 
 
+@dataclass
+class WorkspaceFolderState:
+    """Everything a live session needs to rebuild its folder permissions and
+    its ``# Workspace folders`` context block after the user edits the
+    workspace's folders mid-conversation.
+
+    Bug report (2026-09): "I created a new workspace and added through right
+    hand panel new Source and target folders... Agent seemed really confused
+    about the source and target - I had to give agent exact paths." Both
+    halves of folder access — the ``SafetyGuard``'s allowed roots and the
+    system-prompt block naming the paths — were previously computed once in
+    ``start_session`` and never again, so a folder added to the panel only
+    took effect in the *next* chat. Keeping the inputs here means
+    ``ChatSession.update_workspace_folders`` can redo both from the same
+    values ``start_session`` used, rather than the GUI having to reassemble
+    them (and get the artifacts/scratch roots subtly wrong).
+
+    ``guard_extra_roots`` is the full always-allowed set the guard was built
+    with (global allowed folders + AIDA's own artifacts and scratch dirs);
+    ``context_allowed_folders`` is the shorter list the model is *told*
+    about (global allowed folders only). They differ on purpose — see
+    ``start_session``.
+    """
+
+    source_folders: list[str] = field(default_factory=list)
+    target_folder: str | None = None
+    guard_extra_roots: list[str] = field(default_factory=list)
+    context_allowed_folders: list[str] = field(default_factory=list)
+    sidecar_dirname: str = "figures"
+    safety_mode: str = "confirm"
+    scratch_dir: str | None = None
+
+
 class ChatSession:
     """Holds the mutable state of one chat session: current provider/loop,
     message history, native tools, and (Phase 4) the recorder persisting
@@ -265,6 +306,8 @@ class ChatSession:
         extra_context_texts: list[str] | None = None,
         active_knowledge_bases: list[ActiveKnowledgeBase] | None = None,
         identity_text: str | None = None,
+        guard: SafetyGuard | None = None,
+        folder_state: WorkspaceFolderState | None = None,
     ) -> None:
         self.settings = settings
         self.tools = tools if tools is not None else default_native_tools()
@@ -322,7 +365,26 @@ class ChatSession:
         # a future refactor that reintroduces it.
         self._history_generation = 0
 
-        skill_texts = load_skill_texts(skills_dir(), skill_names or [])
+        # The guard this session's file/document/coding tools were built
+        # with, and the inputs its system message was built from — both kept
+        # so the workspace's folders can be changed mid-conversation without
+        # restarting the chat (``update_workspace_folders``). ``guard`` is
+        # None only for a session constructed directly in a test that
+        # doesn't exercise file tools; ``folder_state`` is None for one
+        # started outside ``start_session``.
+        self.guard = guard
+        self.folder_state = folder_state
+        self._system_prompt = system_prompt
+        self._identity_text = identity_text
+        self._extra_context_texts = list(extra_context_texts or [])
+        #: One-shot notices to hand the model at the start of the next turn
+        #: (see ``_run_turn``): the system message alone changing under it
+        #: mid-conversation is easy to miss when the history above still
+        #: shows it working with the old paths.
+        self._pending_notices: list[str] = []
+
+        self._skill_texts = load_skill_texts(skills_dir(), skill_names or [])
+        skill_texts = self._skill_texts
         system_message = build_system_message(
             system_prompt, skill_texts, extra_texts=extra_context_texts, identity_text=identity_text
         )
@@ -336,6 +398,160 @@ class ChatSession:
         self.messages: list[Message] = (
             [system_message] if system_message.content else []
         ) + history
+
+    def _rebuild_system_message(self) -> None:
+        """Re-render ``messages[0]`` from the same inputs ``__init__`` used,
+        after one of the generated context blocks in
+        ``self._extra_context_texts`` has been replaced.
+
+        Rewriting the system message (rather than only telling the model
+        about the change in a chat message) is what makes the change
+        survive: history gets trimmed and compacted, and a note buried in
+        it would eventually be dropped while the stale folder list in the
+        system prompt stayed. It does cost one prompt-cache miss on the
+        next turn, which is the right trade for a session whose folder
+        permissions just changed."""
+        message = build_system_message(
+            self._system_prompt,
+            self._skill_texts,
+            extra_texts=self._extra_context_texts,
+            identity_text=self._identity_text,
+        )
+        if self.messages and self.messages[0].role == "system":
+            self.messages[0] = message
+        elif message.content:
+            self.messages.insert(0, message)
+
+    def _replace_context_block(self, heading: str, text: str | None) -> None:
+        """Swap the generated context block starting with ``heading`` for
+        ``text`` (or drop it, for ``None``), leaving every other block —
+        MCP server instructions, code templates — untouched and in place."""
+        for position, existing in enumerate(self._extra_context_texts):
+            if existing.startswith(heading):
+                if text is None:
+                    del self._extra_context_texts[position]
+                else:
+                    self._extra_context_texts[position] = text
+                return
+        if text is not None:
+            self._extra_context_texts.insert(0, text)
+
+    def update_workspace_folders(
+        self,
+        *,
+        source_folders: list[str],
+        target_folder: str | None,
+    ) -> str:
+        """Apply new source/target folders to this *running* session, with
+        no restart: the ``SafetyGuard`` starts allowing them immediately and
+        the model is told about them, both for the rest of this
+        conversation.
+
+        Bug report (2026-09): folders added from the GUI's workspace panel
+        did nothing until the user saved them *and* started or resumed a
+        chat — until then the agent neither had access to them nor knew they
+        existed, so it asked for full paths and, once given them, had every
+        read confirmed as if they were outside the workspace. Both halves
+        are fixed here, together: they are the same change as far as the
+        user is concerned, and fixing only one produces a session that can
+        read a folder it has never been told about (or vice versa).
+
+        Callers are expected to have expanded any ``{user}`` placeholder
+        first (``resolve_workspace_for_user``) — same rule as
+        ``start_session``, and for the same reason: a guard holding a
+        literal ``{user}`` root allows nothing real.
+
+        Whether the new folders are also *persisted* to the workspace is a
+        separate decision, made by the caller ("Save to Workspace" in the
+        GUI): this session's own permissions are the part that must not wait
+        for it.
+
+        Returns a one-line summary for the caller to show the user, and
+        raises ``NoWorkspaceFoldersError`` for a session that has no
+        workspace folder state at all (a bare ``--profile`` chat)."""
+        if self.folder_state is None:
+            raise NoWorkspaceFoldersError(
+                "This chat isn't running in a workspace, so its folders can't be changed — "
+                "start or resume a chat in a workspace first."
+            )
+        state = self.folder_state
+        state.source_folders = [str(folder) for folder in source_folders if str(folder).strip()]
+        state.target_folder = str(target_folder) if target_folder else None
+
+        if state.target_folder:
+            # Same convenience (and the same best-effort failure handling)
+            # as _ensure_workspace_folders at session start: a target folder
+            # is an output location the user just named, so create it rather
+            # than failing the first write into it. Source folders are
+            # deliberately never created — see _ensure_workspace_folders.
+            try:
+                Path(state.target_folder).expanduser().mkdir(parents=True, exist_ok=True)
+            except OSError as exc:  # noqa: PERF203 - one path, logged and carried on
+                logger.warning("could not create target folder %s: %s", state.target_folder, exc)
+
+        if self.guard is not None:
+            # Rebuilt through the same constructor start_session used, so
+            # the roots this session ends up with can't drift from the ones
+            # a fresh session in the same workspace would get. Mutated in
+            # place: every already-built file/document/coding tool holds a
+            # reference to *this* guard object.
+            rebuilt = SafetyGuard.for_workspace(
+                source_folders=state.source_folders,
+                target_folder=state.target_folder,
+                global_allowed_folders=state.guard_extra_roots,
+                mode=self.guard.mode,
+            )
+            self.guard.allowed_roots = rebuilt.allowed_roots
+
+        self._replace_context_block(
+            WORKSPACE_FOLDERS_HEADING,
+            build_workspace_context_block(
+                source_folders=state.source_folders,
+                target_folder=state.target_folder,
+                global_allowed_folders=state.context_allowed_folders,
+                sidecar_dirname=state.sidecar_dirname,
+                safety_mode=state.safety_mode,
+                scratch_dir=state.scratch_dir,
+            ),
+        )
+        self._rebuild_system_message()
+
+        notice_lines = ["The user just changed this workspace's folders, mid-conversation."]
+        if state.source_folders:
+            notice_lines.append(
+                "Source folder(s) — read data from here: " + ", ".join(state.source_folders)
+            )
+        else:
+            notice_lines.append("There are no source folders configured now.")
+        if state.target_folder:
+            notice_lines.append(
+                f"Target folder — write generated reports and files here: {state.target_folder}"
+            )
+        notice_lines.append(
+            "Your instructions have been updated to match, and you already have access to these "
+            "folders. Use them from now on instead of any folder paths mentioned earlier in this "
+            "conversation, and don't ask the user to repeat the paths."
+        )
+        notice = "\n".join(notice_lines)
+        if self.is_mutating:
+            # A turn is in flight: hand it over at the next round trip
+            # (same path as a user interjection) rather than holding the
+            # notice back until the turn after — the agent may be about to
+            # list exactly the folder that just changed.
+            self.queue_user_message(notice)
+        else:
+            self._pending_notices.append(notice)
+
+        missing = [
+            folder for folder in state.source_folders if not Path(folder).expanduser().exists()
+        ]
+        summary = (
+            f"Folders applied to this chat — {len(state.source_folders)} source folder(s), "
+            f"target: {state.target_folder or '(none)'}"
+        )
+        if missing:
+            summary += " — not found on disk: " + ", ".join(missing)
+        return summary
 
     @property
     def is_mutating(self) -> bool:
@@ -747,6 +963,14 @@ class ChatSession:
         persisted = len(self.messages)
 
         context_message: Message | None = None
+        # Ephemeral extras the model sees for this turn only: folder-change
+        # notices queued by update_workspace_folders, then any retrieved
+        # knowledge-base passages. Both ride in one message so the removal
+        # and the persistence exclusion below stay a single identity check.
+        context_parts: list[str] = []
+        if self._pending_notices:
+            context_parts.extend(self._pending_notices)
+            self._pending_notices.clear()
         if self.active_knowledge_bases:
             passages_by_kb = await self._retrieve_context(user_text)
             if passages_by_kb:
@@ -764,10 +988,10 @@ class ChatSession:
                         for kb_name, passages in passages_by_kb.items()
                     }
                 )
-                context_message = Message(
-                    role="user", content=_format_retrieved_context(passages_by_kb)
-                )
-                self.messages.append(context_message)
+                context_parts.append(_format_retrieved_context(passages_by_kb))
+        if context_parts:
+            context_message = Message(role="user", content="\n\n".join(context_parts))
+            self.messages.append(context_message)
 
         try:
             async for event in self.loop.run(self.messages):
@@ -1131,15 +1355,33 @@ async def _start_session(
     # write to without confirmation, same "always-allow just this subfolder"
     # treatment as artifacts_dir() below.
     scratch = ensure_scratch_dir(settings.app.scratch_dir)
-    guard = SafetyGuard.for_workspace(
-        source_folders=workspace.source_folders if workspace else [],
+    # One description of this session's folders, used to build both halves of
+    # folder access below (the guard's allowed roots and the context block
+    # naming the paths for the model) and kept on the session so both can be
+    # rebuilt from the same values when the user edits the workspace's
+    # folders mid-conversation — see WorkspaceFolderState and
+    # ChatSession.update_workspace_folders.
+    #
+    # Bug report: writing into ~/.aida/artifacts (AIDA's own generated-output
+    # folder) always asked for confirmation, since nothing put it in any
+    # allowed-folders list. Always-allow just that subfolder, not the rest of
+    # ~/.aida (config.yaml, secrets refs, and the DB live there too and stay
+    # gated). Same treatment for the scratch folder. Neither belongs in
+    # context_allowed_folders: they are AIDA's own plumbing, not folders the
+    # model should be told to go looking in.
+    folder_state = WorkspaceFolderState(
+        source_folders=list(workspace.source_folders) if workspace else [],
         target_folder=workspace.target_folder if workspace else None,
-        # Bug report: writing into ~/.aida/artifacts (AIDA's own generated-
-        # output folder) always asked for confirmation, since nothing put it
-        # in any allowed-folders list. Always-allow just that subfolder, not
-        # the rest of ~/.aida (config.yaml, secrets refs, and the DB live
-        # there too and stay gated). Same treatment for the scratch folder.
-        global_allowed_folders=[*settings.app.allowed_folders, str(artifacts_dir()), str(scratch)],
+        guard_extra_roots=[*settings.app.allowed_folders, str(artifacts_dir()), str(scratch)],
+        context_allowed_folders=list(settings.app.allowed_folders),
+        sidecar_dirname=sidecar_dirname,
+        safety_mode=effective_safety_mode,
+        scratch_dir=str(scratch),
+    )
+    guard = SafetyGuard.for_workspace(
+        source_folders=folder_state.source_folders,
+        target_folder=folder_state.target_folder,
+        global_allowed_folders=folder_state.guard_extra_roots,
         mode=effective_safety_mode,
         confirm_callback=confirm_callback,
         # Phase 9: union'd the same way allowed folders already are — a
@@ -1156,12 +1398,12 @@ async def _start_session(
     # per-workspace user data). Generated fresh here instead.
     extra_context_texts: list[str] = []
     folder_context = build_workspace_context_block(
-        source_folders=workspace.source_folders if workspace else [],
-        target_folder=workspace.target_folder if workspace else None,
-        global_allowed_folders=settings.app.allowed_folders,
-        sidecar_dirname=sidecar_dirname,
-        safety_mode=effective_safety_mode,
-        scratch_dir=str(scratch),
+        source_folders=folder_state.source_folders,
+        target_folder=folder_state.target_folder,
+        global_allowed_folders=folder_state.context_allowed_folders,
+        sidecar_dirname=folder_state.sidecar_dirname,
+        safety_mode=folder_state.safety_mode,
+        scratch_dir=folder_state.scratch_dir,
     )
     if folder_context:
         extra_context_texts.append(folder_context)
@@ -1393,6 +1635,8 @@ async def _start_session(
         extra_context_texts=extra_context_texts,
         active_knowledge_bases=active_knowledge_bases,
         identity_text=identity_text,
+        guard=guard,
+        folder_state=folder_state if workspace else None,
     )
     return session, mcp_manager
 
@@ -1411,6 +1655,8 @@ async def _close_knowledge_base(conn, embeddings_provider) -> None:
 
 __all__ = [
     "ChatSession",
+    "NoWorkspaceFoldersError",
+    "WorkspaceFolderState",
     "UnknownMcpServerError",
     "UnknownProfileError",
     "UnknownWorkspaceError",

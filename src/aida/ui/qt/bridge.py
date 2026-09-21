@@ -45,6 +45,7 @@ from aida.config.settings import (
 from aida.core.confirmation import ConfirmAnswer, ConfirmationRequest, RememberingConfirm
 from aida.core.session import (
     ChatSession,
+    NoWorkspaceFoldersError,
     UnknownMcpServerError,
     UnknownProfileError,
     UnknownWorkspaceError,
@@ -236,6 +237,13 @@ class ChatBridge(QObject):
     # and sqlite3 raises ProgrammingError on any other thread touching it.
     conversation_export_finished = Signal(str)  # path written to
     conversation_export_failed = Signal(str)  # error message
+    # Source/target folders edited in the workspace panel while a chat is
+    # running — applied to the live session rather than waiting for the next
+    # one (see ChatSession.update_workspace_folders). Same "one
+    # applied/failed pair, the panel re-renders from current state" shape as
+    # the MCP and KB signals above.
+    workspace_folders_applied = Signal(str)  # summary to show the user
+    workspace_folders_apply_failed = Signal(str)  # error message
 
     def __init__(self, loop_thread: AsyncLoopThread, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -544,6 +552,51 @@ class ChatBridge(QObject):
             self.compaction_failed.emit("Nothing to compact yet — not enough history.")
             return
         self.event_received.emit(event)
+
+    # --- live workspace folders -------------------------------------------
+
+    def update_workspace_folders(
+        self, source_folders: list[str], target_folder: str | None
+    ) -> None:
+        """Hand the running session a new set of source/target folders, so a
+        folder added in the workspace panel is readable *now* and the model
+        is told about it — rather than only in the next chat.
+
+        Marshalled onto the background loop like every other session
+        mutation, even though ``update_workspace_folders`` itself is a
+        plain synchronous call: it rewrites ``session.messages[0]`` and the
+        guard's allowed roots, which a running turn on that loop is reading
+        from. Deliberately *not* refused while a turn is in flight (unlike
+        ``switch_profile``): the change is additive and the mid-turn case is
+        exactly the one users hit — they start a turn, watch the agent look
+        in the wrong place, and fix the folders while it runs."""
+        if self.session is None:
+            self.workspace_folders_apply_failed.emit(
+                "No chat is running yet — folders will apply when one starts."
+            )
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._update_workspace_folders(list(source_folders), target_folder),
+            self._loop_thread.loop,
+        )
+
+    async def _update_workspace_folders(
+        self, source_folders: list[str], target_folder: str | None
+    ) -> None:
+        if self.session is None:  # closed between the check above and here
+            return
+        try:
+            summary = self.session.update_workspace_folders(
+                source_folders=source_folders, target_folder=target_folder
+            )
+        except NoWorkspaceFoldersError as exc:
+            self.workspace_folders_apply_failed.emit(str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001 - must never crash the loop thread
+            logger.exception("applying workspace folders to the live session failed")
+            self.workspace_folders_apply_failed.emit(str(exc))
+            return
+        self.workspace_folders_applied.emit(summary)
 
     # --- MCP server live control (Phase 7 management dialog) ---------------
 

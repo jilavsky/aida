@@ -17,6 +17,23 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Fixed
+
+- **Source and target folders added while a chat is running now apply to
+  that chat.** Both halves of folder access — what the `SafetyGuard` allows
+  and the `# Workspace folders` block that tells the model which paths are
+  which — were computed once at session start, so a folder added in the
+  workspace panel did nothing until it was saved *and* a new chat was
+  started or resumed: the agent could neither read the folder nor name it,
+  which is what "agent seemed really confused about the source and target —
+  I had to give agent exact paths" (user report, 2026-09) looked like from
+  the outside. Editing either field (or dropping a folder on the chat) now
+  updates the live session's allowed roots and rewrites its system message,
+  and the next message carries a short notice that the folders changed.
+  **Save to Workspace** is now only about *future* chats, and the panel says
+  so while a change is unsaved. MCP servers launched with their own folder
+  arguments still need a restart to see the change.
+
 ### Added
 
 - **Schedules can reuse one chat across every fire** (`ScheduleEntry.reuse_chat`

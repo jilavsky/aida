@@ -3901,3 +3901,75 @@ def test_a_file_dropped_on_the_transcript_becomes_an_attachment(
         assert window.input_box.attached_paths() == [str(dropped)]
     finally:
         window.close()
+
+
+def test_adding_a_source_folder_applies_to_the_running_session(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    """2026-09 bug report: "I assumed I can tell agent that the files to
+    investigate are in source folder... Agent seemed really confused about
+    the source and target - I had to give agent exact paths." A folder
+    added in the panel now reaches the running session both ways — the
+    guard allows it, and the system message names it — without saving or
+    restarting; the "Save to Workspace" click is only about future chats,
+    which is what the unsaved marker now says."""
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", mcp_group="none")
+        }
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-ws"
+    )
+    try:
+        new_source = tmp_path / "usaxs_data"
+        new_source.mkdir()
+        data_file = new_source / "run_042.dat"
+        data_file.write_text("q i\n")
+        session = window.bridge.session
+        assert session.guard.is_allowed(data_file) is False
+
+        window.folder_display.source_folders_changed.emit([str(new_source)])
+
+        assert pump_until(qapp, lambda: session.guard.is_allowed(data_file))
+        assert str(new_source) in session.messages[0].content
+        # Live, but not yet written to workspaces.yaml — this test's
+        # workspace only exists in memory until "Save to Workspace", which
+        # is exactly the state the unsaved marker describes.
+        assert window.folder_display.has_unsaved_changes is True
+        assert get_workspace(load_settings(), "use-ws") is None
+
+        window.folder_display.save_to_workspace_requested.emit()
+        assert window.folder_display.has_unsaved_changes is False
+        assert get_workspace(load_settings(), "use-ws").source_folders == [str(new_source)]
+    finally:
+        window.close()
+
+
+def test_dropped_folder_applies_to_the_running_session(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
+):
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "use-ws": WorkspaceConfig(name="use-ws", profile="mock-profile", mcp_group="none")
+        }
+    )
+    monkeypatch.setattr(
+        "aida.ui.qt.main_window.QMessageBox.question",
+        lambda *a, **kw: QMessageBox.StandardButton.Yes,
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="use-ws"
+    )
+    try:
+        dropped = tmp_path / "dropped_data"
+        dropped.mkdir()
+        session = window.bridge.session
+        window.input_box.folder_dropped.emit(str(dropped))
+
+        assert pump_until(qapp, lambda: session.guard.is_allowed(dropped / "x.dat"))
+        assert window.folder_display.has_unsaved_changes is True
+    finally:
+        window.close()

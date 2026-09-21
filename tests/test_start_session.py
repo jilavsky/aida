@@ -35,7 +35,8 @@ from aida.config.settings import (
     WorkspacesConfig,
     load_settings,
 )
-from aida.core.session import _ensure_workspace_folders
+from aida.core.context import WORKSPACE_FOLDERS_HEADING
+from aida.core.session import NoWorkspaceFoldersError, _ensure_workspace_folders
 from aida.persistence.recorder import ConversationNotFoundError
 from aida.providers.mock import MockProvider, MockTurn
 from aida.providers.mock_embeddings import MockEmbeddings
@@ -1338,5 +1339,155 @@ async def test_a_user_with_no_context_of_their_own_gets_the_shared_one(
     session, _ = await start_session(settings, profile_name="mock-profile", user="Eva")
     try:
         assert "Shared: this is the USAXS instrument." in session.messages[0].content
+    finally:
+        await session.aclose()
+
+
+# --- folders changed mid-conversation (2026-09 bug report) -----------------
+#
+# "I created a new workspace and added through right hand panel new Source
+# and target folders... Agent seemed really confused about the source and
+# target - I had to give agent exact paths." Both halves of folder access —
+# the guard's allowed roots and the system-prompt block naming the paths —
+# used to be frozen at session start, so a folder added to a running chat
+# did nothing until the user saved it *and* started a new chat.
+
+
+@pytest.mark.asyncio
+async def test_folders_added_mid_session_are_allowed_immediately(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    ws = _workspace(source_folders=[], target_folder=None)
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+    session, _ = await start_session(settings, workspace_name="use-ws")
+    try:
+        new_source = tmp_path / "usaxs_data"
+        new_source.mkdir()
+        data_file = new_source / "run_042.dat"
+        data_file.write_text("q i\n")
+        assert session.guard.is_allowed(data_file) is False
+
+        session.update_workspace_folders(
+            source_folders=[str(new_source)], target_folder=str(tmp_path / "out")
+        )
+
+        assert session.guard.is_allowed(data_file) is True
+        assert session.guard.is_allowed(tmp_path / "out" / "report.md") is True
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_folders_added_mid_session_are_named_in_the_system_message(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """The model has to be *told* the new paths, not just allowed to read
+    them — being allowed a folder it can't name is what made the agent ask
+    the user to type full paths."""
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+    _FakeMcpManager.instructions_to_report = {"ws-server": "Call pyirena_summarize_folder first."}
+
+    old_source = tmp_path / "old_data"
+    old_source.mkdir()
+    ws = _workspace(source_folders=[str(old_source)], target_folder=str(tmp_path / "old_out"))
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+    session, _ = await start_session(settings, workspace_name="use-ws")
+    try:
+        new_source = tmp_path / "new_data"
+        new_source.mkdir()
+        session.update_workspace_folders(
+            source_folders=[str(new_source)], target_folder=str(tmp_path / "new_out")
+        )
+
+        content = session.messages[0].content
+        assert session.messages[0].role == "system"
+        assert str(new_source) in content
+        assert str(tmp_path / "new_out") in content
+        assert str(old_source) not in content  # replaced, not appended to
+        # One folder block, and every *other* generated block still in place.
+        assert content.count(WORKSPACE_FOLDERS_HEADING) == 1
+        assert "Call pyirena_summarize_folder first." in content
+        assert "You are a workspace assistant." in content
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_folders_added_mid_session_are_announced_on_the_next_turn(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """The system message changing under a conversation is easy to miss when
+    the history above it still shows the agent working with the old paths,
+    so the next turn also carries a one-shot notice — ephemeral, like
+    retrieved knowledge-base context: seen once, never persisted, never
+    re-sent."""
+    provider = MockProvider([MockTurn(text="looking there now")])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    ws = _workspace()
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+    session, _ = await start_session(settings, workspace_name="use-ws")
+    try:
+        new_source = tmp_path / "usaxs_data"
+        new_source.mkdir()
+        session.update_workspace_folders(source_folders=[str(new_source)], target_folder=None)
+
+        async for _event in session.send("where is my data?"):
+            pass
+
+        sent = [m.content for m in provider.calls[-1][0]]
+        assert any(str(new_source) in c and "just changed" in c for c in sent)
+        # Gone again afterwards: not in the live history, not in the DB.
+        assert not any("just changed" in m.content for m in session.messages[1:])
+        recorded = session.recorder.store.load_messages(session.recorder.conversation_id)
+        assert not any("just changed" in m.content for m in recorded)
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_updating_folders_creates_a_missing_target_folder(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """Same convenience as session start (``_ensure_workspace_folders``): a
+    target folder is an output location the user just named."""
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
+    session, _ = await start_session(settings, workspace_name="use-ws")
+    try:
+        target = tmp_path / "reports" / "2026-09"
+        session.update_workspace_folders(source_folders=[], target_folder=str(target))
+        assert target.is_dir()
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_updating_folders_without_a_workspace_is_refused(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    settings = _settings()
+    session, _ = await start_session(settings, profile_name="mock-profile")
+    try:
+        with pytest.raises(NoWorkspaceFoldersError):
+            session.update_workspace_folders(source_folders=["/tmp"], target_folder=None)
     finally:
         await session.aclose()

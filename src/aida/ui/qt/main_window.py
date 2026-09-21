@@ -42,6 +42,7 @@ from aida.config.settings import (
     save_app_config,
     save_workflow,
 )
+from aida.config.users import resolve_active_user, resolve_workspace_for_user
 from aida.core.confirmation import REMEMBERABLE_ACTIONS, ConfirmAnswer
 from aida.core.cost import estimate_cost_usd
 from aida.core.events import ContextTrimmed
@@ -950,6 +951,8 @@ class MainWindow(QMainWindow):
         self.bridge.compaction_failed.connect(self._on_compaction_failed)
         self.bridge.mcp_server_status_changed.connect(self._on_mcp_server_status_changed)
         self.bridge.mcp_server_action_failed.connect(self._on_mcp_server_action_failed)
+        self.bridge.workspace_folders_applied.connect(self._on_workspace_folders_applied)
+        self.bridge.workspace_folders_apply_failed.connect(self._on_workspace_folders_apply_failed)
         self.bridge.conversation_export_finished.connect(self._on_conversation_export_finished)
         self.bridge.conversation_export_failed.connect(self._on_conversation_export_failed)
         self.input_box.cancel_requested.connect(self.bridge.cancel)
@@ -1520,11 +1523,10 @@ class MainWindow(QMainWindow):
     def _on_folder_dropped(self, folder: str) -> None:
         """A folder (rather than a file) dropped onto the chat: offer to add
         it as a source folder, per PLAN.md's "folder drop -> confirmation
-        dialog offering 'add as allowed/source folder'". Persisting it
-        (and the running session's ``SafetyGuard`` actually honoring it)
-        both go through the same existing "Save to Workspace" + restart
-        path as any other folder edit here — see ``_on_save_folders_to_workspace``
-        and ``FolderDisplay``'s docstring."""
+        dialog offering 'add as allowed/source folder'". The running
+        session starts honoring it immediately, like any other folder edit
+        in the panel (``_apply_folders_to_session``); keeping it for future
+        chats still takes the "Save to Workspace" click."""
         if self._current_workspace_config is None:
             self.statusBar().showMessage(
                 "No active workspace — create or switch to one to add source folders", 5000
@@ -1551,10 +1553,7 @@ class MainWindow(QMainWindow):
             target_folder=self._current_workspace_config.target_folder,
             sidecar_folder_name=self._current_workspace_config.sidecar_folder_name,
         )
-        self.statusBar().showMessage(
-            f"Added {folder} — click 'Save to Workspace', then switch/resume to apply it to this session",
-            8000,
-        )
+        self._apply_folders_to_session()
 
     # --- workspace / profile switching ------------------------------------
 
@@ -2033,14 +2032,58 @@ class MainWindow(QMainWindow):
                 source_folders=[], target_folder=None, sidecar_folder_name="figures"
             )
             self.folder_display.set_commands(patterns=[], interpreter=None)
+        # Freshly loaded from the workspace on disk: nothing unsaved yet.
+        self.folder_display.set_unsaved(False)
 
     def _on_source_folders_changed(self, folders: list[str]) -> None:
         if self._current_workspace_config is not None:
             self._current_workspace_config.source_folders = list(folders)
+            self._apply_folders_to_session()
 
     def _on_target_folder_changed(self, folder: str) -> None:
         if self._current_workspace_config is not None:
             self._current_workspace_config.target_folder = folder
+            self._apply_folders_to_session()
+
+    def _apply_folders_to_session(self) -> None:
+        """Push the panel's current source/target folders into the *running*
+        chat, and mark them as not yet saved to the workspace.
+
+        Bug report (2026-09): "I assumed I can tell agent that the files to
+        investigate are in source folder... Agent seemed really confused —
+        I had to give agent exact paths." Adding a folder here used to do
+        nothing at all until the user saved it *and* started or resumed a
+        chat: the running session kept the allowed roots and the
+        ``# Workspace folders`` block it was built with, so the agent could
+        neither read the new folder nor name it. Applying on every edit
+        makes the panel mean what users read it to mean; the separate
+        "Save to Workspace" click is now only about *future* chats, which
+        is what the unsaved marker says.
+
+        ``{user}`` is expanded first, exactly as ``start_session`` does
+        before building the guard — an unexpanded placeholder would put a
+        literal ``{user}`` root in the allowed set and match nothing real.
+        """
+        if self._current_workspace_config is None:
+            return
+        self.folder_display.set_unsaved(True)
+        resolved = resolve_workspace_for_user(
+            self._current_workspace_config,
+            resolve_active_user(app_config=self.settings.app),
+        )
+        if resolved is None:  # unreachable with a non-None config; keeps mypy honest
+            return
+        self.bridge.update_workspace_folders(resolved.source_folders, resolved.target_folder)
+
+    def _on_workspace_folders_applied(self, summary: str) -> None:
+        self.statusBar().showMessage(
+            f"{summary}. Click 'Save to Workspace' to keep it for future chats.", 8000
+        )
+
+    def _on_workspace_folders_apply_failed(self, message: str) -> None:
+        # Not a dialog: the edit itself is still in the panel (and still
+        # saveable to the workspace), only this chat didn't take it.
+        self.statusBar().showMessage(f"Folders not applied to this chat: {message}", 8000)
 
     def _on_sidecar_folder_name_changed(self, name: str) -> None:
         if self._current_workspace_config is not None:
@@ -2059,8 +2102,11 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("No active workspace to save folders to", 5000)
             return
         save_workspace(self.settings, self._current_workspace_config)
+        self.folder_display.set_unsaved(False)
         self.statusBar().showMessage(
-            f"Saved folders to workspace {self._current_workspace_config.name}", 5000
+            f"Saved folders to workspace {self._current_workspace_config.name} — "
+            "future chats in it start with them too",
+            5000,
         )
 
     # --- quick tasks (B14) ---------------------------------------------------

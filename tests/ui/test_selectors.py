@@ -570,3 +570,22 @@ def test_user_selector_is_wide_enough_to_show_a_name(qapp):
     selector.set_users([])
     assert selector._combo.minimumContentsLength() >= 12
     assert selector._combo.sizeHint().width() > 80
+
+
+def test_folder_display_unsaved_marker_says_the_change_is_already_live(qapp):
+    """2026-09 bug report: users read the panel as "the agent now looks
+    here". It does now — but only this chat does until "Save to Workspace"
+    is clicked, and the marker has to say both halves, since a bare dirty
+    marker reads as "nothing happened yet"."""
+    display = FolderDisplay()
+    assert display.has_unsaved_changes is False
+    assert display._save_button.text() == "Save to Workspace"
+
+    display.set_unsaved(True)
+    assert display.has_unsaved_changes is True
+    assert display._save_button.text().endswith("*")
+    assert "this chat" in display._unsaved_label.text()
+    assert "future chats" in display._unsaved_label.text()
+
+    display.set_unsaved(False)
+    assert display._unsaved_label.text() == ""

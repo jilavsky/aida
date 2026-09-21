@@ -197,6 +197,14 @@ def load_skill_texts(skills_dir: Path, skill_names: list[str]) -> list[str]:
     return texts
 
 
+#: Heading the workspace-folders context block starts with. Used both to
+#: build the block and to find it again inside a live session's
+#: ``extra_context_texts`` when the user changes the workspace's folders
+#: mid-conversation (``ChatSession.update_workspace_folders``), so the block
+#: is replaced rather than duplicated.
+WORKSPACE_FOLDERS_HEADING = "# Workspace folders"
+
+
 def build_workspace_context_block(
     *,
     source_folders: list[str],
@@ -244,7 +252,7 @@ def build_workspace_context_block(
     if not source_folders and not target_folder and not global_allowed_folders and not scratch_dir:
         return None
 
-    lines = ["# Workspace folders"]
+    lines = [WORKSPACE_FOLDERS_HEADING]
     if source_folders:
         lines.append("")
         lines.append(
@@ -662,6 +670,7 @@ __all__ = [
     "IMAGE_TOKEN_ESTIMATE",
     "MIN_HISTORY_BUDGET",
     "MISSING_TOOL_RESULT",
+    "WORKSPACE_FOLDERS_HEADING",
     "SkillInfo",
     "TrimPlan",
     "build_system_message",

@@ -103,9 +103,23 @@ settings:
 - **Python interpreter** — a text field (with a **Browse…** picker) for the
   `python_interpreter` path used by `run_python_script`.
 
-All of these edits happen in memory only — nothing is written to
-`workspaces.yaml` until you click **Save to Workspace**. Switching away or
-closing the app without saving discards the changes.
+A source or target folder you add here takes effect in the **running chat
+immediately**: the agent is allowed to read and write there, and it is told
+the new paths (they appear in its `# Workspace folders` instructions), so
+you can say "the data is in the source folder" rather than pasting full
+paths. A one-line notice on the next message tells it the folders changed,
+and the panel shows *Applied to this chat* until you save.
+
+Saving is about *future* chats: nothing is written to `workspaces.yaml`
+until you click **Save to Workspace**, and the other fields here (sidecar
+folder, allowed commands, interpreter) only take effect in chats started
+after that save. Switching away or closing the app without saving discards
+the changes.
+
+One limit: MCP servers that were started with folder paths of their own
+(`--output-dir`-style arguments) keep the paths they were launched with
+until they are restarted. AIDA's own file, document and script tools pick
+up the new folders right away.
 
 Separately, the toolbar's **Workspaces…** button opens the Workspace
 Management dialog — Add…/Edit…/Remove… against the full list of saved
