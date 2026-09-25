@@ -26,6 +26,7 @@ commented example config files, see [`examples/config/`](../examples/config/).
 | [`knowledge-bases.md`](knowledge-bases.md) | RAG: indexing your own documents so the agent can search them |
 | [`gui-overview.md`](gui-overview.md) | A spatial tour of the desktop app — what's where |
 | [`pyirena.md`](pyirena.md) | Using AIDA with pyIrena: one-click MCP setup, and sharing an environment between the two packages |
+| [`axis-camera.md`](axis-camera.md) | Axis network camera stills via `axis-cam-mcp`: build it, test on macOS, deploy to the beamline machine |
 | [`workflows.md`](workflows.md) | Headless `aida run`, stored named workflows, and the in-app scheduler (Phase 10) |
 | [`moving-and-sharing.md`](moving-and-sharing.md) | Exporting your setup to another machine or a colleague, and importing one |
 
