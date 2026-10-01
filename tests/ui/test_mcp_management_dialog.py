@@ -21,7 +21,7 @@ from aida.config.settings import (
 )
 from aida.core.confirmation import ConfirmAnswer
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
-from aida.ui.qt._qt import QDialog, QMessageBox, Qt
+from aida.ui.qt._qt import QDialog, QLabel, QMessageBox, Qt
 from aida.ui.qt.bridge import ChatBridge
 from aida.ui.qt.mcp_management_dialog import (
     GroupsDialog,
@@ -986,3 +986,47 @@ def test_skills_browser_install_bundled_a_second_time_says_nothing_to_do(
 
     assert len(infos) == 1
     assert infos[0][0] == "Nothing To Install"
+
+
+def test_skills_browser_shows_the_folder_path_and_opens_it(qapp, aida_home: Path, monkeypatch):
+    """Bug report: "the skills folder ... is hidden quite well in a
+    normally invisible folder." ``~/.aida`` does not show up in
+    Finder/Explorer, so the path is printed in the dialog and a button
+    reveals it — the same way File ▸ Open Config/Records/Scratch Folder
+    already handle AIDA's other hidden directories."""
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toLocalFile()),
+    )
+
+    skills_dir = aida_home / "skills"
+    dialog = SkillsBrowserDialog(skills_dir)
+
+    labels = [w.text() for w in dialog.findChildren(QLabel)]
+    assert any(str(skills_dir) in text for text in labels), labels
+
+    dialog._open_folder_button.click()
+    assert opened == [str(skills_dir)]
+
+
+def test_skills_browser_open_folder_creates_a_missing_folder_first(
+    qapp, aida_home: Path, monkeypatch
+):
+    """``QDesktopServices.openUrl`` on a path that does not exist fails
+    silently, which on a fresh install (nothing has ever written a skill)
+    would make the button look broken."""
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toLocalFile()),
+    )
+
+    skills_dir = aida_home / "never-created" / "skills"
+    dialog = SkillsBrowserDialog(skills_dir)
+    assert not skills_dir.exists()
+
+    dialog._open_folder_button.click()
+
+    assert skills_dir.is_dir()
+    assert opened == [str(skills_dir)]

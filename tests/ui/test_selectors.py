@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from aida.ui.qt._qt import Qt
 from aida.ui.qt.selectors import (
+    MCP_PANEL_COLUMNS,
     NO_WORKSPACE_LABEL,
     FolderDisplay,
     McpQuickPanel,
@@ -495,6 +496,64 @@ def test_mcp_quick_panel_reset_servers_clears_old_checkboxes(qapp):
     panel.set_servers(["pyirena"], enabled=["pyirena"], group_name="a")
     panel.set_servers(["other"], enabled=[], group_name="b")
     assert list(panel._checkboxes.keys()) == ["other"]
+    # The grid holds exactly the live checkboxes — a stale widget left
+    # behind would still be laid out (and visible) even though it is gone
+    # from _checkboxes, which is how "clear and rebuild" goes wrong.
+    assert panel._grid.count() == 1
+
+
+def test_mcp_quick_panel_lays_servers_out_in_two_columns(qapp):
+    """Bug report: "I have about 15 of them ... the list is getting
+    needlessly long while the minimum width is enforced by the buttons and
+    objects in the Folders layout, so we are wasting vertical space."
+    Fifteen servers must occupy eight rows, not fifteen."""
+    names = [f"server-{index:02d}" for index in range(15)]
+    panel = McpQuickPanel()
+    panel.set_servers(names, enabled=[], group_name="everything")
+
+    assert MCP_PANEL_COLUMNS == 2
+    positions = {
+        name: panel._grid.getItemPosition(panel._grid.indexOf(box))[:2]
+        for name, box in panel._checkboxes.items()
+    }
+    assert max(row for row, _column in positions.values()) == 7  # 8 rows, 0-indexed
+    assert {column for _row, column in positions.values()} == {0, 1}
+
+
+def test_mcp_quick_panel_columns_read_top_to_bottom(qapp):
+    """Column-major ("ls" order), not row-major: an alphabetical server
+    list has to stay alphabetical going *down* each column, or scanning it
+    is worse than the single column it replaced."""
+    panel = McpQuickPanel()
+    panel.set_servers(list("abcde"), enabled=[], group_name="g")
+
+    positions = {
+        name: panel._grid.getItemPosition(panel._grid.indexOf(box))[:2]
+        for name, box in panel._checkboxes.items()
+    }
+    # 5 servers over 2 columns -> 3 rows: a b c down the left, d e down the right.
+    assert positions["a"] == (0, 0)
+    assert positions["b"] == (1, 0)
+    assert positions["c"] == (2, 0)
+    assert positions["d"] == (0, 1)
+    assert positions["e"] == (1, 1)
+
+
+def test_mcp_quick_panel_single_server_stays_in_the_first_column(qapp):
+    panel = McpQuickPanel()
+    panel.set_servers(["only"], enabled=[], group_name="g")
+    box = panel._checkboxes["only"]
+    assert panel._grid.getItemPosition(panel._grid.indexOf(box))[:2] == (0, 0)
+
+
+def test_mcp_quick_panel_handles_no_servers_at_all(qapp):
+    """The row count is computed by integer division on the server count —
+    an empty list must not reach it as a divide-by-nothing or lay anything
+    out."""
+    panel = McpQuickPanel()
+    panel.set_servers([], enabled=[], group_name=None)
+    assert panel._checkboxes == {}
+    assert panel._grid.count() == 0
 
 
 def test_mcp_quick_panel_checkboxes_are_now_live_controls(qapp):

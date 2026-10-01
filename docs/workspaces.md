@@ -1,6 +1,6 @@
 # Workspaces
 
-> **Status: 0.1.0.** Phases 1–10 are implemented and in daily use.
+> **Status: 0.2.0.** Phases 1–10 are implemented and in daily use.
 > Config formats and CLI commands are stable enough to build on; anything
 > that has to change before 1.0 will be called out in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`PLAN.md`](../PLAN.md) for what is
@@ -20,7 +20,7 @@ whole environment at once.
 
 Workspaces live in `~/.aida/workspaces.yaml`, keyed by name. You can manage
 them with the `aida workspace` CLI or, for the parts that already have an
-editor, from the toolbar in the GUI.
+editor, from the GUI's **Configure** menu.
 
 ## Fields
 
@@ -121,7 +121,7 @@ One limit: MCP servers that were started with folder paths of their own
 until they are restarted. AIDA's own file, document and script tools pick
 up the new folders right away.
 
-Separately, the toolbar's **Workspaces…** button opens the Workspace
+Separately, **Configure → Workspaces…** opens the Workspace
 Management dialog — Add…/Edit…/Remove… against the full list of saved
 workspaces, persisted immediately (no "Save to Workspace" step). Its
 Add/Edit form covers every field the Folders panel above has no control for

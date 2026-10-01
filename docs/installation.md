@@ -1,6 +1,6 @@
 # Installation
 
-> **Status: 0.1.0.** Phases 1–10 are implemented and in daily use.
+> **Status: 0.2.0.** Phases 1–10 are implemented and in daily use.
 > Config formats and CLI commands are stable enough to build on; anything
 > that has to change before 1.0 will be called out in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`PLAN.md`](../PLAN.md) for what is
@@ -16,7 +16,7 @@ aida doctor
 aida-gui
 ```
 
-0.1.0 is the first non-pre-release version, so a bare `pip install` now
+0.1.0 was the first non-pre-release version, so a bare `pip install`
 resolves correctly — no `--pre` flag needed, and no risk of silently
 landing on the long-abandoned `0.0.1` snapshot the way every prior
 `0.1.0bN` install did.
@@ -57,7 +57,7 @@ Once `aida doctor` is clean, you still need one provider profile and
 
 - **GUI:** launch `aida-gui`. On a fresh install it offers to set up a
   provider profile and a first workspace; you can reopen either later from
-  the toolbar's **Providers…** and **Workspaces…** buttons.
+  the **Configure** menu's **Providers…** and **Workspaces…** entries.
 - **CLI:** see [providers-and-secrets.md](providers-and-secrets.md) for the
   `providers.yaml` format and `aida config secret set` for API keys, then
   `aida workspace new` for a workspace.

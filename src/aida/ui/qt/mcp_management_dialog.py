@@ -795,6 +795,14 @@ class SkillsBrowserDialog(QDialog):
     MCP dialog's own button), which meant a user with no interest in
     pyIrena never saw them at all. ``install_bundled_skills`` already never
     overwrites an existing file, so this is safe to click more than once.
+
+    Bug report: "the skills folder ... is hidden quite well in a normally
+    invisible folder" — ``~/.aida/skills`` is not somewhere a user stumbles
+    into from Finder/Explorer, and writing a skill by hand (the documented
+    way to author one) means getting there first. So the folder's real path
+    is shown, and ``Open Folder`` reveals it in the system file manager —
+    the same affordance File ▸ Open Config/Records/Scratch Folder already
+    give for AIDA's other hidden directories.
     """
 
     def __init__(self, skills_dir: Path, parent: QWidget | None = None) -> None:
@@ -803,6 +811,24 @@ class SkillsBrowserDialog(QDialog):
         self._skills_dir = skills_dir
 
         layout = QVBoxLayout(self)
+
+        folder_row = QHBoxLayout()
+        folder_label = QLabel(f"Folder: {skills_dir}", self)
+        folder_label.setWordWrap(True)
+        # Selectable so the path can be copied into a terminal or an
+        # editor's Open dialog, for anyone who would rather not go via the
+        # file manager at all.
+        folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        folder_row.addWidget(folder_label, stretch=1)
+        self._open_folder_button = QPushButton("Open Folder", self)
+        self._open_folder_button.setToolTip(
+            f"Reveal {skills_dir} in the system file manager — skills are plain "
+            "Markdown files you can add, edit, or remove there directly."
+        )
+        self._open_folder_button.clicked.connect(self._on_open_folder)
+        folder_row.addWidget(self._open_folder_button)
+        layout.addLayout(folder_row)
+
         self._list = QListWidget(self)
         self._list.currentItemChanged.connect(self._on_selection_changed)
         layout.addWidget(self._list)
@@ -850,6 +876,14 @@ class SkillsBrowserDialog(QDialog):
             self._preview.setMarkdown(path.read_text(encoding="utf-8"))
         except OSError as exc:
             self._preview.setPlainText(f"[could not read {path}: {exc}]")
+
+    def _on_open_folder(self) -> None:
+        # mkdir rather than assuming it exists: ``skills_dir()`` creates the
+        # folder, but this dialog takes the path as an argument and can be
+        # handed one that does not exist yet, and openUrl on a missing
+        # directory silently does nothing at all.
+        self._skills_dir.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._skills_dir)))
 
     def _on_open_external(self) -> None:
         path = self._selected_path()

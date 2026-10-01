@@ -1,6 +1,6 @@
 # GUI overview
 
-> **Status: 0.1.0.** Phases 1–10 are implemented and in daily use.
+> **Status: 0.2.0.** Phases 1–10 are implemented and in daily use.
 > Config formats and CLI commands are stable enough to build on; anything
 > that has to change before 1.0 will be called out in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`PLAN.md`](../PLAN.md) for what is
@@ -31,22 +31,13 @@ explains its fields and behavior.
 - **Code Editor…** — opens a syntax-highlighted Python editor (Save/Save
   As/Run/Kill) pre-filled from a chat code block, or blank. See
   [coding-and-scripting.md](coding-and-scripting.md).
-- **MCP Servers…** — opens the MCP management dialog. See
-  [mcp-servers.md](mcp-servers.md).
-- **Knowledge Bases…** — opens the knowledge base management dialog. See
-  [knowledge-bases.md](knowledge-bases.md).
-- **Providers…** — opens the provider/embedding profiles dialog (add/edit/
-  remove profiles). See [providers-and-secrets.md](providers-and-secrets.md).
-- **Workspaces…** — opens the workspace management dialog (add/edit/remove
-  named workspaces). See [workspaces.md](workspaces.md).
-- **Workflows…** — opens the stored-workflow dialog (add/edit/run a saved
-  sequence of prompts). See [workflows.md](workflows.md).
-- **Schedules…** — opens the in-app scheduler dialog, with each schedule's
-  last-run status. See [workflows.md](workflows.md).
-- **Settings…** — opens the settings dialog (font size, records folder, log
-  level, max agent iterations, assistant name and personal context,
-  scheduler timings, and the optional document-OCR key). See
-  [documents.md](documents.md#optional-mistral-ocr) for the OCR part.
+
+That is the whole toolbar, and it is deliberately short: everything on it
+is part of running a session. The seven configuration dialogs that used to
+sit here — MCP Servers, Knowledge Bases, Providers, Workspaces, Workflows,
+Schedules, Settings — are in the **Configure** menu instead (see below), so
+a day at the beamline never needs anything but the left-hand end of this
+bar.
 
 At the right-hand end, separated from the rest:
 
@@ -57,9 +48,12 @@ At the right-hand end, separated from the rest:
 
 ## Menus
 
-- **File → Open Config / Records / Scratch Folder** — opens each of AIDA's
-  own folders in the system file browser, so you never have to hunt for
-  them.
+- **File → Open Config / Records / Scratch / Skills Folder** — opens each
+  of AIDA's own folders in the system file browser, so you never have to
+  hunt for them. The config, scratch and skills folders live under
+  `~/.aida/`, which most file browsers hide by default; this is the way in.
+  See [mcp-servers.md](mcp-servers.md#adding-editing-via-the-gui) for what
+  goes in the skills folder.
 - **File → Open Conversation Folder** — the current conversation's
   attachment folder. See [documents.md](documents.md).
 - **File → Export Conversation As…** — write a standalone snapshot of the
@@ -83,6 +77,22 @@ At the right-hand end, separated from the rest:
 - **View → Tool Calls → Hidden / Grouped / Expanded** — how much of the
   agent's tool use the transcript shows. See "Tool calls in the transcript"
   below.
+- **Configure → Workspaces… / Providers… / MCP Servers… / Knowledge
+  Bases…** — the four objects a session is built out of: a workspace picks
+  a provider profile, an MCP group and its knowledge bases. See
+  [workspaces.md](workspaces.md),
+  [providers-and-secrets.md](providers-and-secrets.md),
+  [mcp-servers.md](mcp-servers.md) and
+  [knowledge-bases.md](knowledge-bases.md).
+- **Configure → Workflows… / Schedules…** — a stored sequence of prompts,
+  and the in-app scheduler that runs one unattended (with each schedule's
+  last-run status). See [workflows.md](workflows.md).
+- **Configure → Settings…** (`Ctrl+,`) — font size, records folder, log
+  level, max agent iterations, assistant name and personal context,
+  scheduler timings, and the optional document-OCR key. See
+  [documents.md](documents.md#optional-mistral-ocr) for the OCR part. On
+  macOS this one is in the application menu, **AIDA → Settings…** (`⌘,`),
+  where Qt puts it to match the platform convention.
 - **Help → Documentation** — opens this documentation in your web browser.
 - **Help → About AIDA** — version and project link.
 
@@ -112,12 +122,14 @@ The window splits into three columns:
     (`quick_tasks:` in `workspaces.yaml`), so they follow the workspace,
     not the conversation.
   - **McpQuickPanel** — labeled "MCP Servers" in the UI — shows the
-    workspace's resolved MCP group and a checkbox per known server. Each
-    checkbox is a live control: ticking/unticking it actually starts or
-    stops that server right now (not merely a preference for next session),
-    and the checked state always reflects which servers are actually
-    running, refreshed after every start/stop. A "MCP Servers…" button below
-    the checkboxes opens the full management dialog. See
+    workspace's resolved MCP group and a checkbox per known server, laid
+    out in two columns (names read down the left column and continue down
+    the right, so an alphabetical list stays alphabetical). Each checkbox
+    is a live control: ticking/unticking it actually starts or stops that
+    server right now (not merely a preference for next session), and the
+    checked state always reflects which servers are actually running,
+    refreshed after every start/stop. A "MCP Servers…" button below the
+    checkboxes opens the full management dialog. See
     [mcp-servers.md](mcp-servers.md).
 
 ### Tool calls in the transcript
@@ -171,7 +183,7 @@ name is put right. See [organizing-conversations.md](organizing-conversations.md
 without opening it — the same "Export Conversation As…" dialog as the File
 menu's, see above.
 
-## Dialogs reachable from the toolbar
+## Dialogs reachable from the Configure menu
 
 - **Settings dialog** (`settings_dialog.py`) — font size and log level take
   effect immediately, no restart needed; also sets the records folder and

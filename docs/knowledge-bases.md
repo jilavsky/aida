@@ -1,6 +1,6 @@
 # Knowledge bases (RAG)
 
-> **Status: 0.1.0.** Phases 1–10 are implemented and in daily use.
+> **Status: 0.2.0.** Phases 1–10 are implemented and in daily use.
 > Config formats and CLI commands are stable enough to build on; anything
 > that has to change before 1.0 will be called out in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`PLAN.md`](../PLAN.md) for what is
@@ -65,7 +65,7 @@ leaves the index behind.
 
 ### GUI
 
-Open **Knowledge Bases…** from the toolbar to launch the knowledge
+Open **Configure → Knowledge Bases…** to launch the knowledge
 management dialog, then click **Add…**. The form has the same fields as the
 CLI: name, source folders (one folder or file per line), an embedding
 profile dropdown, chunk size, and chunk overlap. As with the CLI, Add is

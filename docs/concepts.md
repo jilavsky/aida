@@ -98,7 +98,9 @@ This is where "always report Rg in Å and say which Q range you fitted" goes.
 The system prompt says who; a skill says how.
 > *Example:* `saxs-basics.md` (Q units, Irena terminology),
 > `review-checklist.md` (what a review must cover).
-→ [mcp-servers.md](mcp-servers.md#adding-editing-via-the-gui) (Skills… browser)
+→ [mcp-servers.md](mcp-servers.md#adding-editing-via-the-gui) (Skills… browser).
+`~/.aida/` is hidden in Finder and Explorer; **File → Open Skills Folder**
+in the GUI opens it for you.
 
 ### Knowledge base (RAG) — your library, searchable
 A folder of your own documents, chunked and indexed locally, so the agent

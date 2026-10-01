@@ -16,6 +16,7 @@ from aida.ui.qt._qt import (
     QCheckBox,
     QComboBox,
     QFileDialog,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -28,6 +29,13 @@ from aida.ui.qt._qt import (
 )
 
 NO_WORKSPACE_LABEL = "(no workspace)"
+
+#: How many columns of server checkboxes ``McpQuickPanel`` lays out. Two
+#: rather than more because the session column is only as wide as
+#: ``FolderDisplay``'s buttons make it, and a real MCP server name
+#: ("aievaluator", "pyirena-mcp", "axis-cam-mcp") needs most of half of
+#: that; a third column would start eliding names.
+MCP_PANEL_COLUMNS = 2
 
 
 class UserSelector(QWidget):
@@ -525,6 +533,18 @@ class McpQuickPanel(QGroupBox):
         self._layout = QVBoxLayout(self)
         self._group_label = QLabel("Group: (none)", self)
         self._layout.addWidget(self._group_label)
+        # Bug report: "I have about 15 of them (testing and evaluating) and
+        # the list is getting needlessly long while the minimum width is
+        # enforced by the buttons and objects in the Folders layout, so we
+        # are wasting vertical space there." One checkbox per row left the
+        # right-hand column twice as tall as it needed to be; the column is
+        # already wide enough for two because FolderDisplay's buttons set
+        # its minimum width. A dedicated grid (rather than the checkboxes
+        # living in self._layout directly) so rebuilding the server list
+        # never has to reason about where the group label and the manage
+        # button sit.
+        self._grid = QGridLayout()
+        self._layout.addLayout(self._grid)
         self._checkboxes: dict[str, QCheckBox] = {}
         self._manage_button = QPushButton("MCP Servers…", self)
         self._manage_button.clicked.connect(self.manage_requested)
@@ -544,18 +564,26 @@ class McpQuickPanel(QGroupBox):
         added/removed via the management dialog) is always handled
         correctly too."""
         self._group_label.setText(f"Group: {group_name or '(none)'}")
-        for checkbox in self._checkboxes.values():
-            checkbox.deleteLater()
+        while self._grid.count():
+            item = self._grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
         self._checkboxes.clear()
 
         enabled_set = set(enabled)
-        for name in server_names:
+        # Column-major ("ls" order): names run *down* the left column and
+        # continue down the right one, so an alphabetical list still reads
+        # alphabetically. Row-major would interleave it (a, b / c, d),
+        # which is exactly what makes a long list hard to scan.
+        rows = (len(server_names) + MCP_PANEL_COLUMNS - 1) // MCP_PANEL_COLUMNS
+        for index, name in enumerate(server_names):
             checkbox = QCheckBox(name, self)
             checkbox.blockSignals(True)
             checkbox.setChecked(name in enabled_set)
             checkbox.blockSignals(False)
             checkbox.toggled.connect(lambda checked, name=name: self._on_toggle(name, checked))
-            self._layout.insertWidget(self._layout.count() - 1, checkbox)
+            self._grid.addWidget(checkbox, index % rows, index // rows)
             self._checkboxes[name] = checkbox
 
     def enabled_servers(self) -> list[str]:

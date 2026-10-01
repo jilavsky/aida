@@ -15,7 +15,30 @@ its own "Changelog" — dated amendments to the *design document itself* (a
 decision revised), unrelated to what shipped when. Entries below link to
 `COMPLETED.md` where useful; `PLAN.md` tracks what's still open.
 
-## [Unreleased]
+## [0.2.0] - 2026-10-01
+
+### Changed
+
+- **The toolbar now carries only what a session actually needs; setup moved
+  to a Configure menu.** User report: "the order of items in the top bar is
+  not intuitive ... for a regular user the next should be all buried in some
+  kind of menu, since the following are basically configuration items, each
+  opening a helper screen and not something my user at the beamline uses for
+  operation." **MCP Servers…**, **Knowledge Bases…**, **Providers…**,
+  **Workspaces…**, **Workflows…**, **Schedules…** and **Settings…** are now
+  in a new **Configure** menu beside File/View/Help, grouped by what they
+  configure. What is left on the toolbar is the operating path — User,
+  Workspace, Profile, New Chat, Code Editor…, and the Documentation button
+  at the right-hand end. No dialog moved or changed, and `Ctrl+,` still
+  opens Settings (on macOS Qt files that one under **AIDA → Settings…**,
+  `⌘,`, per platform convention).
+- **The MCP Servers panel lays its checkboxes out in two columns.** User
+  report: "I have about 15 of them (testing and evaluating) and the list is
+  getting needlessly long while the minimum width is enforced by the buttons
+  and objects in the Folders layout, so we are wasting vertical space."
+  Fifteen servers now take eight rows instead of fifteen. Names read *down*
+  the left column and continue down the right, so an alphabetical list still
+  scans alphabetically.
 
 ### Fixed
 
@@ -36,6 +59,14 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Added
 
+- **The skills folder is reachable from the GUI.** User report: the skills
+  folder "is hidden quite well in [a] normally invisible folder" — skills are
+  plain Markdown you are meant to write and edit yourself, but `~/.aida/` is
+  hidden in Finder and Explorer by default. **File → Open Skills Folder**
+  reveals it, alongside the existing Config/Records/Scratch entries, and the
+  **Skills…** browser (MCP Servers dialog) now prints the folder's full path
+  with an **Open Folder** button beside it. Both create the folder first if
+  it does not exist yet, since opening a missing path fails silently.
 - **Schedules can reuse one chat across every fire** (`ScheduleEntry.reuse_chat`
   / `reuse_rollover_hours`, GUI "Chat reuse" combo in the Schedules dialog,
   `aida schedule add --reuse-chat --rollover-hours`). Previously every
@@ -880,7 +911,8 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jilavsky/aida/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jilavsky/aida/compare/v0.0.1b7...v0.1.0
 [0.1.0b7]: https://github.com/jilavsky/aida/compare/v0.1.0b6...v0.1.0b7
 [0.1.0b6]: https://github.com/jilavsky/aida/compare/v0.1.0b5...v0.1.0b6

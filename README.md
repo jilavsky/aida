@@ -1,6 +1,6 @@
 # AIDA — AI Data Assistant
 
-> **Status: 0.1.0.** First public release; in daily use at APS beamlines
+> **Status: 0.2.0.** First public release; in daily use at APS beamlines
 > 12-ID/9-ID. Config formats and CLI commands are stable enough to build
 > on; breaking changes before 1.0 will be called out in
 > [`CHANGELOG.md`](CHANGELOG.md). Bug reports and rough edges are still
@@ -59,7 +59,7 @@ console scripts are `aida` / `aida-gui`. Extras: `gui` (PySide6 desktop app),
 `docs` (PDF/DOCX/XLSX/PPTX reading, image handling), `ocr` (the optional
 Mistral OCR backend for figure extraction).
 
-0.1.0 is the first non-pre-release version, so a bare `pip install` resolves
+0.1.0 was the first non-pre-release version, so a bare `pip install` resolves
 correctly — no `--pre` flag needed, and no risk of landing on the
 long-abandoned `0.0.1` snapshot the way every prior `0.1.0bN` install did.
 
@@ -94,8 +94,9 @@ Linux machine even though the install above reported no errors, see
 
 1. `aida doctor` — confirms Python, config files, keychain, and folders.
 2. Launch `aida-gui`. On a fresh install it offers to set up a provider
-   profile and a first workspace; you can also do both from the toolbar
-   (**Providers…**, **Workspaces…**) or from the CLI (`aida workspace new`).
+   profile and a first workspace; you can also do both from the **Configure**
+   menu (**Providers…**, **Workspaces…**) or from the CLI
+   (`aida workspace new`).
 3. Pick a workspace and profile in the toolbar and start typing.
 
 [`docs/installation.md`](docs/installation.md) →

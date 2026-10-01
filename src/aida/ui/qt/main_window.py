@@ -268,44 +268,17 @@ class MainWindow(QMainWindow):
         code_editor_action.triggered.connect(self.open_code_editor_dialog)
         toolbar.addAction(code_editor_action)
 
-        mcp_action = QAction("MCP Servers…", self)
-        mcp_action.triggered.connect(self.open_mcp_management_dialog)
-        toolbar.addAction(mcp_action)
-
-        knowledge_action = QAction("Knowledge Bases…", self)
-        knowledge_action.triggered.connect(self.open_knowledge_management_dialog)
-        toolbar.addAction(knowledge_action)
-
-        # U2/U1: provider/embedding profiles and workspaces were previously
-        # only editable by hand-editing providers.yaml/workspaces.yaml — the
-        # two config objects everything else (a session, a workspace, a
-        # knowledge base) ultimately depends on.
-        providers_action = QAction("Providers…", self)
-        providers_action.triggered.connect(self.open_profiles_dialog)
-        toolbar.addAction(providers_action)
-
-        workspaces_action = QAction("Workspaces…", self)
-        workspaces_action.triggered.connect(self.open_workspace_management_dialog)
-        toolbar.addAction(workspaces_action)
-
-        # Phase 10: same "nothing to start/stop in the active session"
-        # reasoning WorkspaceManagementDialog's own docstring gives for why
-        # it needs no bridge — a workflow is a stored document, not
-        # something running in this session either.
-        workflows_action = QAction("Workflows…", self)
-        workflows_action.triggered.connect(self.open_workflow_management_dialog)
-        toolbar.addAction(workflows_action)
-
-        # Schedules run against whichever workspace their workflow names,
-        # independent of the interactive session too.
-        schedules_action = QAction("Schedules…", self)
-        schedules_action.triggered.connect(self.open_schedule_management_dialog)
-        toolbar.addAction(schedules_action)
-
-        settings_action = QAction("Settings…", self)
-        settings_action.setShortcut(QKeySequence("Ctrl+,"))
-        settings_action.triggered.connect(self.open_settings_dialog)
-        toolbar.addAction(settings_action)
+        # And that is the whole toolbar. Everything that used to follow
+        # here — MCP Servers…, Knowledge Bases…, Providers…, Workspaces…,
+        # Workflows…, Schedules…, Settings… — now lives in the Configure
+        # menu (see _build_menu_bar). Bug report: "for a regular user the
+        # next should be all buried in some kind of menu, since the
+        # following are basically configuration items, each opening a
+        # helper screen and not something my user at the beamline uses for
+        # operation." What is left is exactly the operating set: say who
+        # you are, pick a workspace and a provider, start a chat, open the
+        # code editor. Setup is a menu away, not one stray click from the
+        # New Chat button.
 
         # Everything after this spacer is pushed to the right-hand end of
         # the toolbar. An expanding blank widget is the standard Qt way to
@@ -489,6 +462,17 @@ class MainWindow(QMainWindow):
         open_scratch_action.triggered.connect(self._on_open_scratch_folder)
         file_menu.addAction(open_scratch_action)
 
+        # Bug report: "the skills folder ... is hidden quite well in a
+        # normally invisible folder". Skills are plain Markdown the user is
+        # expected to write and edit by hand, but ~/.aida is not visible in
+        # Finder/Explorer by default — the same discoverability gap the
+        # three entries above already close for the other hidden folders.
+        # The Skills dialog (MCP Servers… ▸ Skills) has its own Open Folder
+        # button next to the path, for whoever is already in there.
+        open_skills_action = QAction("Open Skills Folder", self)
+        open_skills_action.triggered.connect(self._on_open_skills_folder)
+        file_menu.addAction(open_skills_action)
+
         # Bug report: users doing a long instrument-run analysis wanted a
         # clean, self-contained snapshot of the current conversation (not
         # the always-on background transcript this session already keeps
@@ -604,6 +588,66 @@ class MainWindow(QMainWindow):
         # toggles' comment above for why that matters here.
         self._tool_display_group.triggered.connect(self._on_tool_display_mode_chosen)
 
+        # Bug report: "the order of items in the top bar is not intuitive
+        # ... should all the others actually be moved to the menu bar at
+        # the top where we have File and View menus? It would be much
+        # cleaner for beamline operations and normal users." All seven
+        # configuration dialogs that used to sit on the toolbar live here
+        # now, grouped by what they configure: first the four objects a
+        # session is built out of (a workspace picks a provider, an MCP
+        # group and knowledge bases), then the two that run work without
+        # anyone watching, then the app itself.
+        configure_menu = QMenu("&Configure", self.menuBar())
+        self.menuBar().addMenu(configure_menu)
+
+        workspaces_action = QAction("Workspaces…", self)
+        workspaces_action.triggered.connect(self.open_workspace_management_dialog)
+        configure_menu.addAction(workspaces_action)
+
+        # U2/U1: provider/embedding profiles and workspaces were previously
+        # only editable by hand-editing providers.yaml/workspaces.yaml — the
+        # two config objects everything else (a session, a workspace, a
+        # knowledge base) ultimately depends on.
+        providers_action = QAction("Providers…", self)
+        providers_action.triggered.connect(self.open_profiles_dialog)
+        configure_menu.addAction(providers_action)
+
+        mcp_action = QAction("MCP Servers…", self)
+        mcp_action.triggered.connect(self.open_mcp_management_dialog)
+        configure_menu.addAction(mcp_action)
+
+        knowledge_action = QAction("Knowledge Bases…", self)
+        knowledge_action.triggered.connect(self.open_knowledge_management_dialog)
+        configure_menu.addAction(knowledge_action)
+
+        configure_menu.addSeparator()
+
+        # Phase 10: same "nothing to start/stop in the active session"
+        # reasoning WorkspaceManagementDialog's own docstring gives for why
+        # it needs no bridge — a workflow is a stored document, not
+        # something running in this session either.
+        workflows_action = QAction("Workflows…", self)
+        workflows_action.triggered.connect(self.open_workflow_management_dialog)
+        configure_menu.addAction(workflows_action)
+
+        # Schedules run against whichever workspace their workflow names,
+        # independent of the interactive session too.
+        schedules_action = QAction("Schedules…", self)
+        schedules_action.triggered.connect(self.open_schedule_management_dialog)
+        configure_menu.addAction(schedules_action)
+
+        # Last, and deliberately without a separator above it. Qt's default
+        # TextHeuristicRole moves any action whose text starts with
+        # "Settings" into the application menu on macOS (AIDA ▸ Settings…,
+        # ⌘, — exactly where a Mac user looks for it), so on that platform
+        # this item is not in the Configure menu at all and a separator
+        # here would be left dangling at the bottom of it. On Windows and
+        # Linux the role resolves to nothing and the item stays put.
+        settings_action = QAction("Settings…", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self.open_settings_dialog)
+        configure_menu.addAction(settings_action)
+
         help_menu = QMenu("&Help", self.menuBar())
         self.menuBar().addMenu(help_menu)
         docs_action = QAction("Documentation", self)
@@ -670,6 +714,12 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(
             QUrl.fromLocalFile(str(ensure_scratch_dir(self.settings.app.scratch_dir)))
         )
+
+    def _on_open_skills_folder(self) -> None:
+        # skills_dir() creates the folder if it is missing — which matters
+        # here, since openUrl on a path that does not exist does nothing
+        # and a fresh install has never written a skill.
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(skills_dir())))
 
     def _on_export_setup(self) -> None:
         from aida.portability import export_bundle, format_export

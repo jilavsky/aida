@@ -1,6 +1,6 @@
 # Automation: `aida run`, workflows, and schedules
 
-> **Status: 0.1.0, Phase 10.** Implemented on top of the same
+> **Status: 0.2.0, Phase 10.** Implemented on top of the same
 > session engine every interactive chat uses — a headless run or a
 > scheduled job is not a separate code path, it's a different *driver* of
 > `start_session`/`ChatSession.send`. See
@@ -177,7 +177,7 @@ result can always be traced back to exactly what produced it.
   conversation's user prompts into an editable step list, pre-filled with
   the active workspace — opens the same Add-workflow form the Workflows…
   dialog uses, so you can rename steps or add `expect_files` before saving.
-- **Workflows…** toolbar button opens the full management dialog:
+- **Configure → Workflows…** opens the full management dialog:
   Add/Edit/Remove against every stored workflow, and a **Run** button that
   executes one into a normal conversation view (so you watch it happen,
   same as typing the prompts yourself) — the conversation is tagged so it's
@@ -211,7 +211,7 @@ enforced both in-process and (see below) across processes.
 ### Running it
 
 **In the GUI:** nothing to start — `MainWindow` runs the scheduler as a
-background task for the life of the app. The **Schedules…** toolbar button
+background task for the life of the app. **Configure → Schedules…**
 opens the management dialog (Add/Edit/Remove/Enable/Disable, plus **Run
 Now** to force an immediate fire) and shows last-run time/status per
 schedule. A failed run shows a **⚠ N schedule failures** button in the

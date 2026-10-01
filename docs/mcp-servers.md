@@ -1,6 +1,6 @@
 # MCP servers
 
-> **Status: 0.1.0.** Phases 1–10 are implemented and in daily use.
+> **Status: 0.2.0.** Phases 1–10 are implemented and in daily use.
 > Config formats and CLI commands are stable enough to build on; anything
 > that has to change before 1.0 will be called out in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`PLAN.md`](../PLAN.md) for what is
@@ -210,7 +210,7 @@ in the keychain, enter the value once, and the form swaps that line for
 
 ## Adding/editing via the GUI
 
-The **MCP Servers…** toolbar action opens the `McpManagementDialog`, a
+**Configure → MCP Servers…** opens the `McpManagementDialog`, a
 full front end over the same `mcp.json` the CLI edits (changes are saved
 immediately, no separate "Save" step for most actions).
 
@@ -247,7 +247,12 @@ immediately, no separate "Save" step for most actions).
   full result content, error message) in a copyable inspector.
 - **Skills…** opens a browser over `~/.aida/skills/`: list, preview
   (rendered Markdown), open in your external editor, or create a new skill
-  from a blank template.
+  from a blank template. The folder's full path is printed at the top with
+  an **Open Folder** button beside it — `~/.aida` is hidden in Finder and
+  Explorer by default, and a skill is a plain Markdown file you are meant
+  to be able to drop in, edit or delete yourself. **File → Open Skills
+  Folder** in the main window does the same thing without opening this
+  dialog first.
 - **Groups…** opens an editor listing every group name currently in use
   and its member servers, with **Add Group…**, **Rename…**, and
   **Delete…** — see below.

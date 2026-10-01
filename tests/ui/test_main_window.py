@@ -36,6 +36,7 @@ from aida.ui.qt._qt import (
     QApplication,
     QDesktopServices,
     QDialog,
+    QMenu,
     QMessageBox,
     Qt,
     QToolBar,
@@ -3971,5 +3972,165 @@ def test_dropped_folder_applies_to_the_running_session(
 
         assert pump_until(qapp, lambda: session.guard.is_allowed(dropped / "x.dat"))
         assert window.folder_display.has_unsaved_changes is True
+    finally:
+        window.close()
+
+
+# --- toolbar / menu bar split (bug report: "the order of items in the top
+# bar is not intuitive ... the following are basically configuration items,
+# each opening a helper screen and not something my user at the beamline
+# uses for operation") -------------------------------------------------------
+
+
+#: Everything the toolbar used to carry that is now in the Configure menu.
+_CONFIGURE_MENU_ITEMS = [
+    "Workspaces…",
+    "Providers…",
+    "MCP Servers…",
+    "Knowledge Bases…",
+    "Workflows…",
+    "Schedules…",
+    "Settings…",
+]
+
+
+def _top_level_menus(window: MainWindow) -> dict[str, QMenu]:
+    """The menu bar's own menus, keyed by title.
+
+    Deliberately ``menuBar().actions()`` rather than
+    ``menuBar().findChildren(QMenu)``: the latter also returns submenus
+    (View ▸ Tool Calls) and, in a test that rebuilds the bar, the discarded
+    menus from the previous build — both of which are still children of the
+    bar.
+    """
+    return {
+        action.menu().title(): action.menu()
+        for action in window.menuBar().actions()
+        if action.menu() is not None
+    }
+
+
+def test_toolbar_keeps_only_the_operating_controls(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """What is left on the toolbar is the single-click path through an
+    actual beamline session: say who you are, pick a workspace and a
+    provider, start a chat, open the code editor — plus the Documentation
+    button pinned to the right-hand end."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        toolbar = window.findChildren(QToolBar)[0]
+        texts = [a.text() for a in toolbar.actions() if a.text()]
+        assert texts == ["New Chat", "Code Editor…"]
+
+        widgets = [
+            toolbar.widgetForAction(a)
+            for a in toolbar.actions()
+            if toolbar.widgetForAction(a) is not None
+        ]
+        assert widgets[0] is window.user_selector
+        assert widgets[1] is window.workspace_selector
+        assert widgets[2] is window.profile_selector
+        assert widgets[-1] is window.documentation_button
+
+        for label in _CONFIGURE_MENU_ITEMS:
+            assert label not in texts, f"{label} should have moved off the toolbar"
+    finally:
+        window.close()
+
+
+def test_configure_menu_holds_every_configuration_dialog(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        configure_menu = _top_level_menus(window)["&Configure"]
+        texts = [a.text() for a in configure_menu.actions() if not a.isSeparator()]
+        assert texts == _CONFIGURE_MENU_ITEMS
+
+        # Menu order, not toolbar order: the four objects a session is
+        # built out of, then the two that run unattended, then the app.
+        separators = [i for i, a in enumerate(configure_menu.actions()) if a.isSeparator()]
+        assert len(separators) == 1
+        before = [a.text() for a in configure_menu.actions()[: separators[0]]]
+        assert before == ["Workspaces…", "Providers…", "MCP Servers…", "Knowledge Bases…"]
+
+        assert list(_top_level_menus(window)) == ["&File", "&View", "&Configure", "&Help"]
+    finally:
+        window.close()
+
+
+def test_configure_menu_entries_open_their_dialogs(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """The actions moved, but each still has to reach the same opener —
+    the thing a re-parenting change most easily drops on the floor."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        opened: list[str] = []
+        for label, method in (
+            ("Workspaces…", "open_workspace_management_dialog"),
+            ("Providers…", "open_profiles_dialog"),
+            ("MCP Servers…", "open_mcp_management_dialog"),
+            ("Knowledge Bases…", "open_knowledge_management_dialog"),
+            ("Workflows…", "open_workflow_management_dialog"),
+            ("Schedules…", "open_schedule_management_dialog"),
+            ("Settings…", "open_settings_dialog"),
+        ):
+            # *_checked swallows the bool QAction.trigger() passes to its
+            # slot — without it that lands in `label` and every recorded
+            # entry is False.
+            monkeypatch.setattr(
+                window, method, lambda *_checked, label=label: opened.append(label), raising=True
+            )
+
+        # Rebuilt after the patches: each action captured a bound method at
+        # connect() time, so patching the attribute afterwards does not
+        # redirect the connections that already exist — only the ones made
+        # from here on. Cleared first so the window is not left with two of
+        # every menu.
+        window.menuBar().clear()
+        window._build_menu_bar()
+        configure_menu = _top_level_menus(window)["&Configure"]
+        for action in configure_menu.actions():
+            if not action.isSeparator():
+                action.trigger()
+
+        assert opened == _CONFIGURE_MENU_ITEMS
+    finally:
+        window.close()
+
+
+def test_open_skills_folder_menu_item_reveals_the_skills_directory(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Bug report: "the skills folder ... is hidden quite well in a
+    normally invisible folder." It sits beside the other three "Open …
+    Folder" entries in the File menu."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        file_menu = _top_level_menus(window)["&File"]
+        action = next(a for a in file_menu.actions() if a.text() == "Open Skills Folder")
+
+        opened: list[str] = []
+        monkeypatch.setattr(
+            QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile())
+        )
+        action.trigger()
+
+        assert opened == [str(aida_home / "skills")]
+        assert (aida_home / "skills").is_dir()
     finally:
         window.close()
