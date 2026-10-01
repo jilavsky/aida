@@ -137,6 +137,41 @@ def test_app_config_max_agent_iterations_roundtrip(aida_home: Path):
     assert loaded.max_agent_iterations == 500
 
 
+# --- automatic conversation titles (aida.core.titling) -------------------
+
+
+def test_automatic_titles_are_on_by_default(aida_home: Path):
+    """Nothing to configure before conversations start naming themselves
+    — the call is small and reuses the active profile."""
+    save_app_config(AppConfig(), aida_home)
+    loaded = load_app_config(aida_home)
+    assert loaded.auto_title_conversations is True
+    assert loaded.auto_title_interval_turns == 5
+
+
+def test_auto_title_settings_roundtrip(aida_home: Path):
+    save_app_config(
+        AppConfig(auto_title_conversations=False, auto_title_interval_turns=12), aida_home
+    )
+    loaded = load_app_config(aida_home)
+    assert loaded.auto_title_conversations is False
+    assert loaded.auto_title_interval_turns == 12
+
+
+def test_a_hand_edited_auto_title_interval_below_one_falls_back_to_the_default():
+    """0 would ask for a re-title after every single turn, which is both
+    costly and exactly the churn the KEEP sentinel exists to avoid.
+    Switching it off is a separate, explicit setting."""
+    for bad in (0, -5):
+        config = AppConfig.from_dict({"auto_title_interval_turns": bad})
+        assert config.auto_title_interval_turns == AppConfig().auto_title_interval_turns, bad
+
+
+def test_a_non_boolean_auto_title_flag_falls_back_rather_than_crashing():
+    config = AppConfig.from_dict({"auto_title_conversations": "sometimes"})
+    assert config.auto_title_conversations is True
+
+
 def test_old_config_missing_fields_gets_defaults(aida_home: Path):
     """pyIrena rule: old configs must always load."""
     partial = {"config_version": 1}  # no log_level, no records_dir, ...

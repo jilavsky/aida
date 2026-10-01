@@ -101,8 +101,8 @@ At the right-hand end, separated from the rest:
 The window splits into three columns:
 
 - **Conversations sidebar** (left) — see below.
-- **Chat column** (center) — the message transcript plus the input box
-  (attachments, drag-and-drop, cancel/send).
+- **Chat column** (center) — a title strip, the message transcript, and
+  the input box (attachments, drag-and-drop, cancel/send).
 - **Session column** (right) — the active workspace's live state:
   - **FolderDisplay** — labeled "Workspace permissions" in the UI, since it
     covers everything a session may touch, not just folders — shows the
@@ -190,12 +190,30 @@ mode, so **if a turn goes wrong, switch to Expanded and the whole failed
 turn is right there to inspect** — nothing has to be re-run. That is the
 one to reach for before sending a bug report.
 
+### Conversation title strip
+
+Above the transcript, a strip shows what this conversation is called, with
+the workspace, provider profile and user label underneath it. The name is
+written by the model from the conversation's own content and re-checked
+every few turns — see
+[organizing-conversations.md](organizing-conversations.md#how-conversations-get-their-names).
+
+Click the ✎ (or double-click the strip) to name it yourself. A name you
+type is never changed again.
+
 ## Conversations sidebar
 
-Lists past conversations (date, workspace, title) with **Resume**,
-**Delete…**, **Rename…**, and **Clean Up…** (delete everything older than N
-days) — all with confirmation dialogs. Double-clicking an entry resumes it.
-Resuming replays chat history and any still-present image/file artifacts.
+Lists past conversations under date headings — **Today**, **Yesterday**,
+**Previous 7 days**, then by month. Each entry is two lines: the title,
+then when it was last used, its workspace and its user label. Recent
+entries are timed rather than dated ("09:03", "Yesterday 17:44", "Sat
+11:02"), so you can tell this morning's work from last March's at a
+glance.
+
+The buttons are **Resume**, **Delete…**, **Rename…**, and **Clean Up…**
+(delete everything older than N days) — all with confirmation dialogs.
+Double-clicking an entry resumes it. Resuming replays chat history and any
+still-present image/file artifacts.
 
 Above the list, a search box matches the title, workspace and user label,
 and — once any conversation carries a user label — a filter narrows the

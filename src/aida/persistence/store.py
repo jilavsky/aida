@@ -24,6 +24,22 @@ from aida.providers.base import ImageRef, Message, ToolCall
 #: though a tool had returned it.
 USER_IMAGE_KIND = "UserImage"
 
+#: ``conversations.title`` was taken from the first line of the first user
+#: message (``aida.persistence.recorder._derive_title``) — a placeholder,
+#: and the state automatic titling exists to get out of.
+TITLE_DERIVED = "derived"
+
+#: The model named the conversation from its own content
+#: (``aida.core.titling``). Re-checked every few turns, and the re-check
+#: is allowed to answer "this name still fits".
+TITLE_GENERATED = "generated"
+
+#: A person typed this name. Permanently off limits to automatic
+#: re-titling; there is no "unlock" gesture, because renaming again is one.
+TITLE_MANUAL = "manual"
+
+TITLE_SOURCES = (TITLE_DERIVED, TITLE_GENERATED, TITLE_MANUAL)
+
 
 def new_conversation_id() -> str:
     return uuid.uuid4().hex
@@ -63,6 +79,16 @@ class ConversationSummary:
     #: ``aida.persistence.records.attachments_dir``.
     attachments_path: str | None = None
     sidecar_path: str | None = None
+    #: Where ``title`` came from (migration 8) — one of
+    #: ``TITLE_SOURCES``. ``"derived"`` for everything created before the
+    #: column existed, which is correct: those are exactly the
+    #: first-line placeholders automatic titling exists to replace.
+    title_source: str = TITLE_DERIVED
+
+    @property
+    def title_locked(self) -> bool:
+        """A name a person typed is never changed by anything else."""
+        return self.title_source == TITLE_MANUAL
 
 
 @dataclass
@@ -276,10 +302,23 @@ class ConversationStore:
         ).fetchall()
         return [row["user"] for row in rows]
 
-    def set_title(self, conversation_id: str, title: str, *, timestamp: str) -> None:
+    def set_title(
+        self, conversation_id: str, title: str, *, timestamp: str, source: str = TITLE_DERIVED
+    ) -> None:
+        """Rename a conversation, recording where the name came from.
+
+        ``source`` is what later decides whether automatic titling may
+        touch this conversation again, and how — see ``TITLE_SOURCES``
+        and ``aida.core.titling``. It is a required part of renaming
+        rather than an optional flag, but defaults to ``"derived"`` so
+        that the most conservative answer is what a caller that has not
+        thought about it gets.
+        """
+        if source not in TITLE_SOURCES:
+            raise ValueError(f"unknown title source {source!r} (expected one of {TITLE_SOURCES})")
         self._conn.execute(
-            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
-            (title, timestamp, conversation_id),
+            "UPDATE conversations SET title = ?, title_source = ?, updated_at = ? WHERE id = ?",
+            (title, source, timestamp, conversation_id),
         )
         self._conn.commit()
 
@@ -325,6 +364,7 @@ class ConversationStore:
             user=row["user"],
             attachments_path=row["attachments_path"],
             sidecar_path=row["sidecar_path"],
+            title_source=row["title_source"],
         )
 
     # --- messages --------------------------------------------------------

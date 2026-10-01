@@ -29,7 +29,7 @@ from pathlib import Path
 
 from aida.config.paths import db_path
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 # The Phase 5 GUI opens the first-ever connection to a fresh DB file from
 # two threads at once (MainWindow.__init__ starts a session on the
@@ -209,6 +209,31 @@ _MIGRATIONS: dict[int, str] = {
     DROP TABLE schedule_runs_old;
 
     CREATE INDEX IF NOT EXISTS idx_schedule_runs_name ON schedule_runs(schedule_name, fired_at);
+    """,
+    # Where `conversations.title` came from: 'derived' (the first line of
+    # the first user message — aida.persistence.recorder._derive_title),
+    # 'generated' (the model named it from the conversation's content —
+    # aida.core.titling) or 'manual' (a person typed it).
+    #
+    # Two things need this, and neither can live on ChatSession because
+    # both have to outlive the process:
+    #
+    #  - 'manual' is a lock. A name somebody typed is permanently off
+    #    limits to automatic re-titling; without persisting it, relaunching
+    #    would hand the model permission to overwrite it.
+    #  - 'generated' vs 'derived' decides whether a re-check is allowed to
+    #    answer "keep the current title". Offering that for a 'derived'
+    #    placeholder would let a first-line fragment survive as the name
+    #    forever, which is the whole bug; *not* offering it for a
+    #    'generated' one would rename the conversation on the first turn
+    #    after every resume.
+    #
+    # 'derived' for every row that predates this column: nothing was ever
+    # locked before, so an old conversation gets a real name on its next
+    # turn. That is the intended upgrade, not a regression — those rows are
+    # exactly the first-line placeholders this feature exists to replace.
+    8: """
+    ALTER TABLE conversations ADD COLUMN title_source TEXT NOT NULL DEFAULT 'derived';
     """,
 }
 

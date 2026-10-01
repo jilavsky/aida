@@ -28,6 +28,7 @@ from aida.core.events import (
     AgentError,
     AgentEvent,
     ContextTrimmed,
+    ConversationTitled,
     FileArtifactCreated,
     ImageArtifactCreated,
     MessageFinished,
@@ -135,6 +136,14 @@ def print_event(event: AgentEvent) -> None:
         # mid-turn, so this only appears when something else drives the
         # loop — but it must still be visible rather than swallowed.
         print(f"\n[you, mid-turn] {event.text}")
+    elif isinstance(event, ConversationTitled):
+        # Only ever emitted when the name actually changed (see the
+        # event's docstring), so this never repeats itself turn after
+        # turn. Worth printing rather than swallowing: it is the name
+        # `aida conversations list` will show, and the moment to notice
+        # it is wrong is now, while `aida conversations rename` is one
+        # command away.
+        print(f"\n[title] {event.title}")
     elif isinstance(event, AgentError):
         detail = f" ({event.detail})" if event.detail else ""
         print(f"\n[error:{event.layer}] {event.message}{detail}")

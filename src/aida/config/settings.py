@@ -502,6 +502,23 @@ class AppConfig:
     # rule tool_call_display follows, so a hand-edited config.yaml can't
     # blank the transcript.
     transcript_tool_results: str = "full"  # "off" | "summary" | "full"
+    # Let the model name each conversation from its own content, instead of
+    # leaving it called after the first line the user happened to type
+    # (aida.persistence.recorder._derive_title). Bug report: "unless user
+    # renames the chat, the chat name is start of the user question —
+    # rarely useful." On by default: the call is small, runs once per
+    # conversation plus a re-check every few turns, and reuses the active
+    # profile, so there is nothing to configure before it works. Turn it
+    # off for a metered endpoint, or for a local model slow enough that the
+    # extra round trip at the end of a turn is felt.
+    auto_title_conversations: bool = True
+    # How many turns between re-checks of an existing generated title, so a
+    # conversation that drifts onto a different subject stops carrying the
+    # name of the old one. Each re-check is one small call, and the model
+    # is explicitly asked to keep the current title unless the subject has
+    # moved on, so most of them change nothing. The *first* title is
+    # generated after the first reply regardless of this value.
+    auto_title_interval_turns: int = 5
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -524,6 +541,16 @@ class AppConfig:
                 "config.yaml: assistant_name must not be blank; using the default instead"
             )
             filtered.pop("assistant_name")
+        # A re-check cadence of 0 or less would ask the model to re-title
+        # after every single turn (or continuously), which is both costly
+        # and exactly the churn the KEEP sentinel exists to avoid.
+        # Switching auto-titling *off* is a separate, explicit setting.
+        if filtered.get("auto_title_interval_turns", 1) < 1:
+            _logger.warning(
+                "config.yaml: auto_title_interval_turns=%r must be at least 1; "
+                "using the default instead",
+                filtered.pop("auto_title_interval_turns"),
+            )
         # Both scheduler timings accept 0 (quiet period 0 = never wait for
         # idleness; cap 0 = never waive the quiet period) but neither is
         # meaningful negative.
@@ -606,6 +633,8 @@ class AppConfig:
             "scheduler_quiet_period_seconds": self.scheduler_quiet_period_seconds,
             "scheduler_max_defer_seconds": self.scheduler_max_defer_seconds,
             "transcript_tool_results": self.transcript_tool_results,
+            "auto_title_conversations": self.auto_title_conversations,
+            "auto_title_interval_turns": self.auto_title_interval_turns,
         }
 
 
@@ -642,6 +671,8 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "scheduler_quiet_period_seconds": "int",
     "scheduler_max_defer_seconds": "int",
     "transcript_tool_results": "str",
+    "auto_title_conversations": "bool",
+    "auto_title_interval_turns": "int",
 }
 
 

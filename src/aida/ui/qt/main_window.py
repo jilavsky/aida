@@ -45,11 +45,16 @@ from aida.config.settings import (
 from aida.config.users import resolve_active_user, resolve_workspace_for_user
 from aida.core.confirmation import REMEMBERABLE_ACTIONS, ConfirmAnswer
 from aida.core.cost import estimate_cost_usd
-from aida.core.events import ContextTrimmed, ToolCallFinished, ToolCallStarted
+from aida.core.events import (
+    ContextTrimmed,
+    ConversationTitled,
+    ToolCallFinished,
+    ToolCallStarted,
+)
 from aida.documents.ocr.mistral import SECRET_REF as OCR_SECRET_REF
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
 from aida.persistence.recorder import ConversationRecorder
-from aida.persistence.store import ArtifactRecord, ConversationStore
+from aida.persistence.store import TITLE_MANUAL, ArtifactRecord, ConversationStore
 from aida.providers.base import ImageRef
 from aida.ui.qt._qt import (
     QAction,
@@ -57,6 +62,7 @@ from aida.ui.qt._qt import (
     QApplication,
     QDesktopServices,
     QDialog,
+    QInputDialog,
     QKeySequence,
     QLabel,
     QMainWindow,
@@ -78,6 +84,7 @@ from aida.ui.qt.chat_panel import ChatPanel
 from aida.ui.qt.code_editor_dialog import CodeEditorDialog
 from aida.ui.qt.collapsible import CollapsibleSection
 from aida.ui.qt.config_conflict import save_or_warn_conflict
+from aida.ui.qt.conversation_header import ConversationHeader
 from aida.ui.qt.conversations_sidebar import ConversationsSidebar
 from aida.ui.qt.icon import app_icon
 from aida.ui.qt.input_box import InputBox
@@ -314,6 +321,11 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.documentation_button)
 
         self.sidebar = ConversationsSidebar(self)
+        # Bug report: "unless user renames the chat, the chat name is start
+        # of the user question — rarely useful", and nothing in the window
+        # showed the name at all. See ConversationHeader and
+        # _update_conversation_header.
+        self.conversation_header = ConversationHeader(self)
         self.chat_panel = ChatPanel(self)
         self.input_box = InputBox(self)
         self.folder_display = FolderDisplay(self)
@@ -332,6 +344,10 @@ class MainWindow(QMainWindow):
         chat_column = QWidget(self)
         chat_layout = QVBoxLayout(chat_column)
         chat_layout.setContentsMargins(0, 0, 0, 0)
+        # Above the transcript, not above the input box: the name belongs
+        # with the thing it names, and from here it stays put while the
+        # conversation scrolls under it.
+        chat_layout.addWidget(self.conversation_header)
         chat_layout.addWidget(self.chat_panel, stretch=1)
         chat_layout.addWidget(self.input_box)
 
@@ -938,6 +954,7 @@ class MainWindow(QMainWindow):
         self.sidebar.rename_requested.connect(self._on_rename_requested)
         self.sidebar.export_requested.connect(self._on_export_requested)
         self.sidebar.search_query_changed.connect(self._on_conversations_search_query_changed)
+        self.conversation_header.rename_requested.connect(self._on_header_rename_requested)
         self.chat_panel.code_editor_requested.connect(self._on_code_editor_requested)
         self.chat_panel.open_in_code_editor_requested.connect(
             self._on_open_in_code_editor_requested
@@ -1045,6 +1062,16 @@ class MainWindow(QMainWindow):
                     8000,
                 )
             self._update_context_label()
+        elif isinstance(event, ConversationTitled):
+            # The conversation just named itself from its own content
+            # (aida.core.titling). Only ever emitted when the name
+            # actually changed, so both the header and the sidebar row can
+            # be refreshed unconditionally here. The status-bar line is
+            # how the user learns the rename happened at all rather than
+            # noticing the strip above the transcript quietly differ.
+            self._update_conversation_header()
+            self._refresh_conversations_sidebar()
+            self.statusBar().showMessage(f"Conversation named: {event.title}", 5000)
         elif isinstance(event, ToolCallStarted):
             # Which tool is in flight, for the "Stopping… waiting for X"
             # label — cancellation is honored between provider events and
@@ -1089,6 +1116,12 @@ class MainWindow(QMainWindow):
         self._usage_refresh_timer.stop()
         self._restore_undelivered_messages()
         self.scheduler_bridge.activity.turn_in_flight = False
+        # The first turn is where the recorder derives the placeholder
+        # title from the opening message, and there is no event for that —
+        # a ConversationTitled only fires for a *model*-generated name.
+        # Refreshing here is what puts a name in the header the moment the
+        # conversation has one at all.
+        self._update_conversation_header()
         # The quiet period the scheduler waits out is measured from here,
         # not from turn *start* — a ten-minute tool loop shouldn't count as
         # ten minutes of the user being idle.
@@ -1187,6 +1220,7 @@ class MainWindow(QMainWindow):
         self._refresh_quick_tasks_panel()
         self._refresh_notes_panel()
         self._refresh_conversations_sidebar()
+        self._update_conversation_header()
         # Bug report: "I restored prior session and have selected local AI
         # ... I suspect it must be using cloud (Argo)." Root cause:
         # _refresh_profile_selector() was previously only ever called once,
@@ -1959,19 +1993,84 @@ class MainWindow(QMainWindow):
             store.close()
         self._refresh_conversations_sidebar()
 
+    def _update_conversation_header(self) -> None:
+        """Refresh the strip above the transcript (``ConversationHeader``).
+
+        Reads the live recorder rather than the database: the recorder is
+        the thing that *writes* the title (both the first-message
+        placeholder and the model-generated replacement, see
+        ``aida.core.titling``), so it is never stale, and this is called
+        often enough — after every turn — that a DB round trip per call
+        would be the wrong trade.
+        """
+        session = self.bridge.session
+        if session is None or session.recorder is None:
+            self.conversation_header.set_conversation(None, "")
+            return
+        recorder = session.recorder
+        subtitle_parts = [
+            recorder.workspace_name or "",
+            session.profile_name or "",
+            recorder.user or "",
+        ]
+        self.conversation_header.set_conversation(
+            recorder.title, " · ".join(part for part in subtitle_parts if part)
+        )
+
+    def _on_header_rename_requested(self) -> None:
+        """The ✎ (or a double-click) on the chat header. Ends at the same
+        ``_on_rename_requested`` the sidebar's own Rename… does — the
+        header just has to supply the id, which it has no idea about."""
+        conversation_id = self._active_conversation_id(self.bridge)
+        if conversation_id is None:
+            return
+        new_title, ok = QInputDialog.getText(
+            self,
+            "Rename Conversation",
+            "Title:",
+            text=self.conversation_header.title_text(),
+        )
+        new_title = new_title.strip()
+        if ok and new_title:
+            self._on_rename_requested(conversation_id, new_title)
+
     def _on_rename_requested(self, conversation_id: str, title: str) -> None:
         """Bug report: "Can we have the chat list in the history column
         have some kind of names? ... these date/times are not very
         convenient to use." set_title already exists (ConversationRecorder
         auto-titles from the first message via it) — this is just the
-        missing "change it again later" entry point."""
+        missing "change it again later" entry point.
+
+        Shared by the sidebar's Rename… and the chat header's ✎
+        (``_on_header_rename_requested``). ``TITLE_MANUAL`` locks the
+        title against automatic re-titling for good — see
+        ``ConversationStore.set_title`` and ``aida.core.titling``."""
         from datetime import UTC, datetime
 
         store = ConversationStore()
         try:
-            store.set_title(conversation_id, title, timestamp=datetime.now(UTC).isoformat())
+            store.set_title(
+                conversation_id,
+                title,
+                timestamp=datetime.now(UTC).isoformat(),
+                source=TITLE_MANUAL,
+            )
         finally:
             store.close()
+        # The row that was just renamed may be the conversation currently
+        # open, whose live recorder caches both the title and the lock.
+        # Without this the header would keep showing the old name (it
+        # reads the recorder, not the DB) and the session would go on
+        # believing it is still free to re-title it.
+        session = self.bridge.session
+        if (
+            session is not None
+            and session.recorder is not None
+            and session.recorder.conversation_id == conversation_id
+        ):
+            session.recorder.title = title
+            session.recorder.title_source = TITLE_MANUAL
+        self._update_conversation_header()
         self._refresh_conversations_sidebar()
 
     def _on_cleanup_requested(self, days: int) -> None:

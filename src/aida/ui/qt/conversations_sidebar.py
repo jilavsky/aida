@@ -20,6 +20,8 @@ from aida.ui.qt._qt import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFont,
+    QFontMetrics,
     QFormLayout,
     QGridLayout,
     QInputDialog,
@@ -28,9 +30,16 @@ from aida.ui.qt._qt import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QPainter,
+    QPalette,
     QPushButton,
+    QRect,
+    QSize,
     QSizePolicy,
     QSpinBox,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     Qt,
     QVBoxLayout,
     QWidget,
@@ -38,6 +47,23 @@ from aida.ui.qt._qt import (
 )
 
 ALL_USERS_LABEL = "All users"
+
+#: Item data the row delegate paints from. The item's own ``text()`` stays
+#: the one-line ``_row_label`` (accessibility, tooltip); these are the two
+#: lines actually drawn, plus the group-header marker.
+TITLE_ROLE = Qt.ItemDataRole.UserRole + 1
+SUBTITLE_ROLE = Qt.ItemDataRole.UserRole + 2
+GROUP_HEADER_ROLE = Qt.ItemDataRole.UserRole + 3
+
+#: Shown for a conversation whose title is NULL — only reachable now for a
+#: row written before titles existed, since the recorder derives one from
+#: the first user message.
+UNTITLED_LABEL = "(untitled)"
+
+#: The group a conversation with an unparseable ``updated_at`` falls into.
+#: Should never appear in practice; it exists so a hand-edited or foreign
+#: DB row lands somewhere visible instead of crashing the grouping.
+UNDATED_GROUP = "Undated"
 
 #: How narrow the user is allowed to drag this column. Bug report: "Left
 #: one is fixed width or hidden ... I cannot fit this on smaller screens."
@@ -86,10 +112,223 @@ def _format_timestamp(iso_str: str) -> str:
 
 
 def _row_label(summary: ConversationSummary) -> str:
-    title = summary.title or "(untitled)"
+    """The whole row on one line.
+
+    No longer what the list *paints* — ``_ConversationRowDelegate`` draws
+    the title and the subtitle separately — but still what each item
+    carries as its ``text()``: it is the accessible name a screen reader
+    announces, and the string the tooltip shows.
+    """
+    title = summary.title or UNTITLED_LABEL
     workspace = summary.workspace_name or "-"
     when = _format_timestamp(summary.updated_at)
     return f"{when}  [{workspace}]  {title}"
+
+
+def _local_datetime(iso_str: str) -> datetime | None:
+    """``updated_at`` in the viewer's own timezone, or ``None`` if the
+    string isn't a timestamp at all — a hand-edited or foreign DB row must
+    never crash the sidebar (same rule ``_format_timestamp`` follows)."""
+    try:
+        return datetime.fromisoformat(iso_str).astimezone()
+    except (TypeError, ValueError):
+        return None
+
+
+def _relative_when(iso_str: str, *, now: datetime | None = None) -> str:
+    """How recent this conversation is, at the precision that is actually
+    useful at that distance.
+
+    An absolute "Aug 22 09:03" is the same eleven characters whether the
+    conversation was an hour ago or last spring, and reading it costs the
+    user a subtraction every time. Today's work is identified by its time
+    of day, this week's by its weekday, and anything older by its date —
+    with the year only once it stops being obvious.
+
+    ``now`` is injectable so the tests are not written against the clock.
+    """
+    local = _local_datetime(iso_str)
+    if local is None:
+        return iso_str
+    now = (now or datetime.now()).astimezone()
+    days = (now.date() - local.date()).days
+    if days <= 0:
+        return local.strftime("%H:%M")
+    if days == 1:
+        return f"Yesterday {local:%H:%M}"
+    if days < 7:
+        return local.strftime("%a %H:%M")
+    if local.year == now.year:
+        return local.strftime("%b %d")
+    return local.strftime("%b %d, %Y")
+
+
+def _date_group(iso_str: str, *, now: datetime | None = None) -> str:
+    """Which band of the list this conversation belongs under.
+
+    Coarser than ``_relative_when`` on purpose: the headers exist to break
+    a long list into a handful of scannable blocks, so anything older than
+    a week collapses into its month rather than producing a header per
+    day.
+    """
+    local = _local_datetime(iso_str)
+    if local is None:
+        return UNDATED_GROUP
+    now = (now or datetime.now()).astimezone()
+    days = (now.date() - local.date()).days
+    if days <= 0:
+        return "Today"
+    if days == 1:
+        return "Yesterday"
+    if days < 7:
+        return "Previous 7 days"
+    return local.strftime("%B %Y")
+
+
+def _row_subtitle(
+    summary: ConversationSummary, *, group: str | None = None, now: datetime | None = None
+) -> str:
+    """The dim second line: when, where, and whose. Empty parts are
+    dropped rather than shown as "-", so an install that uses no user
+    labels doesn't carry a column of placeholders down the whole list.
+
+    ``group`` is the header this row sits under, so the two don't stutter:
+    "Yesterday 17:44" directly beneath a "YESTERDAY" heading says the word
+    twice, and the time alone is the only part carrying information there.
+    Passing nothing gives the standalone form, which is what a row needs
+    when it is read outside the list.
+    """
+    when = _relative_when(summary.updated_at, now=now)
+    if group == "Yesterday":
+        local = _local_datetime(summary.updated_at)
+        if local is not None:
+            when = local.strftime("%H:%M")
+    parts = [when, summary.workspace_name or "", summary.user or ""]
+    return " · ".join(part for part in parts if part)
+
+
+class _ConversationRowDelegate(QStyledItemDelegate):
+    """Paints a conversation as two lines — the title, then everything
+    that identifies *which* one it is.
+
+    Bug report: "the display in the Conversation column is not very
+    helpful. Could we make it into two lines — title first and
+    date-time/workspace second?" The single line it replaces
+    (``_row_label``) led with the timestamp and the workspace, so on a
+    narrow column — which this one is designed to be draggable down to,
+    see ``MIN_SIDEBAR_WIDTH`` — the elide ate the title, the only part
+    worth reading.
+
+    A delegate rather than ``setItemWidget``: a per-row widget costs a
+    layout and a paint tree per conversation (this list grows into the
+    hundreds) and has to re-derive the selection colours by hand. Painting
+    straight from ``option.palette`` also means light and dark system
+    themes both come out right, which matters because AIDA does no
+    theming of its own and relies entirely on Qt's native styling.
+    """
+
+    _PADDING_X = 6
+    _PADDING_Y = 4
+    _HEADER_PADDING_TOP = 8
+
+    def _fonts(self, option: QStyleOptionViewItem) -> tuple[QFont, QFont]:
+        title_font = QFont(option.font)
+        title_font.setBold(True)
+        subtitle_font = QFont(option.font)
+        subtitle_font.setPointSizeF(max(6.0, option.font.pointSizeF() * 0.85))
+        return title_font, subtitle_font
+
+    def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:  # noqa: N802 - Qt override
+        self.initStyleOption(option, index)
+        title_font, subtitle_font = self._fonts(option)
+        if index.data(GROUP_HEADER_ROLE):
+            height = QFontMetrics(subtitle_font).height() + self._HEADER_PADDING_TOP
+            return QSize(0, height)
+        height = (
+            QFontMetrics(title_font).height()
+            + QFontMetrics(subtitle_font).height()
+            + 2 * self._PADDING_Y
+        )
+        # Width 0, deliberately: a QListWidget sizes itself to the widest
+        # sizeHint it is given, so reporting the text's natural width here
+        # would re-impose exactly the column-width floor MIN_SIDEBAR_WIDTH
+        # exists to remove. The painting below elides to whatever width
+        # the view actually hands it.
+        return QSize(0, height)
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        self.initStyleOption(option, index)
+        title_font, subtitle_font = self._fonts(option)
+        painter.save()
+
+        group = index.data(GROUP_HEADER_ROLE)
+        if group:
+            # No selection background and no hover: a header is a label,
+            # and it is already unselectable (Qt.ItemFlag.NoItemFlags).
+            painter.setFont(subtitle_font)
+            painter.setPen(option.palette.color(QPalette.ColorRole.Mid))
+            rect = option.rect.adjusted(self._PADDING_X, self._HEADER_PADDING_TOP, -2, 0)
+            painter.drawText(
+                rect,
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop),
+                QFontMetrics(subtitle_font).elidedText(
+                    group.upper(), Qt.TextElideMode.ElideRight, rect.width()
+                ),
+            )
+            painter.restore()
+            return
+
+        # Selection/hover background, drawn by the active style so it
+        # matches every other list in the app (and the platform).
+        style = option.widget.style() if option.widget is not None else None
+        if style is not None:
+            style.drawPrimitive(
+                QStyle.PrimitiveElement.PE_PanelItemViewItem, option, painter, option.widget
+            )
+
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        title_color = option.palette.color(
+            QPalette.ColorRole.HighlightedText if selected else QPalette.ColorRole.Text
+        )
+        # Dim, but still legible on the highlight — the highlighted text
+        # colour is the only one guaranteed to contrast with a selected
+        # row's background, so a selected subtitle keeps it rather than
+        # dropping to Mid and disappearing into the highlight.
+        subtitle_color = (
+            option.palette.color(QPalette.ColorRole.HighlightedText)
+            if selected
+            else option.palette.color(QPalette.ColorRole.Mid)
+        )
+
+        width = option.rect.width() - 2 * self._PADDING_X
+        x = option.rect.left() + self._PADDING_X
+        y = option.rect.top() + self._PADDING_Y
+
+        title_metrics = QFontMetrics(title_font)
+        painter.setFont(title_font)
+        painter.setPen(title_color)
+        painter.drawText(
+            QRect(x, y, width, title_metrics.height()),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            title_metrics.elidedText(
+                str(index.data(TITLE_ROLE) or UNTITLED_LABEL),
+                Qt.TextElideMode.ElideRight,
+                width,
+            ),
+        )
+
+        subtitle = str(index.data(SUBTITLE_ROLE) or "")
+        if subtitle:
+            subtitle_metrics = QFontMetrics(subtitle_font)
+            painter.setFont(subtitle_font)
+            painter.setPen(subtitle_color)
+            painter.drawText(
+                QRect(x, y + title_metrics.height(), width, subtitle_metrics.height()),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                subtitle_metrics.elidedText(subtitle, Qt.TextElideMode.ElideRight, width),
+            )
+
+        painter.restore()
 
 
 class CleanupDialog(QDialog):
@@ -224,13 +463,20 @@ class ConversationsSidebar(QWidget):
         # click (rename, resume, delete)."
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_context_menu_requested)
-        # Row labels are long ("Aug 22 09:03  [workspace]  title") and a
-        # QListWidget would otherwise ask for the widest of them; the text
-        # elides instead, and the full label stays available as a tooltip
-        # for whatever the narrow column cuts off.
+        # Row labels are long and a QListWidget would otherwise ask for the
+        # widest of them; the text elides instead (the delegate does the
+        # eliding now, per line), and the full label stays available as a
+        # tooltip for whatever the narrow column cuts off.
         self._list.setMinimumWidth(0)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        # Two-line rows under date-group headers — see
+        # _ConversationRowDelegate. Kept as an attribute because a delegate
+        # is not parented to the view it is set on: dropping the only
+        # Python reference lets it be garbage-collected and leaves the view
+        # painting with a destroyed C++ object.
+        self._row_delegate = _ConversationRowDelegate(self._list)
+        self._list.setItemDelegate(self._row_delegate)
         layout.addWidget(self._list)
 
         # 2x2 rather than one row of four: half the width for the same four
@@ -359,39 +605,109 @@ class ConversationsSidebar(QWidget):
         self._list.clear()
         self._ids_by_row = []
         self._titles_by_row = []
+        # The summaries arrive newest-first (ConversationStore
+        # .list_conversations' own ORDER BY), so walking them in order and
+        # emitting a header whenever the band changes produces each group
+        # exactly once, with no sorting or bucketing pass of its own.
+        current_group: str | None = None
         for summary in visible:
-            item = QListWidgetItem(_row_label(summary))
-            # The column is user-resizable and the label elides, so the
+            group = _date_group(summary.updated_at)
+            if group != current_group:
+                current_group = group
+                self._list.addItem(self._make_group_header(group))
+                # Headers occupy a row, so both row-indexed lists need a
+                # placeholder to stay aligned with the view. Every reader
+                # of these (selected_conversation_id(s), _on_double_click,
+                # _on_rename_clicked) treats None as "not a conversation".
+                self._ids_by_row.append(None)
+                self._titles_by_row.append(None)
+
+            label = _row_label(summary)
+            item = QListWidgetItem(label)
+            # The column is user-resizable and each line elides, so the
             # untruncated row has to stay reachable somewhere.
-            item.setToolTip(_row_label(summary))
+            item.setToolTip(label)
+            item.setData(TITLE_ROLE, summary.title or UNTITLED_LABEL)
+            item.setData(SUBTITLE_ROLE, _row_subtitle(summary, group=group))
             self._list.addItem(item)
             self._ids_by_row.append(summary.id)
             self._titles_by_row.append(summary.title or "")
 
+    @staticmethod
+    def _make_group_header(group: str) -> QListWidgetItem:
+        """A "Today" / "September 2026" divider.
+
+        ``NoItemFlags`` is what keeps the rest of the widget honest: a
+        header cannot be clicked, shift-range-selected, tabbed onto or
+        double-clicked, so no action can ever be aimed at one and none of
+        the selection paths need a special case for it beyond skipping its
+        ``None`` id.
+        """
+        item = QListWidgetItem(group)
+        item.setData(GROUP_HEADER_ROLE, group)
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        return item
+
     @property
     def count(self) -> int:
-        return self._list.count()
+        """How many *conversations* are listed.
 
-    def selected_conversation_id(self) -> str | None:
-        row = self._list.currentRow()
+        Not ``self._list.count()``: the view also holds date-group header
+        rows (``_make_group_header``), and no caller has ever wanted those
+        counted — "how many conversations match the current filter" is the
+        question this has always answered.
+        """
+        return sum(1 for conv_id in self._ids_by_row if conv_id is not None)
+
+    def listed_conversation_ids(self) -> list[str]:
+        """Every conversation currently shown, newest first, with the
+        date-group headers filtered out — "what the user can see right
+        now", as opposed to ``_all_summaries`` ("what there is")."""
+        return [conv_id for conv_id in self._ids_by_row if conv_id is not None]
+
+    def _conversation_id_at(self, row: int) -> str | None:
+        """The conversation at view row ``row``, or ``None`` for an
+        out-of-range row *or* a date-group header (which occupies a row
+        but is not a conversation — see ``_make_group_header``)."""
         if row < 0 or row >= len(self._ids_by_row):
             return None
         return self._ids_by_row[row]
+
+    def selected_conversation_id(self) -> str | None:
+        return self._conversation_id_at(self._list.currentRow())
 
     def selected_conversation_ids(self) -> list[str]:
         """Every currently-selected row's conversation id, in list order
         (not selection/click order) — the multi-select counterpart of
         ``selected_conversation_id`` above, used by bulk Delete."""
         rows = sorted({index.row() for index in self._list.selectedIndexes()})
-        return [self._ids_by_row[row] for row in rows if 0 <= row < len(self._ids_by_row)]
+        ids = (self._conversation_id_at(row) for row in rows)
+        return [conv_id for conv_id in ids if conv_id is not None]
+
+    def _view_row_for(self, index: int) -> int | None:
+        """The view row holding the ``index``-th conversation, skipping
+        date-group headers. ``None`` if there is no such conversation."""
+        seen = -1
+        for row, conv_id in enumerate(self._ids_by_row):
+            if conv_id is None:
+                continue
+            seen += 1
+            if seen == index:
+                return row
+        return None
 
     def select_row(self, index: int) -> None:
-        self._list.setCurrentRow(index)
+        """Select the ``index``-th *conversation* — header rows are not
+        counted and cannot be selected, so this stays stable as groups
+        appear and disappear with the filter."""
+        row = self._view_row_for(index)
+        if row is not None:
+            self._list.setCurrentRow(row)
 
     def _on_double_click(self, item: QListWidgetItem) -> None:
-        row = self._list.row(item)
-        if 0 <= row < len(self._ids_by_row):
-            self.resume_requested.emit(self._ids_by_row[row])
+        conv_id = self._conversation_id_at(self._list.row(item))
+        if conv_id is not None:
+            self.resume_requested.emit(conv_id)
 
     def _on_resume_clicked(self) -> None:
         conv_id = self.selected_conversation_id()
@@ -434,7 +750,14 @@ class ConversationsSidebar(QWidget):
         conv_id = self.selected_conversation_id()
         if not conv_id:
             return
-        current_title = self._titles_by_row[row] if 0 <= row < len(self._titles_by_row) else ""
+        # `or ""`: a header row's slot holds None, and QInputDialog.getText
+        # will not take that for `text`. Unreachable in practice —
+        # selected_conversation_id() already returned None above for a
+        # header — but this is the only place the list is indexed for
+        # anything other than an id.
+        current_title = (
+            self._titles_by_row[row] if 0 <= row < len(self._titles_by_row) else ""
+        ) or ""
         new_title, ok = QInputDialog.getText(
             self, "Rename Conversation", "Title:", text=current_title
         )

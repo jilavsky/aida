@@ -43,6 +43,8 @@ from aida.ui.qt._qt import (
 )
 from aida.ui.qt.artifact_widgets import InlineImageWidget
 from aida.ui.qt.chat_panel import MessageBubble
+from aida.ui.qt.conversation_header import PLACEHOLDER_TITLE
+from aida.ui.qt.conversations_sidebar import TITLE_ROLE
 from aida.ui.qt.main_window import MainWindow
 from aida.workspace.workspaces import get_workspace
 from tests.ui._qt_test_utils import pump_until
@@ -55,6 +57,14 @@ def _settings_with_profile(name: str = "mock-profile") -> Settings:
     settings.providers.profiles[name] = ProviderProfile(
         name=name, kind="openai_compat", model="mock-model"
     )
+    # Off for the window tests in general. Auto-titling
+    # (aida.core.session.ChatSession._maybe_update_title) makes a *second*
+    # provider call after every turn, which both consumes a MockTurn the
+    # test scripted for the turn itself and lands after the assertions'
+    # own wait condition (the reply bubble appearing) — so a test reading
+    # `provider.calls[-1]` for "what the turn sent" would race it. The
+    # tests that are actually about naming turn it back on explicitly.
+    settings.app.auto_title_conversations = False
     return settings
 
 
@@ -721,7 +731,7 @@ def test_delete_conversation_removes_from_sidebar_and_db(
         assert pump_until(qapp, lambda: window.chat_panel.widget_count >= 2)
 
         window._refresh_conversations_sidebar()
-        assert conv_id in window.sidebar._ids_by_row
+        assert conv_id in window.sidebar.listed_conversation_ids()
 
         window._on_delete_requested(conv_id)
 
@@ -730,7 +740,7 @@ def test_delete_conversation_removes_from_sidebar_and_db(
             assert store.get_conversation(conv_id) is None
         finally:
             store.close()
-        assert conv_id not in window.sidebar._ids_by_row
+        assert conv_id not in window.sidebar.listed_conversation_ids()
     finally:
         window.close()
 
@@ -761,8 +771,8 @@ def test_delete_many_requested_removes_all_from_sidebar_and_db(
         finally:
             store.close()
         window._refresh_conversations_sidebar()
-        assert conv_id in window.sidebar._ids_by_row
-        assert other_id in window.sidebar._ids_by_row
+        assert conv_id in window.sidebar.listed_conversation_ids()
+        assert other_id in window.sidebar.listed_conversation_ids()
 
         window._on_delete_many_requested([conv_id, other_id])
 
@@ -772,8 +782,8 @@ def test_delete_many_requested_removes_all_from_sidebar_and_db(
             assert store.get_conversation(other_id) is None
         finally:
             store.close()
-        assert conv_id not in window.sidebar._ids_by_row
-        assert other_id not in window.sidebar._ids_by_row
+        assert conv_id not in window.sidebar.listed_conversation_ids()
+        assert other_id not in window.sidebar.listed_conversation_ids()
     finally:
         window.close()
 
@@ -793,7 +803,7 @@ def test_sidebar_never_shows_the_freshly_started_empty_conversation(
     try:
         conv_id = window.bridge.session.recorder.conversation_id
         window._refresh_conversations_sidebar()
-        assert conv_id not in window.sidebar._ids_by_row
+        assert conv_id not in window.sidebar.listed_conversation_ids()
     finally:
         window.close()
 
@@ -3093,7 +3103,7 @@ def test_schedule_run_finished_ok_refreshes_sidebar_without_a_failure_badge(
 
         window._on_schedule_run_finished("nightly", True, conv_id, "")
 
-        assert conv_id in window.sidebar._ids_by_row
+        assert conv_id in window.sidebar.listed_conversation_ids()
         assert not window._schedule_failures_button.isVisibleTo(window)
         assert window._schedule_failure_count == 0
     finally:
@@ -3606,7 +3616,7 @@ def test_sidebar_content_search_finds_a_conversation_by_message_text(
 
         window.sidebar._search_edit.setText("sample X01")
 
-        assert window.sidebar._ids_by_row == [conv]
+        assert window.sidebar.listed_conversation_ids() == [conv]
     finally:
         window.close()
 
@@ -4243,5 +4253,158 @@ def test_a_new_turn_resets_the_stopping_state(
         # The tool from the cancelled turn must not leak into the next one.
         window.input_box.cancel_requested.emit()
         assert "slow_tool" not in window.input_box.busy_status_text()
+    finally:
+        window.close()
+
+
+# --- the conversation's name, in the window ------------------------------
+#
+# Bug report: "unless user renames the chat, the chat name is start of the
+# user question — rarely useful ... we need some kind of flexible chat
+# title - which will be displayed during the chat already."
+
+
+def _titling_settings() -> Settings:
+    """``_settings_with_profile`` with auto-titling back on — see the
+    comment there for why the window tests switch it off by default."""
+    settings = _settings_with_profile()
+    settings.app.auto_title_conversations = True
+    return settings
+
+
+def test_the_header_starts_on_the_placeholder_and_names_the_session(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        assert window.conversation_header.title_text() == PLACEHOLDER_TITLE
+        # The subtitle says which provider the conversation is running on
+        # even before it has a name of its own.
+        assert "mock-profile" in window.conversation_header.subtitle_text()
+    finally:
+        window.close()
+
+
+def test_the_header_picks_up_the_derived_title_after_the_first_turn(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """The recorder derives a placeholder from the opening message and
+    emits no event for it, so the header has to refresh on turn end."""
+    settings = _settings_with_profile()  # auto-titling off: the derived name only
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        window.input_box.set_text("subtract the background from run_042")
+        window.input_box._send_button.click()
+        assert pump_until(
+            qapp,
+            lambda: (
+                window.conversation_header.title_text() == "subtract the background from run_042"
+            ),
+        )
+    finally:
+        window.close()
+
+
+def test_a_generated_title_reaches_the_header_the_sidebar_and_the_status_bar(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    window = _make_window(
+        qapp,
+        loop_thread,
+        _titling_settings(),
+        monkeypatch,
+        [MockTurn(text="load the file first"), MockTurn(text="Unified fit of S12_0042.h5")],
+        profile_name="mock-profile",
+    )
+    try:
+        conv_id = window.bridge.session.recorder.conversation_id
+        window.input_box.set_text("can you look at the file I just put in the target folder")
+        window.input_box._send_button.click()
+
+        assert pump_until(
+            qapp,
+            lambda: window.conversation_header.title_text() == "Unified fit of S12_0042.h5",
+        )
+        assert "Unified fit of S12_0042.h5" in window.statusBar().currentMessage()
+        # The history column renamed itself live, without a manual refresh.
+        assert conv_id in window.sidebar.listed_conversation_ids()
+        row = window.sidebar._ids_by_row.index(conv_id)
+        assert window.sidebar._list.item(row).data(TITLE_ROLE) == "Unified fit of S12_0042.h5"
+    finally:
+        window.close()
+
+
+def test_renaming_from_the_header_locks_the_title_against_the_model(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """The repair for a name the model got wrong: it has to stick, both in
+    the database and on the live session."""
+    window = _make_window(
+        qapp,
+        loop_thread,
+        _titling_settings(),
+        monkeypatch,
+        [MockTurn(text="hi"), MockTurn(text="A Name The Model Chose")],
+        profile_name="mock-profile",
+    )
+    try:
+        conv_id = window.bridge.session.recorder.conversation_id
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QInputDialog.getText",
+            staticmethod(lambda *a, **kw: ("USAXS beamtime notes", True)),
+        )
+        window.conversation_header.rename_requested.emit()
+
+        assert window.conversation_header.title_text() == "USAXS beamtime notes"
+        store = ConversationStore()
+        try:
+            summary = store.get_conversation(conv_id)
+            assert summary.title == "USAXS beamtime notes"
+            assert summary.title_locked is True
+        finally:
+            store.close()
+        # And the live recorder knows, so the next turn will not re-title.
+        assert window.bridge.session.recorder.title_locked is True
+    finally:
+        window.close()
+
+
+def test_a_cancelled_header_rename_changes_nothing(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QInputDialog.getText",
+            staticmethod(lambda *a, **kw: ("ignored", False)),
+        )
+        window.conversation_header.rename_requested.emit()
+        assert window.conversation_header.title_text() == PLACEHOLDER_TITLE
+    finally:
+        window.close()
+
+
+def test_renaming_from_the_sidebar_also_updates_the_header(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Both rename entry points end at _on_rename_requested, so the one
+    showing the name has to be refreshed from there rather than from
+    whichever widget happened to start it."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        conv_id = window.bridge.session.recorder.conversation_id
+        window._on_rename_requested(conv_id, "Renamed from the list")
+        assert window.conversation_header.title_text() == "Renamed from the list"
     finally:
         window.close()

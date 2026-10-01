@@ -29,7 +29,7 @@ from aida.persistence.cleanup import (
 )
 from aida.persistence.recorder import ConversationNotFoundError, ConversationRecorder
 from aida.persistence.records import TOOL_RESULT_MODES
-from aida.persistence.store import ConversationStore, ConversationSummary
+from aida.persistence.store import TITLE_MANUAL, ConversationStore, ConversationSummary
 
 
 class UnknownConversationIdError(Exception):
@@ -154,7 +154,11 @@ def cmd_rename(args: argparse.Namespace) -> int:
         except (UnknownConversationIdError, AmbiguousConversationIdError) as exc:
             print(str(exc))
             return 1
-        store.set_title(conv_id, args.title, timestamp=datetime.now(UTC).isoformat())
+        # TITLE_MANUAL: a name somebody typed is never re-titled by the
+        # model afterwards (aida.core.titling).
+        store.set_title(
+            conv_id, args.title, timestamp=datetime.now(UTC).isoformat(), source=TITLE_MANUAL
+        )
         print(f"Renamed conversation {conv_id[:8]} to {args.title!r}.")
         return 0
     finally:

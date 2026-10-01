@@ -247,6 +247,27 @@ class SteeringMessageDelivered:
 
 
 @dataclass(frozen=True)
+class ConversationTitled:
+    """The conversation has just been (re)named from its own content.
+
+    Emitted by ``aida.core.session.ChatSession.send`` after a turn ends —
+    once for the first real title, then only on the occasional re-check
+    that actually produces a different name (see ``aida.core.titling``).
+    A re-check that answers "the current title still fits" emits nothing,
+    so this event always means "the name in front of the user just
+    changed" and a frontend can act on it unconditionally.
+
+    Never emitted for a conversation whose title a person typed: those are
+    locked in the database and skipped entirely.
+    """
+
+    conversation_id: str
+    title: str
+
+    to_dict = _base_dict
+
+
+@dataclass(frozen=True)
 class AgentError:
     """A terminal error for the current ``complete()``/``run()`` call.
 
@@ -276,6 +297,7 @@ AgentEvent = (
     | RetrievalPerformed
     | ContextTrimmed
     | SteeringMessageDelivered
+    | ConversationTitled
     | AgentError
 )
 
@@ -283,6 +305,7 @@ __all__ = [
     "AgentError",
     "AgentEvent",
     "ContextTrimmed",
+    "ConversationTitled",
     "FileArtifactCreated",
     "ImageArtifactCreated",
     "MessageFinished",

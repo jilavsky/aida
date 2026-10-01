@@ -15,6 +15,44 @@ its own "Changelog" — dated amendments to the *design document itself* (a
 decision revised), unrelated to what shipped when. Entries below link to
 `COMPLETED.md` where useful; `PLAN.md` tracks what's still open.
 
+## [Unreleased]
+
+### Added
+
+- **Conversations name themselves, and the name is visible while you
+  chat.** User report: "unless user renames the chat, the chat name is
+  start of the user question — rarely useful ... we need some kind of
+  flexible chat title, which will be displayed during the chat already."
+  A conversation is still named after your first line the moment you send
+  it, but once the first reply lands the model replaces that with a short
+  name drawn from what the conversation is actually about. The name is
+  re-checked every five turns, with the model shown the current title and
+  asked to keep it unless the subject has clearly moved on — so a
+  conversation that wanders stops carrying the old name, and one that does
+  not is left alone. It costs one small call on the profile the
+  conversation is already using; `auto_title_conversations` and
+  `auto_title_interval_turns` (Settings, or `config.yaml`) turn it off or
+  change the cadence.
+
+  The name now appears above the transcript, with the workspace, profile
+  and user label under it. Click the ✎ there — or use the sidebar's
+  **Rename…**, or `aida conversations rename` — to name it yourself, which
+  switches automatic naming off for that conversation permanently. See
+  [`docs/organizing-conversations.md`](docs/organizing-conversations.md#how-conversations-get-their-names).
+
+### Changed
+
+- **The Conversations column is two lines per entry, grouped by date.**
+  User report: "the display in the Conversation column is not very helpful.
+  Could we make it into two lines — title first and date-time/workspace
+  second? Or something more ergonomic, so user can easier find what he is
+  looking for." Entries now sit under **Today** / **Yesterday** /
+  **Previous 7 days** / month headings, with the title on its own line and
+  "when · workspace · user" dimmed underneath. Recent entries are timed
+  rather than dated ("09:03", "Yesterday 17:44", "Sat 11:02"). The old
+  single line led with the timestamp and workspace, so on a narrow column
+  the elide ate the title — the only part worth reading.
+
 ## [0.2.0] - 2026-10-01
 
 ### Changed

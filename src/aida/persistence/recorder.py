@@ -32,7 +32,7 @@ from aida.persistence.records import (
     record_file_path,
     write_transcript,
 )
-from aida.persistence.store import ConversationStore
+from aida.persistence.store import TITLE_DERIVED, TITLE_MANUAL, ConversationStore
 from aida.providers.base import ImageRef, Message
 
 logger = get_logger("persistence.recorder")
@@ -117,6 +117,7 @@ class ConversationRecorder:
                 raise ConversationNotFoundError(f"no conversation with id {conversation_id!r}")
             self.conversation_id = conversation_id
             self.title = existing.title
+            self.title_source = existing.title_source
             self.workspace_name = existing.workspace_name
             self.profile_name = existing.profile_name
             self.sidecar_dirname = existing.sidecar_dirname
@@ -132,6 +133,7 @@ class ConversationRecorder:
             self._record_path = Path(existing.record_path) if existing.record_path else None
         else:
             self.title = None
+            self.title_source = TITLE_DERIVED
             self.workspace_name = workspace_name
             self.profile_name = profile_name
             self.sidecar_dirname = sidecar_dirname
@@ -194,6 +196,26 @@ class ConversationRecorder:
             return IngestResult()
         return store_attachments(paths, self._claim_attachments_dir(), texts=texts)
 
+    @property
+    def title_locked(self) -> bool:
+        """A name a person typed is never changed by anything else."""
+        return self.title_source == TITLE_MANUAL
+
+    def set_title(self, title: str, *, source: str) -> None:
+        """Rename this conversation, keeping the cached fields in step
+        with the row.
+
+        The one place anything above persistence should go to change the
+        title of the conversation that is *currently open*:
+        ``ChatSession``'s automatic titling (``aida.core.titling``) calls
+        it with ``TITLE_GENERATED``. Renaming a conversation that is not
+        open goes straight to ``ConversationStore.set_title`` from the
+        GUI/CLI, since there is no live recorder for it to keep in step.
+        """
+        self.title = title
+        self.title_source = source
+        self.store.set_title(self.conversation_id, title, timestamp=_now_iso(), source=source)
+
     def record_message(self, message: Message) -> int:
         """Persist one finalized message immediately, set an auto-derived
         title on the first user message if none exists yet, and refresh the
@@ -206,7 +228,10 @@ class ConversationRecorder:
         timestamp = _now_iso()
         if self.title is None and message.role == "user" and message.content:
             self.title = _derive_title(message.content)
-            self.store.set_title(self.conversation_id, self.title, timestamp=timestamp)
+            self.title_source = TITLE_DERIVED
+            self.store.set_title(
+                self.conversation_id, self.title, timestamp=timestamp, source=TITLE_DERIVED
+            )
 
         seq = self.store.append_message(self.conversation_id, message, timestamp=timestamp)
         # User attachments only. A *tool* message's images are already

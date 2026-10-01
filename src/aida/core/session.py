@@ -71,12 +71,14 @@ from aida.core.context import (
 from aida.core.events import (
     AgentError,
     ContextTrimmed,
+    ConversationTitled,
     FileArtifactCreated,
     ImageArtifactCreated,
     RetrievalPerformed,
     TextFinished,
     UsageInfo,
 )
+from aida.core.titling import clean_title, title_request_messages
 from aida.core.tools import NativeTool, default_native_tools
 from aida.documents.figure_tools import OcrBackend, default_figure_tools
 from aida.documents.ocr.mistral import SECRET_REF as OCR_SECRET_REF
@@ -90,7 +92,7 @@ from aida.knowledge.rag.retrieval import (
 from aida.mcp.groups import resolve_explicit, resolve_group
 from aida.mcp.manager import NAMESPACE_SEPARATOR, McpManager
 from aida.persistence.recorder import ConversationNotFoundError, ConversationRecorder
-from aida.persistence.store import ConversationStore
+from aida.persistence.store import TITLE_GENERATED, ConversationStore
 from aida.providers.base import CompletionSettings, ImageRef, Message
 from aida.providers.profiles import (
     UnknownProviderKindError,
@@ -364,6 +366,21 @@ class ChatSession:
         # above is what actually prevents the race; this is what would catch
         # a future refactor that reintroduces it.
         self._history_generation = 0
+        #: Completed turns since the last time a title check actually
+        #: ran. Starts at 0 on a resume, so a conversation that already
+        #: carries a generated name waits out a full interval before it
+        #: is re-checked. Whether it has such a name at all is *not* kept
+        #: here — that is `recorder.title_source`, which has to survive
+        #: the process. See _maybe_update_title.
+        self._turns_since_title = 0
+        #: Whether a titling call has been made at all this session. The
+        #: "still on the placeholder, name it now" shortcut is allowed to
+        #: skip the cadence exactly once; after that even an unnamed
+        #: conversation waits out the interval, so an endpoint that keeps
+        #: failing (or a model that keeps answering with nothing usable)
+        #: costs one extra call every interval rather than one on every
+        #: single turn, forever.
+        self._title_attempted = False
 
         # The guard this session's file/document/coding tools were built
         # with, and the inputs its system message was built from — both kept
@@ -726,6 +743,102 @@ class ChatSession:
             logger.warning("context compaction failed, falling back to plain trim: %s", exc)
             return None
 
+    def _title_check_is_due(self) -> bool:
+        """Whether this turn should spend a call on (re)naming the
+        conversation — see ``_maybe_update_title`` for what it then does.
+
+        Three gates, cheapest first: the setting, a conversation that can
+        actually be renamed (there is a recorder, and nobody has typed a
+        name for it), and the cadence. A conversation still carrying the
+        derived placeholder skips the cadence for its *first* attempt, so
+        its real name arrives at the end of the first turn rather than
+        five turns later — that first moment is when the useless "can you
+        look at the file I just" placeholder is in front of the user.
+        Only the first, though: see ``_title_attempted``.
+        """
+        if not self.settings.app.auto_title_conversations:
+            return False
+        if self.recorder is None or self.recorder.title_locked:
+            return False
+        if not any(message.role == "assistant" for message in self.messages):
+            # Nothing to name it from yet: a turn that failed before the
+            # model said anything, or a history-only session.
+            return False
+        if self.recorder.title_source != TITLE_GENERATED and not self._title_attempted:
+            return True
+        return self._turns_since_title >= max(1, self.settings.app.auto_title_interval_turns)
+
+    async def _maybe_update_title(self) -> ConversationTitled | None:
+        """Name (or re-name) this conversation from its own content.
+
+        Same shape as ``_compact_context`` above — the *active* provider,
+        no tools, nothing raised — because it has the same contract: a
+        cosmetic nicety must never cost the user a turn. Every failure
+        path (provider error, empty reply, an exception from a client
+        closed by a concurrent profile switch) ends as a log line and a
+        ``None``, and the next due turn simply tries again.
+
+        Returns the event to emit when the title actually changed.
+        ``None`` covers all three "nothing to tell the user" cases: not
+        due, the model answered ``KEEP``, or the call failed.
+        """
+        self._turns_since_title += 1
+        if not self._title_check_is_due():
+            return None
+        self._title_attempted = True
+        recorder = self.recorder
+        assert recorder is not None  # guaranteed by _title_check_is_due
+        # The current title is offered back for a KEEP only once it is a
+        # real, model-written name. Offering it for the derived
+        # placeholder would let a first-line fragment survive as the
+        # conversation's name forever, which is the whole bug.
+        already_named = recorder.title_source == TITLE_GENERATED
+        request_messages = title_request_messages(
+            self.messages, current_title=recorder.title if already_named else None
+        )
+        # Same reasoning as _compact_context's own settings: a factual,
+        # one-line extraction, so pin temperature low — but only if the
+        # active profile shows this endpoint accepts one at all, since a
+        # model that fixes its own temperature rejects 0.0 exactly as it
+        # rejects 0.7.
+        title_settings = CompletionSettings(
+            model=self.completion_settings.model,
+            temperature=0.0 if self.completion_settings.temperature is not None else None,
+            supports_vision=False,
+        )
+        try:
+            reply = ""
+            for_error: str | None = None
+            async for event in self.provider.complete(request_messages, [], title_settings):
+                if isinstance(event, TextFinished):
+                    reply = event.text
+                elif isinstance(event, AgentError):
+                    for_error = f"{event.layer}: {event.message}"
+            if for_error is not None:
+                logger.debug(
+                    "conversation titling failed, keeping the current title: %s", for_error
+                )
+                return None
+        except Exception as exc:  # noqa: BLE001 - titling must never fail a turn
+            logger.debug("conversation titling failed, keeping the current title: %s", exc)
+            return None
+
+        # The check ran, so the cadence restarts even when the answer was
+        # KEEP — otherwise a conversation the model is happy with would be
+        # re-checked on every single turn from then on.
+        self._turns_since_title = 0
+        title = clean_title(reply)
+        if title is None or title == recorder.title:
+            # KEEP, an unusable answer, or the same name again. The first
+            # of those is a decision about the *current* title, so it
+            # only counts as "this conversation has a generated name" if
+            # it already did — a KEEP of a derived placeholder must not
+            # promote that placeholder and stop it ever being replaced.
+            return None
+        recorder.set_title(title, source=TITLE_GENERATED)
+        logger.info("conversation %s titled %r", recorder.conversation_id[:8], title)
+        return ConversationTitled(conversation_id=recorder.conversation_id, title=title)
+
     async def _apply_trim_plan(self, plan: TrimPlan) -> ContextTrimmed | None:
         """Shared by the automatic (``_trim_context``) and manual
         (``compact_now``) paths: try to summarize ``plan.dropped_turns``
@@ -890,7 +1003,15 @@ class ChatSession:
         profile switch is already in flight — see ``SessionBusyError``. Note
         that a *queued interjection* into a running turn is a different
         thing entirely and still works: it goes through the synchronous
-        ``queue_user_message``, which never touches this lock."""
+        ``queue_user_message``, which never touches this lock.
+
+        Conversation titling runs here, *after* the lock is released: it
+        reads ``self.messages`` and writes only the conversation's title,
+        so it has no business holding a lock whose job is serializing
+        mutations of the history. Doing it in this wrapper rather than in
+        each frontend means the CLI, the GUI, ``aida run`` and scheduled
+        workflow runs all get named conversations with no extra wiring —
+        see ``_maybe_update_title``."""
         if self._mutation_lock.locked():
             raise SessionBusyError("A turn is already running in this session.")
         async with self._mutation_lock:
@@ -901,6 +1022,9 @@ class ChatSession:
                 attachment_texts=attachment_texts,
             ):
                 yield event
+        title_event = await self._maybe_update_title()
+        if title_event is not None:
+            yield title_event
 
     async def _run_turn(
         self,

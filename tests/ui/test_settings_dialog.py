@@ -409,3 +409,39 @@ def test_with_no_active_user_the_box_edits_the_shared_text(qapp):
 
     assert updated.user_context == "New shared framing."
     assert updated.user_contexts == {"Jan": "Jan's text."}, "another user's text is untouched"
+
+
+# --- automatic conversation titles (aida.core.titling) -------------------
+
+
+def test_dialog_seeds_the_auto_title_fields_from_app_config(qapp):
+    dialog = SettingsDialog(AppConfig(auto_title_conversations=False, auto_title_interval_turns=9))
+    assert dialog.auto_title_conversations() is False
+    assert dialog.auto_title_interval_turns() == 9
+
+
+def test_dialog_defaults_automatic_titles_to_on(qapp):
+    dialog = SettingsDialog(AppConfig())
+    assert dialog.auto_title_conversations() is True
+    assert dialog.auto_title_interval_turns() == 5
+
+
+def test_the_interval_is_disabled_while_automatic_titles_are_off(qapp):
+    """A re-check cadence means nothing with nothing to re-check."""
+    dialog = SettingsDialog(AppConfig(auto_title_conversations=False))
+    assert dialog._auto_title_interval_spin.isEnabled() is False
+
+    dialog._auto_title_check.setChecked(True)
+    assert dialog._auto_title_interval_spin.isEnabled() is True
+
+
+def test_updated_app_config_includes_the_edited_auto_title_fields(qapp):
+    cfg = AppConfig()
+    dialog = SettingsDialog(cfg)
+    dialog._auto_title_check.setChecked(False)
+    dialog._auto_title_interval_spin.setValue(20)
+
+    updated = dialog.updated_app_config()
+    assert updated.auto_title_conversations is False
+    assert updated.auto_title_interval_turns == 20
+    assert cfg.auto_title_conversations is True  # original untouched

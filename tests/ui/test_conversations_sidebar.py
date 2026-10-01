@@ -2,16 +2,33 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
+from datetime import datetime, timedelta
 
 from aida.persistence.store import ConversationSummary
-from aida.ui.qt._qt import QAbstractItemView, QDialog, QMessageBox
+from aida.ui.qt._qt import (
+    QAbstractItemView,
+    QDialog,
+    QMessageBox,
+    QPixmap,
+    QStyleOptionViewItem,
+    Qt,
+)
 from aida.ui.qt.conversations_sidebar import (
     ALL_USERS_LABEL,
+    GROUP_HEADER_ROLE,
     MIN_SIDEBAR_WIDTH,
     NO_USER_LABEL,
+    SUBTITLE_ROLE,
+    TITLE_ROLE,
+    UNDATED_GROUP,
+    UNTITLED_LABEL,
     CleanupDialog,
     ConversationsSidebar,
+    _date_group,
+    _relative_when,
+    _row_subtitle,
 )
 
 
@@ -35,6 +52,22 @@ def _summary(
         message_count=message_count,
         user=user,
     )
+
+
+def _items(sidebar: ConversationsSidebar) -> list:
+    """Every *conversation* row, in order.
+
+    The list also holds non-selectable date-group headers now (see
+    ``ConversationsSidebar._make_group_header``), so a test that wants
+    "the second conversation" can no longer index ``_list`` directly.
+    ``_ids_by_row`` carries ``None`` at each header's row, which is what
+    this filters on.
+    """
+    return [
+        sidebar._list.item(row)
+        for row, conv_id in enumerate(sidebar._ids_by_row)
+        if conv_id is not None
+    ]
 
 
 def test_set_conversations_populates_list(qapp):
@@ -72,7 +105,7 @@ def test_double_click_emits_resume_requested(qapp):
     sidebar.set_conversations([_summary("id1"), _summary("id2")])
     resumed = []
     sidebar.resume_requested.connect(resumed.append)
-    sidebar._on_double_click(sidebar._list.item(1))
+    sidebar._on_double_click(_items(sidebar)[1])
     assert resumed == ["id2"]
 
 
@@ -218,7 +251,7 @@ def test_row_label_shows_local_short_date_time_not_the_raw_iso_string(qapp):
     row used to show the raw UTC ISO-8601 updated_at string verbatim."""
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1", title="analysis")])
-    label = sidebar._list.item(0).text()
+    label = _items(sidebar)[0].text()
     assert "2026-08-19T00:00:00" not in label
     assert "[use-pyirena]" in label
     assert "analysis" in label
@@ -233,7 +266,7 @@ def test_row_label_falls_back_to_the_raw_string_for_unparseable_timestamps(qapp)
     bad = _summary("id1")
     bad.updated_at = "not-a-timestamp"
     sidebar.set_conversations([bad])
-    assert "not-a-timestamp" in sidebar._list.item(0).text()
+    assert "not-a-timestamp" in _items(sidebar)[0].text()
 
 
 def test_search_filters_by_title_case_insensitively(qapp):
@@ -243,7 +276,7 @@ def test_search_filters_by_title_case_insensitively(qapp):
     )
     sidebar._search_edit.setText("usaxs")
     assert sidebar.count == 1
-    assert sidebar._ids_by_row == ["id1"]
+    assert sidebar.listed_conversation_ids() == ["id1"]
 
 
 def test_search_filters_by_workspace_and_user(qapp):
@@ -256,10 +289,10 @@ def test_search_filters_by_workspace_and_user(qapp):
     )
 
     sidebar._search_edit.setText("USAXS")
-    assert sidebar._ids_by_row == ["id1"]
+    assert sidebar.listed_conversation_ids() == ["id1"]
 
     sidebar._search_edit.setText("bob")
-    assert sidebar._ids_by_row == ["id2"]
+    assert sidebar.listed_conversation_ids() == ["id2"]
 
 
 # --- planning/improvement_plan_2026-09.md §2: content search, not just
@@ -288,11 +321,11 @@ def test_content_match_ids_are_merged_into_the_visible_set(qapp):
         ]
     )
     sidebar._search_edit.setText("sample X01")
-    assert sidebar._ids_by_row == []  # no title/workspace/user match yet
+    assert sidebar.listed_conversation_ids() == []  # no title/workspace/user match yet
 
     sidebar.set_content_matches({"id1"})
 
-    assert sidebar._ids_by_row == ["id1"]
+    assert sidebar.listed_conversation_ids() == ["id1"]
 
 
 def test_content_matches_do_not_leak_into_an_unrelated_later_query(qapp):
@@ -300,12 +333,12 @@ def test_content_matches_do_not_leak_into_an_unrelated_later_query(qapp):
     sidebar.set_conversations([_summary("id1", title="unrelated")])
     sidebar._search_edit.setText("sample X01")
     sidebar.set_content_matches({"id1"})
-    assert sidebar._ids_by_row == ["id1"]
+    assert sidebar.listed_conversation_ids() == ["id1"]
 
     # A fresh query with content_matches not yet updated for it must not
     # keep showing the previous query's matches.
     sidebar._search_edit.setText("something else entirely")
-    assert sidebar._ids_by_row == []
+    assert sidebar.listed_conversation_ids() == []
 
 
 def test_content_matches_cleared_with_none_stops_merging_stale_ids(qapp):
@@ -313,10 +346,10 @@ def test_content_matches_cleared_with_none_stops_merging_stale_ids(qapp):
     sidebar.set_conversations([_summary("id1", title="unrelated")])
     sidebar._search_edit.setText("sample X01")
     sidebar.set_content_matches({"id1"})
-    assert sidebar._ids_by_row == ["id1"]
+    assert sidebar.listed_conversation_ids() == ["id1"]
 
     sidebar.set_content_matches(None)
-    assert sidebar._ids_by_row == []
+    assert sidebar.listed_conversation_ids() == []
 
 
 def test_content_matches_still_apply_alongside_a_title_match(qapp):
@@ -332,7 +365,7 @@ def test_content_matches_still_apply_alongside_a_title_match(qapp):
     sidebar._search_edit.setText("sample X01")
     sidebar.set_content_matches({"id2"})
 
-    assert set(sidebar._ids_by_row) == {"id1", "id2"}
+    assert set(sidebar.listed_conversation_ids()) == {"id1", "id2"}
 
 
 def test_user_filter_is_visible_only_when_user_labels_exist(qapp):
@@ -361,13 +394,13 @@ def test_user_filter_narrows_to_one_user_and_all_users_restores_everything(qapp)
     )
 
     sidebar._user_filter.setCurrentText("Alice")
-    assert sidebar._ids_by_row == ["alice"]
+    assert sidebar.listed_conversation_ids() == ["alice"]
 
     sidebar._user_filter.setCurrentText(NO_USER_LABEL)
-    assert sidebar._ids_by_row == ["legacy"]
+    assert sidebar.listed_conversation_ids() == ["legacy"]
 
     sidebar._user_filter.setCurrentText(ALL_USERS_LABEL)
-    assert sidebar._ids_by_row == ["alice", "bob", "legacy"]
+    assert sidebar.listed_conversation_ids() == ["alice", "bob", "legacy"]
 
 
 def test_set_conversations_preserves_the_selected_user(qapp):
@@ -378,7 +411,7 @@ def test_set_conversations_preserves_the_selected_user(qapp):
     sidebar.set_conversations([_summary("bob-2", user="Bob"), _summary("alice-2", user="Alice")])
 
     assert sidebar._user_filter.currentText() == "Bob"
-    assert sidebar._ids_by_row == ["bob-2"]
+    assert sidebar.listed_conversation_ids() == ["bob-2"]
 
 
 def test_search_with_no_matches_shows_an_empty_list(qapp):
@@ -405,7 +438,7 @@ def test_set_conversations_hides_conversations_with_no_messages(qapp):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1", message_count=0), _summary("id2", message_count=1)])
     assert sidebar.count == 1
-    assert sidebar._ids_by_row == ["id2"]
+    assert sidebar.listed_conversation_ids() == ["id2"]
 
 
 def test_set_conversations_with_only_empty_conversations_shows_nothing(qapp):
@@ -430,8 +463,8 @@ def test_selection_mode_is_extended(qapp):
 def test_selected_conversation_ids_returns_every_selected_row(qapp):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1"), _summary("id2"), _summary("id3")])
-    sidebar._list.item(0).setSelected(True)
-    sidebar._list.item(2).setSelected(True)
+    _items(sidebar)[0].setSelected(True)
+    _items(sidebar)[2].setSelected(True)
     assert sidebar.selected_conversation_ids() == ["id1", "id3"]
 
 
@@ -445,8 +478,8 @@ def test_selected_conversation_ids_empty_when_nothing_selected(qapp):
 def test_delete_multiple_selected_emits_delete_many_requested(qapp, monkeypatch):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1"), _summary("id2"), _summary("id3")])
-    sidebar._list.item(0).setSelected(True)
-    sidebar._list.item(1).setSelected(True)
+    _items(sidebar)[0].setSelected(True)
+    _items(sidebar)[1].setSelected(True)
     monkeypatch.setattr(
         "aida.ui.qt.conversations_sidebar.QMessageBox.question",
         lambda *a, **kw: QMessageBox.StandardButton.Yes,
@@ -463,8 +496,8 @@ def test_delete_multiple_selected_emits_delete_many_requested(qapp, monkeypatch)
 def test_delete_multiple_declined_emits_nothing(qapp, monkeypatch):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1"), _summary("id2")])
-    sidebar._list.item(0).setSelected(True)
-    sidebar._list.item(1).setSelected(True)
+    _items(sidebar)[0].setSelected(True)
+    _items(sidebar)[1].setSelected(True)
     monkeypatch.setattr(
         "aida.ui.qt.conversations_sidebar.QMessageBox.question",
         lambda *a, **kw: QMessageBox.StandardButton.No,
@@ -480,7 +513,7 @@ def test_delete_single_selection_still_emits_the_singular_signal(qapp, monkeypat
     delete_requested, not the new bulk signal."""
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1"), _summary("id2")])
-    sidebar._list.item(0).setSelected(True)
+    _items(sidebar)[0].setSelected(True)
     monkeypatch.setattr(
         "aida.ui.qt.conversations_sidebar.QMessageBox.question",
         lambda *a, **kw: QMessageBox.StandardButton.Yes,
@@ -502,7 +535,7 @@ def test_delete_single_selection_still_emits_the_singular_signal(qapp, monkeypat
 def test_context_menu_on_a_single_row_offers_resume_rename_delete(qapp):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1")])
-    sidebar._list.item(0).setSelected(True)
+    _items(sidebar)[0].setSelected(True)
     menu = sidebar._build_context_menu()
     labels = [action.text() for action in menu.actions() if not action.isSeparator()]
     assert labels == ["Resume", "Rename…", "Export…", "Move to User", "Delete…"]
@@ -523,8 +556,8 @@ def test_context_menu_on_multiple_rows_offers_move_and_delete(qapp):
     right label at once is the common case, not the exception."""
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1"), _summary("id2")])
-    sidebar._list.item(0).setSelected(True)
-    sidebar._list.item(1).setSelected(True)
+    _items(sidebar)[0].setSelected(True)
+    _items(sidebar)[1].setSelected(True)
     menu = sidebar._build_context_menu()
     labels = [action.text() for action in menu.actions() if not action.isSeparator()]
     assert labels == ["Move to User", "Delete…"]
@@ -535,10 +568,10 @@ def test_right_clicking_an_unselected_row_selects_just_that_row(qapp, monkeypatc
     as a plain left click), not act on stale rows."""
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1"), _summary("id2"), _summary("id3")])
-    sidebar._list.item(0).setSelected(True)
+    _items(sidebar)[0].setSelected(True)
     monkeypatch.setattr(ConversationsSidebar, "_popup_context_menu", lambda self, menu, pos: None)
 
-    pos = sidebar._list.visualItemRect(sidebar._list.item(2)).center()
+    pos = sidebar._list.visualItemRect(_items(sidebar)[2]).center()
     sidebar._on_context_menu_requested(pos)
 
     assert sidebar.selected_conversation_ids() == ["id3"]
@@ -547,11 +580,11 @@ def test_right_clicking_an_unselected_row_selects_just_that_row(qapp, monkeypatc
 def test_right_clicking_a_row_already_in_the_selection_keeps_the_whole_selection(qapp, monkeypatch):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("id1"), _summary("id2"), _summary("id3")])
-    sidebar._list.item(0).setSelected(True)
-    sidebar._list.item(1).setSelected(True)
+    _items(sidebar)[0].setSelected(True)
+    _items(sidebar)[1].setSelected(True)
     monkeypatch.setattr(ConversationsSidebar, "_popup_context_menu", lambda self, menu, pos: None)
 
-    pos = sidebar._list.visualItemRect(sidebar._list.item(1)).center()
+    pos = sidebar._list.visualItemRect(_items(sidebar)[1]).center()
     sidebar._on_context_menu_requested(pos)
 
     assert sidebar.selected_conversation_ids() == ["id1", "id2"]
@@ -589,7 +622,7 @@ def test_refreshing_conversations_preserves_an_active_filter(qapp):
 
 
 def _rows(sidebar) -> list[str]:
-    return [sidebar._list.item(i).text() for i in range(sidebar._list.count())]
+    return [item.text() for item in _items(sidebar)]
 
 
 def _mixed() -> list:
@@ -675,7 +708,7 @@ def test_context_menu_offers_move_to_user_for_one_and_for_many(qapp):
     sidebar.set_conversations(_mixed())
     sidebar.set_known_users(["Jan", "Eva"])
 
-    sidebar._list.setCurrentRow(0)
+    sidebar.select_row(0)
     single = [a.text() for a in sidebar._build_context_menu().actions()]
     assert "Move to User" in single
 
@@ -689,7 +722,7 @@ def test_move_to_user_submenu_lists_names_plus_no_user_and_new(qapp):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations(_mixed())
     sidebar.set_known_users(["Jan", "Eva"])
-    sidebar._list.setCurrentRow(0)
+    sidebar.select_row(0)
 
     menu = sidebar._build_context_menu()
     submenu = next(a.menu() for a in menu.actions() if a.text() == "Move to User")
@@ -703,7 +736,7 @@ def test_choosing_a_name_emits_the_selected_ids(qapp):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations(_mixed())
     sidebar.set_known_users(["Jan"])
-    sidebar._list.setCurrentRow(1)
+    sidebar.select_row(1)
     emitted = []
     sidebar.move_to_user_requested.connect(lambda ids, user: emitted.append((ids, user)))
 
@@ -714,7 +747,7 @@ def test_choosing_a_name_emits_the_selected_ids(qapp):
 def test_choosing_no_user_emits_an_empty_name(qapp):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations(_mixed())
-    sidebar._list.setCurrentRow(0)
+    sidebar.select_row(0)
     emitted = []
     sidebar.move_to_user_requested.connect(lambda ids, user: emitted.append(user))
 
@@ -727,7 +760,7 @@ def test_move_to_a_new_name_prompts_and_emits(qapp, monkeypatch):
 
     sidebar = ConversationsSidebar()
     sidebar.set_conversations(_mixed())
-    sidebar._list.setCurrentRow(0)
+    sidebar.select_row(0)
     emitted = []
     sidebar.move_to_user_requested.connect(lambda ids, user: emitted.append(user))
 
@@ -784,5 +817,242 @@ def test_narrow_rows_keep_their_full_label_as_a_tooltip(qapp):
     sidebar = ConversationsSidebar()
     sidebar.set_conversations([_summary("c1", title="quantitative USAXS of the aged sample")])
 
-    item = sidebar._list.item(0)
+    item = _items(sidebar)[0]
     assert "quantitative USAXS of the aged sample" in item.toolTip()
+
+
+# --- two-line rows under date groups --------------------------------------
+#
+# Bug report: "the display in the Conversation column is not very helpful.
+# Could we make it into two lines — title first and date-time/workspace
+# second? Or something more ergonomic, so user can easier find what he is
+# looking for."
+
+
+def _at(days_ago: float, *, hour: int = 14) -> str:
+    """An ``updated_at`` that many days in the past, in local time — the
+    rows are grouped and labelled relative to *now*, so the fixtures have
+    to be too."""
+    when = datetime.now().astimezone().replace(hour=hour, minute=3, second=0, microsecond=0)
+    return (when - timedelta(days=days_ago)).isoformat()
+
+
+def _dated(conv_id: str, title: str, iso: str, **kwargs) -> ConversationSummary:
+    summary = _summary(conv_id, title, **kwargs)
+    return dataclasses.replace(summary, updated_at=iso)
+
+
+def _headers(sidebar: ConversationsSidebar) -> list[str]:
+    return [
+        sidebar._list.item(row).data(GROUP_HEADER_ROLE)
+        for row, conv_id in enumerate(sidebar._ids_by_row)
+        if conv_id is None
+    ]
+
+
+def test_each_row_carries_a_title_and_a_subtitle_the_delegate_paints(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [_dated("c1", "Unified fit of PS latex", _at(0), workspace="usaxs", user="Jan")]
+    )
+
+    item = _items(sidebar)[0]
+    assert item.data(TITLE_ROLE) == "Unified fit of PS latex"
+    subtitle = item.data(SUBTITLE_ROLE)
+    assert "usaxs" in subtitle
+    assert "Jan" in subtitle
+    # The title is on its own line, so it must not be repeated below it.
+    assert "Unified fit" not in subtitle
+
+
+def test_a_subtitle_drops_the_parts_a_conversation_does_not_have(qapp):
+    """An install that uses no user labels must not carry a column of
+    placeholder separators down the whole list."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_dated("c1", "chat", _at(0), workspace=None, user=None)])
+    assert _items(sidebar)[0].data(SUBTITLE_ROLE) == _relative_when(_at(0))
+
+
+def test_an_untitled_conversation_still_shows_something(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_dated("c1", None, _at(0))])
+    assert _items(sidebar)[0].data(TITLE_ROLE) == UNTITLED_LABEL
+
+
+def test_rows_are_grouped_under_date_headers_in_order(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [
+            _dated("today", "today's work", _at(0)),
+            _dated("yesterday", "yesterday's work", _at(1)),
+            _dated("midweek", "earlier this week", _at(3)),
+            _dated("ancient", "last season", _at(200)),
+        ]
+    )
+
+    assert _headers(sidebar)[:3] == ["Today", "Yesterday", "Previous 7 days"]
+    assert len(_headers(sidebar)) == 4  # the fourth is a month name
+    assert sidebar.count == 4  # headers are not conversations
+
+
+def test_consecutive_conversations_in_one_band_share_a_single_header(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_dated(f"c{i}", f"chat {i}", _at(0, hour=10 + i)) for i in range(4)])
+    assert _headers(sidebar) == ["Today"]
+
+
+def test_a_header_cannot_be_selected_or_acted_on(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_dated("c1", "chat", _at(0))])
+
+    header_row = sidebar._ids_by_row.index(None)
+    header = sidebar._list.item(header_row)
+    assert header.flags() == Qt.ItemFlag.NoItemFlags
+
+    # Even reached directly (a stray setCurrentRow, selectAll), it is not
+    # a conversation and no action can be aimed at it.
+    sidebar._list.setCurrentRow(header_row)
+    assert sidebar.selected_conversation_id() is None
+    sidebar._list.selectAll()
+    assert sidebar.selected_conversation_ids() == ["c1"]
+
+
+def test_double_clicking_a_header_resumes_nothing(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_dated("c1", "chat", _at(0))])
+    resumed = []
+    sidebar.resume_requested.connect(resumed.append)
+
+    header_row = sidebar._ids_by_row.index(None)
+    sidebar._on_double_click(sidebar._list.item(header_row))
+    assert resumed == []
+
+
+def test_select_row_counts_conversations_not_view_rows(qapp):
+    """Headers come and go with the filter, so an index into the *list*
+    would mean something different every refresh."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [_dated("today", "today's work", _at(0)), _dated("old", "older work", _at(3))]
+    )
+    sidebar.select_row(1)
+    assert sidebar.selected_conversation_id() == "old"
+
+
+def test_headers_follow_the_filtered_set_not_the_whole_history(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [_dated("today", "alpha today", _at(0)), _dated("old", "beta earlier", _at(3))]
+    )
+    sidebar._search_edit.setText("alpha")
+    assert _headers(sidebar) == ["Today"]
+    assert sidebar.count == 1
+
+
+# --- how a timestamp reads ------------------------------------------------
+
+
+def test_relative_when_says_the_time_for_today_and_names_the_day_this_week():
+    now = datetime(2026, 10, 1, 17, 0).astimezone()
+    assert _relative_when(datetime(2026, 10, 1, 9, 3).astimezone().isoformat(), now=now) == "09:03"
+    assert (
+        _relative_when(datetime(2026, 9, 30, 17, 44).astimezone().isoformat(), now=now)
+        == "Yesterday 17:44"
+    )
+    assert (
+        _relative_when(datetime(2026, 9, 26, 11, 2).astimezone().isoformat(), now=now)
+        == "Sat 11:02"
+    )
+
+
+def test_relative_when_adds_the_year_only_once_it_stops_being_obvious():
+    now = datetime(2026, 10, 1, 17, 0).astimezone()
+    assert _relative_when(datetime(2026, 3, 12, 9, 0).astimezone().isoformat(), now=now) == "Mar 12"
+    assert (
+        _relative_when(datetime(2025, 9, 12, 9, 0).astimezone().isoformat(), now=now)
+        == "Sep 12, 2025"
+    )
+
+
+def test_anything_older_than_a_week_groups_by_month():
+    now = datetime(2026, 10, 1, 17, 0).astimezone()
+    older = datetime(2026, 9, 12, 9, 0).astimezone().isoformat()
+    assert _date_group(older, now=now) == "September 2026"
+
+
+def test_an_unparseable_timestamp_is_shown_and_grouped_rather_than_crashing(qapp):
+    """A hand-edited or foreign DB row must never take the sidebar down —
+    the same rule the single-line label already followed."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_dated("c1", "chat", "not-a-timestamp")])
+
+    assert _headers(sidebar) == [UNDATED_GROUP]
+    assert "not-a-timestamp" in _items(sidebar)[0].data(SUBTITLE_ROLE)
+
+
+def test_the_delegate_actually_paints_both_row_kinds(qapp):
+    """A smoke test with teeth: nothing above this forces a real paint, so
+    a mistake inside _ConversationRowDelegate.paint (a bad enum, a wrong
+    palette role, an unsaved painter) would go unnoticed until the app
+    ran. Rendering the viewport exercises both a selected conversation
+    row and a group header."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [_dated("today", "Unified fit of PS latex", _at(0)), _dated("old", "older work", _at(3))]
+    )
+    sidebar.resize(260, 400)
+    sidebar.select_row(0)
+
+    pixmap = QPixmap(sidebar._list.viewport().size())
+    pixmap.fill()
+    sidebar._list.viewport().render(pixmap)
+    assert not pixmap.isNull()
+
+
+def test_rows_report_no_preferred_width_so_the_column_can_still_shrink(qapp):
+    """MIN_SIDEBAR_WIDTH only holds if nothing inside the list asks to be
+    wider — a sizeHint carrying the text's natural width would re-impose
+    exactly the floor that constant exists to remove."""
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations(
+        [_dated("c1", "a very long conversation title that would never fit", _at(0))]
+    )
+    option = QStyleOptionViewItem()
+    option.initFrom(sidebar._list)
+    index = sidebar._list.indexFromItem(_items(sidebar)[0])
+    hint = sidebar._row_delegate.sizeHint(option, index)
+    assert hint.width() == 0
+    assert hint.height() > 0
+
+
+def test_a_header_row_is_shorter_than_a_conversation_row(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_dated("c1", "chat", _at(0))])
+    option = QStyleOptionViewItem()
+    option.initFrom(sidebar._list)
+
+    header_row = sidebar._ids_by_row.index(None)
+    header_hint = sidebar._row_delegate.sizeHint(
+        option, sidebar._list.indexFromItem(sidebar._list.item(header_row))
+    )
+    row_hint = sidebar._row_delegate.sizeHint(
+        option, sidebar._list.indexFromItem(_items(sidebar)[0])
+    )
+    assert 0 < header_hint.height() < row_hint.height()
+
+
+def test_a_row_under_the_yesterday_heading_does_not_say_yesterday_again(qapp):
+    sidebar = ConversationsSidebar()
+    sidebar.set_conversations([_dated("c1", "chat", _at(1, hour=17))])
+
+    assert _headers(sidebar) == ["Yesterday"]
+    subtitle = _items(sidebar)[0].data(SUBTITLE_ROLE)
+    assert subtitle.startswith("17:03")
+    assert "Yesterday" not in subtitle
+
+
+def test_the_standalone_form_still_names_the_day(qapp):
+    """Without a heading above it there is nothing else saying which day
+    it was, so the long form is the right one."""
+    summary = _dated("c1", "chat", _at(1, hour=17))
+    assert _row_subtitle(summary).startswith("Yesterday 17:03")

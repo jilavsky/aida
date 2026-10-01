@@ -280,6 +280,40 @@ def test_migrating_from_v6_recreates_schedule_runs_with_on_delete_set_null(tmp_p
     conn.close()
 
 
+def test_conversations_table_has_a_title_source_column(tmp_path: Path):
+    conn = connect(tmp_path / "aida.db")
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(conversations)")}
+    assert "title_source" in columns
+    conn.close()
+
+
+def test_migrating_from_v7_calls_every_existing_title_derived(tmp_path: Path):
+    """A conversation that predates automatic titling carries, by
+    definition, a first-line placeholder: nothing was ever locked and
+    nothing was ever generated. So it starts as 'derived' and gets a real
+    name on its next turn. That is the intended upgrade behaviour, not a
+    regression — those rows are exactly what this feature exists to
+    replace."""
+    path = tmp_path / "aida.db"
+    raw = sqlite3.connect(path)
+    for version in range(1, 8):
+        raw.executescript(_MIGRATIONS[version])
+    raw.execute("PRAGMA user_version = 7")
+    raw.execute(
+        "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        ("c1", "an old chat", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+    )
+    raw.commit()
+    raw.close()
+
+    conn = connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+    row = conn.execute("SELECT * FROM conversations WHERE id = 'c1'").fetchone()
+    assert row["title"] == "an old chat"  # pre-migration row survived intact
+    assert row["title_source"] == "derived"
+    conn.close()
+
+
 def test_deleting_a_conversation_referenced_by_schedule_runs_nulls_the_reference(tmp_path: Path):
     conn = connect(tmp_path / "aida.db")
     conn.execute(

@@ -3,7 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from aida.artifacts.base import ImageArtifact, TextArtifact
-from aida.persistence.store import ConversationStore, ScheduleRunStore
+from aida.persistence.store import (
+    TITLE_DERIVED,
+    TITLE_GENERATED,
+    TITLE_MANUAL,
+    ConversationStore,
+    ScheduleRunStore,
+)
 from aida.providers.base import Message, ToolCall
 
 T0 = "2026-08-19T00:00:00"
@@ -208,6 +214,79 @@ def test_set_title_and_record_path(tmp_path: Path):
     summary = store.get_conversation(conv_id)
     assert summary.title == "My analysis"
     assert summary.record_path == "/tmp/transcript.md"
+
+
+# --- title_source (migration 8): where a conversation's name came from,
+# which is what decides whether automatic titling may touch it and how
+# (aida.core.titling) --------------------------------------------------
+
+
+def test_a_new_conversation_counts_as_derived(tmp_path: Path):
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    summary = store.get_conversation(conv_id)
+    assert summary.title_source == TITLE_DERIVED
+    assert summary.title_locked is False
+
+
+def test_the_first_message_placeholder_is_derived_and_unlocked(tmp_path: Path):
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.set_title(conv_id, "can you look at the file I", timestamp=T1, source=TITLE_DERIVED)
+
+    summary = store.get_conversation(conv_id)
+    assert summary.title_source == TITLE_DERIVED
+    assert summary.title_locked is False
+
+
+def test_a_generated_title_is_recorded_as_such_and_stays_renameable(tmp_path: Path):
+    """'generated' is not a lock — it only means a later re-check may
+    offer to keep this name rather than always replacing it."""
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.set_title(conv_id, "Unified fit of S12_0042.h5", timestamp=T1, source=TITLE_GENERATED)
+
+    summary = store.get_conversation(conv_id)
+    assert summary.title_source == TITLE_GENERATED
+    assert summary.title_locked is False
+
+
+def test_a_manual_rename_locks_the_title(tmp_path: Path):
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.set_title(conv_id, "USAXS beamtime notes", timestamp=T1, source=TITLE_MANUAL)
+
+    summary = store.get_conversation(conv_id)
+    assert summary.title == "USAXS beamtime notes"
+    assert summary.title_locked is True
+
+
+def test_an_unknown_title_source_is_refused_rather_than_stored(tmp_path: Path):
+    """Failing closed: a typo'd source silently stored would read as
+    neither locked nor generated, quietly changing how the conversation
+    is treated."""
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    try:
+        store.set_title(conv_id, "x", timestamp=T1, source="hand-written")
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised
+    assert store.get_conversation(conv_id).title is None
+
+
+def test_title_source_is_reported_by_the_list_query_too(tmp_path: Path):
+    """The sidebar's listing and the single-row read must agree — they are
+    two different SELECTs."""
+    store = _store(tmp_path)
+    conv_id = store.create_conversation(timestamp=T0)
+    store.append_message(conv_id, Message(role="user", content="hi"), timestamp=T0)
+    store.set_title(conv_id, "USAXS beamtime notes", timestamp=T1, source=TITLE_MANUAL)
+
+    listed = {summary.id: summary for summary in store.list_conversations()}
+    assert listed[conv_id].title_source == TITLE_MANUAL
+    assert listed[conv_id].title_locked is True
 
 
 def test_append_and_load_artifacts(tmp_path: Path):

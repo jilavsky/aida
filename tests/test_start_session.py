@@ -1435,6 +1435,12 @@ async def test_folders_added_mid_session_are_announced_on_the_next_turn(
 
     ws = _workspace()
     settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+    # This asserts on the provider's *last* request, which auto-titling
+    # would otherwise be: it runs after every turn and goes through the
+    # same provider (aida.core.session.ChatSession._maybe_update_title).
+    # Naming conversations is orthogonal to what a turn sends, and has its
+    # own tests — tests/test_session_titling.py.
+    settings.app.auto_title_conversations = False
     session, _ = await start_session(settings, workspace_name="use-ws")
     try:
         new_source = tmp_path / "usaxs_data"

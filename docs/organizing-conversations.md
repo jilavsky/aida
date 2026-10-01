@@ -24,11 +24,48 @@ You can also set `active_user` in `~/.aida/config.yaml`. Resolution order is
 the command-line `--user`, then `$AIDA_USER`, then `active_user`. A blank
 value means no user label.
 
+## How conversations get their names
+
+The moment you send the first message, the conversation is named after the
+first line of it. That is a placeholder, and usually a poor one — "can you
+look at the file I just put in the target folder and".
+
+Once the first reply lands, the model replaces it with a short name drawn
+from what the conversation is actually about ("Background subtraction for
+AgBehenate"). After that the name is re-checked every five turns: the model
+is shown the current title and asked to keep it unless the subject has
+clearly moved on, so an ongoing conversation is not renamed for the sake of
+slightly better wording.
+
+It costs one small model call, on the profile the conversation is already
+using. In the GUI the current name sits above the transcript; `aida chat`
+prints a `[title]` line when it changes.
+
+**A name you type is permanent.** Renaming — the ✎ above the transcript,
+the sidebar's **Rename…**, or `aida conversations rename` — switches
+automatic naming off for that conversation for good. There is no "unlock":
+renaming again is one.
+
+Both knobs live in Settings, or in `~/.aida/config.yaml`:
+
+```yaml
+auto_title_conversations: true   # false turns the whole thing off
+auto_title_interval_turns: 5     # how often an existing name is re-checked
+```
+
+Turn it off for a metered endpoint, or for a local model slow enough that
+the extra round trip at the end of a turn is noticeable. Conversations then
+keep the first-line placeholder until you rename them.
+
 ## Find conversations
 
+Conversations are listed under date headings — **Today**, **Yesterday**,
+**Previous 7 days**, then by month — two lines each: the title, then when
+it was last used, its workspace and its user label.
+
 The sidebar search matches the visible title and workspace as well as the
-user label. Once any conversation carries a label, a filter above the list
-narrows it to one name.
+user label, and the text of the messages themselves. Once any conversation
+carries a label, a filter above the list narrows it to one name.
 
 Selecting a name shows **only** that name's conversations. Conversations
 with no label — including all history from before user labels existed — are

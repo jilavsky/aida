@@ -23,6 +23,7 @@ from aida.config.secrets import delete_secret
 from aida.config.settings import AppConfig, ProviderProfile
 from aida.documents.ocr.mistral import SECRET_REF
 from aida.ui.qt._qt import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -175,6 +176,33 @@ class SettingsDialog(QDialog):
         self._max_context_tokens_spin.setSpecialValueText("Disabled (no trimming)")
         self._max_context_tokens_spin.setValue(app_config.max_context_tokens)
         form.addRow("Max context tokens:", self._max_context_tokens_spin)
+
+        # Bug report: "use AI to rename the chat ... may be keep renaming
+        # the chat if the topic changes enough". On by default; this is
+        # the opt-out for a metered endpoint or a local model slow enough
+        # that the extra round trip at the end of a turn is felt. See
+        # aida.core.titling.
+        self._auto_title_check = QCheckBox("Name conversations from their content", self)
+        self._auto_title_check.setChecked(app_config.auto_title_conversations)
+        self._auto_title_check.setToolTip(
+            "After the first reply, the model gives the conversation a short name "
+            "instead of leaving it called after the first line you typed. "
+            "A name you type yourself is never changed."
+        )
+        form.addRow("Automatic titles:", self._auto_title_check)
+
+        self._auto_title_interval_spin = QSpinBox(self)
+        self._auto_title_interval_spin.setRange(1, 100)
+        self._auto_title_interval_spin.setSuffix(" turns")
+        self._auto_title_interval_spin.setValue(app_config.auto_title_interval_turns)
+        self._auto_title_interval_spin.setToolTip(
+            "How often an existing automatic title is re-checked, so a conversation "
+            "that moves on to another subject stops carrying the old name. "
+            "The model is asked to keep the current title unless the subject really changed."
+        )
+        self._auto_title_interval_spin.setEnabled(app_config.auto_title_conversations)
+        self._auto_title_check.toggled.connect(self._auto_title_interval_spin.setEnabled)
+        form.addRow("Re-check the title every:", self._auto_title_interval_spin)
 
         # Phase 10: how considerate the in-app scheduler is of a user who
         # is mid-something. Both are in seconds but shown in minutes —
@@ -359,6 +387,12 @@ class SettingsDialog(QDialog):
     def scheduler_max_defer_seconds(self) -> int:
         return self._scheduler_max_defer_spin.value() * 60
 
+    def auto_title_conversations(self) -> bool:
+        return self._auto_title_check.isChecked()
+
+    def auto_title_interval_turns(self) -> int:
+        return self._auto_title_interval_spin.value()
+
     def ocr_api_key(self) -> str:
         return self._ocr_api_key_edit.text().strip()
 
@@ -383,6 +417,8 @@ class SettingsDialog(QDialog):
             scheduler_quiet_period_seconds=self.scheduler_quiet_period_seconds(),
             scheduler_max_defer_seconds=self.scheduler_max_defer_seconds(),
             transcript_tool_results=self.transcript_tool_results(),
+            auto_title_conversations=self.auto_title_conversations(),
+            auto_title_interval_turns=self.auto_title_interval_turns(),
         )
 
 

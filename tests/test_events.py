@@ -4,6 +4,7 @@ import json
 
 from aida.core.events import (
     AgentError,
+    ConversationTitled,
     FileArtifactCreated,
     ImageArtifactCreated,
     MessageFinished,
@@ -26,6 +27,7 @@ ALL_EVENTS = [
     MessageFinished(message_id="m1", stop_reason="stop"),
     UsageInfo(input_tokens=10, output_tokens=5, total_tokens=15),
     AgentError(layer="provider", message="boom", detail="details here"),
+    ConversationTitled(conversation_id="abc123", title="Unified fit of S12_0042.h5"),
 ]
 
 

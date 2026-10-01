@@ -141,6 +141,14 @@ _APP_PORTABLE_FIELDS = (
     # *exported* transcript's tool-result sections are follows from the
     # person/role, not the machine.
     "transcript_tool_results",
+    # Whether conversations name themselves, and how often that name is
+    # re-checked (aida.core.titling). Portable for the same reason again:
+    # the real driver is what you are willing to spend an extra small
+    # model call on — a metered endpoint, a slow local model — which is a
+    # working preference that travels with the person, not a property of
+    # one screen or one machine.
+    "auto_title_conversations",
+    "auto_title_interval_turns",
 )
 
 #: About a *person*, not a setup. Portable, but wrong to hand to a
