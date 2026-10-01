@@ -42,6 +42,33 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Fixed
 
+- **Stop now stops.** User report: "the Stop button seems to get stuck — I
+  assume it is waiting for the provider to come back and then to stop. I
+  have been staring at Working for 180 seconds and it is still going."
+  Cancellation was only ever checked *between* round trips, so Stop pressed
+  while the model was part-way through a long answer did nothing until the
+  entire answer had streamed in. `AgentLoop` now checks it between provider
+  events too and closes the stream (`contextlib.aclosing`, so the HTTP
+  response is torn down immediately rather than whenever the garbage
+  collector gets to it) — a model mid-answer stops within one token instead
+  of minutes. The text already on screen is kept in history, every tool call
+  the turn had announced is still answered, and a stream cut off before its
+  first token appends nothing, so the conversation stays valid and usable.
+  An **in-flight tool call is deliberately still not interrupted** — it runs
+  to completion (bounded by the server's `timeout_seconds`) because killing
+  it would leave an MCP server with an orphaned request and a half-written
+  file with no way to tell which. One consequence worth knowing: an aborted
+  round trip's token usage goes uncounted, so the cost estimate slightly
+  under-reports a session you stop often.
+- **Pressing Stop is visibly acknowledged.** It used to change nothing on
+  screen — the label went on reading "Working… 180s — press Stop to cancel"
+  for the whole wait, so a click that had registered looked exactly like one
+  that had not, which is most of why the button felt stuck. It now reads
+  "Stopping… 180s — finishing the current step" and the button greys out,
+  since a second press genuinely does nothing. When an in-flight tool call
+  is the hold-up, the label names it: "Stopping… 12s — waiting for
+  pyirena_fit_unified".
+
 - **Source and target folders added while a chat is running now apply to
   that chat.** Both halves of folder access — what the `SafetyGuard` allows
   and the `# Workspace folders` block that tells the model which paths are

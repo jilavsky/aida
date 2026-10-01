@@ -299,6 +299,11 @@ class InputBox(QWidget):
 
         self._busy_started_at = 0.0
         self._busy_ticks = 0
+        #: Set by set_stopping() once Stop has been pressed and cleared by
+        #: the next set_busy() — see _tick_busy_label, which is what
+        #: actually turns it into visible text.
+        self._stopping = False
+        self._stopping_detail = ""
         self._busy_timer = QTimer(self)
         self._busy_timer.setInterval(_BUSY_TICK_MS)
         self._busy_timer.timeout.connect(self._tick_busy_label)
@@ -327,7 +332,11 @@ class InputBox(QWidget):
         if busy == self._busy:
             return
         self._busy = busy
+        self._stopping = False
+        self._stopping_detail = ""
         self._stop_button.setVisible(busy)
+        self._stop_button.setEnabled(True)
+        self._stop_button.setToolTip("Stop the turn in progress")
         self._send_button.setText("Queue" if busy else "Send")
         self._send_button.setToolTip(
             "Hand this to the running turn — the agent sees it at its next step" if busy else ""
@@ -344,16 +353,53 @@ class InputBox(QWidget):
             self._busy_label.setVisible(False)
             self._busy_label.setText("")
 
+    def set_stopping(self, detail: str = "") -> None:
+        """Acknowledge that Stop was pressed, before anything has actually
+        stopped.
+
+        User report: "the Stop button seems to get stuck ... I have been
+        staring at Working for 180 seconds." Pressing Stop used to change
+        nothing on screen — the label went on saying "Working… press Stop
+        to cancel" — so there was no way to tell a click that had
+        registered from one that had not, and no way to tell what the
+        delay was. Now the label says it is stopping and the button goes
+        flat and disabled, because a second press genuinely does nothing.
+
+        ``detail`` names what the stop is waiting on when that is known
+        (``"waiting for pyirena_fit_unified"``), since an in-flight tool
+        call is the one thing cancellation cannot cut short. A no-op when
+        the widget is not busy, so a stray Stop cannot leave a stale
+        label behind after the turn has already ended.
+        """
+        if not self._busy:
+            return
+        self._stopping = True
+        self._stopping_detail = detail
+        self._stop_button.setEnabled(False)
+        self._stop_button.setToolTip(
+            "Already stopping — " + (detail or "finishing the current step")
+        )
+        self._tick_busy_label()
+
+    @property
+    def is_stopping(self) -> bool:
+        return self._stopping
+
     def busy_status_text(self) -> str:
-        """Current "Working…" text (empty when idle) — the readable form of
-        this widget's busy state, and what the tests assert on."""
+        """Current "Working…"/"Stopping…" text (empty when idle) — the
+        readable form of this widget's busy state, and what the tests
+        assert on."""
         return self._busy_label.text()
 
     def _tick_busy_label(self) -> None:
         elapsed = int(time.monotonic() - self._busy_started_at)
         dots = "." * (1 + self._busy_ticks % 3)
         self._busy_ticks += 1
-        self._busy_label.setText(f"Working{dots} {elapsed}s — press Stop to cancel")
+        if self._stopping:
+            tail = self._stopping_detail or "finishing the current step"
+            self._busy_label.setText(f"Stopping{dots} {elapsed}s — {tail}")
+        else:
+            self._busy_label.setText(f"Working{dots} {elapsed}s — press Stop to cancel")
 
     # --- text ----------------------------------------------------------------
 

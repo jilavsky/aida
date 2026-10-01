@@ -27,7 +27,7 @@ from aida.config.settings import (
     load_settings,
 )
 from aida.core.confirmation import ConfirmAnswer
-from aida.core.events import ContextTrimmed
+from aida.core.events import ContextTrimmed, ToolCallFinished, ToolCallStarted
 from aida.persistence.store import ConversationStore
 from aida.providers.base import Message
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
@@ -4135,5 +4135,113 @@ def test_open_skills_folder_menu_item_reveals_the_skills_directory(
         assert len(opened) == 1
         assert Path(opened[0]) == aida_home / "skills"
         assert (aida_home / "skills").is_dir()
+    finally:
+        window.close()
+
+
+# --- Stop feedback (user report: "the Stop button seems to get stuck") ------
+
+
+def test_pressing_stop_acknowledges_immediately(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """``ChatBridge.cancel`` only sets a cooperative flag, so the turn ends
+    at the next checkpoint rather than the instant Stop is pressed. Without
+    an acknowledgement the label went on saying "Working… press Stop to
+    cancel" for the whole wait, which is what made a working button look
+    broken."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        cancelled: list[bool] = []
+        monkeypatch.setattr(window.bridge, "cancel", lambda: cancelled.append(True))
+        window._on_turn_started()
+
+        window.input_box.cancel_requested.emit()
+
+        assert cancelled == [True], "the cancel still has to reach the bridge"
+        assert window.input_box.is_stopping
+        assert window.input_box.busy_status_text().startswith("Stopping")
+        assert not window.stop_action.isEnabled()
+    finally:
+        window.close()
+
+
+def test_stop_names_the_tool_call_it_is_waiting_on(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """An in-flight tool call is the one thing cancellation cannot cut
+    short, so the label says which one rather than leaving the user to
+    guess why Stop has not taken effect yet."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        monkeypatch.setattr(window.bridge, "cancel", lambda: None)
+        window._on_turn_started()
+        window._on_event_received(
+            ToolCallStarted(call_id="c1", tool_name="pyirena_fit_unified", arguments={})
+        )
+
+        window.input_box.cancel_requested.emit()
+
+        assert "waiting for pyirena_fit_unified" in window.input_box.busy_status_text()
+    finally:
+        window.close()
+
+
+def test_stop_after_the_tool_finished_does_not_name_a_stale_tool(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        monkeypatch.setattr(window.bridge, "cancel", lambda: None)
+        window._on_turn_started()
+        window._on_event_received(
+            ToolCallStarted(call_id="c1", tool_name="pyirena_fit_unified", arguments={})
+        )
+        window._on_event_received(
+            ToolCallFinished(call_id="c1", tool_name="pyirena_fit_unified", result="ok")
+        )
+
+        window.input_box.cancel_requested.emit()
+
+        status = window.input_box.busy_status_text()
+        assert "pyirena_fit_unified" not in status
+        assert "finishing the current step" in status
+    finally:
+        window.close()
+
+
+def test_a_new_turn_resets_the_stopping_state(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        monkeypatch.setattr(window.bridge, "cancel", lambda: None)
+        window._on_turn_started()
+        window._on_event_received(
+            ToolCallStarted(call_id="c1", tool_name="slow_tool", arguments={})
+        )
+        window.input_box.cancel_requested.emit()
+        window._on_turn_finished()
+
+        window._on_turn_started()
+
+        assert not window.input_box.is_stopping
+        assert window.input_box.busy_status_text().startswith("Working")
+        assert window.stop_action.isEnabled()
+        # The tool from the cancelled turn must not leak into the next one.
+        window.input_box.cancel_requested.emit()
+        assert "slow_tool" not in window.input_box.busy_status_text()
     finally:
         window.close()

@@ -132,6 +132,34 @@ The window splits into three columns:
     checkboxes opens the full management dialog. See
     [mcp-servers.md](mcp-servers.md).
 
+### Stopping a turn
+
+While a turn runs, a red **Stop** button appears beside Send (`Esc` does the
+same thing) and a line next to it counts the seconds. Stop is cooperative,
+not a kill switch — it takes effect at the next safe point, which is one of:
+
+- **between the model's tokens** — a model part-way through a long answer is
+  cut off immediately and the text it had already produced is kept;
+- **between tool calls** — the remaining calls in the batch are abandoned and
+  recorded as cancelled;
+- **before the next round trip** — no further step is started.
+
+The one thing it cannot interrupt is a **tool call already in flight**. That
+call runs to completion (bounded by the server's own `timeout_seconds` — see
+[mcp-servers.md](mcp-servers.md)) and the stop lands the moment it returns;
+killing it mid-call would leave an MCP server with an orphaned request and a
+half-written file with no way to tell which. While that is what you are
+waiting on, the label says so by name — *"Stopping… 12s — waiting for
+pyirena_fit_unified"* — and the Stop button greys out, because pressing it
+again genuinely does nothing.
+
+A cancelled turn leaves a valid conversation: whatever the model had already
+said is kept, every tool call it announced is answered, and you can send the
+next message straight away. One side effect worth knowing: the token usage of
+an aborted round trip is not counted, so the cost estimate in the status bar
+slightly under-reports a session you stop often — the request was still
+billed.
+
 ### Tool calls in the transcript
 
 When the agent goes off and does things — reading files, running a fit,

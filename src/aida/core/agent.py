@@ -13,6 +13,7 @@ same way: append a user ``Message``, iterate ``AgentLoop.run()``.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import time
 from collections import deque
@@ -27,6 +28,7 @@ from aida.core.events import (
     ImageArtifactCreated,
     MessageFinished,
     SteeringMessageDelivered,
+    TextDelta,
     TextFinished,
     ToolCallFinished,
     ToolCallStarted,
@@ -115,9 +117,17 @@ class AgentLoop:
         return [t.schema for t in self.tools.values()]
 
     def cancel(self) -> None:
-        """Request cancellation. Takes effect at the next checkpoint (before
-        the next provider call or before the next tool execution) — an
-        in-flight provider stream is drained, not killed mid-token."""
+        """Request cancellation. Takes effect at the next checkpoint, which
+        is any of: between provider events (so a model mid-answer is cut
+        off within one token rather than streamed to the end), before the
+        next provider call, or before the next tool execution.
+
+        The one thing it does *not* interrupt is a tool call already in
+        flight — that await runs to completion (bounded by the tool's own
+        timeout) and cancellation is honored the moment it returns.
+        Killing it mid-call would leave an MCP server with an orphaned
+        request and a half-written file with no way to tell which.
+        """
         self._cancelled = True
 
     def queue_user_message(self, text: str) -> None:
@@ -222,34 +232,83 @@ class AgentLoop:
                 return
 
             assistant_text = ""
+            #: Deltas accumulated as they stream, so a turn cancelled
+            #: mid-answer still has the text the user already watched
+            #: appear. ``TextFinished`` (the authoritative full text) never
+            #: arrives on that path, which would otherwise leave the
+            #: transcript showing text that the saved history does not have.
+            streamed_text = ""
             pending_tool_calls: list[ToolCall] = []
             terminated_by_error = False
+            cancelled_mid_stream = False
 
             round_trip_started = time.monotonic()
-            async for event in self.provider.complete(
-                messages, self._tool_schemas(), self.settings
-            ):
-                # Wallclock duration of this provider round-trip, stamped
-                # here (not by the provider itself) so it's available
-                # uniformly regardless of whether a given provider's own
-                # API reports timing — see UsageInfo's docstring.
-                if isinstance(event, UsageInfo) and event.duration_seconds is None:
-                    event = dataclasses.replace(
-                        event, duration_seconds=time.monotonic() - round_trip_started
-                    )
-                yield event
-                if isinstance(event, TextFinished):
-                    assistant_text = event.text
-                elif isinstance(event, ToolCallStarted):
-                    pending_tool_calls.append(
-                        ToolCall(id=event.call_id, name=event.tool_name, arguments=event.arguments)
-                    )
-                elif isinstance(event, MessageFinished):
-                    pass  # stop_reason itself doesn't drive control flow; tool_calls list does
-                elif isinstance(event, AgentError):
-                    terminated_by_error = True
+            # User report: "the Stop button seems to get stuck ... I have
+            # been staring at Working for 180 seconds". Cancellation used
+            # to be checked only *between* round trips, so Stop pressed
+            # while the model was part-way through a long answer did
+            # nothing until the whole answer had streamed in — on a verbose
+            # model that is minutes of a button that looks broken.
+            #
+            # aclosing(), not a bare `break`: breaking out of an `async for`
+            # leaves the generator suspended at its yield, and the provider's
+            # HTTP response stays open until the garbage collector happens to
+            # finalize it. aclosing() throws GeneratorExit in at the yield
+            # right now, which unwinds the SDK's stream and drops the
+            # connection — the difference between "stops" and "looks stopped".
+            async with contextlib.aclosing(
+                self.provider.complete(messages, self._tool_schemas(), self.settings)
+            ) as stream:
+                async for event in stream:
+                    # Wallclock duration of this provider round-trip, stamped
+                    # here (not by the provider itself) so it's available
+                    # uniformly regardless of whether a given provider's own
+                    # API reports timing — see UsageInfo's docstring.
+                    if isinstance(event, UsageInfo) and event.duration_seconds is None:
+                        event = dataclasses.replace(
+                            event, duration_seconds=time.monotonic() - round_trip_started
+                        )
+                    yield event
+                    if isinstance(event, TextFinished):
+                        assistant_text = event.text
+                    elif isinstance(event, TextDelta):
+                        streamed_text += event.text
+                    elif isinstance(event, ToolCallStarted):
+                        pending_tool_calls.append(
+                            ToolCall(
+                                id=event.call_id, name=event.tool_name, arguments=event.arguments
+                            )
+                        )
+                    elif isinstance(event, MessageFinished):
+                        pass  # stop_reason itself doesn't drive control flow; tool_calls list does
+                    elif isinstance(event, AgentError):
+                        terminated_by_error = True
+                    # Checked after the yield, so the event the caller is
+                    # mid-way through handling is never swallowed — a Stop
+                    # pressed during it takes effect on the next one.
+                    if self._cancelled:
+                        cancelled_mid_stream = True
+                        break
 
             if terminated_by_error:
+                return
+
+            # An aborted stream has no TextFinished, so fall back to what
+            # actually arrived.
+            if not assistant_text:
+                assistant_text = streamed_text
+
+            if cancelled_mid_stream and not pending_tool_calls:
+                # Nothing was announced, so there is no orphaned tool_use
+                # for the next request to choke on and the shared cancel
+                # branch below has nothing to answer. Append the partial
+                # answer only if there *is* one: both providers reject an
+                # assistant message whose content is an empty string, so a
+                # stream cut off before its first token must leave history
+                # untouched rather than poison the next turn.
+                if assistant_text:
+                    messages.append(Message(role="assistant", content=assistant_text))
+                yield AgentError(layer="core", message="cancelled")
                 return
 
             messages.append(
@@ -258,6 +317,11 @@ class AgentLoop:
 
             if not pending_tool_calls:
                 return  # final answer — this turn is done
+
+            # A stream cancelled *after* announcing calls falls through to
+            # the per-call loop below, whose own cancel branch answers every
+            # one of them with CANCELLED_TOOL_RESULT — the history-validity
+            # invariant is maintained in exactly one place rather than two.
 
             for position, tc in enumerate(pending_tool_calls):
                 if self._cancelled:

@@ -217,6 +217,17 @@ class LLMProvider(ABC):
     produces). A provider that hits a network/auth/model error yields a
     single ``AgentError`` (``layer="provider"``) and ends the stream rather
     than raising — callers should not need a try/except around iteration.
+
+    **A real async generator, not merely something async-iterable.**
+    ``AgentLoop`` wraps every ``complete()`` in ``contextlib.aclosing`` and
+    closes it early when the user presses Stop, so the implementation must
+    accept a ``GeneratorExit`` thrown in at its current ``yield`` and let
+    it unwind (tearing down the underlying HTTP stream on the way out).
+    Writing ``complete`` as ``async def`` + ``yield`` gets this for free;
+    returning a hand-rolled iterator object without ``aclose()`` does not,
+    and a blanket ``except Exception`` around the yield must not swallow
+    it — ``GeneratorExit`` is a ``BaseException``, so the usual shape is
+    already correct.
     """
 
     #: Set by subclasses; used to tag AgentError.layer and in diagnostics.

@@ -45,7 +45,7 @@ from aida.config.settings import (
 from aida.config.users import resolve_active_user, resolve_workspace_for_user
 from aida.core.confirmation import REMEMBERABLE_ACTIONS, ConfirmAnswer
 from aida.core.cost import estimate_cost_usd
-from aida.core.events import ContextTrimmed
+from aida.core.events import ContextTrimmed, ToolCallFinished, ToolCallStarted
 from aida.documents.ocr.mistral import SECRET_REF as OCR_SECRET_REF
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
 from aida.persistence.recorder import ConversationRecorder
@@ -170,6 +170,12 @@ class MainWindow(QMainWindow):
         self._logger = get_logger("ui")
         self._loop_thread = loop_thread
         self._current_workspace_config: WorkspaceConfig | None = None
+        #: Name of the tool call currently in flight, or None. Only used to
+        #: tell the user what a pending Stop is waiting on (see
+        #: _on_cancel_requested) — the transcript tracks tool calls
+        #: properly on its own. Must exist before any bridge signal is
+        #: wired, since _on_event_received maintains it.
+        self._running_tool_name: str | None = None
         self.setWindowTitle("AIDA")
         self.setWindowIcon(app_icon())
 
@@ -680,7 +686,7 @@ class MainWindow(QMainWindow):
 
     def _on_stop_shortcut(self) -> None:
         if self.bridge.is_busy:
-            self.bridge.cancel()
+            self._on_cancel_requested()
 
     def _on_focus_input_shortcut(self) -> None:
         self.input_box.focus_input()
@@ -1005,7 +1011,7 @@ class MainWindow(QMainWindow):
         self.bridge.workspace_folders_apply_failed.connect(self._on_workspace_folders_apply_failed)
         self.bridge.conversation_export_finished.connect(self._on_conversation_export_finished)
         self.bridge.conversation_export_failed.connect(self._on_conversation_export_failed)
-        self.input_box.cancel_requested.connect(self.bridge.cancel)
+        self.input_box.cancel_requested.connect(self._on_cancel_requested)
         self.profile_selector.profile_changed.connect(self.bridge.switch_profile)
 
     def _on_event_received(self, event: object) -> None:
@@ -1039,9 +1045,35 @@ class MainWindow(QMainWindow):
                     8000,
                 )
             self._update_context_label()
+        elif isinstance(event, ToolCallStarted):
+            # Which tool is in flight, for the "Stopping… waiting for X"
+            # label — cancellation is honored between provider events and
+            # between tool calls, but never *during* one, so a running
+            # tool is the only thing that can hold a stop up for long.
+            self._running_tool_name = event.tool_name
+        elif isinstance(event, ToolCallFinished):
+            self._running_tool_name = None
         self.chat_panel.handle_event(event)
 
+    def _on_cancel_requested(self) -> None:
+        """Stop, from the button or from Esc.
+
+        ``ChatBridge.cancel`` only sets a cooperative flag, so the turn
+        ends at the next checkpoint rather than the instant this runs —
+        which is why the acknowledgement matters: without it, pressing
+        Stop produced no visible change at all and looked broken (user
+        report, 2026-10). ``AgentLoop`` now also checks that flag between
+        provider events, so a model mid-answer stops within a token; an
+        in-flight tool call is the remaining wait, and that is exactly
+        what the label names.
+        """
+        self.bridge.cancel()
+        tool = self._running_tool_name
+        self.input_box.set_stopping(f"waiting for {tool}" if tool else "")
+        self.stop_action.setEnabled(False)
+
     def _on_turn_started(self) -> None:
+        self._running_tool_name = None
         self.input_box.set_busy(True)
         self._set_session_mutating(True)
         self.stop_action.setEnabled(True)
@@ -1050,6 +1082,7 @@ class MainWindow(QMainWindow):
         self._note_user_activity()
 
     def _on_turn_finished(self) -> None:
+        self._running_tool_name = None
         self.input_box.set_busy(False)
         self.stop_action.setEnabled(False)
         self._set_session_mutating(False)
@@ -1123,7 +1156,7 @@ class MainWindow(QMainWindow):
         widget-to-bridge connections, where the *bridge* is the receiver and
         so isn't covered by that first call."""
         bridge.disconnect(self)
-        self.input_box.cancel_requested.disconnect(bridge.cancel)
+        self.input_box.cancel_requested.disconnect(self._on_cancel_requested)
         self.profile_selector.profile_changed.disconnect(bridge.switch_profile)
 
     # --- session lifecycle -----------------------------------------------

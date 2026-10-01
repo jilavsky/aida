@@ -587,7 +587,15 @@ async def test_cancel_mid_tool_call_answers_every_announced_call():
 @pytest.mark.asyncio
 async def test_cancel_mid_tool_call_emits_a_result_event_for_each_cancelled_call():
     """The GUI's tool rows are driven by ToolCallFinished; without one, a
-    cancelled call's row would spin forever."""
+    cancelled call's row would spin forever.
+
+    Asserted as the *pairing* (every started call is finished) rather than
+    a fixed list of ids: cancelling here happens on a ToolCallStarted,
+    which the provider emits mid-stream, and the loop now cuts the stream
+    off at that point — so how many calls get announced at all depends on
+    exactly when Stop lands. What must hold regardless is that the caller
+    never sees a start without its finish.
+    """
 
     async def _tool(_args):
         return ToolResult(content="ok")
@@ -615,9 +623,14 @@ async def test_cancel_mid_tool_call_emits_a_result_event_for_each_cancelled_call
         if isinstance(event, ToolCallStarted):
             loop.cancel()
 
+    started = [e.call_id for e in events if isinstance(e, ToolCallStarted)]
     finished = [e for e in events if isinstance(e, ToolCallFinished)]
-    assert [e.call_id for e in finished] == ["c1", "c2"]
+    assert started == ["c1"], "the stream is cut off at the cancel, before c2 is announced"
+    assert [e.call_id for e in finished] == started
     assert all(e.is_error for e in finished)
+    # And the history stays valid for the same reason — see
+    # test_cancel_mid_tool_call_answers_every_announced_call.
+    assert _announced_call_ids(messages) == _answered_call_ids(messages) == started
 
 
 @pytest.mark.asyncio
@@ -835,3 +848,159 @@ async def test_no_hook_given_is_the_same_as_before():
 
     types = [type(e).__name__ for e in events]
     assert types == ["TextStarted", "TextDelta", "TextFinished", "MessageFinished"]
+
+
+# --- Stop must not wait for the model to finish talking ---------------------
+#
+# User report (2026-10): "The Stop button seems to get stuck — I assume it is
+# waiting for the provider to come back and then to stop. I have been staring
+# at Working for 180 seconds and it is still going." Cancellation was checked
+# only *between* round trips, so Stop pressed while a verbose model was
+# part-way through an answer did nothing until the whole answer had streamed
+# in. It is now checked between provider events as well.
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_stream_stops_consuming_the_provider_immediately():
+    # One delta per character, so "how far did it get" is countable.
+    provider = MockProvider([MockTurn(text="abcdefghij", chunk_size=1)])
+    loop = AgentLoop(provider, _settings())
+    messages = [Message(role="user", content="hi")]
+
+    deltas: list[str] = []
+    async for event in loop.run(messages):
+        if isinstance(event, TextDelta):
+            deltas.append(event.text)
+            if len(deltas) == 3:
+                loop.cancel()
+
+    assert deltas == ["a", "b", "c"], "the remaining seven deltas must never arrive"
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_stream_yields_a_cancelled_error():
+    provider = MockProvider([MockTurn(text="abcdefghij", chunk_size=1)])
+    loop = AgentLoop(provider, _settings())
+    messages = [Message(role="user", content="hi")]
+
+    events = []
+    async for event in loop.run(messages):
+        events.append(event)
+        if isinstance(event, TextDelta):
+            loop.cancel()
+
+    assert isinstance(events[-1], AgentError)
+    assert events[-1].message == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_stream_keeps_the_text_the_user_already_saw():
+    """The panel rendered those deltas as they arrived; dropping them from
+    history would leave the transcript showing text the saved conversation
+    does not have, and the model blind to its own half-answer."""
+    provider = MockProvider([MockTurn(text="abcdefghij", chunk_size=1)])
+    loop = AgentLoop(provider, _settings())
+    messages = [Message(role="user", content="hi")]
+
+    seen = 0
+    async for event in loop.run(messages):
+        if isinstance(event, TextDelta):
+            seen += 1
+            if seen == 4:
+                loop.cancel()
+
+    assistant = [m for m in messages if m.role == "assistant"]
+    assert len(assistant) == 1
+    assert assistant[0].content == "abcd"
+    assert assistant[0].tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_any_text_appends_no_empty_assistant_message():
+    """Both providers reject an assistant message whose content is an empty
+    string, so a stream cut off before its first token must leave history
+    untouched rather than wedge the *next* request — the same class of bug
+    the cancelled-tool-result path exists to prevent."""
+    provider = MockProvider([MockTurn(text="abcdefghij", chunk_size=1)])
+    loop = AgentLoop(provider, _settings())
+    messages = [Message(role="user", content="hi")]
+
+    async for event in loop.run(messages):
+        if isinstance(event, TextStarted):
+            loop.cancel()  # before a single delta has landed
+
+    assert [m.role for m in messages] == ["user"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_stream_closes_the_provider_generator():
+    """Breaking out of an `async for` leaves the generator suspended and the
+    provider's HTTP response open until the GC finalizes it — which is the
+    difference between a Stop that stops and one that only looks stopped.
+    AgentLoop wraps the stream in contextlib.aclosing; this proves the
+    GeneratorExit actually reaches the provider."""
+    closed: list[bool] = []
+
+    class _ClosingProvider(MockProvider):
+        async def complete(self, messages, tools, settings):
+            try:
+                yield TextStarted(message_id="m1")
+                for index in range(1000):
+                    yield TextDelta(message_id="m1", text=str(index))
+                yield TextFinished(message_id="m1", text="never reached")
+            except GeneratorExit:
+                closed.append(True)
+                raise
+
+    loop = AgentLoop(_ClosingProvider(), _settings())
+    messages = [Message(role="user", content="hi")]
+
+    async for event in loop.run(messages):
+        if isinstance(event, TextDelta):
+            loop.cancel()
+
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_stream_does_not_run_an_announced_tool():
+    """A call announced before the cancel landed still has to be answered
+    (history validity), but must never actually execute."""
+    ran: list[str] = []
+
+    async def _tool(_args):
+        ran.append("x")
+        return ToolResult(content="ok")
+
+    tool = NativeTool(
+        schema=ToolSchema(name="track", description="", parameters={"type": "object"}),
+        func=_tool,
+    )
+    provider = MockProvider(
+        [MockTurn(tool_calls=[MockToolCall(name="track", id="c1")], chunk_size=1)]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"track": tool})
+    messages = [Message(role="user", content="hi")]
+
+    async for event in loop.run(messages):
+        if isinstance(event, ToolCallStarted):
+            loop.cancel()
+
+    assert ran == []
+    assert _announced_call_ids(messages) == _answered_call_ids(messages) == ["c1"]
+    assert [m.content for m in messages if m.role == "tool"] == [CANCELLED_TOOL_RESULT]
+
+
+@pytest.mark.asyncio
+async def test_uncancelled_turn_still_streams_to_completion():
+    """The cancel check sits inside the streaming loop, so the guard against
+    it firing spuriously belongs right next to it."""
+    provider = MockProvider([MockTurn(text="abcdefghij", chunk_size=1)])
+    loop = AgentLoop(provider, _settings())
+    messages = [Message(role="user", content="hi")]
+
+    events = [event async for event in loop.run(messages)]
+
+    assert "".join(e.text for e in events if isinstance(e, TextDelta)) == "abcdefghij"
+    assert [m.content for m in messages if m.role == "assistant"] == ["abcdefghij"]
+    assert not any(isinstance(e, AgentError) for e in events)

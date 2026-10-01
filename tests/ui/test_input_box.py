@@ -526,3 +526,81 @@ def test_attachment_chips_survive_the_busy_indicator(qapp, tmp_path):
     assert box._attachments_row.count() == 3  # chip + stretch + busy label
     assert box._attachments_row.itemAt(0).widget().path == str(file_a)
     assert box._attachments_row.itemAt(2).widget() is box._busy_label
+
+
+# --- "Stop" has to look like it did something -------------------------------
+#
+# User report (2026-10): "The Stop button seems to get stuck ... I have been
+# staring at Working for 180 seconds." Half of that was the agent loop (fixed
+# in aida.core.agent); the other half was this widget saying "Working… press
+# Stop to cancel" for the whole wait, so a click that had registered looked
+# exactly like one that had not.
+
+
+def test_set_stopping_acknowledges_the_click(qapp):
+    box = InputBox()
+    box.set_busy(True)
+    assert box.busy_status_text().startswith("Working")
+    assert box._stop_button.isEnabled()
+
+    box.set_stopping()
+
+    assert box.is_stopping
+    assert box.busy_status_text().startswith("Stopping")
+    assert "finishing the current step" in box.busy_status_text()
+    # A second press genuinely cannot do anything, so the button must not
+    # invite one.
+    assert not box._stop_button.isEnabled()
+
+
+def test_set_stopping_names_what_it_is_waiting_on(qapp):
+    """An in-flight tool call is the one thing cancellation cannot cut
+    short, so when that is the hold-up the label says so by name."""
+    box = InputBox()
+    box.set_busy(True)
+
+    box.set_stopping("waiting for pyirena_fit_unified")
+
+    assert "waiting for pyirena_fit_unified" in box.busy_status_text()
+    assert "pyirena_fit_unified" in box._stop_button.toolTip()
+
+
+def test_stopping_label_keeps_ticking(qapp):
+    """The elapsed counter has to keep running — a frozen number is the
+    other thing that reads as "hung"."""
+    box = InputBox()
+    box.set_busy(True)
+    box.set_stopping()
+    first = box.busy_status_text()
+
+    box._tick_busy_label()
+
+    assert box.busy_status_text().startswith("Stopping")
+    assert box.busy_status_text() != first  # the animated dots advanced
+
+
+def test_next_turn_clears_the_stopping_state(qapp):
+    box = InputBox()
+    box.set_busy(True)
+    box.set_stopping("waiting for slow_tool")
+    box.set_busy(False)
+
+    assert not box.is_stopping
+    assert box.busy_status_text() == ""
+
+    box.set_busy(True)
+
+    assert not box.is_stopping
+    assert box.busy_status_text().startswith("Working")
+    assert box._stop_button.isEnabled(), "a new turn must get a working Stop button back"
+
+
+def test_set_stopping_while_idle_is_a_no_op(qapp):
+    """A Stop that lands just after the turn already ended must not leave a
+    stale "Stopping…" label on an idle box."""
+    box = InputBox()
+
+    box.set_stopping()
+
+    assert not box.is_stopping
+    assert box.busy_status_text() == ""
