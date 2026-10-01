@@ -1007,7 +1007,13 @@ def test_skills_browser_shows_the_folder_path_and_opens_it(qapp, aida_home: Path
     assert any(str(skills_dir) in text for text in labels), labels
 
     dialog._open_folder_button.click()
-    assert opened == [str(skills_dir)]
+    # Compared via Path rather than a raw string: on Windows, Qt's QUrl
+    # round-trip through fromLocalFile()/toLocalFile() comes back with
+    # forward slashes rather than the native backslash separator (real CI
+    # failure) — Path() treats both as equivalent, which is all this test
+    # actually cares about.
+    assert len(opened) == 1
+    assert Path(opened[0]) == skills_dir
 
 
 def test_skills_browser_open_folder_creates_a_missing_folder_first(
@@ -1029,4 +1035,6 @@ def test_skills_browser_open_folder_creates_a_missing_folder_first(
     dialog._open_folder_button.click()
 
     assert skills_dir.is_dir()
-    assert opened == [str(skills_dir)]
+    # Path, not a raw string — see the sibling test above.
+    assert len(opened) == 1
+    assert Path(opened[0]) == skills_dir

@@ -4130,7 +4130,10 @@ def test_open_skills_folder_menu_item_reveals_the_skills_directory(
         )
         action.trigger()
 
-        assert opened == [str(aida_home / "skills")]
+        # See test_open_config_folder_opens_the_config_dir's comment on why
+        # this compares via Path rather than a raw string.
+        assert len(opened) == 1
+        assert Path(opened[0]) == aida_home / "skills"
         assert (aida_home / "skills").is_dir()
     finally:
         window.close()
