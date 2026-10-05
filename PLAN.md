@@ -427,6 +427,93 @@ PubMed/arXiv/DataCite only on a real need); and remote HTTP/SSE-only
 servers until AIDA deliberately implements remote transport, auth and
 lifecycle (§2.2).
 
+### 2.8 Sample-holder recognition from the USAXS camera (2026-10-04)
+
+`axis-cam-mcp` lets the agent see the sample area, but a high-magnification
+view of an unusual holder means nothing without something to compare it to:
+no model has been trained on our holders. Goal: the agent says "flat sample
+plate in the beam, window ~0.4 mm low, move `sy` by +0.4" — the
+explanation and the fix are skills; this section is about recognition and
+location.
+
+**Core idea — no training, two separate jobs.** Vision models are poor at
+naming an object they have never seen but good at "which of these labelled
+pictures does this frame match, and what differs from the known-good one".
+They are *not* good at metric geometry and will produce a plausible number
+anyway. So:
+
+1. **Identification — in-context reference atlas.** One folder per holder
+   type, photographed with the *same* camera, zoom and beamline lighting
+   (this matters more than the model):
+
+   ```
+   holder_atlas/
+     flat_plate_v2/
+       holder.yaml          # name, description, distinguishing features, where
+                            # the beam should hit, which motor fixes what (+ sign)
+       aligned.jpg          # known-good, annotated: box on window, arrow at beam spot
+       off_horizontal.jpg   # typical misalignments, labelled
+       empty.jpg
+     capillary_rack/ ...
+   ```
+
+   Narrow candidates from the `holder.yaml` descriptions (at <~30 holders the
+   whole catalog fits in the prompt; AIDA's text KB is available if it grows),
+   then attach 1–3 reference images next to the live frame. Annotated
+   references beat raw photos. Budget: `MAX_ATTACHED_IMAGES = 4` and the
+   1024 px downscale in `aida/providers/vision.py` mean live frame + 3
+   references — or have the server tile references into one labelled
+   contact sheet, which counts as one image.
+
+2. **Location — deterministic, not the model.** Per zoom setting, calibrate
+   once: beam position in camera pixels and mm/pixel. The server draws the
+   beam crosshair onto the snapshot (makes even qualitative model judgement
+   reliable), and for a number it template-matches the holder's feature
+   crop from `aligned.jpg` against the live frame with normalized
+   cross-correlation (`scipy.signal.fftconvolve`, numpy/scipy only — no
+   OpenCV) → pixel offset → mm → suggested motor move, plus a confidence.
+   Weak spot: lighting changes; take references under beamline lighting.
+
+**Where it lives — no AIDA core changes.** Tools in `axis-cam-mcp` or a
+sibling `sample-holder-mcp`; AIDA already forwards MCP image results as
+vision input.
+
+- `list_holders()` — catalog with text descriptions
+- `get_reference(holder_id, which)` — annotated reference image(s) or contact sheet
+- `snapshot(overlay=True)` — live frame with beam crosshair
+- `measure_offset(holder_id)` — NCC match → `{dx_mm, dy_mm, confidence}`
+
+Plus `skills/sample-alignment.md`: the workflow and decision rules (e.g.
+confidence below threshold → say so and stop, don't guess). The agent
+*suggests* moves; any motor motion via `epics-mcp` stays behind confirmation.
+
+**Cost.**
+
+| | |
+|---|---|
+| Code | ~300–500 lines in the MCP server + one-page skill |
+| Training | none |
+| Curation (the real cost) | ~an afternoon per ~10 holders: photograph aligned/misaligned/empty, annotate, write `holder.yaml` |
+| Disk / RAM | a few MB of JPEGs; no model loaded |
+| Tokens per check | ~1–1.5k per 1024 px image on Claude → ~5–7k for live + 3 references |
+
+**Caveat — provider.** This relies on a strong vision model; small local
+models (Ollama-class) are much weaker at fine-grained compare-to-reference.
+If the beamline machine must stay local-only, the trained-detector route
+below becomes the main path rather than the upgrade.
+
+**Validate before trusting.** Collect ~20–30 snapshots with known answers
+(holder type, aligned or not, true offset) and score the pipeline against
+them — same discipline as validating against Irena.
+
+**Decided against / deferred.** Image-embedding retrieval (CLIP/DINOv2):
+pays off only for a large catalog, and pulls in torch plus a ~300 MB model.
+A multimodal AIDA knowledge base: the general solution, but a much bigger
+change than this needs. **Upgrade path:** a detector trained on our own
+infrastructure (YOLO-style) drops in as another MCP tool returning
+`{holder_type, bbox, offset}`; agent and skill stay unchanged. Start with
+the atlas; swap in the detector only if the atlas measurably falls short.
+
 ---
 
 ## 3. Known open risk
