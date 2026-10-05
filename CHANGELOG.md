@@ -53,6 +53,23 @@ decision revised), unrelated to what shipped when. Entries below link to
   single line led with the timestamp and workspace, so on a narrow column
   the elide ate the title — the only part worth reading.
 
+### Fixed
+
+- **`Bearer keyring:NAME` in an HTTP server's headers now works.** A
+  `keyring:`/`secret:` reference was only resolved when it was the whole
+  value, so the documented `"Authorization": "Bearer keyring:NAME"` sent
+  that literal text as the token and the server rejected it. The reference
+  may now be the last word of a value, and the text before it is kept. The
+  GUI's "store secret" button for headers likewise keeps an auth scheme
+  (`Bearer abc123` becomes `Bearer keyring:NAME`) instead of replacing the
+  whole value and dropping `Bearer `.
+- **MCP start failures name the real cause.** Every failure to connect to
+  an HTTP server read "unhandled errors in a TaskGroup (1 sub-exception)",
+  the `mcp` SDK's wrapper text, which hid both a rejected self-signed TLS
+  certificate and an `http://` URL pointed at an HTTPS-only port. The
+  message now shows the underlying exception(s), e.g. `ConnectError: [SSL:
+  CERTIFICATE_VERIFY_FAILED] ...`.
+
 ## [0.2.0] - 2026-10-01
 
 ### Changed

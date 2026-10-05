@@ -30,7 +30,12 @@ from aida.config import secrets
 from aida.config.settings import McpServerConfig
 from aida.mcp.manager import McpManager
 from aida.mcp.results import convert_result
-from aida.mcp.server import McpServerError, McpServerHandle, resolve_env_secrets
+from aida.mcp.server import (
+    McpServerError,
+    McpServerHandle,
+    describe_start_error,
+    resolve_env_secrets,
+)
 from tests.test_secrets import _use_memory_backend
 
 MOCK_SERVER_PATH = Path(__file__).parent / "mock_mcp_server.py"
@@ -294,6 +299,20 @@ def test_resolve_env_secrets_mixes_plain_and_referenced_values(monkeypatch):
     secrets.set_secret("my-token", "sk-real-value")
     resolved = resolve_env_secrets({"PLAIN": "unchanged", "API_TOKEN": "keyring:my-token"})
     assert resolved == {"PLAIN": "unchanged", "API_TOKEN": "sk-real-value"}
+
+
+def test_resolve_env_secrets_keeps_lead_in_before_reference(monkeypatch):
+    """An auth header is "Bearer <token>", so the reference has to work as
+    the last word of a value, not only as the whole value."""
+    _use_memory_backend(monkeypatch)
+    secrets.set_secret("my-token", "sk-real-value")
+    resolved = resolve_env_secrets({"Authorization": "Bearer keyring:my-token"})
+    assert resolved == {"Authorization": "Bearer sk-real-value"}
+
+
+def test_resolve_env_secrets_ignores_reference_not_in_last_word():
+    value = "keyring:my-token is not last"
+    assert resolve_env_secrets({"X": value}) == {"X": value}
 
 
 def test_resolve_env_secrets_missing_secret_raises(monkeypatch):
@@ -603,10 +622,21 @@ async def test_http_transport_connection_refused_reports_a_clear_error():
         _mock_http_config(port=port), startup_timeout_seconds=5.0, stop_timeout_seconds=2.0
     )
     try:
-        with pytest.raises(McpServerError, match="failed to start"):
+        with pytest.raises(McpServerError, match="failed to start") as excinfo:
             await handle.start()
     finally:
         await handle.stop()
+    # The real cause, not the SDK's TaskGroup wrapper text.
+    assert "TaskGroup" not in str(excinfo.value)
+    assert "ConnectError" in str(excinfo.value)
+
+
+def test_describe_start_error_flattens_nested_exception_groups():
+    exc = ExceptionGroup(
+        "unhandled errors in a TaskGroup",
+        [ExceptionGroup("inner", [ConnectionError("certificate verify failed")]), TimeoutError()],
+    )
+    assert describe_start_error(exc) == ("ConnectionError: certificate verify failed; TimeoutError")
 
 
 @pytest.mark.asyncio

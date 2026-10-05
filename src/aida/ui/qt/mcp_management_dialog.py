@@ -422,7 +422,10 @@ class ServerFormDialog(QDialog):
         if not ok or not key:
             return
 
-        current_value = headers[key]
+        # Keep an auth scheme ("Bearer abc123" -> "Bearer keyring:NAME"):
+        # only the credential after it goes into the keychain.
+        scheme, _, current_value = headers[key].rpartition(" ")
+        scheme_lead = f"{scheme} " if scheme else ""
         already_ref = current_value.startswith(("keyring:", "secret:"))
         default_name = f"{self._name_edit.text().strip() or 'mcp'}_{key}".lower()
         secret_name, ok = QInputDialog.getText(
@@ -443,7 +446,9 @@ class ServerFormDialog(QDialog):
             return
 
         set_secret(secret_name, value)
-        self._raw_headers_text = _replace_env_value(current_text, key, f"keyring:{secret_name}")
+        self._raw_headers_text = _replace_env_value(
+            current_text, key, f"{scheme_lead}keyring:{secret_name}"
+        )
         if self._hide_header_values_checkbox.isChecked():
             self._on_header_hide_toggled(True)  # refresh the masked view from the new raw text
         else:

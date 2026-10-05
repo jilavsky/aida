@@ -44,7 +44,9 @@ _SECRET_ENV_PREFIXES = ("keyring:", "secret:")
 def resolve_env_secrets(values: dict[str, str]) -> dict[str, str]:
     """Resolve any ``keyring:NAME``/``secret:NAME`` values in a
     ``dict[str, str]`` into real values via ``aida.config.secrets.get_secret``
-    — plain values pass through unchanged. Used for a stdio server's ``env``
+    — plain values pass through unchanged. The reference may also be the last
+    word of a value (``Bearer keyring:NAME``), in which case the text before
+    it is kept. Used for a stdio server's ``env``
     block and, identically, for an http server's ``headers`` block (a
     bearer token in a header is exactly as much a secret as one in an env
     var). Raises ``McpServerError`` (not e.g. KeyError) for a reference with
@@ -54,19 +56,40 @@ def resolve_env_secrets(values: dict[str, str]) -> dict[str, str]:
     missing a credential it needs and failing confusingly later."""
     resolved: dict[str, str] = {}
     for key, value in values.items():
-        prefix = next((p for p in _SECRET_ENV_PREFIXES if value.startswith(p)), None)
+        # The reference may follow a literal lead-in, so an auth header can
+        # be written "Bearer keyring:NAME" — only the last whitespace-
+        # separated token is treated as the reference; the lead-in is kept.
+        lead, sep, reference = value.rpartition(" ")
+        prefix = next((p for p in _SECRET_ENV_PREFIXES if reference.startswith(p)), None)
         if prefix is None:
             resolved[key] = value
             continue
-        secret_name = value[len(prefix) :]
+        secret_name = reference[len(prefix) :]
         secret_value = get_secret(secret_name) if secret_name else None
         if secret_value is None:
             raise McpServerError(
                 f"{key!r} references secret {secret_name!r} ({value!r}), but nothing is "
                 f"stored under that name in the OS keychain (or AIDA_SECRET_{secret_name.upper()})"
             )
-        resolved[key] = secret_value
+        resolved[key] = f"{lead}{sep}{secret_value}"
     return resolved
+
+
+def describe_start_error(exc: BaseException) -> str:
+    """One-line description of why a server failed to start, naming the
+    underlying exception(s) rather than their wrapper.
+
+    The ``mcp`` SDK runs each transport inside an anyio TaskGroup, so a
+    connection failure arrives as an ``ExceptionGroup`` whose own text is
+    only "unhandled errors in a TaskGroup (1 sub-exception)" — that hid a
+    TLS certificate rejection and a wrong-port disconnect behind the same
+    message. Groups (nested too) are flattened to their leaves, and each
+    leaf is shown as ``Type: message`` since some (e.g. a bare
+    ``ConnectError``) have empty text on their own."""
+    if isinstance(exc, BaseExceptionGroup):
+        return "; ".join(describe_start_error(sub) for sub in exc.exceptions)
+    message = str(exc)
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 def _scratch_env_defaults(cwd: Path | None) -> dict[str, str]:
@@ -459,7 +482,8 @@ class McpServerHandle:
             tail = "\n".join(stderr.tail()) if stderr is not None else ""
             detail = f" — stderr: {tail}" if tail else ""
             self._start_error = McpServerError(
-                f"mcp server {self.config.name!r} failed to start: {exc}{detail}"
+                f"mcp server {self.config.name!r} failed to start: "
+                f"{describe_start_error(exc)}{detail}"
             )
             ready.set()  # unblock a waiting start() even on failure
         finally:
