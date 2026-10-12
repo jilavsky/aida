@@ -24,6 +24,7 @@ reporting an empty index, which would read as "this paper has no figures".
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -318,7 +319,7 @@ def default_figure_tools(
                 ImageArtifact(
                     data=b"",
                     path=str(image_path),
-                    mime_type="image/png",
+                    mime_type=mimetypes.guess_type(str(image_path))[0] or "image/png",
                     filename=f"{document.stem}-{match.file}",
                 )
             ],

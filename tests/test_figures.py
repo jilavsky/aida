@@ -39,6 +39,16 @@ def _png(color: str = "red", size: int = 240) -> bytes:
     return buffer.getvalue()
 
 
+def _jpeg(color: str = "green", size: int = 240) -> bytes:
+    import io
+
+    from PIL import Image as PILImage
+
+    buffer = io.BytesIO()
+    PILImage.new("RGB", (size, size), color).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
 def _single_column_pdf(path: Path, *, caption: str = "Figure 1. SAXS patterns at 25 C") -> Path:
     doc = pymupdf.open()
     page = doc.new_page()
@@ -236,6 +246,30 @@ def test_a_label_is_matched_case_insensitively_and_by_prefix(tmp_path: Path):
     attachments = _attached(tmp_path)
     tools = _tools(attachments)
     assert not _call(tools, "get_document_figure", document="paper.pdf", label="figure 1").is_error
+
+
+def test_a_jpeg_figure_is_served_with_a_jpeg_mime_type(tmp_path: Path):
+    """Regression: get_document_figure used to hardcode mime_type="image/png"
+    on every figure it returned, so a PDF's embedded JPEG (extracted
+    correctly, with a .jpeg filename, by extract_pdf_figures) was labelled as
+    PNG — a mismatch the Anthropic API rejects outright."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Introduction text for this paper. " * 6)
+    page.insert_image(pymupdf.Rect(72, 200, 320, 420), stream=_jpeg())
+    page.insert_text((72, 450), "Figure 1. A photo")
+    pdf_path = tmp_path / "paper.pdf"
+    doc.save(str(pdf_path))
+    doc.close()
+
+    attachments = tmp_path / "attachments" / "abcd1234"
+    store_attachment(pdf_path, attachments)
+    tools = _tools(attachments)
+
+    got = _call(tools, "get_document_figure", document="paper.pdf", label="Figure 1")
+    assert not got.is_error
+    assert Path(got.artifacts[0].path).suffix in (".jpg", ".jpeg")
+    assert got.artifacts[0].mime_type == "image/jpeg"
 
 
 def test_an_unknown_label_lists_what_is_available(tmp_path: Path):

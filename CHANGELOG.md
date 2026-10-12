@@ -64,6 +64,17 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Fixed
 
+- **A non-PNG figure pulled from a document no longer crashes the next
+  turn with a provider 400.** `get_document_figure` hardcoded
+  `mime_type="image/png"` on every figure it handed back, regardless of
+  the file's real format — so a PDF's embedded JPEG (extracted correctly,
+  with a `.jpeg` filename, by `extract_pdf_figures`) was sent to the
+  provider labelled as PNG. Claude's API validates the declared media type
+  against the actual bytes and rejects the mismatch, and because that
+  wrong `mime_type` is persisted into the conversation's artifact history,
+  the failure repeated on every later turn that replayed the image. The
+  mime type is now guessed from the extracted file's own extension, the
+  same way every other image path in AIDA already does it.
 - **`Bearer keyring:NAME` in an HTTP server's headers now works.** A
   `keyring:`/`secret:` reference was only resolved when it was the whole
   value, so the documented `"Authorization": "Bearer keyring:NAME"` sent
