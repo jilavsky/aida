@@ -67,6 +67,7 @@ from aida.core.context import (
     load_skill_texts,
     plan_trim,
     repair_tool_call_pairing,
+    skill_exists,
 )
 from aida.core.events import (
     AgentError,
@@ -400,7 +401,14 @@ class ChatSession:
         #: shows it working with the old paths.
         self._pending_notices: list[str] = []
 
-        self._skill_texts = load_skill_texts(skills_dir(), skill_names or [])
+        #: Names as requested (workspace + ``--skills`` + MCP-attached), kept
+        #: so ``update_skills`` can report what changed and the GUI's Skills
+        #: panel can show what this chat is actually running with.
+        self._skill_names = list(dict.fromkeys(skill_names or []))
+        self._skill_texts = load_skill_texts(skills_dir(), self._skill_names)
+        #: See ``update_skills`` — lets repeated toggles collapse into one notice.
+        self._pending_skills_notice: str | None = None
+        self._skills_notice_baseline: list[str] = []
         skill_texts = self._skill_texts
         system_message = build_system_message(
             system_prompt, skill_texts, extra_texts=extra_context_texts, identity_text=identity_text
@@ -566,6 +574,85 @@ class ChatSession:
             f"Folders applied to this chat — {len(state.source_folders)} source folder(s), "
             f"target: {state.target_folder or '(none)'}"
         )
+        if missing:
+            summary += " — not found on disk: " + ", ".join(missing)
+        return summary
+
+    @property
+    def skill_names(self) -> list[str]:
+        """Skills this chat's system message is currently built from."""
+        return list(self._skill_names)
+
+    def update_skills(self, skill_names: list[str]) -> str:
+        """Swap the set of skills loaded into this *running* session, with
+        no restart — the GUI's Skills panel.
+
+        User request (2026-10): a paper-review workspace with separate
+        skills for summarization, review and related-work search. Skills
+        are pasted whole into the system message (not loaded on demand),
+        so having all of them on at once gives the model several
+        competing playbooks — output formats and personas bleed into each
+        other. Switching mid-conversation keeps the paper in context while
+        the user moves from one view of it to the next.
+
+        Same mechanics as ``update_workspace_folders``: the system message
+        is rebuilt (so the change survives trimming/compaction, at the cost
+        of one prompt-cache miss) and the next turn carries a one-shot
+        notice, because earlier replies in the history were written under
+        the old skills and would otherwise keep steering the model.
+
+        Skill files are re-read from disk, so re-applying the same set also
+        picks up edits made to a skill file since the chat started.
+        Persisting the selection to the workspace is the caller's
+        decision. Returns a one-line summary for the caller to show."""
+        new_names = list(dict.fromkeys(name for name in skill_names if name.strip()))
+        # Ticking several boxes before the next message must produce one
+        # notice describing the net change, not one per click: while an
+        # earlier skills notice is still waiting to be delivered, replace it
+        # and diff against the skills the model last actually saw.
+        pending = self._pending_skills_notice
+        if pending is not None and pending in self._pending_notices:
+            self._pending_notices.remove(pending)
+            baseline = self._skills_notice_baseline
+        else:
+            baseline = self._skill_names
+        self._pending_skills_notice = None
+        self._skills_notice_baseline = baseline
+
+        self._skill_names = new_names
+        self._skill_texts = load_skill_texts(skills_dir(), new_names)
+        self._rebuild_system_message()
+
+        added = [name for name in new_names if name not in baseline]
+        removed = [name for name in baseline if name not in new_names]
+        if added or removed:
+            notice_lines = ["The user just changed which skills are active, mid-conversation."]
+            if new_names:
+                notice_lines.append("Active skills now: " + ", ".join(new_names) + ".")
+            else:
+                notice_lines.append("No skills are active now.")
+            if removed:
+                notice_lines.append(
+                    "No longer active: "
+                    + ", ".join(removed)
+                    + ". Stop following their instructions, including output formats or roles "
+                    "they set in earlier replies of this conversation."
+                )
+            notice_lines.append(
+                "Your instructions have been updated to match; follow the active skills from now on."
+            )
+            notice = "\n".join(notice_lines)
+            if self.is_mutating:
+                self.queue_user_message(notice)
+            else:
+                self._pending_notices.append(notice)
+                self._pending_skills_notice = notice
+
+        missing = [name for name in new_names if not skill_exists(skills_dir(), name)]
+        loaded = [name for name in new_names if name not in missing]
+        summary = f"Skills applied to this chat — {len(loaded)} active"
+        if loaded:
+            summary += ": " + ", ".join(loaded)
         if missing:
             summary += " — not found on disk: " + ", ".join(missing)
         return summary

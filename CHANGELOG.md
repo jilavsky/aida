@@ -19,6 +19,15 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Added
 
+- **Skills panel in the right column.** Every skill in the skills folder
+  has a checkbox; ticking or unticking applies to the running chat
+  immediately (system message rebuilt, one notice on the next turn telling
+  the model what changed), so one conversation can move from summarizing a
+  paper to reviewing it without competing playbooks loaded at once.
+  "Reload" picks up new or edited skill files; "Save to Workspace" keeps
+  the selection for future chats. The selection itself isn't stored with
+  the conversation — a resumed chat starts from the workspace's skills.
+
 - **Conversations name themselves, and the name is visible while you
   chat.** User report: "unless user renames the chat, the chat name is
   start of the user question — rarely useful ... we need some kind of

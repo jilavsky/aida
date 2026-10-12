@@ -44,6 +44,7 @@ from aida.config.settings import (
 )
 from aida.config.users import resolve_active_user, resolve_workspace_for_user
 from aida.core.confirmation import REMEMBERABLE_ACTIONS, ConfirmAnswer
+from aida.core.context import SkillInfo, list_skills
 from aida.core.cost import estimate_cost_usd
 from aida.core.events import (
     ContextTrimmed,
@@ -104,6 +105,7 @@ from aida.ui.qt.selectors import (
     WorkspaceSelector,
 )
 from aida.ui.qt.settings_dialog import SettingsDialog
+from aida.ui.qt.skills_panel import SkillData, SkillsPanel
 from aida.ui.qt.tool_call_group import DEFAULT_TOOL_CALL_DISPLAY, TOOL_CALL_DISPLAY_MODES
 from aida.ui.qt.users_dialog import UsersDialog
 from aida.ui.qt.window_state import (
@@ -161,6 +163,28 @@ SPLITTER_SAVE_DELAY_MS = 800
 #: provider call). Cheap enough to be a poll, frequent enough that the
 #: number is never meaningfully behind.
 USAGE_REFRESH_INTERVAL_MS = 30_000
+
+
+def _skill_data(info: SkillInfo) -> SkillData:
+    """Skills panel row: the file path, plus the ``description:`` from a
+    SKILL.md-style frontmatter block when there is one — downloaded skills
+    usually carry one, and it says what the skill is for better than its
+    file name does."""
+    tooltip = str(info.path)
+    try:
+        lines = info.path.read_text(encoding="utf-8").splitlines()[:40]
+    except OSError:
+        return SkillData(name=info.name, tooltip=tooltip)
+    if lines and lines[0].strip() == "---":
+        for line in lines[1:]:
+            if line.strip() == "---":
+                break
+            if line.startswith("description:"):
+                description = line.partition(":")[2].strip().strip("\"'")
+                if description:
+                    tooltip = f"{description}\n\n{tooltip}"
+                break
+    return SkillData(name=info.name, tooltip=tooltip)
 
 
 class MainWindow(QMainWindow):
@@ -330,6 +354,9 @@ class MainWindow(QMainWindow):
         self.input_box = InputBox(self)
         self.folder_display = FolderDisplay(self)
         self.mcp_panel = McpQuickPanel(self)
+        self.skills_panel = SkillsPanel(self)
+        # Disabled until a session is ready: toggles apply to the live chat.
+        self.skills_panel.setEnabled(False)
         self.quick_tasks_panel = QuickTasksPanel(self)
         # Disabled until _refresh_quick_tasks_panel says otherwise:
         # quick tasks are workspace-scoped, and until the first session
@@ -365,6 +392,7 @@ class MainWindow(QMainWindow):
         for title, panel in (
             ("Folders", self.folder_display),
             ("MCP Servers", self.mcp_panel),
+            ("Skills", self.skills_panel),
             ("Quick Tasks", self.quick_tasks_panel),
             ("Workspace Notes", self.notes_panel),
         ):
@@ -978,6 +1006,9 @@ class MainWindow(QMainWindow):
         self.mcp_panel.manage_requested.connect(self.open_mcp_management_dialog)
         self.mcp_panel.server_start_requested.connect(self._on_mcp_server_start_requested)
         self.mcp_panel.server_stop_requested.connect(self._on_mcp_server_stop_requested)
+        self.skills_panel.skills_changed.connect(self._on_skills_changed)
+        self.skills_panel.reload_requested.connect(self._on_skills_reload_requested)
+        self.skills_panel.save_to_workspace_requested.connect(self._on_save_skills_to_workspace)
         self.quick_tasks_panel.task_selected.connect(self._on_quick_task_selected)
         self.quick_tasks_panel.tasks_changed.connect(self._on_quick_tasks_changed)
         self.notes_panel.notes_changed.connect(self._on_notes_changed)
@@ -1026,6 +1057,8 @@ class MainWindow(QMainWindow):
         self.bridge.mcp_server_action_failed.connect(self._on_mcp_server_action_failed)
         self.bridge.workspace_folders_applied.connect(self._on_workspace_folders_applied)
         self.bridge.workspace_folders_apply_failed.connect(self._on_workspace_folders_apply_failed)
+        self.bridge.skills_applied.connect(self._on_skills_applied)
+        self.bridge.skills_apply_failed.connect(self._on_skills_apply_failed)
         self.bridge.conversation_export_finished.connect(self._on_conversation_export_finished)
         self.bridge.conversation_export_failed.connect(self._on_conversation_export_failed)
         self.input_box.cancel_requested.connect(self._on_cancel_requested)
@@ -1217,6 +1250,7 @@ class MainWindow(QMainWindow):
             self._load_resumed_history(session.recorder.conversation_id)
         self._refresh_mcp_panel()
         self._refresh_folder_display()
+        self._refresh_skills_panel()
         self._refresh_quick_tasks_panel()
         self._refresh_notes_panel()
         self._refresh_conversations_sidebar()
@@ -2287,6 +2321,55 @@ class MainWindow(QMainWindow):
         self.folder_display.set_unsaved(False)
         self.statusBar().showMessage(
             f"Saved folders to workspace {self._current_workspace_config.name} — "
+            "future chats in it start with them too",
+            5000,
+        )
+
+    # --- skills ---------------------------------------------------------------
+
+    def _refresh_skills_panel(self) -> None:
+        """List the skills folder, ticking what the running chat has loaded
+        (workspace skills, ``--skills`` and MCP-attached ones alike). Runs
+        after ``_refresh_folder_display``, which sets
+        ``_current_workspace_config``."""
+        session = self.bridge.session
+        self.skills_panel.set_skills(
+            [_skill_data(info) for info in list_skills(skills_dir())],
+            session.skill_names if session is not None else [],
+        )
+        self.skills_panel.set_unsaved(False)
+        self.skills_panel.set_save_enabled(self._current_workspace_config is not None)
+        self.skills_panel.setEnabled(session is not None)
+
+    def _on_skills_changed(self, names: list[str]) -> None:
+        self.skills_panel.set_unsaved(self._current_workspace_config is not None)
+        self.bridge.update_skills(names)
+
+    def _on_skills_reload_requested(self) -> None:
+        """Re-scan the folder (new skill files show up) and re-apply the
+        ticked set, which re-reads each file — so editing a skill doesn't
+        need a new chat."""
+        checked = self.skills_panel.checked_skills()
+        self.skills_panel.set_skills(
+            [_skill_data(info) for info in list_skills(skills_dir())], checked
+        )
+        self.bridge.update_skills(self.skills_panel.checked_skills())
+
+    def _on_skills_applied(self, summary: str) -> None:
+        self.statusBar().showMessage(summary, 8000)
+
+    def _on_skills_apply_failed(self, message: str) -> None:
+        self.statusBar().showMessage(f"Skills not applied to this chat: {message}", 8000)
+
+    def _on_save_skills_to_workspace(self) -> None:
+        if self._current_workspace_config is None:
+            self.statusBar().showMessage("No active workspace to save skills to", 5000)
+            return
+        self._current_workspace_config.skills = self.skills_panel.checked_skills()
+        save_workspace(self.settings, self._current_workspace_config)
+        self.skills_panel.set_unsaved(False)
+        self.statusBar().showMessage(
+            f"Saved skills to workspace {self._current_workspace_config.name} — "
             "future chats in it start with them too",
             5000,
         )

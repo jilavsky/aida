@@ -244,6 +244,10 @@ class ChatBridge(QObject):
     # the MCP and KB signals above.
     workspace_folders_applied = Signal(str)  # summary to show the user
     workspace_folders_apply_failed = Signal(str)  # error message
+    # Skills toggled in the Skills panel — same applied/failed pair, applied
+    # to the live session (see ChatSession.update_skills).
+    skills_applied = Signal(str)  # summary to show the user
+    skills_apply_failed = Signal(str)  # error message
 
     def __init__(self, loop_thread: AsyncLoopThread, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -597,6 +601,30 @@ class ChatBridge(QObject):
             self.workspace_folders_apply_failed.emit(str(exc))
             return
         self.workspace_folders_applied.emit(summary)
+
+    # --- live skills ---------------------------------------------------------
+
+    def update_skills(self, skill_names: list[str]) -> None:
+        """Hand the running session a new set of skills. Marshalled onto the
+        background loop for the same reason as ``update_workspace_folders``:
+        it rewrites ``session.messages[0]``, which a running turn reads."""
+        if self.session is None:
+            self.skills_apply_failed.emit("No chat is running yet.")
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._update_skills(list(skill_names)), self._loop_thread.loop
+        )
+
+    async def _update_skills(self, skill_names: list[str]) -> None:
+        if self.session is None:  # closed between the check above and here
+            return
+        try:
+            summary = self.session.update_skills(skill_names)
+        except Exception as exc:  # noqa: BLE001 - must never crash the loop thread
+            logger.exception("applying skills to the live session failed")
+            self.skills_apply_failed.emit(str(exc))
+            return
+        self.skills_applied.emit(summary)
 
     # --- MCP server live control (Phase 7 management dialog) ---------------
 

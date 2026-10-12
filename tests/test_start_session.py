@@ -1497,3 +1497,104 @@ async def test_updating_folders_without_a_workspace_is_refused(
             session.update_workspace_folders(source_folders=["/tmp"], target_folder=None)
     finally:
         await session.aclose()
+
+
+# --- skills changed mid-conversation (2026-10 user request) ----------------
+#
+# A paper-review workspace with separate summarization / review / related-
+# work skills: all of them pasted into the system message at once compete
+# with each other, so the GUI's Skills panel switches them on a live chat.
+
+
+def _write_skill(aida_home: Path, name: str, text: str) -> None:
+    folder = aida_home / "skills"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{name}.md").write_text(text, encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_skills_switched_mid_session_replace_the_system_message_text(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+    _write_skill(aida_home, "summarize", "Summarize in five bullets.")
+    _write_skill(aida_home, "review", "Write a referee report.")
+
+    ws = _workspace(skills=["summarize"])
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+    session, _ = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert session.skill_names == ["summarize"]
+        assert "Summarize in five bullets." in session.messages[0].content
+
+        summary = session.update_skills(["review", "not-there"])
+
+        content = session.messages[0].content
+        assert "Write a referee report." in content
+        assert "Summarize in five bullets." not in content
+        assert "You are a workspace assistant." in content  # other blocks untouched
+        assert session.skill_names == ["review", "not-there"]
+        assert "1 active: review" in summary
+        assert "not found on disk: not-there" in summary
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_skills_switched_mid_session_announce_the_net_change_once(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """Several toggles before the next message collapse into one notice
+    describing the net change; it is ephemeral like the folder notice."""
+    provider = MockProvider([MockTurn(text="ok")])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+    _write_skill(aida_home, "summarize", "Summarize in five bullets.")
+    _write_skill(aida_home, "review", "Write a referee report.")
+
+    ws = _workspace(skills=["summarize"])
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+    settings.app.auto_title_conversations = False
+    session, _ = await start_session(settings, workspace_name="use-ws")
+    try:
+        session.update_skills(["summarize", "review"])
+        session.update_skills(["review"])
+
+        async for _event in session.send("now review it"):
+            pass
+
+        sent = [m.content for m in provider.calls[-1][0]]
+        notices = [c for c in sent if "changed which skills are active" in c]
+        assert len(notices) == 1
+        assert "Active skills now: review." in notices[0]
+        assert "No longer active: summarize." in notices[0]
+        assert not any("changed which skills" in m.content for m in session.messages[1:])
+        recorded = session.recorder.store.load_messages(session.recorder.conversation_id)
+        assert not any("changed which skills" in m.content for m in recorded)
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_skills_toggled_back_to_the_original_set_send_no_notice(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+    _write_skill(aida_home, "summarize", "Summarize in five bullets.")
+    _write_skill(aida_home, "review", "Write a referee report.")
+
+    ws = _workspace(skills=["summarize"])
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": ws}))
+    session, _ = await start_session(settings, workspace_name="use-ws")
+    try:
+        session.update_skills(["summarize", "review"])
+        session.update_skills(["summarize"])
+        assert not any("skills" in notice for notice in session._pending_notices)
+    finally:
+        await session.aclose()

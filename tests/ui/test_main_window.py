@@ -579,6 +579,48 @@ def test_folder_display_shows_and_saves_command_allowlist_and_interpreter(
         window.close()
 
 
+# --- skills panel (2026-10) ---------------------------------------------
+
+
+def test_skills_panel_applies_to_the_live_chat_and_saves_to_workspace(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    skills = aida_home / "skills"
+    skills.mkdir(parents=True, exist_ok=True)
+    (skills / "summarize.md").write_text(
+        "---\nname: summarize\ndescription: Five-bullet paper summary\n---\nSummarize.\n"
+    )
+    (skills / "review.md").write_text("Write a referee report.\n")
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "papers": WorkspaceConfig(
+                name="papers", profile="mock-profile", mcp_group="none", skills=["summarize"]
+            )
+        }
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="papers"
+    )
+    try:
+        panel = window.skills_panel
+        assert panel.isEnabled()
+        assert panel.checked_skills() == ["summarize"]
+        assert panel._checkboxes["summarize"].toolTip().startswith("Five-bullet paper summary")
+
+        panel._checkboxes["review"].setChecked(True)
+        assert pump_until(
+            qapp, lambda: window.statusBar().currentMessage().startswith("Skills applied")
+        )
+        assert window.bridge.session.skill_names == ["review", "summarize"]
+        assert "Write a referee report." in window.bridge.session.messages[0].content
+
+        panel.save_to_workspace_requested.emit()
+        assert get_workspace(load_settings(), "papers").skills == ["review", "summarize"]
+    finally:
+        window.close()
+
+
 # --- quick tasks panel (B14) --------------------------------------------
 
 
