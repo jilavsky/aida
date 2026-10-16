@@ -1,4 +1,4 @@
-"""``SettingsDialog`` (PLAN.md Phase 5; U3, planning/improvement_plan_2026-08.md
+"""``SettingsDialog`` (PLAN.md Phase 5; U3, planning/completed/improvement_plan_2026-08.md
 §3): font size, records folder, log level, provider profiles *view*, and
 (U3) the remaining ``AppConfig`` fields that previously required hand-
 editing ``config.yaml``: ``default_safety_mode``, the global

@@ -313,7 +313,7 @@ def test_pyirena_check_does_not_probe_a_server_that_is_not_configured(aida_home,
     assert "NOT configured" in result.detail
 
 
-# --- context_windows (PLAN.md §1.3 / planning/context_management.md §3.5) --
+# --- context_windows (PLAN.md §1.3 / planning/completed/context_management.md §3.5) --
 
 
 def test_context_windows_check_ok_with_no_profiles(aida_home, records_home):
@@ -543,3 +543,65 @@ def test_run_checks_includes_secret_headless_check(
     results = run_checks()
 
     assert any(r.name == "secret_headless:argo" for r in results)
+
+
+def test_report_opens_with_the_aida_version(aida_home: Path, records_home: Path):
+    """`aida doctor` output is what gets pasted into a bug report, so it
+    has to say which AIDA produced it — and first."""
+    from aida import __version__
+
+    results = run_checks()
+
+    assert results[0].name == "aida_version"
+    assert results[0].ok is True
+    assert __version__ in results[0].detail
+
+
+def test_secret_check_points_a_local_endpoint_at_the_real_fix(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """A keyless local endpoint whose profile still carries a stale
+    `secret_ref` (every GUI-created local profile, before that default was
+    fixed) gets told to delete the ref rather than to invent a secret."""
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["ollama"] = ProviderProfile(
+        name="ollama",
+        kind="openai_compat",
+        model="llama3",
+        base_url="http://localhost:11434/v1",
+        secret_ref="ollama",
+    )
+    monkeypatch.delenv("AIDA_SECRET_OLLAMA", raising=False)
+    monkeypatch.setattr("aida.config.secrets.get_secret", lambda profile: None)
+
+    (result,) = doctor._check_secrets_non_interactive(settings)
+
+    assert result.ok is False
+    assert "local endpoint" in result.detail
+    assert "secret_ref" in result.detail
+
+
+def test_secret_check_does_not_mention_local_endpoints_for_a_remote_profile(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["argo"] = ProviderProfile(
+        name="argo",
+        kind="anthropic",
+        model="m",
+        base_url="https://apps.inside.anl.gov/argoapi/",
+        secret_ref="argo",
+    )
+    monkeypatch.delenv("AIDA_SECRET_ARGO", raising=False)
+    monkeypatch.setattr("aida.config.secrets.get_secret", lambda profile: None)
+
+    (result,) = doctor._check_secrets_non_interactive(settings)
+
+    assert result.ok is False
+    assert "local endpoint" not in result.detail

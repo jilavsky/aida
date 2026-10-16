@@ -2,7 +2,7 @@
 real subprocess in tests/mock_mcp_server.py (real stdio JSON-RPC — not a
 mocked ClientSession). These are the Phase 3 "discovery, execution, typed
 conversion for every content type, timeout handling, restart-after-crash"
-tests from planning/phase03_mcp.md.
+tests from planning/completed/phase03_mcp.md.
 
 Note: this deliberately does NOT use an async pytest fixture for
 start/stop. An ``AsyncExitStack`` holding anyio task groups open (as

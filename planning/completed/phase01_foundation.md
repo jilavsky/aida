@@ -24,7 +24,7 @@ later phase builds on. No agent functionality yet.
       `.env`, `*.db`, `logs/`, any `secrets*` pattern inside the repo
 - [x] README.md: one-paragraph description, install, status badge, "pre-alpha" notice
 - [x] LICENSE (MIT), basic CONTRIBUTING note
-- [ ] **Claim a PyPI name and publish 0.0.1**: attempted bare `aida` on 2026-08-18 —
+- [x] **Claim a PyPI name and publish 0.0.1**: attempted bare `aida` on 2026-08-18 —
       PyPI returned `403 ... isn't allowed to upload to project 'aida'` (automated
       typosquat/name-confusion block, not a real prior claim: the project page
       still 404s). Per the fallback this task already anticipated, switched to
@@ -32,6 +32,9 @@ later phase builds on. No agent functionality yet.
       `pyproject.toml`). **Still pending:** rebuild (`python -m build`) and
       `twine upload dist/*` under the new name — cannot be done from the build
       sandbox (no PyPI credentials there); see delivery instructions.
+      *(Done: `aida-workbench` 0.0.1 is on PyPI, followed by 0.1.0b5-b7,
+      0.1.0 and 0.2.0. Uploads now run from the `Publish to PyPI` workflow
+      on a GitHub release, not `twine` by hand.)*
 
 ### Configuration system (`aida.config`)
 
@@ -77,11 +80,12 @@ later phase builds on. No agent functionality yet.
 - [x] `aida doctor` correctly reports a working setup AND correctly flags a broken
       one (bad YAML, missing keyring entry) — verified by
       `tests/test_doctor.py::test_doctor_flags_broken_config` and a manual run.
-- [ ] CI green on all three OSes — pending first push to GitHub (cannot run GitHub
-      Actions from the build sandbox).
-- [ ] Package name secured on PyPI (`aida-workbench` — fallback recorded in
+- [x] CI green on all three OSes — pending first push to GitHub (cannot run GitHub
+      Actions from the build sandbox). *(Verified 2026-10-16: run 38281164466 — all six matrix legs (ubuntu/macos/windows x 3.11/3.13) plus the `package` job green; `Publish to PyPI` ran for real on the v0.2.0 release.)*
+- [x] Package name secured on PyPI (`aida-workbench` — fallback recorded in
       PLAN.md §2, bare `aida` auto-blocked) — pending user action (rebuild +
       `twine upload` with the corrected `pyproject.toml`).
+      *(Verified 2026-10-16: pypi.org/project/aida-workbench, latest 0.2.0.)*
 
 ## Out of scope for this phase
 

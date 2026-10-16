@@ -147,7 +147,7 @@ def schedules_path() -> Path:
     """Path to the schedule store (``~/.aida/schedules.yaml``, Phase 10) —
     one shared YAML file, unlike ``workflows_dir()``'s one-file-per-workflow
     layout, since a schedule is a short config row rather than an editable
-    document (planning/phase10_scheduling_design.md §5)."""
+    document (planning/completed/phase10_scheduling_design.md §5)."""
     return app_dir() / "schedules.yaml"
 
 

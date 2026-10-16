@@ -1,10 +1,12 @@
 # AIDA — AI Data Assistant
 
-> **Status: 0.2.0.** First public release; in daily use at APS beamlines
-> 12-ID/9-ID. Config formats and CLI commands are stable enough to build
-> on; breaking changes before 1.0 will be called out in
-> [`CHANGELOG.md`](CHANGELOG.md). Bug reports and rough edges are still
-> very much welcome — [open an issue](https://github.com/jilavsky/aida/issues).
+> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. All ten
+> phases of the original plan are delivered, the test suite is 2,449 tests
+> green on macOS, Windows and Linux, and the config formats and CLI
+> commands are stable: a breaking change to either now means a new major
+> version. Every change is dated in [`CHANGELOG.md`](CHANGELOG.md).
+> Bug reports and rough edges are very much welcome —
+> [open an issue](https://github.com/jilavsky/aida/issues).
 
 AIDA is a local scientific agent workbench: a simple, reliable desktop GUI
 (and CLI) for using AI agents in scientific work — conversation with local or
@@ -13,7 +15,8 @@ correct display of rich tool results (especially PNG plots), reading and
 producing documents, and controlled access to your own data folders.
 
 It is built for pyIrena and USAXS-instrument users and is deliberately **not**
-a general-purpose AI platform — see [`PLAN.md`](PLAN.md) §1 for the rationale.
+a general-purpose AI platform — see [`planning/DESIGN.md`](planning/DESIGN.md) §1
+for the rationale.
 
 ## What it does
 
@@ -59,10 +62,6 @@ console scripts are `aida` / `aida-gui`. Extras: `gui` (PySide6 desktop app),
 `docs` (PDF/DOCX/XLSX/PPTX reading, image handling), `ocr` (the optional
 Mistral OCR backend for figure extraction).
 
-0.1.0 was the first non-pre-release version, so a bare `pip install` resolves
-correctly — no `--pre` flag needed, and no risk of landing on the
-long-abandoned `0.0.1` snapshot the way every prior `0.1.0bN` install did.
-
 Already using pyIrena? Install both — in either order, in one environment or
 two — and wire up its MCP tools with a single command:
 
@@ -84,7 +83,7 @@ conda activate aida
 aida doctor
 ```
 
-`environment.yml` already includes the `gui` and `docs` extras. If
+`environment.yml` already includes the `gui`, `docs` and `ocr` extras. If
 `aida doctor` or `aida-gui` says PySide6 isn't installed on a headless
 Linux machine even though the install above reported no errors, see
 [GUI fails to import on headless Linux](docs/installation.md#gui-fails-to-import-on-headless-linux)
@@ -113,14 +112,21 @@ safety model, MCP servers, scripting, RAG, a GUI tour — live in
 
 ## Status and roadmap
 
-Phases 1–10 of [`PLAN.md`](PLAN.md) are implemented: config and diagnostics,
-the provider layer and agent loop, MCP with typed artifacts, persistence and
-workspaces, the PySide6 GUI, documents and the safety model, MCP management
-UI, RAG, coding/scripting, and headless automation — `aida run`, stored
-workflows, and the in-app scheduler (see [`docs/workflows.md`](docs/workflows.md)).
-Distribution (real PyPI/conda release automation) is what remains open.
-Completed per-phase checklists live in [`planning/`](planning/); what is
-still open is at the top of `PLAN.md`.
+All ten phases are implemented: config and diagnostics, the provider layer
+and agent loop, MCP with typed artifacts, persistence and workspaces, the
+PySide6 GUI, documents and the safety model, MCP management UI, RAG,
+coding/scripting, headless automation (`aida run`, stored workflows, the
+in-app scheduler — see [`docs/workflows.md`](docs/workflows.md)), and
+moving a setup between machines
+([`docs/moving-and-sharing.md`](docs/moving-and-sharing.md)).
+
+What is still open — manual acceptance checks that need a real beamline, a
+conda-forge decision, full backup/restore — is in [`TODO.md`](TODO.md).
+[`PLAN.md`](PLAN.md) holds the reasoning behind each item, and its §2 the
+things considered and deliberately not committed. What has been delivered,
+and why, is in [`planning/COMPLETED.md`](planning/COMPLETED.md); the
+per-phase checklists are archived in
+[`planning/completed/`](planning/completed/README.md).
 
 Released and unreleased changes, version by version, are in
 [`CHANGELOG.md`](CHANGELOG.md).

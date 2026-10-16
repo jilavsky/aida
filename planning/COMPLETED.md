@@ -1,17 +1,23 @@
-# AIDA — completed work (through 0.1.0b1, 2026-08-28)
+# AIDA — completed work (through 1.0.0, 2026-10-16)
 
 Everything below is **done, in the code, and covered by the test suite**
-(1319 tests green on macOS/Windows/Linux, ruff clean). It was moved out of
-`PLAN.md` when that file was cut down to open work only.
+(2426 tests green on macOS/Windows/Linux, ruff clean, CI green on all six
+matrix legs). It was moved out of `PLAN.md` when that file was cut down to
+open work only.
+
+Sections 1–11 were written as the work landed, and are dated as they were
+written; §12 brings the record up to 1.0.0. What is still open is in
+[`../TODO.md`](../TODO.md).
 
 Where to look for detail:
 
 | Document | What it holds |
 |---|---|
 | [`DESIGN.md`](DESIGN.md) | The enduring design: objective, decisions table, architecture + hard rules, config model, safety model, documents, testing philosophy, dependency policy, distribution. Formerly `PLAN.md` §§1–9. |
-| `phase01…phase09_*.md` | The original per-phase checklists, still ticked box by box. |
-| [`improvement_plan_2026-08.md`](improvement_plan_2026-08.md) | The full-codebase review of 2026-08-22 and the 35 items it produced, each with a dated "Done" note explaining what was actually changed and which tests cover it. |
-| [`local_scientific_ai_agent_proposal.md`](local_scientific_ai_agent_proposal.md) | The original pre-`PLAN.md` proposal, kept for history. |
+| [`completed/`](completed/README.md) | Every planning document for work that is delivered, indexed — the ten per-phase checklists, the design notes behind shipped features, and the closed review rounds. Moved there 2026-10-16. |
+| `completed/phase01…phase10_*.md` | The original per-phase checklists, still ticked box by box. |
+| [`improvement_plan_2026-08.md`](completed/improvement_plan_2026-08.md) | The full-codebase review of 2026-08-22 and the 35 items it produced, each with a dated "Done" note explaining what was actually changed and which tests cover it. |
+| [`local_scientific_ai_agent_proposal.md`](completed/local_scientific_ai_agent_proposal.md) | The original pre-`PLAN.md` proposal, kept for history. |
 
 ---
 
@@ -261,7 +267,7 @@ New docs: `docs/pyirena.md`, plus pointers from the README, `installation.md`,
 The failure this prevented: a long pyIrena analysis conversation dying
 halfway through, with no in-app recovery. Full design, steps, and measured
 numbers in
-[`planning/context_management.md`](context_management.md) (marked
+[`planning/completed/context_management.md`](completed/context_management.md) (marked
 implemented); user-facing docs in
 [`docs/context-and-limits.md`](../docs/context-and-limits.md).
 
@@ -391,7 +397,7 @@ Documented in
 
 `PLAN.md` §1.2 tracked Phase 10 as one item with fourteen checkboxes; this
 is what got ticked. The *shape* was decided first, in
-[`phase10_scheduling_design.md`](phase10_scheduling_design.md): four layers
+[`phase10_scheduling_design.md`](completed/phase10_scheduling_design.md): four layers
 (`run` → `workflow` → `schedule` → trigger), where only the top layer
 touches the operating system. Three conclusions from that design drove
 what was built:
@@ -489,7 +495,7 @@ chat context).
 Note for anyone extending this: these readers extract **text only**.
 Images embedded in a PDF, DOCX or PPTX are not extracted and never reach
 the model — see `PLAN.md` §2.4 and
-[`document_images.md`](document_images.md).
+[`document_images.md`](completed/document_images.md).
 
 ---
 
@@ -497,9 +503,9 @@ the model — see `PLAN.md` §2.4 and
 
 Four days of work, delivered as `PLAN.md` §1.3 plus the four phases of
 `documents_implementation.md`. The design rationale lives in
-[`multiuser_plan.md`](multiuser_plan.md),
-[`document_images.md`](document_images.md) and
-[`documents_implementation.md`](documents_implementation.md); this is the
+[`multiuser_plan.md`](completed/multiuser_plan.md),
+[`document_images.md`](completed/document_images.md) and
+[`documents_implementation.md`](completed/documents_implementation.md); this is the
 summary of what exists now.
 
 **Conversation organization — a `user` label, not authentication.** A
@@ -544,3 +550,158 @@ a scanned PDF instead of returning silently empty text (`COMPLETED.md` §10
 covers the related budget fix), and `tests/ui/conftest.py` turns any real
 modal dialog in a GUI test into an immediate named failure rather than a
 hung suite.
+
+---
+
+## 12. From 0.1.0b1 to 1.0.0 (2026-09-05 → 2026-10-16)
+
+Sections 1–11 above stop at 0.1.0b1. What follows covers the six weeks
+that turned a beta into a release: two betas, the first non-beta release
+(0.1.0, 2026-09-16), 0.2.0 (2026-10-01), and the round after it. The
+per-release detail is in [`../CHANGELOG.md`](../CHANGELOG.md); this is the
+shape of it, which the changelog's reverse-chronological entries do not
+show.
+
+Almost all of it came from *use*, not from the plan. The pattern worth
+recording: nearly every item below starts life in the changelog as a
+quoted user report — "the Stop button seems to get stuck", "I have about
+15 of them and the list is getting needlessly long", "the display in the
+Conversation column is not very helpful". A beta on a real beamline
+machine found things no phase checklist had thought to ask about, which
+is what `PLAN.md` §1.1 said a beta was for.
+
+### Portability — moving a setup between machines (Tiers 1 and 2)
+
+The one genuinely new capability in this stretch, and the only item here
+that was planned rather than reported. `aida config export` / `import`,
+File ▸ Export/Import Setup…, and `aida.portability`: profiles,
+workspaces, MCP servers, knowledge-base definitions, schedules,
+workflows, skills and prompts in one **secret-free** zip, with
+`${HOME}` / `${AIDA_HOME}` / `${CONDA_ENV:<name>}` path translation and a
+report naming what the target machine is still missing — as runnable
+commands, so re-entering a handful of keys replaces the encrypted
+secrets sidecar that was considered and rejected.
+
+Tier 2 added `--list`, `--only KIND:NAME` with transitive dependency
+closure (`aida.portability.closure`), `--map FROM=TO` prefix remapping,
+the import dialog's Contents/Paths tabs, and `--check` as a genuinely
+side-effect-free dry run — it had been creating things while claiming not
+to. Analysis in [`portability.md`](portability.md); user guide in
+[`../docs/moving-and-sharing.md`](../docs/moving-and-sharing.md). Tier 3
+(the database, artifacts and indexes) stays open.
+
+### Reach — remote MCP, and three more one-click presets
+
+- **Remote MCP servers over streamable-HTTP.** Until 0.1.0 every server
+  had to be a local subprocess. `PLAN.md` §2.7 had listed remote
+  transport as deliberately *not* done until AIDA implemented it
+  properly; this is that implementation.
+- **`aida mcp add-aievaluator` and `add-epics-mcp`** generalize the
+  `add-pyirena` pattern to the two servers
+  [`PLAN_INSTRUMENT_INTEGRATION.md`](PLAN_INSTRUMENT_INTEGRATION.md)
+  needs. The EPICS preset's write rules ship marked `TODO(verify)`
+  against the real PVs on purpose — a safety policy nobody has checked
+  against the instrument should say so in the code.
+- **An Axis camera server** (`docs/axis-camera.md`) — the work that
+  prompted §2.8's sample-holder recognition analysis.
+
+### MCP at pyIrena scale
+
+pyirena-mcp's ~110 tools stopped being a theoretical concern when a real
+session on `usaxscontrol` hit the ANL Argo gateway's 128-tool cap at a
+combined 137 (`array_above_max_length` — a proxy-side limit invisible
+when talking to a provider directly). Two curation fixes shipped:
+`aida.core.session` warns past 100 tools, and the MCP dialog's Tools tab
+groups a large server's tools into collapsible categories
+(`aida.mcp.tool_grouping`) instead of one flat scrolling list. Neither
+lowers the cap; the dispatcher-pattern fix that would belongs in
+pyirena-mcp and is analysed in [`mcp_tool_scaling.md`](mcp_tool_scaling.md).
+
+### Making a long turn legible, and stoppable
+
+- **A run of tool calls is one collapsible line** (`ToolCallGroup`), with
+  View ▸ Tool Calls to choose the display mode and the choice persisted.
+  A twenty-call analysis stopped burying the reply.
+- **Stop now stops**, and says so the instant it is pressed. The button
+  had been getting stuck; cancellation now interrupts a generation
+  promptly and the button acknowledges the press rather than looking
+  dead while the turn unwinds.
+- **`max_agent_iterations` raised from 10 to 50.** The cap counts
+  provider round-trips, not tool calls, and one round-trip can bundle
+  several — so 10 was tight enough that ordinary multi-step tasks, not
+  just long analyses, hit "iteration cap reached" mid-task.
+
+### Conversations that are findable
+
+Delivered in the round after 0.2.0, and the clearest case of a user
+report reshaping a feature. A conversation had been named after the first
+line the user typed — "can you look at the file I just put in the target
+folder and" — which is almost never a name.
+
+- **Conversations name themselves.** Once the first reply lands, the
+  model replaces the placeholder with a short name drawn from what the
+  conversation is actually about, re-checked every five turns with the
+  current title fed back and `KEEP` as the expected answer. It reuses
+  compaction's machinery exactly (`aida.core.titling` → one bare
+  `role="user"` request through the *active* provider, no tools), so
+  there is no second "utility" profile to configure and nothing here can
+  fail a turn. Renaming it by hand switches automatic naming off for that
+  conversation permanently.
+- **The name is visible while you chat** (`ConversationHeader`), with the
+  workspace, profile and user label under it.
+- **The Conversations column is two lines per entry, grouped by date** —
+  Today / Yesterday / Previous 7 days / month, title on its own line,
+  "when · workspace · user" dimmed underneath. The old single line led
+  with the timestamp, so on a narrow column the elide ate the title.
+
+### Skills as a live control
+
+Skills are pasted whole into the system message, so a paper-review
+workspace with separate summarize / review / related-work skills gave the
+model three competing playbooks at once. The right-hand **Skills** panel
+now lists every skill with a checkbox; each toggle rebuilds the system
+message immediately and the next turn carries one notice telling the
+model what changed — including that it should stop following a removed
+skill's instructions from earlier replies. Repeated toggles collapse into
+a single net notice. "Save to Workspace" keeps the selection for future
+chats; the selection itself is not stored with the conversation, so a
+resumed chat starts from the workspace's skills.
+
+### Two AIDAs on one beamline machine
+
+`aida.core.proc_lock.config_write_lock`, plus an `expected_mtime` check on
+every `save_*_config` call, turns a silently-lost concurrent config edit
+into an explicit conflict the caller can react to — without a
+single-instance lock, which would block the two-instances-on-purpose
+workflow this exists to support. The SQLite half was already covered (WAL
+plus `busy_timeout`). Schedules also gained `reuse_chat`, so a daily
+report accumulates in one conversation instead of creating a new one
+every fire.
+
+### The long tail that a beta is actually for
+
+Windows paid the most attention: a console window popping behind the Qt
+window on every `aida-gui` launch (fixed by moving to `gui-scripts`, which
+builds a windowed-subsystem stub), SSHFS-mounted drives, pyIrena MCP
+discovery, and a hang on quit after killing a running script. Linux got
+headless-login secret storage and a PySide6 import diagnosis that
+distinguishes a missing system Qt library from a wheel needing a newer
+glibc than the machine has — the latter being why the `gui` extra now
+caps PySide6 below 6.11, after 6.11's wheels broke `aida-gui` on an APS
+control machine with glibc 2.28.
+
+The rest, briefly: `edit_file` so the agent can change part of a file
+rather than rewrite it; drag-and-drop anywhere in the chat window;
+figures extracted from Word documents; copyable error banners; font-size
+changes applying to the conversation already on screen; the Configure
+menu, which took seven setup dialogs off a toolbar a beamline user never
+touches; per-workspace scripts and templates folders; conversation export
+to Markdown; and twenty-odd more text file extensions recognized.
+
+### Where that leaves 1.0
+
+Every phase implemented, 2426 tests green on three OSes, `aida-workbench`
+on PyPI with an automated publish workflow, and six weeks of real use
+behind the rough edges. The open list — manual acceptance demos that need
+a beamline, a conda-forge decision, portability Tier 3 — is in
+[`../TODO.md`](../TODO.md), and none of it is a missing feature.

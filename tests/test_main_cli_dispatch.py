@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from aida import __version__
 from aida.cli.__main__ import _COMMANDS, main
 
 
@@ -74,3 +75,36 @@ def test_dispatches_to_schedule_list(aida_home: Path, records_home: Path, capsys
     out = capsys.readouterr().out
     assert rc == 0
     assert "No schedules configured." in out
+
+
+def test_version_flag_prints_the_version(capsys):
+    """`aida --version` is the first thing a bug report needs, so both
+    spellings work and neither depends on config loading successfully."""
+    for flag in ("--version", "-V"):
+        rc = main([flag])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert out.startswith("aida ")
+        assert __version__ in out
+
+
+def test_version_flag_does_not_load_settings(monkeypatch, capsys):
+    """Guards the reason it is handled above the dispatch table: a broken
+    config.yaml must not stop you finding out which version wrote it."""
+
+    def explode() -> None:
+        raise AssertionError("load_settings() must not run for --version")
+
+    monkeypatch.setattr("aida.cli.__main__.load_settings", explode)
+    assert main(["--version"]) == 0
+    assert __version__ in capsys.readouterr().out
+
+
+def test_top_level_help_mentions_the_version_flag(capsys):
+    main([])
+    assert "--version" in capsys.readouterr().out
+
+
+def test_command_help_text_carries_no_internal_phase_numbers():
+    """Phase numbers are planning vocabulary; `aida --help` is user-facing."""
+    assert not [text for text in _COMMANDS.values() if "Phase " in text]

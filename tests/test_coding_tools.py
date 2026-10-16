@@ -320,7 +320,7 @@ async def test_run_command_bad_quoting_is_an_error_not_a_crash(tmp_path: Path):
     assert result.is_error
 
 
-# --- output size cap (planning/improvement_plan_2026-09.md §1: stdout/stderr
+# --- output size cap (planning/completed/improvement_plan_2026-09.md §1: stdout/stderr
 # went to the model uncapped, up to 256,000 bytes each) ----------------------
 
 _PRINT_N_CHARS = "import sys; sys.stdout.write('x' * {n}); sys.stdout.write('\\n')"

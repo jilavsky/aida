@@ -3,9 +3,8 @@
 All notable changes to AIDA are recorded here, newest first. The format
 loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/): `bN` marks a pre-release
-beta cycle leading up to a release (as `0.1.0b1`–`0.1.0b7` did for `0.1.0`),
-and 0.x versioning continues until 1.0 — see [`PLAN.md`](PLAN.md) for what
-1.0 requires.
+beta cycle leading up to a release (as `0.1.0b1`–`0.1.0b7` did for `0.1.0`).
+See [`TODO.md`](TODO.md) for where 1.0 stands and what is still open.
 
 This file is the terse, dated "what changed and for whom," by release. Two
 other files are easy to confuse it with: [`planning/COMPLETED.md`](planning/COMPLETED.md)
@@ -13,11 +12,33 @@ holds the fuller design rationale behind shipped work, in narrative form, not
 tied to a version number; [`planning/DESIGN.md`](planning/DESIGN.md) §2 has
 its own "Changelog" — dated amendments to the *design document itself* (a
 decision revised), unrelated to what shipped when. Entries below link to
-`COMPLETED.md` where useful; `PLAN.md` tracks what's still open.
+`COMPLETED.md` where useful; [`TODO.md`](TODO.md) tracks what's still open.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-16
+
+**AIDA is 1.0.** All ten phases of the original plan are delivered and in
+daily use at APS beamlines 12-ID/9-ID; the config formats and CLI commands
+are now stable, and a breaking change to either means a new major version.
+Nothing in this release is a new subsystem — it is the round that closed
+the last rough edges and the review that confirmed there was no missing
+feature left. What that review found, and what is still open (manual
+acceptance checks that need a real beamline, a conda-forge decision, full
+backup and restore), is in [`TODO.md`](TODO.md). The six weeks of work
+between 0.1.0b1 and here are written up in
+[`planning/COMPLETED.md`](planning/COMPLETED.md) §12.
+
 ### Added
+
+- **`aida --version`.** The first question on every bug report, and there
+  was no way to answer it from the CLI. `-V` works too, and both are
+  handled before the config is loaded, so they still answer when a broken
+  `config.yaml` is the thing you are trying to report.
+
+- **`aida doctor` says which AIDA produced the report**, as its first
+  line. The report is what gets pasted into an issue; it used to open
+  with the Python version and leave the AIDA version to be asked for.
 
 - **Skills panel in the right column.** Every skill in the skills folder
   has a checkbox; ticking or unticking applies to the running chat
@@ -51,6 +72,23 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ### Changed
 
+- **Release tags are now checked against the version in the tree.**
+  `publish.yml` refuses to build if the tag does not match
+  `pyproject.toml`'s `version`, or if that disagrees with
+  `aida.__version__` — the two are maintained by hand and nothing derived
+  one from the other. A release tagged `v1.0.0` from a tree still saying
+  `0.2.0` would have published 0.2.0 under that tag, and PyPI does not
+  allow a version to be re-uploaded. `tests/test_version_metadata.py`
+  catches the same drift locally, in a second.
+
+- **Planning documents for delivered work moved to
+  `planning/completed/`**, indexed by a README there, leaving `planning/`
+  holding only the design reference, the completed-work record, and the
+  proposals that are still live. New at the repo root: `TODO.md`, the
+  working list of what is open and what 1.0 needs. No user-facing
+  behaviour; noted because every `planning/...` path in a code comment
+  changed with it.
+
 - **The Conversations column is two lines per entry, grouped by date.**
   User report: "the display in the Conversation column is not very helpful.
   Could we make it into two lines — title first and date-time/workspace
@@ -63,6 +101,37 @@ decision revised), unrelated to what shipped when. Entries below link to
   the elide ate the title — the only part worth reading.
 
 ### Fixed
+
+- **`aida doctor` no longer reports four failures on a working install.**
+  The provider form defaulted a blank "Secret ref" field to the profile's
+  own name, so every profile created in the GUI claimed a secret — and a
+  keyless local Ollama or LM Studio endpoint never has one stored under
+  that name. Doctor's own "a profile with no secret ref needs no secret
+  and is skipped" branch was unreachable from the GUI, so a perfectly
+  healthy local setup showed one `[FAIL]` per local profile. Blank now
+  means no secret, unless a secret value was typed alongside it. Profiles
+  already saved with the old default still fail, correctly — they do
+  reference a secret that does not exist — but when the endpoint is a
+  local address the message now says that deleting the `secret_ref:` line
+  is probably the fix, rather than only offering to store a key you do
+  not have. Same bug and same fix in the embedding-profile form.
+
+- **A conversation could be renamed to "KEEP — the current title still
+  fits".** Asked whether an existing title still describes the
+  conversation, the model is told to answer with exactly `KEEP`; one that
+  explained itself instead had the explanation installed as the new
+  title, because the sentinel was compared against the whole reply. Small
+  local models do this most, and they are the ones this has to work with.
+  `KEEP` is now recognized as a leading word, with a word boundary so a
+  real title like "Keeping the sample cell at 40 C" still gets through.
+
+- **`aida --help` no longer shows internal phase numbers** ("Interactive
+  chat (Phase 2)"). Planning vocabulary, in user-facing output.
+
+- **Reloading the Skills panel could flash the old checkboxes** over the
+  new ones: the widgets were removed from the layout and queued for
+  deletion but left parented to the panel, so they kept painting until
+  the event loop caught up.
 
 - **A non-PNG figure pulled from a document no longer crashes the next
   turn with a provider 400.** `get_document_figure` hardcoded
@@ -850,7 +919,7 @@ nothing behaves as 0.1.0b3 did.
   logo counts once rather than once per page, the note is appended after
   the size budget so truncation can never drop the explanation itself, and
   an ordinary text-only document with no images gets no note at all. See
-  [`planning/document_images.md`](planning/document_images.md) for the
+  [`planning/completed/document_images.md`](planning/completed/document_images.md) for the
   richer options this is the floor of.
 
 - Reading or attaching a real document (e.g. a multi-page PDF) silently
@@ -1013,7 +1082,8 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/jilavsky/aida/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/jilavsky/aida/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jilavsky/aida/compare/v0.0.1b7...v0.1.0
 [0.1.0b7]: https://github.com/jilavsky/aida/compare/v0.1.0b6...v0.1.0b7

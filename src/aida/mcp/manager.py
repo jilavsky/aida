@@ -193,7 +193,7 @@ class McpManager:
     def skills(self) -> list[str]:
         """Union of every enabled server's ``skills:`` list, config order,
         de-duplicated — "enabling a server auto-includes those skills files
-        in the system context" (planning/phase03_mcp.md)."""
+        in the system context" (planning/completed/phase03_mcp.md)."""
         seen: list[str] = []
         for config in self._configs.values():
             for skill in config.skills:

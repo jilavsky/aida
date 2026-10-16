@@ -78,7 +78,7 @@ jobs:
       # line this project owns. Splitting the run in two roughly halves the
       # cumulative churn either half accumulates and has not reproduced the
       # crash across many repeated local runs (see
-      # planning/improvement_plan_2026-08.md's "Known issues" section for
+      # planning/completed/improvement_plan_2026-08.md's "Known issues" section for
       # the full writeup and the longer-term follow-up options).
       - name: Pytest (non-GUI)
         run: pytest -v --ignore=tests/ui

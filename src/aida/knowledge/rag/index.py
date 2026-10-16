@@ -10,7 +10,7 @@ independently, one file per knowledge base
 
 Embeddings are stored as raw little-endian float32 bytes (``struct.pack``)
 — no numpy dependency needed for storage, matching this phase's "minimal,
-no vector DB" decision (see planning/phase08_rag.md).
+no vector DB" decision (see planning/completed/phase08_rag.md).
 """
 
 from __future__ import annotations
@@ -171,7 +171,7 @@ def all_chunks(conn: sqlite3.Connection) -> list[StoredChunk]:
     rank against a query. Fine at the corpus sizes this phase targets
     (hundreds to low thousands of chunks per knowledge base); a knowledge
     base that grows far beyond that is a documented follow-up, not handled
-    here (see planning/phase08_rag.md)."""
+    here (see planning/completed/phase08_rag.md)."""
     rows = conn.execute(
         "SELECT source_path, heading, chunk_index, text, embedding FROM chunks"
     ).fetchall()

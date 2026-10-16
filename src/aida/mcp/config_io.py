@@ -1,6 +1,6 @@
 """Import an external ``mcp.json``-shaped config and merge it into AIDA's
 own ``McpConfig``, without clobbering existing servers by accident
-(planning/phase07_mcp_management.md: "Import from existing standard
+(planning/completed/phase07_mcp_management.md: "Import from existing standard
 mcp.json (paste or file-pick a Claude Desktop-style config; merge without
 clobbering)").
 

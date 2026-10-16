@@ -3,16 +3,23 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 0.2.0, reconciled 2026-10-01.** Phases 1–10's automation
-half are implemented, tested (2,000+ tests, three OSes) and in daily use.
-This file holds **only what is not done** — anything ticked here has been
-moved to `planning/COMPLETED.md`, and anything shipped is dated in
-`CHANGELOG.md`. If you find a `[x]` below, it is a bug in this file.
+**Status: 1.0.0, released 2026-10-16.** All ten phases are implemented,
+tested (2,449 tests, three OSes, CI green on all six matrix legs) and in
+daily use. This file holds **only what is not done** —
+anything ticked here has been moved to `planning/COMPLETED.md`, and
+anything shipped is dated in `CHANGELOG.md`. If you find a `[x]` below,
+it is a bug in this file.
 
+**Start at [`TODO.md`](TODO.md)** for the working list — the 1.0 readiness
+assessment, the fixes from the 2026-10-16 review, and every open item in
+one place. This file is where the *reasoning* behind each of them lives,
+and it is the only place §2 (considered, not committed) exists.
+
+- The working list, and what 1.0 needs → [`TODO.md`](TODO.md)
 - What AIDA is, and every design decision behind it → [`planning/DESIGN.md`](planning/DESIGN.md)
 - What has been delivered, with rationale → [`planning/COMPLETED.md`](planning/COMPLETED.md)
 - What shipped in which release → [`CHANGELOG.md`](CHANGELOG.md)
-- Per-phase checklists → `planning/phase01…phase10_*.md`
+- Per-phase checklists, archived → [`planning/completed/`](planning/completed/README.md)
 - User-facing setup and configuration → [`docs/`](docs/README.md)
 
 Two companion proposals live under `planning/` rather than in §1, because
@@ -28,7 +35,9 @@ from them into §1 as they are taken on:
 Code comments and docstrings that cite "PLAN.md §N" or "PLAN.md Phase N"
 refer to the sections and phase files as they were before this split — the
 numbered sections now live in `planning/DESIGN.md`, the phases in
-`planning/phase0N_*.md`. Nothing they describe has changed.
+`planning/completed/phase0N_*.md` (moved there 2026-10-16, when the 1.0
+review confirmed every phase's implementation side was done). Nothing they
+describe has changed.
 
 Two lists follow, and the distinction between them is the point:
 
@@ -50,14 +59,12 @@ gets a dated note appended there; error messages say *which* layer failed.
 
 Nothing here is speculative work; it is what a beta is for.
 
-- [ ] Publish `aida-workbench` 0.2.0 to PyPI and verify
-      `pip install "aida-workbench[gui,docs]"` → working `aida-gui` on a
-      clean macOS, Windows, and Linux machine. 0.1.0 was the first
-      non-pre-release version, so this is still early enough to be worth
-      checking that a bare `pip install aida-workbench` resolves correctly
-      instead of silently landing on the abandoned `0.0.1` snapshot — worth
-      verifying end to end rather than assuming the version-number fix is
-      enough.
+- [ ] Verify `pip install "aida-workbench[gui,docs]"` → working `aida-gui`
+      on a clean macOS, Windows, and Linux machine. *Publishing is done*
+      — 0.2.0 is on PyPI (and 1.0.0 will go the same way, through
+      `publish.yml`); what remains is the clean-machine check, including
+      that a bare `pip install aida-workbench` resolves correctly instead
+      of silently landing on the abandoned `0.0.1` snapshot.
 - [ ] First outside users installing from PyPI, with issues triaged into this
       file rather than fixed ad hoc.
 - [ ] Watch for the two things most likely to bite a new user: a provider
@@ -79,8 +86,10 @@ the in-app scheduler with its deferral policy, and `docs/workflows.md`.
 Full account in [`planning/COMPLETED.md`](planning/COMPLETED.md) §9. What
 remains is distribution, plus one deliberate deferral:
 
-- [ ] Release automation: a GitHub Actions publish workflow with the version
-      in `pyproject.toml` authoritative and tag-checked.
+*Closed 2026-10-16: release automation. `.github/workflows/publish.yml`
+has existed and run for real since v0.2.0; its tag check was genuinely
+missing and is now in place. Account in `TODO.md` §2.*
+
 - [ ] conda: keep `environment.yml` current; evaluate a conda-forge feedstock
       once PyPI releases are routine (record the decision either way).
 - [ ] *Deferred, not scheduled:* `aida schedule install/uninstall/status`
@@ -96,8 +105,11 @@ believed complete. Items verified so far — the pyirena-mcp keystone, MCP
 group switching, UC2, UC3, and live `ollama-local`/`argo-claude` profiles
 — are recorded in `planning/COMPLETED.md`.
 
-- [ ] CI green on all three OSes after the next push (phases 1, 3, 4, 6, 7, 8, 9
-      each left this box open for the same reason).
+*Closed 2026-10-16: CI green on all three OSes — run `38281164466`, all
+six matrix legs (ubuntu/macos/windows × 3.11/3.13) plus the `package`
+job, and green on the two pushes before it. The phase files that each
+left this box open for the same reason are ticked too.*
+
 - [ ] bait_mcp connects and lists its tools from AIDA (no instrument needed).
 - [ ] **UC5:** check beamline status via an AIEvaluator script plus bait_mcp
       from an AIDA workspace. See `planning/AIEVALUATOR_EPICS_MCP_SETUP.md` for the
@@ -119,14 +131,14 @@ unambiguous is done and archived in `planning/COMPLETED.md` §7; what is
 left below either needs a real UX decision, needs domain knowledge only
 the user can supply, or is a read-through rather than a mechanical edit.
 
-- [ ] **Enforce `ruff format` in CI** (external review, P3). `ruff check`
-      passes and is gated; `ruff format --check .` currently reports
-      **128 files would be reformatted, 97 already formatted**. Two commits,
-      in this order: one formatting-only pass with no other change in it
-      (so it can be added to `.git-blame-ignore-revs`), then a
-      `ruff format --check .` step next to the existing lint step in
-      `.github/workflows/ci.yml`. Doing it the other way round makes CI red
-      on main. Nothing else in the review's P3 list is still open.
+*Closed 2026-10-16: `ruff format` in CI. It was done in exactly the order
+this entry prescribed — the formatting-only pass is `70d5d0b`
+(2026-09-05, listed in `.git-blame-ignore-revs`), the
+`ruff format --check .` step sits beside the lint step in `ci.yml`, and
+the tree is clean across 254 files. The entry was simply never updated.
+Nothing else in the review's P3 list is open except the comment-hygiene
+pass below.*
+
 - [ ] **Comment hygiene pass** (external review, P3). Long historical
       "this used to be broken because…" comments are useful while a fix is
       fresh and become false as the code moves on — the review caught two
@@ -191,11 +203,13 @@ concrete asks for it.
 
 ### 2.1 Deployment and multi-user
 
-- **Per-user beamline credentials.** The identity half graduated to §1.3;
-  the *secrets* half did not. Per-user provider profiles would mean
+- **Per-user beamline credentials.** The identity half shipped (the
+  conversation "user" label — `planning/completed/multiuser_plan.md`,
+  `COMPLETED.md` §11); the *secrets* half did not. Per-user provider profiles would mean
   per-user secrets in the OS keychain of one shared login — which the
   keychain does not partition. A shared staff profile is what
-  BeamlineAdvisor effectively does today and what §1.3 assumes. Revisit
+  BeamlineAdvisor effectively does today, and what the shipped label
+  layer assumes. Revisit
   only if per-person Argo billing or auditing becomes a requirement.
 - **Credentials for browser automation.** How an automated Playwright MCP
   run could log in to a web system without the agent, the provider, or
@@ -213,9 +227,9 @@ concrete asks for it.
   conflict the caller can react to, without adding a single-instance lock
   that would block the two-instances-on-purpose beamline workflow this
   exists to support. The SQLite half was already covered (WAL +
-  `busy_timeout`, `aida.persistence.db`). §1.3 makes concurrent instances
+  `busy_timeout`, `aida.persistence.db`). The shipped user layer makes concurrent instances
   materially more likely (two people at one beamline machine); see
-  `planning/multiuser_plan.md` §6 for what else that graduation needs.
+  `planning/completed/multiuser_plan.md` §6 for what else that graduation needs.
 - **Preinstall Node/npx and offer common npx-based MCP servers** (Playwright
   and friends). Two separable pieces: `environment.yml` could pull `nodejs`
   from conda-forge so `npx` comes along, and AIDA could ship ready-to-enable
@@ -297,7 +311,7 @@ concrete asks for it.
   workspace, confirmation on upload, never in a headless run without
   explicit pre-approval, and always falling back to plain text extraction
   when unavailable. Full analysis, including what survives a chat restart
-  today, in [`planning/document_images.md`](planning/document_images.md).
+  today, in [`planning/completed/document_images.md`](planning/completed/document_images.md).
 - **RAG over past conversations** ("what did we conclude last week?").
 - **A reranking model** in retrieval, if quality plateaus.
 - **Automatic knowledge-base refresh** via a folder watcher.
@@ -523,4 +537,4 @@ the atlas; swap in the detector only if the atlas measurably falls short.
   mathematically closed; it is a known PySide/PyQt class of issue rather than
   something application code can rule out. If it recurs as the suite grows,
   the next escalation is one pytest process per `tests/ui/*.py` file. Full
-  writeup in `planning/improvement_plan_2026-08.md` §6.
+  writeup in `planning/completed/improvement_plan_2026-08.md` §6.

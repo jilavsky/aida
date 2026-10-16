@@ -771,7 +771,7 @@ async def test_blank_queued_message_is_ignored():
     assert loop.take_undelivered_messages() == []
 
 
-# --- before_round_trip hook (planning/improvement_plan_2026-09.md §2: mid-
+# --- before_round_trip hook (planning/completed/improvement_plan_2026-09.md §2: mid-
 # turn context check — _trim_context used to run only once, before the turn
 # started, with nothing re-checking history size across a long tool-calling
 # turn) -----------------------------------------------------------------

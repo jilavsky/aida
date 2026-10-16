@@ -1,4 +1,4 @@
-"""The ``user`` organization axis (planning/multiuser_plan.md).
+"""The ``user`` organization axis (planning/completed/multiuser_plan.md).
 
 Not authentication and not a security boundary — a label stamped on new
 conversations, used to filter the listing, and expandable into configured

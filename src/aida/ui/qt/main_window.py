@@ -435,14 +435,14 @@ class MainWindow(QMainWindow):
         # so it stays visible turn over turn — see _update_usage_label.
         self._usage_label = QLabel("", self)
         self.statusBar().addPermanentWidget(self._usage_label)
-        # PLAN.md §1.3 / planning/context_management.md §3.5: fullness
+        # PLAN.md §1.3 / planning/completed/context_management.md §3.5: fullness
         # ("how close to the wall am I"), a different question from the
         # ever-growing cumulative total the label above already answers —
         # a separate permanent label so the two are never confused with
         # each other, see _update_context_label.
         self._context_label = QLabel("", self)
         self.statusBar().addPermanentWidget(self._context_label)
-        # Phase 10 (planning/phase10_scheduling_design.md §7: "a failed run
+        # Phase 10 (planning/completed/phase10_scheduling_design.md §7: "a failed run
         # should be loud the next time the GUI opens — a persistent banner,
         # not a log line"). A flat QPushButton rather than a QLabel: it
         # needs to be clickable (opens the Schedules dialog, which already
@@ -550,7 +550,7 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        # PLAN.md §1.3 / planning/context_management.md §3.4: GUI parity
+        # PLAN.md §1.3 / planning/completed/context_management.md §3.4: GUI parity
         # with the CLI's /compact — summarize older turns at a natural task
         # boundary rather than only ever compacting automatically mid-turn.
         # Retained on self (it used to be a bare local) so _on_turn_started/

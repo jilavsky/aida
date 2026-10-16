@@ -142,7 +142,7 @@ def test_enter_while_busy_sends_for_the_owner_to_queue(qapp):
     assert box.text() == ""  # cleared, like any other send
 
 
-# --- planning/improvement_plan_2026-09.md §2: prompt history recall --------
+# --- planning/completed/improvement_plan_2026-09.md §2: prompt history recall --------
 
 
 def _submit(box: InputBox, text: str) -> None:

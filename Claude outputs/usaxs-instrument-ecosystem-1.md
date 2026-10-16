@@ -17,7 +17,7 @@ This draft is meant to be checked and corrected before it becomes the basis for 
 | **Sample survey** | `run_command_file` plan replays an exported `.mac` file, from any of the three columns | Igor Pro *Setup Sample Plates* (mac export, or direct-to-queue) or `matilda-sample-plates` (mac export today) | Same queue, via bait_mcp |
 | **Data reduction/calibration** | `matilda` daemon (automatic, headless) | `matilda-gui` (manual override) | — (automatic; not a per-scan judgment call) |
 | **Data analysis** | pyIrena batch/JSON scripting API | pyIrena GUI (`pyirena-gui` and tool-specific GUIs) | pyIrena MCP server, via Aida or any MCP client |
-| **Plotting** | — | Igor Pro (current production tool for publication-quality plots); Bernardyn (early alpha, growing) | — |
+| **Plotting** | `bernardyn-plot` CLI and Python API | Bernardyn 1.0 (reduced data + saved pyIrena results); Igor Pro (long-standing tool for publication-quality plots) | `bernardyn-mcp`, via Aida or any MCP client |
 
 No single row is complete without the others, and no single column has to be used exclusively — a user can survey samples in Igor Pro, run the actual scan from the command line, and ask an agent to summarize the reduced results, all in the same session.
 
@@ -67,13 +67,13 @@ pyIrena is the Python port of the 25-year-old Igor Pro Irena package, and — li
 
 - **GUI** — `pyirena-gui` (Data Selector) as the entry point, plus standalone tools for each method: Modeling (up to 10 combined populations of size distributions, Unified Fit levels, or diffraction peaks), Unified Fit (Beaucage hierarchical model), Size Distribution (MaxEnt/Regularization/TNNLS/Monte Carlo inversion), Simple Fits (13 analytical models), WAXS Peak Fit, Data Merge, Data Explorer, and an Igor `.pxp`/`.h5xp` importer for bringing legacy data in.
 - **Scripting (JSON-configured batch API)** — the same fitting/merging functions (`fit_unified`, `fit_sizes`, `fit_simple`, `fit_waxs`, `fit_modeling`, `merge_data`) are callable headlessly from Python or via JSON config files; this is exactly the mechanism Matilda's daemon uses for its automatic analysis and merging.
-- **MCP (agent) server** — `pyirena-mcp` exposes HDF5 readers, parameter aggregation/tabulation, and headless plotting as MCP tools (`pyirena_summarize_folder`, `pyirena_tabulate_parameter`, `pyirena_plot_iq`, `pyirena_read_modeling`, etc.), so an agent (Aida, Claude Desktop, Claude Code, or any other MCP client) can answer plain-language questions about analysis results directly from the data files.
+- **MCP (agent) server** — `pyirena-mcp` exposes HDF5 readers, parameter aggregation/tabulation, and headless plotting as MCP tools (`pyirena_summarize_folder`, `pyirena_tabulate_parameter`, `pyirena_plot_iq`, `pyirena_read_modeling`, etc.), so an agent (Aida, Claude Desktop, Claude Code, or any other MCP client) can answer plain-language questions about analysis results directly from the data files. Since pyIrena 1.2.0 it also drives fitting sessions and data operations (average, subtract, merge, scale, trim, rebin) through a small dispatcher (`pyirena_call`).
 
 All three surfaces read and write the same NXcanSAS/HDF5 files, so results are shareable and self-contained regardless of which interface produced them.
 
 ## 7. Plotting
 
-Publication-quality plotting of reduced and analyzed SAS data today is done mainly in **Igor Pro** — still the production tool for figures that go into papers. **Bernardyn**, a dedicated PySide6/PyQtGraph plotting workbench for SAS/diffraction curves (Guinier, Kratky, Porod, Zimm, Debye–Bueche views, 3D waterfalls/surfaces, portable `*.bernardyn.h5` graph packages, PNG/SVG/CSV/Igor-ITX export), is the intended successor, but is currently **early alpha**: it already plots reduced SAS data, and adding the ability to plot pyIrena's analysis/fit results directly is planned next. Treat Bernardyn as a future capability worth a small mention in the diagrams, not a peer of the other production tools yet.
+**Bernardyn 1.0** (released 2026-10-15) is a dedicated PySide6/PyQtGraph plotting workbench for SAS/diffraction curves, a visual companion to pyIrena: Guinier, Kratky, Porod, Zimm, Debye–Bueche views, 3D waterfalls/surfaces, graph templates, and portable `*.bernardyn.h5` graph packages (stable schema v3) with PNG/SVG/CSV/Igor-ITX export. It reads NXcanSAS/HDF5 and simple text data, and plots saved pyIrena results side by side with I(Q) — Unified Fit, size distributions, Modeling populations and residuals, WAXS peaks (requires pyIrena ≥ 1.2.0). It has a GUI, a `bernardyn-plot` CLI and Python API, and an optional `bernardyn-mcp` server, so Aida can plot too. Model fitting, reduction, and 2D-detector workflows stay out of scope. **Igor Pro** remains the long-standing tool for publication figures and works just as well.
 
 ## 8. Putting it together
 
@@ -85,5 +85,5 @@ That gives a user at the beamline — staff or visiting scientist — real freed
 
 - **Two diagrams, both needed now:** (a) a detailed technical diagram for expert/staff audiences — showing the real processes, protocols (ZMQ control/console, EPICS CA, MCP/HTTP), and the queue-server-centered control architecture; (b) a simplified, usability-focused schematic for training users — light on plumbing, clear on "here are your three ways to do X."
 - **Sample survey is prominent, not a footnote:** it's a critical, ready-to-use step for every user (mac-file replay and, in Igor Pro, direct-to-queue population), and both diagrams should show it clearly, ahead of instrument control in the natural workflow order.
-- **Bernardyn gets a small, clearly-future-labeled mention**, not equal billing with Igor Pro plotting, pyIrena, or Matilda.
+- **Bernardyn 1.0 is a released peer** of Igor Pro for plotting (updated October 2026); Aida reaches it through `bernardyn-mcp`.
 - **Safety framing:** don't depict a human-in-the-loop gate between the agent and "normal" instrument operation — queue-server plans are safe by design, so GUI and agent control are drawn as equally safe, structurally-parallel clients of the same queue. Only raw EPICS access (epics-mcp writes, staff-only, alpha) sits outside that guarantee and should be shown as a distinct, staff-scoped path.

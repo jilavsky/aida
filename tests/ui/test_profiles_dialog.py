@@ -140,7 +140,10 @@ def test_provider_profile_form_result_profile_reflects_edited_fields(qapp):
     assert profile.temperature is None  # left unchecked -> None, not 0.0
     assert profile.supports_vision is True
     assert profile.context_window == 128_000
-    assert profile.secret_ref == "local"  # defaults to the profile name
+    # No secret typed and no ref typed: a keyless local endpoint, recorded
+    # as having no secret at all rather than claiming one under its own
+    # name that `aida doctor` would then report missing.
+    assert profile.secret_ref is None
 
 
 def test_provider_profile_form_secret_ref_can_be_overridden(qapp):
@@ -148,6 +151,31 @@ def test_provider_profile_form_secret_ref_can_be_overridden(qapp):
     dialog._name_edit.setText("local")
     dialog._secret_ref_edit.setText("custom-ref")
     assert dialog.result_profile().secret_ref == "custom-ref"
+
+
+def test_provider_profile_form_blank_secret_ref_with_a_typed_secret_uses_the_name(qapp):
+    """A secret was typed but not given a name of its own — the profile's
+    name is the key `_on_add_provider` stores it under, so that is what has
+    to be recorded. Only the no-ref/no-secret combination means "keyless"."""
+    dialog = ProviderProfileFormDialog()
+    dialog._name_edit.setText("argo")
+    dialog._secret_value_edit.setText("sk-whatever")
+    assert dialog.result_profile().secret_ref == "argo"
+
+
+def test_provider_profile_form_keyless_local_endpoint_records_no_secret_ref(qapp):
+    """The regression this guards: a GUI-created local Ollama profile used
+    to get `secret_ref = <profile name>` for a secret that was never
+    stored, so `aida doctor` reported a permanent
+    `[FAIL] secret_headless:<name>` on a working install."""
+    dialog = ProviderProfileFormDialog()
+    dialog._name_edit.setText("ollama-local")
+    dialog._base_url_edit.setText("http://localhost:11434/v1")
+    dialog._model_edit.setText("llama3")
+    # `None` is what makes doctor's `_check_secrets_non_interactive` skip
+    # the profile instead of reporting a missing secret — see
+    # tests/test_doctor.py::test_secret_check_skips_profile_with_no_secret_ref.
+    assert dialog.result_profile().secret_ref is None
 
 
 def test_provider_profile_form_secret_value_blank_by_default(qapp):
@@ -186,7 +214,17 @@ def test_embedding_profile_form_result_profile(qapp):
     profile = dialog.result_profile()
     assert profile.name == "local-embed"
     assert profile.model == "nomic-embed"
-    assert profile.secret_ref == "local-embed"
+    # Same rule as the provider form: blank ref + no typed secret means a
+    # keyless endpoint (a local embedding model), not a secret named after
+    # the profile.
+    assert profile.secret_ref is None
+
+
+def test_embedding_profile_form_blank_secret_ref_with_a_typed_secret_uses_the_name(qapp):
+    dialog = EmbeddingProfileFormDialog()
+    dialog._name_edit.setText("argo-embed")
+    dialog._secret_value_edit.setText("sk-whatever")
+    assert dialog.result_profile().secret_ref == "argo-embed"
 
 
 # --- ProfilesDialog: config CRUD (no bridge needed) --------------------------

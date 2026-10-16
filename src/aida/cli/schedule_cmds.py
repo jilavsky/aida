@@ -1,6 +1,6 @@
 """``aida schedule`` — manage ``schedules.yaml`` and run the in-app
 scheduler from a terminal (Phase 10,
-planning/phase10_scheduling_design.md §6): ``watch`` is what lets a
+planning/completed/phase10_scheduling_design.md §6): ``watch`` is what lets a
 headless control machine with no GUI host the exact same scheduler loop
 the GUI runs in the background — same ``aida.core.scheduler_runtime.
 scheduler_loop`` function either way.
@@ -123,7 +123,7 @@ def cmd_remove(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     """Fire one named schedule right now, regardless of whether it's
     "due" — the quick way to check a schedule actually works without
-    waiting for its next slot (planning/phase10_scheduling_design.md §8)."""
+    waiting for its next slot (planning/completed/phase10_scheduling_design.md §8)."""
     config = load_schedules_config()
     entry = config.schedules.get(args.name)
     if entry is None:

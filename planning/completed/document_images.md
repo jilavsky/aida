@@ -80,7 +80,7 @@ the records dir:**
 
 `attachments/` is a peer of the existing `figures/` sidecar and reuses its
 `conversation_id[:8]` convention, so it nests for per-user switching later
-(`planning/multiuser_plan.md`) exactly as the rest of the records dir does,
+(`planning/completed/multiuser_plan.md`) exactly as the rest of the records dir does,
 and `delete_conversation` extends to it in three lines.
 
 **The model gets text plus a figure index, not the figures:**

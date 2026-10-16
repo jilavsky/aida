@@ -173,7 +173,7 @@ class RetrievalPerformed:
     knowledge base(s) (Phase 8) retrieved passages for this turn's
     question, right before they're injected into the model's context —
     "event carries retrieval info so the GUI can show 'used these
-    passages'" (planning/phase08_rag.md). Never emitted for a workspace
+    passages'" (planning/completed/phase08_rag.md). Never emitted for a workspace
     with no knowledge bases configured.
 
     ``passages_by_kb`` maps knowledge base name to a list of plain dicts

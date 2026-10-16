@@ -5,4 +5,8 @@ dependencies:
   - python=3.11
   - pip
   - pip:
-      - -e .[gui,docs,dev]
+      # Matches what CI installs, `ocr` included: it is only httpx, which
+      # the openai/anthropic SDKs already pull in, so adding it costs
+      # nothing and keeps the documented conda path exercising the same
+      # optional-import branches CI does.
+      - -e .[gui,docs,ocr,dev]

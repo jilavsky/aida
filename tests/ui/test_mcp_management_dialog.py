@@ -172,7 +172,7 @@ def test_edit_server_via_dialog_action(qapp, aida_home: Path):
     assert load_mcp_config(aida_home).servers["pyirena"].command == "/new"
 
 
-# --- per-server call timeout override (planning/improvement_plan_2026-09.md
+# --- per-server call timeout override (planning/completed/improvement_plan_2026-09.md
 # §1: McpServerHandle.DEFAULT_CALL_TIMEOUT_SECONDS was hard-coded to 60s with
 # no way to raise it for a server whose tools legitimately run long) --------
 

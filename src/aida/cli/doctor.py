@@ -28,6 +28,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from aida.cli._gui_diagnosis import diagnose_pyside6_import_error
 from aida.config import paths
@@ -43,6 +44,21 @@ class CheckResult:
     name: str
     ok: bool
     detail: str
+
+
+def _check_aida_version() -> CheckResult:
+    """The first line of the report, and never a failure.
+
+    `aida doctor` output is what gets pasted into a bug report, and until
+    1.0 it opened with the Python version and never said which AIDA
+    produced it — leaving every report to begin by asking. Reported from
+    the running import (``aida.__version__``), not from installed package
+    metadata, so an editable checkout shows the version of the code that
+    actually ran.
+    """
+    from aida import __version__
+
+    return CheckResult("aida_version", True, f"AIDA {__version__}")
 
 
 def _check_python_version() -> CheckResult:
@@ -116,6 +132,19 @@ def _check_gui() -> CheckResult:
     return CheckResult("gui", True, "PySide6 importable — aida-gui available")
 
 
+#: Hosts whose endpoints conventionally take no API key at all (Ollama, LM
+#: Studio, llama.cpp). Used only to *word* a failing secret check — never
+#: to skip one, since a local proxy may well be keyed.
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1")
+
+
+def _looks_like_a_local_endpoint(base_url: str | None) -> bool:
+    if not base_url:
+        return False
+    host = urlparse(base_url).hostname
+    return host is not None and host.lower() in _LOOPBACK_HOSTS
+
+
 def _check_secrets_non_interactive(settings: Settings | None) -> list[CheckResult]:
     """Phase 10: can each profile's secret actually be read from an
     unattended process (``aida run``, a schedule)?
@@ -129,7 +158,7 @@ def _check_secrets_non_interactive(settings: Settings | None) -> list[CheckResul
     reads it, a Windows Credential Manager entry is unreachable from a task
     configured to run while logged out, and Linux's Secret Service needs an
     unlocked session keyring a cron job outside a graphical session may not
-    have (planning/phase10_scheduling_design.md §3.2). This check cannot
+    have (planning/completed/phase10_scheduling_design.md §3.2). This check cannot
     detect "would hang on a keychain prompt" without actually triggering
     one, which ``aida doctor`` must never risk doing — so it reports
     "reachable via the OS keychain" as informational, not a guarantee, and
@@ -165,14 +194,25 @@ def _check_secrets_non_interactive(settings: Settings | None) -> list[CheckResul
                 )
             )
         else:
-            results.append(
-                CheckResult(
-                    f"secret_headless:{profile.name}",
-                    False,
-                    f"no secret found for {profile.secret_ref!r} — set it with `aida config secret set "
-                    f"{profile.secret_ref}` or export ${var_name}",
-                )
+            detail = (
+                f"no secret found for {profile.secret_ref!r} — set it with `aida config secret set "
+                f"{profile.secret_ref}` or export ${var_name}"
             )
+            if _looks_like_a_local_endpoint(profile.base_url):
+                # Overwhelmingly the benign case, and it used to read as a
+                # broken install: profiles created in the GUI before this
+                # was fixed got `secret_ref` defaulted to their own name
+                # even when nothing was ever stored under it, so a working
+                # Ollama setup reported one FAIL per local profile. New
+                # profiles record no ref at all; existing ones need the
+                # line deleted once, which is what this says.
+                detail += (
+                    f" — or, since {profile.base_url} is a local endpoint that most likely needs "
+                    f"no key, delete this profile's `secret_ref:` line from providers.yaml "
+                    f"(blank the Secret ref field in Configure -> Providers...) and this check "
+                    f"will skip it"
+                )
+            results.append(CheckResult(f"secret_headless:{profile.name}", False, detail))
     return results
 
 
@@ -389,7 +429,7 @@ def _check_pyirena_mcp(settings: Settings | None) -> CheckResult:
 
 
 def _check_context_windows(settings: Settings | None) -> CheckResult:
-    """PLAN.md §1.3 / planning/context_management.md §3.5: a profile with
+    """PLAN.md §1.3 / planning/completed/context_management.md §3.5: a profile with
     no ``context_window`` set falls back to the global
     ``AppConfig.max_context_tokens`` — fine for most models, but the one
     combination this exists to catch is a real window *smaller* than that
@@ -481,7 +521,7 @@ def _check_max_tokens_vs_context_window(settings: Settings | None) -> CheckResul
 
 
 def run_checks() -> list[CheckResult]:
-    results: list[CheckResult] = [_check_python_version()]
+    results: list[CheckResult] = [_check_aida_version(), _check_python_version()]
     settings, config_result = _load_settings_safely()
     results.append(config_result)
     results.append(_check_writable("app_dir", paths.app_dir()))

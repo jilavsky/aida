@@ -84,11 +84,25 @@ Deliberate changes and additions:
 | 11 | Name | "scientific-agent" placeholder | **AIDA — AI Data Assistant**; repo `jilavsky/Aida`, package `aida`. |
 | 12 | Agent engine | Own loop (implied) | **Confirmed: own thin loop, no agent framework.** The `openai` + `anthropic` SDKs are the only LLM dependencies. Frameworks (LangChain, pydantic-ai...) would reintroduce exactly the opaque-abstraction problem AIDA exists to escape. |
 
-Deferred/parked (see `planning/phase_future.md`): voice STT/TTS, per-user beamline
+Deferred/parked (see `planning/completed/phase_future.md`): voice STT/TTS, per-user beamline
 credentials, external-trigger report generation, remote (HTTP) MCP servers,
 alternative web frontend.
 
 ### Changelog
+
+- **2026-10-16** — §3's repository-structure listing refreshed. It had
+  drifted: it named `core/conversation.py` and `core/permissions.py`
+  (neither exists — the agent loop lives in `session.py`, permissions in
+  `confirmation.py` and `workspace/safety.py`), `persistence/database.py`
+  (it is `db.py`), four `ui/qt` modules under names they never shipped
+  with, and a `rag` extra that was never declared, while omitting the
+  whole `portability/` package. No decision changed; the map was simply
+  stale, and a stale map in the document `CONTRIBUTING.md` points
+  newcomers at costs more than it saves. Also: `planning/` now holds
+  `DESIGN.md`, `COMPLETED.md` and the still-live proposals, with the
+  per-phase checklists and delivered design notes archived under
+  `planning/completed/`, and `TODO.md` at the repo root is the working
+  list of what is open.
 
 - **2026-08-18** — Row 11 (Name): the bare PyPI name `aida` returned
   `403 ... isn't allowed to upload to project 'aida'` on the first real upload
@@ -173,31 +187,50 @@ user message → build context (system prompt + skills + retrieved docs
 
 ### Repository structure
 
+Refreshed 2026-10-16 against the tree as it actually is (see §2's changelog
+entry for that date — the previous listing had drifted far enough to
+mislead). Only the modules worth naming are listed.
+
 ```text
 Aida/
-├── PLAN.md                      # this file
-├── planning/                    # per-phase checklists (phase01...phase10, future)
-├── pyproject.toml               # package `aida`, extras: gui, rag, docs, dev
+├── PLAN.md                      # open work, and §2's "considered, not committed"
+├── TODO.md                      # the working list: 1.0 readiness and what is left
+├── CHANGELOG.md                 # what shipped in which release
+├── planning/                    # DESIGN.md (this file), COMPLETED.md, live proposals
+│   └── completed/               # the ten phase checklists and delivered design notes
+├── pyproject.toml               # distribution `aida-workbench`, extras: gui, docs, ocr, dev
 ├── environment.yml              # conda env (aida)
 ├── src/aida/
-│   ├── core/                    # agent.py, conversation.py, events.py, context.py,
-│   │                            # permissions.py, workflows.py
-│   ├── providers/               # base.py, openai_compat.py, anthropic_.py,
-│   │                            # embeddings_base.py, profiles.py
-│   ├── mcp/                     # manager.py, server.py, groups.py, results.py, config.py
-│   ├── workspace/               # workspace.py, files.py, search.py, safety.py
-│   ├── documents/               # readers (pdf/docx/xlsx/pptx/md/txt/code),
-│   │                            # writers (md_obsidian.py, docx.py ...)
-│   ├── knowledge/               # skills.py, rag/ (index, extraction, retrieval)
-│   ├── artifacts/               # base.py, image.py, file.py, table.py, store.py
-│   ├── persistence/             # database.py, records.py, cleanup.py
-│   ├── config/                  # settings.py, secrets.py, paths.py
-│   ├── coding/                  # templates.py, runner.py (subprocess + timeout)
-│   ├── cli/                     # chat.py, run.py, doctor.py, config_cmds.py
-│   └── ui/qt/                   # _qt.py, main_window.py, chat_panel.py,
-│                                # workspace_bar.py, mcp_panel.py, settings_dialog.py,
-│                                # code_panel.py, conversations_panel.py
-├── skills/                      # example/starter skills shipped as *samples* only
+│   ├── core/                    # agent.py, session.py, context.py, events.py,
+│   │                            # tools.py, confirmation.py, cost.py, titling.py,
+│   │                            # workflows.py, scheduling.py, scheduler_runtime.py,
+│   │                            # headless.py, proc_lock.py
+│   ├── providers/               # base.py, openai_compat.py, anthropic_.py, vision.py,
+│   │                            # embeddings_base.py, openai_compat_embeddings.py,
+│   │                            # profiles.py, mock*.py
+│   ├── mcp/                     # manager.py, server.py, groups.py, results.py,
+│   │                            # config_io.py, tool_grouping.py, argument_coercion.py,
+│   │                            # env_discovery.py, {pyirena,aievaluator,epics_mcp}_setup.py
+│   ├── workspace/               # workspaces.py, files.py, safety.py, web.py,
+│   │                            # command_allowlist.py
+│   ├── documents/               # readers.py, figures.py, figure_tools.py,
+│   │                            # attachments.py, tools.py,
+│   │                            # writers/ (md_obsidian.py, docx_writer.py),
+│   │                            # ocr/ (mistral.py — optional)
+│   ├── knowledge/rag/           # ingest.py, chunking.py, index.py, retrieval.py
+│   ├── artifacts/               # base.py, store.py, policy.py
+│   ├── persistence/             # db.py, store.py, recorder.py, records.py, cleanup.py
+│   ├── portability/             # bundle.py, closure.py, contents.py, paths_map.py,
+│   │                            # path_issues.py, report.py
+│   ├── config/                  # settings.py, secrets.py, paths.py, users.py,
+│   │                            # logging_setup.py
+│   ├── coding/                  # templates.py, runner.py (subprocess + timeout), tools.py
+│   ├── cli/                     # __main__.py, chat.py, run.py, doctor.py, and one
+│   │                            # module per subcommand (mcp_cmds, kb_cmds, ...)
+│   └── ui/qt/                   # _qt.py (the only place PySide6 is imported),
+│                                # app.py, main_window.py, bridge.py, chat_panel.py,
+│                                # selectors.py, the *_dialog.py / *_panel.py widgets
+├── skills/                      # example/starter skills, also packaged into the wheel
 ├── examples/                    # scripted usage of the core (no GUI)
 └── tests/                       # incl. contract tests for layering + _qt + events
 ```
@@ -376,7 +409,7 @@ demonstrated need.
 | Markdown render (GUI) | Qt rich text first; add a md lib only if needed | |
 | PDF read | `pymupdf` (extra: `docs`) | BeamlineAdvisor precedent |
 | DOCX/XLSX/PPTX | `python-docx`, `openpyxl`, `python-pptx` (extra: `docs`) | read + docx write |
-| RAG (Phase 8) | **Decided:** plain SQLite (own schema, own file per knowledge base) + pure-Python cosine similarity — no vector DB. Realistic corpora here (instrument docs, one Obsidian vault) are hundreds to low thousands of chunks; brute-force ranking is tens of milliseconds at that scale, so `sqlite-vec`/ChromaDB add a second persistence engine for no measured benefit. See `planning/phase08_rag.md`. | LlamaIndex only if the minimal path proves insufficient at real corpus sizes |
+| RAG (Phase 8) | **Decided:** plain SQLite (own schema, own file per knowledge base) + pure-Python cosine similarity — no vector DB. Realistic corpora here (instrument docs, one Obsidian vault) are hundreds to low thousands of chunks; brute-force ranking is tens of milliseconds at that scale, so `sqlite-vec`/ChromaDB add a second persistence engine for no measured benefit. See `planning/completed/phase08_rag.md`. | LlamaIndex only if the minimal path proves insufficient at real corpus sizes |
 | Code editor (Phase 9) | Qt plain-text editor + syntax highlighting; consider `QScintilla` only if needed | |
 
 pyIrena is **not** an import dependency — AIDA talks to it only through

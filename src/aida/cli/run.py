@@ -1,5 +1,5 @@
 """``aida run`` — headless execution of a single agent turn (Phase 10,
-planning/phase10_scheduling_design.md §3): the layer everything else in
+planning/completed/phase10_scheduling_design.md §3): the layer everything else in
 this phase is built on. No stored workflow, no schedule — one prompt, one
 workspace, one turn, an exit code a shell script can branch on.
 

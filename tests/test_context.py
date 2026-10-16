@@ -474,7 +474,7 @@ def test_repair_leaves_a_healthy_history_alone():
     assert repair_tool_call_pairing(messages) == messages
 
 
-# --- PLAN.md §1.3 / planning/context_management.md: counting what is
+# --- PLAN.md §1.3 / planning/completed/context_management.md: counting what is
 # actually sent (tool schemas, dense tool/JSON content, images) -------------
 
 

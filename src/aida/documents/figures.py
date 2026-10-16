@@ -23,7 +23,7 @@ single-column documents and much less so on the two-column layouts most
 journals use, where "the text block below this image" is regularly the
 neighbouring column. Every entry therefore carries a ``confidence``, and a
 low-confidence index says so in what the model reads, so a wrong guess can
-be recognised as a guess. `planning/document_images.md` §4 records why an
+be recognised as a guess. `planning/completed/document_images.md` §4 records why an
 OCR/layout backend would raise this ceiling.
 """
 

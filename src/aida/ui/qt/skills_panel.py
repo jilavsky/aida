@@ -83,6 +83,13 @@ class SkillsPanel(QGroupBox):
             item = self._grid.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # Unparent before deleting: `takeAt` only removes the widget
+                # from the layout, so until `deleteLater` is serviced it is
+                # still a child of this panel and still painted at its old
+                # geometry — a Reload with a changed skill list flashes the
+                # stale checkboxes over the new ones. Clearing the parent
+                # hides it in the same event-loop turn the rebuild happens in.
+                widget.setParent(None)
                 widget.deleteLater()
         self._checkboxes.clear()
 

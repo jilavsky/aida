@@ -134,9 +134,9 @@ Direct-context skills files remain the tool for small, fast-changing docs
       backends needs real network access, out of sandbox scope
 - [x] Retrieval row in the GUI shows the actual passages used (`RetrievalRow`,
       `test_retrieval_performed_renders_a_retrieval_row`)
-- [ ] CI green (fixture corpus only, no network) — this environment has no CI
+- [x] CI green (fixture corpus only, no network) — this environment has no CI
       pipeline to report on directly; the fixture-corpus/fake-embedder test suite
-      itself is green (`pytest -q`: 769 passed, `ruff check .` clean at delivery)
+      itself is green (`pytest -q`: 769 passed, `ruff check .` clean at delivery) *(Verified 2026-10-16: run 38281164466 — all six matrix legs (ubuntu/macos/windows x 3.11/3.13) plus the `package` job green; `Publish to PyPI` ran for real on the v0.2.0 release.)*
 
 ## Out of scope for this phase
 

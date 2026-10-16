@@ -3,7 +3,7 @@
 > **Automation half shipped 2026-09-03** on branch `phase10-in-app-scheduler`
 > (merged to `main`). Distribution is still open. Tracked from `PLAN.md`
 > §1.2; this file stays the detailed checklist. User-facing usage docs are
-> in [`docs/workflows.md`](../docs/workflows.md).
+> in [`docs/workflows.md`](../../docs/workflows.md).
 >
 > **2026-09-02:** the automation half of this phase got a decision
 > document — [`phase10_scheduling_design.md`](phase10_scheduling_design.md).
@@ -76,13 +76,18 @@ need 5.
 
 ### Distribution
 
-- [ ] PyPI: real release automation (GitHub Actions publish workflow, version in
+- [x] PyPI: real release automation (GitHub Actions publish workflow, version in
       `pyproject.toml` authoritative + tag check — pyIrena's proven pattern)
+      *(Done: `.github/workflows/publish.yml`, trusted publishing on a
+      GitHub release. It ran for real on v0.2.0. The tag check it was
+      specified with was missing until 2026-10-16 and is now in place,
+      alongside a pyproject-vs-`aida.__version__` check and
+      `tests/test_version_metadata.py`.)*
 - [ ] `pip install aida[gui]` → working `aida-gui` verified on clean macOS, Windows,
       Linux machines
 - [ ] conda: environment.yml maintained; evaluate conda-forge feedstock (record
       decision)
-- [x] Docs pass, workflow guide part: [`docs/workflows.md`](../docs/workflows.md)
+- [x] Docs pass, workflow guide part: [`docs/workflows.md`](../../docs/workflows.md)
       (README quickstart and the rest of the config-reference docs already
       existed pre-Phase-10 — see `docs/README.md`)
 - [ ] Investigate (timeboxed, decision recorded, not committed): PyInstaller/
@@ -119,7 +124,7 @@ need 5.
       in `docs/workflows.md`; the in-app half is verified)
 - [ ] Fresh-machine install test passes on all three OSes from PyPI
       (distribution — not part of the automation work just shipped)
-- [ ] CI green, publish workflow dry-run verified
+- [x] CI green, publish workflow dry-run verified *(Verified 2026-10-16: run 38281164466 — all six matrix legs (ubuntu/macos/windows x 3.11/3.13) plus the `package` job green; `Publish to PyPI` ran for real on the v0.2.0 release.)*
 
 ## Out of scope for this phase
 

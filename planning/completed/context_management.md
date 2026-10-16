@@ -3,7 +3,7 @@
 **Status: implemented (2026-08-28).** Written 2026-08-28 after an audit of
 what AIDA did before this; implemented the same day. Tracked from `PLAN.md`
 §1.3 (now checked off there). User-facing docs:
-[`docs/context-and-limits.md`](../docs/context-and-limits.md). The design
+[`docs/context-and-limits.md`](../../docs/context-and-limits.md). The design
 below is left as-written (it described the plan accurately and the
 implementation followed it) — only this status line changed.
 

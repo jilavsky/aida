@@ -5,7 +5,7 @@ real mock-mcp subprocess for the tool-call+image case (same as
 test_keystone_image_roundtrip.py / test_phase4_acceptance.py), and only the
 LLM itself scripted (MockProvider). What's NOT automated here — an actual
 visual/manual smoke check on macOS/Windows, a real pyirena-mcp server, a
-real Ollama model — is called out in planning/phase05_gui.md instead of
+real Ollama model — is called out in planning/completed/phase05_gui.md instead of
 silently skipped.
 """
 
@@ -81,7 +81,7 @@ def _make_window(qapp, loop_thread, settings, monkeypatch, script, **start_kwarg
     # _on_session_ready/_on_startup_failed set as their last step, pins the
     # wait to "the handler actually ran". This was a real, timing-dependent
     # flake caught by running this file after other tests in the same
-    # process (see planning/phase05_gui.md's notes) — not just a theoretical
+    # process (see planning/completed/phase05_gui.md's notes) — not just a theoretical
     # race.
     assert pump_until(
         qapp,
@@ -2257,7 +2257,7 @@ def test_context_trimmed_summarized_event_shows_compacted_wording(
 def test_context_label_shows_fullness_after_session_ready(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
 ):
-    """planning/context_management.md §3.5: a separate "Context: Nk / Mk
+    """planning/completed/context_management.md §3.5: a separate "Context: Nk / Mk
     (P%)" label, distinct from the ever-growing "Session total:" one."""
     settings = _settings_with_profile()
     window = _make_window(
@@ -2468,7 +2468,7 @@ def test_send_with_image_attachment_records_an_image_ref_on_the_sent_message(
 def test_send_with_image_attachment_and_vision_disabled_warns_in_status_bar(
     qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
 ):
-    """planning/improvement_plan_2026-09.md §1: attaching an image to a
+    """planning/completed/improvement_plan_2026-09.md §1: attaching an image to a
     profile with supports_vision=False (the default — see
     _settings_with_profile above) used to silently send only the text
     placeholder, with nothing in the GUI explaining why the model then says
@@ -2945,7 +2945,7 @@ def test_profile_selector_and_compaction_are_disabled_while_a_turn_runs(
         window.close()
 
 
-# --- planning/improvement_plan_2026-09.md §2: keyboard shortcuts -----------
+# --- planning/completed/improvement_plan_2026-09.md §2: keyboard shortcuts -----------
 
 
 def test_new_chat_settings_and_compact_actions_have_the_expected_shortcuts(
@@ -3629,7 +3629,7 @@ def test_switching_user_filters_the_sidebar_to_that_user(
         window.close()
 
 
-# --- planning/improvement_plan_2026-09.md §2: search inside conversations,
+# --- planning/completed/improvement_plan_2026-09.md §2: search inside conversations,
 # not just titles -------------------------------------------------------
 
 

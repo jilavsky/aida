@@ -1,4 +1,4 @@
-"""``KnowledgeManagementDialog`` (Phase 8, planning/phase08_rag.md): add/
+"""``KnowledgeManagementDialog`` (Phase 8, planning/completed/phase08_rag.md): add/
 edit/remove RAG knowledge bases and rebuild/update their indexes, entirely
 from the GUI, no manual ``knowledge.yaml`` editing.
 

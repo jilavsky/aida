@@ -1,5 +1,5 @@
 """``ScheduleManagementDialog`` (Phase 10,
-planning/phase10_scheduling_design.md §6): add/edit/enable/disable/remove
+planning/completed/phase10_scheduling_design.md §6): add/edit/enable/disable/remove
 schedules (``schedules.yaml``) and fire one right now, entirely from the
 GUI.
 

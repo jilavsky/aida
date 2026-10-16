@@ -40,6 +40,15 @@ TITLE_MAX_CHARS = 60
 #: and never itself accepted as a title.
 KEEP_SENTINEL = "KEEP"
 
+#: A model told to "answer with exactly KEEP" often answers "KEEP — the
+#: current title still fits", which an equality test reads as a new title
+#: and installs verbatim. Small local models do this most, and they are
+#: the ones AIDA has to work with. Matching the sentinel as a *leading
+#: word* catches the whole family; requiring a word boundary keeps a real
+#: title that merely starts with those letters ("Keeping the sample cell
+#: at 40 C") from being swallowed as a KEEP.
+_KEEP_RE = re.compile(rf"^{KEEP_SENTINEL}\b\s*[\s:.,;—–-]*", re.IGNORECASE)
+
 #: How much of the conversation the titling request carries. Generous
 #: enough to cover a real exchange, small enough that this stays a cheap
 #: call on a local model — it runs once per conversation plus once every
@@ -215,7 +224,7 @@ def clean_title(raw: str, *, max_chars: int = TITLE_MAX_CHARS) -> str | None:
     title = _strip_wrappers(title)
     if not title:
         return None
-    if title.strip().upper() == KEEP_SENTINEL:
+    if _KEEP_RE.match(title.strip()):
         return None
     return _truncate(title, max_chars)
 

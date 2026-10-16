@@ -1,5 +1,5 @@
 """A small cross-process, non-blocking advisory lock over
-``~/.aida/scheduler.lock`` (planning/phase10_scheduling_design.md §7): at
+``~/.aida/scheduler.lock`` (planning/completed/phase10_scheduling_design.md §7): at
 most one process's scheduler loop may actually execute a due run at a time,
 even when a GUI instance and an ``aida schedule watch`` CLI instance are
 both pointed at the same ``~/.aida``.

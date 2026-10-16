@@ -11,7 +11,7 @@ build-backend = "hatchling.build"
 # documented fallback; `pip install aida-workbench[gui]` still gives you
 # `import aida` and the `aida` / `aida-gui` console scripts.
 name = "aida-workbench"
-version = "0.2.0"
+version = "1.0.0"
 description = "AIDA — AI Data Assistant: a local scientific agent workbench."
 readme = "README.md"
 license = { text = "MIT" }
@@ -23,6 +23,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Physics",
     "Topic :: Scientific/Engineering :: Chemistry",
@@ -110,6 +111,16 @@ packages = ["src/aida"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+# `Claude outputs/` holds the scripts that draw the diagrams used in talks
+# and in docs/figures, not package code — nothing imports them and nothing
+# ships them. They are written as layout tables: one line per box, columns
+# lined up so the source reads like the picture it produces. `ruff format`
+# explodes each of those rows into eight lines and destroys exactly the
+# property that makes them editable. Same argument as the Markdown
+# exclusion below, for the same reason: these files are laid out for a
+# human reading them, and the formatter cannot know that.
+exclude = ["Claude outputs"]
 
 [tool.ruff.format]
 # ruff >= 0.16 formats Python code blocks inside Markdown when a .md file is

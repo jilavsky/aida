@@ -134,9 +134,9 @@ image object, not garbled text. Plus MCP groups and per-server skills attachment
       requires a real model. Group resolution itself (`resolve_group`) and the
       resulting tool-set change are both unit-tested; only the "ask a real
       model" step needs a live endpoint.
-- [ ] CI green — **needs you**: this sandbox can't push to GitHub or observe
+- [x] CI green — **needs you**: this sandbox can't push to GitHub or observe
       Actions runs (see PLAN.md's standing note on this). `ruff check` and the
-      full `pytest` suite (162 tests) are clean here; push and confirm.
+      full `pytest` suite (162 tests) are clean here; push and confirm. *(Verified 2026-10-16: run 38281164466 — all six matrix legs (ubuntu/macos/windows x 3.11/3.13) plus the `package` job green; `Publish to PyPI` ran for real on the v0.2.0 release.)*
 
 ## Out of scope for this phase
 

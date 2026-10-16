@@ -1,5 +1,5 @@
 """``aida mcp`` — manage MCP servers, groups, and per-tool permissions
-without hand-editing ``mcp.json`` (Phase 7, planning/phase07_mcp_management.md).
+without hand-editing ``mcp.json`` (Phase 7, planning/completed/phase07_mcp_management.md).
 
 Mirrors ``aida.cli.workspace_cmds``'s exact pattern: each subcommand handler
 loads settings, mutates, saves, prints a plain result, and returns 0/1 —

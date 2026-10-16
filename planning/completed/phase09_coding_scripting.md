@@ -117,8 +117,8 @@ confirm).
       the "Decided" note above); manual verification needs a real search MCP
       server/API key, same "real external service, out of sandbox scope" limit
       every prior phase's real-provider items carry
-- [ ] CI green — pending the user's next Windows/Linux CI run, same as every
-      other change this session
+- [x] CI green — pending the user's next Windows/Linux CI run, same as every
+      other change this session *(Verified 2026-10-16: run 38281164466 — all six matrix legs (ubuntu/macos/windows x 3.11/3.13) plus the `package` job green; `Publish to PyPI` ran for real on the v0.2.0 release.)*
 
 ## Out of scope for this phase
 

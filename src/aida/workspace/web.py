@@ -9,7 +9,7 @@ hatch describes, with zero new AIDA dependency or secret-handling code.
 ``McpServerConfig.disabled_tools``/``confirm_tools`` already give per-tool
 visibility/confirmation, and a workspace's ``mcp_group`` already gives
 "enable per workspace" — no new config surface needed for that half of the
-phase file's "web search" task. See ``planning/phase09_coding_scripting.md``.
+phase file's "web search" task. See ``planning/completed/phase09_coding_scripting.md``.
 
 ``fetch_url`` always requires confirmation — no folder concept applies to a
 URL, and PLAN.md §5's safety model already names "anything that sends local

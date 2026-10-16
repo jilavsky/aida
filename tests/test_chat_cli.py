@@ -563,7 +563,7 @@ async def test_repl_max_iterations_command_rejects_non_numeric_input(
     assert "Not a number" in capsys.readouterr().out
 
 
-# --- /compact (PLAN.md §1.3 / planning/context_management.md §3.4) --------
+# --- /compact (PLAN.md §1.3 / planning/completed/context_management.md §3.4) --------
 
 
 @pytest.mark.asyncio

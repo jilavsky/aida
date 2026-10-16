@@ -643,7 +643,7 @@ async def test_recent_calls_content_preview_has_no_raw_image_bytes(tmp_path):
         await manager.aclose()
 
 
-# --- MCP result size cap (planning/improvement_plan_2026-09.md §1: results
+# --- MCP result size cap (planning/completed/improvement_plan_2026-09.md §1: results
 # were silently cut at aida.artifacts.policy.DEFAULT_MAX_CHARS == 4000, with
 # nothing keeping the rest) ---------------------------------------------
 

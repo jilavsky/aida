@@ -3,6 +3,8 @@ conversation, and making the model's answer fit in a sidebar row."""
 
 from __future__ import annotations
 
+import pytest
+
 from aida.core.titling import (
     KEEP_SENTINEL,
     TITLE_MAX_CHARS,
@@ -162,3 +164,38 @@ def test_request_respects_the_excerpt_cap():
     request = title_request_messages(messages, max_chars=500)
     # The instruction itself is fixed-size; only the excerpt is capped.
     assert len(request[0].content) < 3_000
+
+
+# --- KEEP recognition when the model does not answer with exactly KEEP -------
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "KEEP",
+        "keep",
+        "  KEEP  ",
+        "KEEP — the current title still fits",
+        "KEEP: still accurate",
+        "KEEP, the subject has not moved on",
+        "Keep - no change needed",
+    ],
+)
+def test_clean_title_treats_a_chatty_keep_as_keep(reply):
+    """Told to "answer with exactly KEEP", models routinely explain
+    themselves anyway. An equality test read that as a new title and
+    renamed the conversation to "KEEP — the current title still fits"."""
+    assert clean_title(reply) is None
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Keeping the sample cell at 40 C",
+        "KEEPSAKE analysis",
+        "Keepers among the AgBehenate fits",
+    ],
+)
+def test_clean_title_keeps_a_real_title_that_merely_starts_with_those_letters(reply):
+    """The word boundary earns its keep: these are titles, not sentinels."""
+    assert clean_title(reply) == reply

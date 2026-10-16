@@ -1,10 +1,10 @@
 # Workspaces
 
-> **Status: 0.2.0.** Phases 1–10 are implemented and in daily use.
-> Config formats and CLI commands are stable enough to build on; anything
-> that has to change before 1.0 will be called out in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`PLAN.md`](../PLAN.md) for what is
-> still planned.
+> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. Config
+> formats and CLI commands are stable: from here, a breaking change to
+> either means a new major version, and every change is dated in
+> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> is still open.
 
 **Related:** [safety-and-permissions.md](safety-and-permissions.md) · [mcp-servers.md](mcp-servers.md) · [coding-and-scripting.md](coding-and-scripting.md) · [knowledge-bases.md](knowledge-bases.md)
 

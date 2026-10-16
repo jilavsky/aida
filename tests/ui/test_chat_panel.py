@@ -463,7 +463,7 @@ def test_agent_error_adds_error_banner_with_layer(qapp):
     assert banner.message == "boom"
 
 
-# --- planning/improvement_plan_2026-09.md §2: "Continue" button on the two
+# --- planning/completed/improvement_plan_2026-09.md §2: "Continue" button on the two
 # cut-off notices -------------------------------------------------------
 
 

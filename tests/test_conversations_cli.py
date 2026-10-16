@@ -201,7 +201,7 @@ def test_cmd_delete_unknown_id_reports_error(aida_home: Path, records_home: Path
     assert "does-not-exist" in out
 
 
-# --- cmd_gc (planning/improvement_plan_2026-09.md §3: scratch cleanup) ------
+# --- cmd_gc (planning/completed/improvement_plan_2026-09.md §3: scratch cleanup) ------
 
 
 def _touch_with_age(path: Path, *, days_old: float) -> None:

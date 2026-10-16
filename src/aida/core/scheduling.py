@@ -1,4 +1,4 @@
-"""Pure scheduling logic (planning/phase10_scheduling_design.md §4/§7) — no
+"""Pure scheduling logic (planning/completed/phase10_scheduling_design.md §4/§7) — no
 I/O, no config loading, nothing async: given a parsed schedule and "when
 did it last fire" plus "what time is it," decide whether it's due. Kept
 separate from ``aida.core.scheduler_runtime`` (which actually drives this

@@ -35,7 +35,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
         elif self.path == "/big-head-real-article":
-            # planning/improvement_plan_2026-09.md §1: the article text sits
+            # planning/completed/improvement_plan_2026-09.md §1: the article text sits
             # after a large inlined <head> — old behavior read only enough
             # raw bytes for DEFAULT_FETCH_MAX_CHARS (~80,000) *before*
             # extraction, so a page shaped like this had the real content
@@ -171,7 +171,7 @@ async def test_fetch_url_404_is_not_a_crash(http_server: str):
     assert result.is_error
 
 
-# --- planning/improvement_plan_2026-09.md §1: raw-byte cap raised so a real
+# --- planning/completed/improvement_plan_2026-09.md §1: raw-byte cap raised so a real
 # article's text (after a large inlined <head>) isn't cut off before
 # extraction, and a browser-like User-Agent is sent -------------------------
 

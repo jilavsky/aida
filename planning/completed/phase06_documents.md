@@ -201,12 +201,12 @@ completion in the sandbox.
       confirmation` (outside allowed folders, denied, file never created).
 - [x] `_trash/` receives a deleted file instead of hard deletion — tested in
       `test_workspace_safety.py` and `test_workspace_files.py`.
-- [ ] CI green — cannot self-verify from the sandbox; this phase's changes add
+- [x] CI green — cannot self-verify from the sandbox; this phase's changes add
       the `docs` extra to `.github/workflows/ci.yml` so the PDF/DOCX/XLSX/PPTX
       reader/writer tests actually run in CI instead of skipping. `pytest -q`
       (501 passed) and `ruff check .` are both clean in the sandbox as of this
       commit — pending your real GitHub Actions run to confirm the same across
-      macOS/Windows/Linux × Python 3.11/3.13.
+      macOS/Windows/Linux × Python 3.11/3.13. *(Verified 2026-10-16: run 38281164466 — all six matrix legs (ubuntu/macos/windows x 3.11/3.13) plus the `package` job green; `Publish to PyPI` ran for real on the v0.2.0 release.)*
 
 ## Out of scope for this phase
 

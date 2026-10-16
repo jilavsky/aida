@@ -4,7 +4,7 @@ conversation recorder) and ``start_session`` (the shared startup logic that
 resolves a workspace, starts its MCP servers, builds tools/context, and
 returns a ready ``ChatSession``).
 
-B8 (planning/improvement_plan_2026-08.md): this used to live in
+B8 (planning/completed/improvement_plan_2026-08.md): this used to live in
 ``aida.cli.chat``, which worked fine for the CLI itself but put
 ``aida.ui.qt.bridge`` in the position of importing from ``aida.cli`` to get
 at it — the one place in the codebase where the intended layering
@@ -323,7 +323,7 @@ class ChatSession:
             self.completion_settings,
             self.tools,
             max_iterations=settings.app.max_agent_iterations,
-            # planning/improvement_plan_2026-09.md §2: before this,
+            # planning/completed/improvement_plan_2026-09.md §2: before this,
             # _trim_context only ran once, before the turn even started —
             # a single long-running turn (max_agent_iterations now 50)
             # could grow the history by hundreds of thousands of characters
@@ -355,7 +355,7 @@ class ChatSession:
         # _apply_trim_plan, ...) deliberately do *not* take it, since they
         # only ever run underneath one of those three — including when
         # _trim_context runs mid-turn as self.loop's before_round_trip hook
-        # (planning/improvement_plan_2026-09.md §2), since that hook only
+        # (planning/completed/improvement_plan_2026-09.md §2), since that hook only
         # ever fires from inside AgentLoop.run(messages), itself only ever
         # awaited from send()'s _run_turn, underneath this same lock.
         self._mutation_lock = asyncio.Lock()
@@ -1003,7 +1003,7 @@ class ChatSession:
 
     async def compact_now(self, *, min_recent_turns: int = 4) -> ContextTrimmed | None:
         """Manual compaction — the CLI's ``/compact`` and the GUI's
-        "Compact Conversation" action (planning/context_management.md §3.4):
+        "Compact Conversation" action (planning/completed/context_management.md §3.4):
         summarize everything but the most recent ``min_recent_turns`` turns
         right now, regardless of whether the budget is currently exceeded,
         so the user can compact at a natural task boundary instead of

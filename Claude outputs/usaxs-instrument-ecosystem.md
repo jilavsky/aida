@@ -17,7 +17,7 @@ This draft is meant to be checked and corrected before it becomes the basis for 
 | **Sample survey** | Exported `.mac` command file | Igor Pro *Setup Sample Plates*, or Matilda's `matilda-sample-plates` | Agent-loaded plan file via queue server |
 | **Data reduction/calibration** | `matilda` daemon (automatic, headless) | `matilda-gui` (manual override) | — (automatic; not typically agent-driven) |
 | **Data analysis** | pyIrena batch/JSON scripting API | pyIrena GUI (`pyirena-gui` and tool-specific GUIs) | pyIrena MCP server, via Aida or any MCP client |
-| **Plotting** | — | Bernardyn (early alpha), Igor Pro | — |
+| **Plotting** | `bernardyn-plot` CLI and Python API | Bernardyn 1.0 (reduced data + saved pyIrena results); Igor Pro (long-standing tool for publication-quality plots) | `bernardyn-mcp`, via Aida or any MCP client |
 
 No single row is complete without the others, and no single column has to be used exclusively — a user can survey samples in the GUI, run the actual scan from the command line, and ask an agent to summarize the reduced results, all in the same session.
 
@@ -71,7 +71,7 @@ This stage is effectively "automatic by default, GUI when you need to intervene"
 
 ## 6. Plotting — Bernardyn
 
-Bernardyn is a dedicated SAS/diffraction plotting workbench (PySide6/PyQtGraph), a visual companion to pyIrena, currently in **early alpha**. It reads NXcanSAS/HDF5 and simple text data, offers the standard SAS transformation views (Guinier, Kratky, Porod, Zimm, Debye–Bueche, etc.), 3D waterfall/surface rendering, and saves self-contained, portable `*.bernardyn.h5` graph packages (as well as PNG/SVG/CSV/Igor ITX export). It is GUI-only at this stage — there is no CLI or agent surface for it yet, and model fitting, reduction, and 2D-detector workflows are explicitly out of scope for its 1.0.
+**Bernardyn 1.0** (released 2026-10-15) is a dedicated PySide6/PyQtGraph plotting workbench for SAS/diffraction curves, a visual companion to pyIrena: Guinier, Kratky, Porod, Zimm, Debye–Bueche views, 3D waterfalls/surfaces, graph templates, and portable `*.bernardyn.h5` graph packages (stable schema v3) with PNG/SVG/CSV/Igor-ITX export. It reads NXcanSAS/HDF5 and simple text data, and plots saved pyIrena results side by side with I(Q) — Unified Fit, size distributions, Modeling populations and residuals, WAXS peaks (requires pyIrena ≥ 1.2.0). It has a GUI, a `bernardyn-plot` CLI and Python API, and an optional `bernardyn-mcp` server, so Aida can plot too. Model fitting, reduction, and 2D-detector workflows stay out of scope.
 
 ## 7. Data analysis — pyIrena
 
@@ -79,7 +79,7 @@ pyIrena is the Python port of the 25-year-old Igor Pro Irena package, and — li
 
 - **GUI** — `pyirena-gui` (Data Selector) as the entry point, plus standalone tools for each method: Modeling (up to 10 combined populations of size distributions, Unified Fit levels, or diffraction peaks), Unified Fit (Beaucage hierarchical model), Size Distribution (MaxEnt/Regularization/TNNLS/Monte Carlo inversion), Simple Fits (13 analytical models), WAXS Peak Fit, Data Merge, Data Explorer, and an Igor `.pxp`/`.h5xp` importer for bringing legacy data in.
 - **Scripting (JSON-configured batch API)** — the same fitting/merging functions (`fit_unified`, `fit_sizes`, `fit_simple`, `fit_waxs`, `fit_modeling`, `merge_data`) are callable headlessly from Python or via JSON config files; this is exactly the mechanism Matilda's daemon uses for its automatic analysis and merging.
-- **MCP (agent) server** — `pyirena-mcp` exposes HDF5 readers, parameter aggregation/tabulation, and headless plotting as MCP tools (`pyirena_summarize_folder`, `pyirena_tabulate_parameter`, `pyirena_plot_iq`, `pyirena_read_modeling`, etc.), so an agent (Aida, Claude Desktop, Claude Code, or any other MCP client) can answer plain-language questions about analysis results directly from the data files.
+- **MCP (agent) server** — `pyirena-mcp` exposes HDF5 readers, parameter aggregation/tabulation, and headless plotting as MCP tools (`pyirena_summarize_folder`, `pyirena_tabulate_parameter`, `pyirena_plot_iq`, `pyirena_read_modeling`, etc.), so an agent (Aida, Claude Desktop, Claude Code, or any other MCP client) can answer plain-language questions about analysis results directly from the data files. Since pyIrena 1.2.0 it also drives fitting sessions and data operations (average, subtract, merge, scale, trim, rebin) through a small dispatcher (`pyirena_call`).
 
 All three surfaces read and write the same NXcanSAS/HDF5 files, so results are shareable and self-contained regardless of which interface produced them.
 

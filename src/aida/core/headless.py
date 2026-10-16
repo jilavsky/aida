@@ -1,5 +1,5 @@
 """Headless confirmation policy shared by ``aida run``, ``aida workflow
-run``, and the scheduler (planning/phase10_scheduling_design.md §3.1) — no
+run``, and the scheduler (planning/completed/phase10_scheduling_design.md §3.1) — no
 frontend it drives has a human to ask, so it must always resolve, never
 block, and must never grant more than it is explicitly told to.
 

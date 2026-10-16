@@ -185,7 +185,7 @@ class ChatBridge(QObject):
     turn_failed = Signal(str)
     profile_switched = Signal(str)
     profile_switch_failed = Signal(str)
-    # PLAN.md §1.3 / planning/context_management.md §3.4: the "Compact
+    # PLAN.md §1.3 / planning/completed/context_management.md §3.4: the "Compact
     # Conversation" menu action's failure/no-op path — success is
     # deliberately *not* a separate signal, see compact_context's docstring.
     compaction_failed = Signal(str)  # message: an error, or "nothing to compact yet"

@@ -211,9 +211,9 @@ who will never edit `mcp.json` by hand.
       even_in_relaxed_workspace`.
 - [x] Raw inspector shows the exact ImageContent response for a plot call —
       `test_raw_inspector_shows_image_content_for_a_plot_call`.
-- [ ] CI green — cannot self-verify from this sandbox (no GitHub Actions access);
+- [x] CI green — cannot self-verify from this sandbox (no GitHub Actions access);
       `pytest -q` (649 passed) and `ruff check .` are both clean here as of this
-      commit, same as every prior phase's note.
+      commit, same as every prior phase's note. *(Verified 2026-10-16: run 38281164466 — all six matrix legs (ubuntu/macos/windows x 3.11/3.13) plus the `package` job green; `Publish to PyPI` ran for real on the v0.2.0 release.)*
 
 ## Out of scope for this phase
 

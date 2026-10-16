@@ -41,7 +41,7 @@ incomplete document is worse than an obviously incomplete one, each reader
 appends a short note saying how many images it dropped, and the PDF reader
 additionally detects the case where there was no usable text layer at all
 (a scanned paper, a photographed logbook) and says so rather than handing
-back an empty-looking document. See ``planning/document_images.md`` for the
+back an empty-looking document. See ``planning/completed/document_images.md`` for the
 richer options this note is the floor of.
 
 Every reader applies a size/token guard (PLAN.md: "long docs summarized-by-

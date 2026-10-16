@@ -295,7 +295,7 @@ def test_search_filters_by_workspace_and_user(qapp):
     assert sidebar.listed_conversation_ids() == ["id2"]
 
 
-# --- planning/improvement_plan_2026-09.md §2: content search, not just
+# --- planning/completed/improvement_plan_2026-09.md §2: content search, not just
 # title/workspace/user ------------------------------------------------------
 
 

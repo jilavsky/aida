@@ -1,7 +1,7 @@
 """Drives ``aida.core.scheduling`` and ``aida.core.workflows`` against real
 config, the real clock, and ``aida.persistence.store.ScheduleRunStore`` —
 the one function both the GUI's background task and ``aida schedule watch``
-call (planning/phase10_scheduling_design.md §6: "the in-app trigger and the
+call (planning/completed/phase10_scheduling_design.md §6: "the in-app trigger and the
 OS/CLI trigger must call the same code path").
 
 Timestamps in this module are deliberately **naive local time**, not the

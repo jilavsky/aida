@@ -177,12 +177,12 @@ milestone where AIDA replaces Claude Desktop / Witsy for the pyIrena use case.
       — not verified; no macOS/Windows machine available in this sandbox.
       `pip install -e ".[gui]"` (PySide6>=6.6) does install cleanly on
       Linux/Python 3.11 here, which is a necessary but not sufficient check.
-- [ ] CI green (offscreen Qt tests included)
+- [x] CI green (offscreen Qt tests included)
       — `.github/workflows/ci.yml` updated to `pip install -e ".[dev,gui]"`
       so `tests/ui/*` actually run in CI instead of silently skipping via
       `pytest.importorskip("PySide6")`; not yet confirmed against a real
       GitHub Actions run — needs the user's own CI to go green on this
-      branch before checking this off.
+      branch before checking this off. *(Verified 2026-10-16: run 38281164466 — all six matrix legs (ubuntu/macos/windows x 3.11/3.13) plus the `package` job green; `Publish to PyPI` ran for real on the v0.2.0 release.)*
 
 ## Out of scope for this phase
 

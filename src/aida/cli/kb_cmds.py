@@ -1,5 +1,5 @@
 """``aida kb`` — manage RAG knowledge bases and their SQLite indexes
-(Phase 8, planning/phase08_rag.md) without hand-editing ``knowledge.yaml``.
+(Phase 8, planning/completed/phase08_rag.md) without hand-editing ``knowledge.yaml``.
 
 Mirrors ``aida.cli.mcp_cmds``'s exact pattern: each subcommand handler loads
 settings, mutates/saves (or, for build/update/query, just reads the config

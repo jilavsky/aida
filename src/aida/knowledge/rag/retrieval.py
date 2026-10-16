@@ -1,7 +1,7 @@
 """Rank a knowledge base's stored chunks against a query (Phase 8).
 
 Brute-force cosine similarity over in-memory vectors — no vector DB (see
-planning/phase08_rag.md's storage decision). Fine at the corpus sizes this
+planning/completed/phase08_rag.md's storage decision). Fine at the corpus sizes this
 phase targets (hundreds to low thousands of chunks); loading a whole
 knowledge base's chunks into memory for every query is the actual
 performance ceiling here, not the similarity computation itself. A

@@ -1,4 +1,4 @@
-"""The attachment store (planning/documents_implementation.md Phase B).
+"""The attachment store (planning/completed/documents_implementation.md Phase B).
 
 Two properties matter here, and they pull in opposite directions:
 

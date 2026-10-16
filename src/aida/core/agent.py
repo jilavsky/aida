@@ -93,7 +93,7 @@ class AgentLoop:
         self.settings = settings
         self.tools = tools or {}
         self.max_iterations = max_iterations
-        # planning/improvement_plan_2026-09.md §2: context trimming used to
+        # planning/completed/improvement_plan_2026-09.md §2: context trimming used to
         # run once, before the turn even started (ChatSession._run_turn) —
         # with max_agent_iterations now 50, a single turn's tool results can
         # grow the history by hundreds of thousands of characters with

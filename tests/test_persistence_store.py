@@ -142,7 +142,7 @@ def test_list_conversations_orders_by_updated_at_desc(tmp_path: Path):
     assert [s.id for s in summaries] == [newer, older]
 
 
-# --- search_conversations (planning/improvement_plan_2026-09.md §2:
+# --- search_conversations (planning/completed/improvement_plan_2026-09.md §2:
 # sidebar search only ever matched title/workspace_name/user) ---------------
 
 

@@ -22,7 +22,7 @@ logger = get_logger("context")
 # and is only used for a soft trim budget, not billing.
 _CHARS_PER_TOKEN_ESTIMATE = 4
 
-# PLAN.md §1.3 / planning/context_management.md §2b: the 4-chars-per-token
+# PLAN.md §1.3 / planning/completed/context_management.md §2b: the 4-chars-per-token
 # average is fair for English prose, but JSON and dense numeric data (tool
 # call arguments, tool results — the bulk of a pyIrena session) tokenize
 # closer to ~3 chars/token, so the plain estimator systematically
@@ -31,7 +31,7 @@ _CHARS_PER_TOKEN_ESTIMATE = 4
 # never for ordinary assistant/user prose.
 DENSE_CHARS_PER_TOKEN = 3
 
-# planning/context_management.md §3.3: a vision image's rough token cost —
+# planning/completed/context_management.md §3.3: a vision image's rough token cost —
 # derived from Anthropic's own ~(width x height)/750 rule for a ~1024px
 # image (AIDA already downscales tool-result/attached images to ~1024px in
 # aida.providers.vision before they're sent), i.e. roughly
@@ -41,7 +41,7 @@ DENSE_CHARS_PER_TOKEN = 3
 # not a billing figure.
 IMAGE_TOKEN_ESTIMATE = 1600
 
-# planning/context_management.md §3.2: covers estimator error (§2b) plus
+# planning/completed/context_management.md §3.2: covers estimator error (§2b) plus
 # each provider's own per-request overhead around the raw message content.
 # One knob, not five — every other constant below is either derived from
 # measurement (IMAGE_TOKEN_ESTIMATE) or a provider default
@@ -576,7 +576,7 @@ def history_budget(
     safety_fraction: float = CONTEXT_SAFETY_FRACTION,
 ) -> int:
     """How many tokens of *history* (messages) can be sent, given a model's
-    total ``context_window`` — planning/context_management.md §3.2.
+    total ``context_window`` — planning/completed/context_management.md §3.2.
 
     ``usable = context_window * safety_fraction`` (covers estimator error
     plus each provider's own per-request overhead); the reply about to be

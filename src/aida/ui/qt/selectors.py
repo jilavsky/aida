@@ -508,7 +508,7 @@ class McpQuickPanel(QGroupBox):
     v1 shipped these checkboxes as if ticking one would change which
     servers start, but nothing was wired up — a real bug, fixed by
     disabling them (2026-08-22 note above the fix in
-    planning/improvement_plan_2026-08.md §1: "a misleading control is worse
+    planning/completed/improvement_plan_2026-08.md §1: "a misleading control is worse
     than no control"). This is the follow-up the user actually wanted
     instead of the read-only compromise: ticking/unticking now really
     starts/stops that server (``server_start_requested``/

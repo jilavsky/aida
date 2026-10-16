@@ -35,7 +35,7 @@ ln -s "$(pwd)/skills/review-checklist.md" ~/.aida/skills/review-checklist.md
   server already provides that itself via its MCP `initialize` handshake
   `instructions` field, which AIDA now surfaces directly into the system
   context automatically whenever that server is connected (see
-  `planning/phase07_mcp_management.md`'s post-delivery notes) — no skill
+  `planning/completed/phase07_mcp_management.md`'s post-delivery notes) — no skill
   file needed for that part.
 - **`review-checklist.md`** — a **draft, not a finished skill**: a generic
   scientific-document review checklist for the `perform-reviews` workspace.

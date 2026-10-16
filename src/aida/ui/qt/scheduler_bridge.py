@@ -1,5 +1,5 @@
 """Runs the in-app scheduler (Phase 10,
-planning/phase10_scheduling_design.md §6) on the shared ``AsyncLoopThread``
+planning/completed/phase10_scheduling_design.md §6) on the shared ``AsyncLoopThread``
 as a background task for the life of the app process.
 
 Deliberately a separate ``QObject`` from ``ChatBridge``, not a method on

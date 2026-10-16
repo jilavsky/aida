@@ -1,4 +1,4 @@
-"""``WorkspaceManagementDialog`` (U1, planning/improvement_plan_2026-08.md
+"""``WorkspaceManagementDialog`` (U1, planning/completed/improvement_plan_2026-08.md
 §3): add/edit/remove named workspaces (``workspaces.yaml``) entirely from
 the GUI — previously the one config object with no GUI editor at all (every
 other one — MCP servers, knowledge bases, and now providers/embeddings via

@@ -1,5 +1,5 @@
 """``WorkflowManagementDialog`` (Phase 10,
-planning/phase10_scheduling_design.md §4): create/edit/remove stored named
+planning/completed/phase10_scheduling_design.md §4): create/edit/remove stored named
 workflows (``~/.aida/workflows/NAME.yaml``) entirely from the GUI —
 previously the one Phase 10 config object with no GUI editor at all: a
 workflow could only be hand-written, even though ``ScheduleFormDialog``

@@ -169,7 +169,7 @@ async def test_start_session_unknown_workspace_raises(aida_home: Path, records_h
 async def test_start_session_workspace_that_fails_validation_raises_unknown_workspace_not_profile(
     aida_home: Path, records_home: Path
 ):
-    """planning/improvement_plan_2026-09.md §3: a workspace that *exists*
+    """planning/completed/improvement_plan_2026-09.md §3: a workspace that *exists*
     by name but fails validate_workspace (here: its own configured
     ``profile:`` doesn't exist in providers.yaml) used to raise
     UnknownProfileError — misleading for a log grep, since the workspace
@@ -1045,7 +1045,7 @@ async def test_start_session_shuts_down_mcp_servers_when_the_session_fails_to_bu
     assert all(instance.closed for instance in _FakeMcpManager.instances)
 
 
-# --- the user organization axis (planning/multiuser_plan.md) -------------
+# --- the user organization axis (planning/completed/multiuser_plan.md) -------------
 
 
 @pytest.mark.asyncio

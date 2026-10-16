@@ -1,6 +1,6 @@
 """Resolve which MCP servers should be active for a session.
 
-Two selection modes, both from planning/phase03_mcp.md:
+Two selection modes, both from planning/completed/phase03_mcp.md:
 
 - **Group**: a named server set, resolved from each server's own
   ``groups: [...]`` config key (``aida.config.settings.McpServerConfig``).

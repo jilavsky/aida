@@ -1,4 +1,4 @@
-"""PLAN.md §1.3 / planning/context_management.md §3.4 — compaction:
+"""PLAN.md §1.3 / planning/completed/context_management.md §3.4 — compaction:
 
 summarize-then-replace instead of plain-discarding the oldest turns once a
 conversation is over budget, plus the manual ``ChatSession.compact_now()``
@@ -186,7 +186,7 @@ async def test_context_fullness_prefers_the_profiles_own_context_window(
     await session.aclose()
 
 
-# --- planning/improvement_plan_2026-09.md §2: mid-turn context check —
+# --- planning/completed/improvement_plan_2026-09.md §2: mid-turn context check —
 # AgentLoop.before_round_trip, wired to ChatSession._trim_context -----------
 
 

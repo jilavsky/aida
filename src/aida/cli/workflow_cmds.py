@@ -1,5 +1,5 @@
 """``aida workflow`` — list/show/validate/run stored named workflows
-(Phase 10, planning/phase10_scheduling_design.md §4).
+(Phase 10, planning/completed/phase10_scheduling_design.md §4).
 
 Deliberately no ``add``/``edit`` subcommand: a workflow is a hand-edited or
 GUI-"save conversation as workflow"-produced YAML document (one file per

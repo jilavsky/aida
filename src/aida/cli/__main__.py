@@ -22,14 +22,14 @@ from aida.config.settings import load_settings
 
 _COMMANDS = {
     "doctor": "Report environment/config diagnostics",
-    "chat": "Interactive chat (Phase 2)",
-    "conversations": "List/resume/delete/export persisted conversations (Phase 4)",
-    "workspace": "List/show/create/edit named workspaces (Phase 4)",
-    "mcp": "Manage MCP servers, groups, and per-tool permissions (Phase 7)",
-    "kb": "Manage RAG knowledge bases: config, build/update indexes, query (Phase 8)",
-    "run": 'Non-interactive single turn: `aida run --workspace W "prompt"` (Phase 10)',
-    "workflow": "Run/list/show/validate stored named workflows (Phase 10)",
-    "schedule": "Manage and run scheduled workflows (Phase 10)",
+    "chat": "Interactive chat",
+    "conversations": "List/resume/delete/export persisted conversations",
+    "workspace": "List/show/create/edit named workspaces",
+    "mcp": "Manage MCP servers, groups, and per-tool permissions",
+    "kb": "Manage RAG knowledge bases: config, build/update indexes, query",
+    "run": 'Non-interactive single turn: `aida run --workspace W "prompt"`',
+    "workflow": "Run/list/show/validate stored named workflows",
+    "schedule": "Manage and run scheduled workflows",
     "documents": "Inspect document extraction: `documents figures FILE`, `documents verify-ocr`",
     "config": "Config locations, OS-keychain secrets, and `config export`/`config import` of a portable setup bundle",
 }
@@ -42,6 +42,8 @@ def _print_top_level_help() -> None:
     width = max(len(name) for name in _COMMANDS) + 1
     for name, help_text in _COMMANDS.items():
         print(f"  {name:<{width}} {help_text}")
+    print()
+    print("  -V, --version   Print the AIDA version and exit")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,6 +51,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if not argv or argv[0] in ("-h", "--help"):
         _print_top_level_help()
+        return 0
+
+    # Handled here rather than as a subcommand, and before the
+    # `load_settings()` below: "what version are you running?" is the first
+    # question on every bug report, so it has to answer even when the
+    # config that call would read is itself the thing that is broken.
+    if argv[0] in ("-V", "--version"):
+        from aida import __version__
+
+        print(f"aida {__version__}")
         return 0
 
     command, rest = argv[0], argv[1:]

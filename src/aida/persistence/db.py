@@ -103,7 +103,7 @@ _MIGRATIONS: dict[int, str] = {
     ALTER TABLE artifacts ADD COLUMN seq INTEGER;
     CREATE INDEX IF NOT EXISTS idx_artifacts_conversation_seq ON artifacts(conversation_id, seq);
     """,
-    # Phase 10: workflow/schedule runs (planning/phase10_scheduling_design.md
+    # Phase 10: workflow/schedule runs (planning/completed/phase10_scheduling_design.md
     # §4). `conversations.origin` is NULL for every interactive chat
     # conversation ever created (unchanged behavior) and "workflow" /
     # "schedule" for one created by aida.core.workflows.run_workflow — lets
@@ -126,7 +126,7 @@ _MIGRATIONS: dict[int, str] = {
 
     CREATE INDEX IF NOT EXISTS idx_schedule_runs_name ON schedule_runs(schedule_name, fired_at);
     """,
-    # The "user" organization axis (planning/multiuser_plan.md). NULL for
+    # The "user" organization axis (planning/completed/multiuser_plan.md). NULL for
     # every conversation created before this column existed and for every
     # install that never sets an active user — which is why the filtering
     # side treats NULL as "visible to everyone" rather than "belongs to

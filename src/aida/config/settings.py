@@ -469,7 +469,7 @@ class AppConfig:
     # of columns is ignored the same way, so adding or removing a column
     # can't strand a user with a broken layout.
     splitter_sizes: list[int] = field(default_factory=list)
-    # Phase 10 (planning/phase10_scheduling_design.md §7): how long after
+    # Phase 10 (planning/completed/phase10_scheduling_design.md §7): how long after
     # the user's last interaction the in-app scheduler waits before it will
     # start a due job. Without this, a scheduled run fired the instant it
     # came due — starting a second set of MCP servers and a second session
@@ -707,7 +707,7 @@ class ProviderProfile:
     have tool-result plots and GUI-attached images actually reach the
     model — see ``aida.providers.vision``.
 
-    ``context_window`` (PLAN.md §1.3, planning/context_management.md §3.1):
+    ``context_window`` (PLAN.md §1.3, planning/completed/context_management.md §3.1):
     the model's TOTAL context window, in tokens — ``None`` falls back to
     ``AppConfig.max_context_tokens`` (the same global number every profile
     used unconditionally before this), so an existing profile that never
@@ -1316,7 +1316,7 @@ class KnowledgeConfig:
 
 
 # --------------------------------------------------------------------------
-# workflows/NAME.yaml (Phase 10 — planning/phase10_scheduling_design.md §4)
+# workflows/NAME.yaml (Phase 10 — planning/completed/phase10_scheduling_design.md §4)
 # --------------------------------------------------------------------------
 
 

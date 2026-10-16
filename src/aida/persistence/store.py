@@ -601,7 +601,7 @@ class ConversationStore:
 @dataclass
 class ScheduleRun:
     """One row of ``schedule_runs`` — the scheduler's own last-fired/status
-    bookkeeping (planning/phase10_scheduling_design.md §5: kept separate
+    bookkeeping (planning/completed/phase10_scheduling_design.md §5: kept separate
     from the user-edited ``schedules.yaml`` on purpose, same reasoning as
     keeping conversations in SQLite rather than in workspace config)."""
 

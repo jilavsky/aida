@@ -5,7 +5,7 @@ The reference frontend implementation (PLAN.md §10 Phase 2 row): every
 printed line maps 1:1 to an event from ``aida.core.events``, so this file
 doubles as the spec any future frontend (Qt in Phase 5, ...) needs to match.
 
-B8 (planning/improvement_plan_2026-08.md): the session engine itself
+B8 (planning/completed/improvement_plan_2026-08.md): the session engine itself
 (``ChatSession``, ``start_session``, and their supporting pieces) now lives
 in ``aida.core.session`` — this module re-exports every one of those names
 below so nothing that used to import them from here (``aida.cli.conversations``,
@@ -294,7 +294,7 @@ async def _repl_loop(session: ChatSession) -> None:
                 f"tokens, ~${cost:.4f} est."
             )
 
-        # planning/context_management.md §3.5: fullness (how close to the
+        # planning/completed/context_management.md §3.5: fullness (how close to the
         # wall the *next* request is), not the ever-growing cumulative
         # total printed just above — computed the same way ChatSession's
         # own trim/compaction budget is, so the two can never disagree.

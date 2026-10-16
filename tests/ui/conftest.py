@@ -64,7 +64,7 @@ def _drain_qt_garbage_after_each_test(qapp):
     `QCoreApplication::notifyInternal2`/`QTimerInfoList::activateTimers`,
     always several hundred tests into a run combining ``tests/`` and
     ``tests/ui`` in one process (see
-    planning/improvement_plan_2026-08.md's "Known issues" section), never
+    planning/completed/improvement_plan_2026-08.md's "Known issues" section), never
     when a handful of files ran alone — consistent with needing enough
     accumulated garbage to cross the cyclic collector's threshold.
 

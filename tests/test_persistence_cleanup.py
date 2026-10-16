@@ -158,7 +158,7 @@ def test_delete_unknown_conversation_is_a_no_op(tmp_path: Path):
     assert result.deleted_artifact_rows == 0
 
 
-# --- scratch folder cleanup (planning/improvement_plan_2026-09.md §3:
+# --- scratch folder cleanup (planning/completed/improvement_plan_2026-09.md §3:
 # ensure_scratch_dir creates it, nothing ever swept it) ----------------------
 
 

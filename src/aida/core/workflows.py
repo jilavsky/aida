@@ -1,7 +1,7 @@
 """Runs a stored named workflow (``aida.config.settings.WorkflowConfig``) as
 a sequence of turns in one shared ``ChatSession`` — the layer both
 ``aida workflow run`` and the scheduler drive
-(planning/phase10_scheduling_design.md §4).
+(planning/completed/phase10_scheduling_design.md §4).
 
 Design choices worth stating up front, since they aren't obvious from the
 config shape alone:

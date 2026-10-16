@@ -1,4 +1,4 @@
-"""``McpManagementDialog`` (Phase 7, planning/phase07_mcp_management.md):
+"""``McpManagementDialog`` (Phase 7, planning/completed/phase07_mcp_management.md):
 add/edit/remove MCP servers, per-tool permissions, groups, skills, and
 diagnostics — entirely from the GUI, no manual ``mcp.json`` editing.
 
@@ -26,7 +26,7 @@ tool-call row inside the live chat transcript would need a ``call_id``
 threaded through every ``NativeTool``'s function signature
 (``aida.core.tools.ToolFunc``, and every module that builds one) — a much
 larger, higher-risk change than one nice-to-have justifies; see
-planning/phase07_mcp_management.md's review notes.
+planning/completed/phase07_mcp_management.md's review notes.
 """
 
 from __future__ import annotations
@@ -140,7 +140,7 @@ def _tool_count_for(name: str, bridge) -> int | None:
     it isn't running (no live ``McpManager``, or this server just isn't
     started yet) — PLAN.md §1.5's "show estimated tool count per group":
     real numbers only for servers actually running, per
-    ``planning/phase07_mcp_management.md``'s own note that a live
+    ``planning/completed/phase07_mcp_management.md``'s own note that a live
     ``McpManager`` reference has no way to know a not-yet-started server's
     tool count without starting it."""
     manager = bridge.mcp_manager if bridge is not None else None

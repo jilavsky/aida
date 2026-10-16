@@ -1,4 +1,4 @@
-"""``OnboardingDialog`` (U4, planning/improvement_plan_2026-08.md §3): the
+"""``OnboardingDialog`` (U4, planning/completed/improvement_plan_2026-08.md §3): the
 first-run experience. Previously a genuine first launch (no
 ``providers.yaml`` profiles at all — the common case for anyone who just
 installed AIDA) hit the bare "No profile given: pass --profile NAME, or

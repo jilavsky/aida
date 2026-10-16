@@ -27,7 +27,7 @@ def _settings_with_profile(name: str = "mock-profile") -> object:
 
 
 def test_is_busy_reads_false_for_a_future_that_finished_before_being_assigned(qapp, loop_thread):
-    """Regression for a theoretical race (planning/improvement_plan_2026-09.md
+    """Regression for a theoretical race (planning/completed/improvement_plan_2026-09.md
     §3): ``send()`` assigns ``self._turn_future`` on the Qt thread *after*
     ``run_coroutine_threadsafe`` returns, while ``_drain``'s ``finally``
     clears it back to ``None`` on the loop thread. If ``_drain`` finishes

@@ -12,10 +12,11 @@ count crosses 100, naming `McpServerConfig.disabled_tools` as the fix. This
 doc is the follow-up: `disabled_tools` unchecking one tool at a time across
 ~110 entries is not a workable curation UI, and it doesn't reduce the
 per-turn token cost of whichever tools stay enabled. Companion doc, other
-side of the seam: pyIrena's own
-[`planning/ai-agent/01-api-and-mcp-extensions.md`](../../pyirena/planning/ai-agent/01-api-and-mcp-extensions.md)
-(the design that produced the current tool set and its category
-structure).
+side of the seam: pyIrena's own `planning/ai-agent/` notes (the design
+that produced the current tool set and its category structure) — in the
+`jilavsky/pyirena` repo, not this one, so it is named rather than linked.
+The specific file this cited, `01-api-and-mcp-extensions.md`, has since
+been reorganized there; start from that folder's `README.md`.
 
 ## The problem, precisely
 

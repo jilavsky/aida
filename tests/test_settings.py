@@ -417,7 +417,7 @@ def test_mcp_server_unknown_type_falls_back_to_stdio(caplog):
     assert "unknown type" in caplog.text
 
 
-# --- per-server timeout_seconds (planning/improvement_plan_2026-09.md §1) ---
+# --- per-server timeout_seconds (planning/completed/improvement_plan_2026-09.md §1) ---
 
 
 def test_mcp_server_timeout_seconds_defaults_to_none():

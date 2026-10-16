@@ -1,4 +1,4 @@
-"""``ProfilesDialog`` (U2, planning/improvement_plan_2026-08.md §3): add/
+"""``ProfilesDialog`` (U2, planning/completed/improvement_plan_2026-08.md §3): add/
 edit/remove provider profiles (``providers.yaml``'s ``profiles:``) and
 embedding profiles (``embedding_profiles:``) entirely from the GUI — the
 config objects every session, workspace, and knowledge base ultimately
@@ -63,6 +63,38 @@ from aida.ui.qt.config_conflict import save_or_warn_conflict
 
 PROVIDER_KINDS = ["openai_compat", "anthropic"]
 EMBEDDING_KINDS = ["openai_compat"]
+
+
+SECRET_REF_PLACEHOLDER = (
+    "(blank: the profile name if you type a secret, otherwise no secret — "
+    "correct for a local Ollama/LM Studio endpoint)"
+)
+
+
+def _resolved_secret_ref(name: str, typed_ref: str, typed_value: str) -> str | None:
+    """What to record as a profile's ``secret_ref``, including the "no
+    secret at all" answer the old ``or name`` fallback made unreachable.
+
+    A keyless endpoint — a local Ollama or LM Studio on ``http://localhost``
+    — is a first-class case here, and ``secret_ref`` is ``str | None``
+    precisely so a profile can say so. Both form dialogs used to default a
+    blank field to the profile's own name regardless, which left every
+    GUI-created local profile claiming a secret that was never stored:
+    ``aida doctor`` then reported a permanent ``[FAIL]
+    secret_headless:<name>`` on an installation that worked perfectly, and
+    its own "a profile without ``secret_ref`` ... needs no secret and is
+    skipped" branch could never be reached from the GUI at all.
+
+    Blank now means blank — unless a secret value was typed alongside it,
+    in which case the ref field is only an unfilled label for that value
+    and the profile name remains the right key to store it under (which is
+    what ``_on_add_provider``/``_on_edit_provider`` then pass to
+    ``set_secret``).
+    """
+    typed_ref = typed_ref.strip()
+    if typed_ref:
+        return typed_ref
+    return name if typed_value else None
 
 
 class _OptionalNumberRow(QWidget):
@@ -155,7 +187,7 @@ class ProviderProfileFormDialog(QDialog):
         self._secret_ref_edit = QLineEdit(
             profile.secret_ref if profile and profile.secret_ref else "", self
         )
-        self._secret_ref_edit.setPlaceholderText("(defaults to the profile name)")
+        self._secret_ref_edit.setPlaceholderText(SECRET_REF_PLACEHOLDER)
         form.addRow("Secret ref:", self._secret_ref_edit)
 
         self._secret_value_edit = QLineEdit(self)
@@ -271,7 +303,9 @@ class ProviderProfileFormDialog(QDialog):
             kind=self._kind_combo.currentText(),
             base_url=self._base_url_edit.text().strip() or None,
             model=self._model_edit.text().strip(),
-            secret_ref=self._secret_ref_edit.text().strip() or name,
+            secret_ref=_resolved_secret_ref(
+                name, self._secret_ref_edit.text(), self._secret_value_edit.text()
+            ),
             capability_notes=self._capability_notes_edit.text().strip(),
             max_tokens=(int(v) if (v := self._max_tokens_row.value()) is not None else None),
             temperature=self._temperature_row.value(),
@@ -322,7 +356,7 @@ class EmbeddingProfileFormDialog(QDialog):
         self._secret_ref_edit = QLineEdit(
             profile.secret_ref if profile and profile.secret_ref else "", self
         )
-        self._secret_ref_edit.setPlaceholderText("(defaults to the profile name)")
+        self._secret_ref_edit.setPlaceholderText(SECRET_REF_PLACEHOLDER)
         form.addRow("Secret ref:", self._secret_ref_edit)
 
         self._secret_value_edit = QLineEdit(self)
@@ -360,7 +394,9 @@ class EmbeddingProfileFormDialog(QDialog):
             kind=self._kind_combo.currentText(),
             base_url=self._base_url_edit.text().strip() or None,
             model=self._model_edit.text().strip(),
-            secret_ref=self._secret_ref_edit.text().strip() or name,
+            secret_ref=_resolved_secret_ref(
+                name, self._secret_ref_edit.text(), self._secret_value_edit.text()
+            ),
             capability_notes=self._capability_notes_edit.text().strip(),
         )
 

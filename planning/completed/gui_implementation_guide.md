@@ -52,7 +52,7 @@ independently useful and independently revertable.
 **Why**: conversations accumulate in one flat list with no safe bulk
 cleanup, because "delete everything older than 30 days" in a shared list
 takes conversations somebody else wanted kept. Background:
-`planning/multiuser_plan.md`.
+`planning/completed/multiuser_plan.md`.
 
 **What already exists** (do not rebuild):
 
@@ -251,7 +251,7 @@ existing tests wait for a restart.
 
 **Why**: attachments are now copied into
 `<records_dir>/attachments/<conv8>/` and deleted with the conversation
-(`planning/documents_implementation.md` Phase B). Nothing says so.
+(`planning/completed/documents_implementation.md` Phase B). Nothing says so.
 
 ### 3a. Status-bar line on ingest
 
@@ -321,7 +321,7 @@ attachment → `openUrl` called with the right path.
 ## 4. Settings: the OCR key, and the workspace switch
 
 **Why**: Phase D shipped the backend, the consent gate and the fallback
-(`planning/documents_implementation.md`). The key can currently only be
+(`planning/completed/documents_implementation.md`). The key can currently only be
 set via `$AIDA_SECRET_MISTRAL_OCR`.
 
 **Read first**: `src/aida/documents/ocr/mistral.py` module docstring, and
@@ -442,8 +442,8 @@ Then update, in this order:
    describe the GUI as "still to come".
 2. `PLAN.md` §1.3 and §1.5 — remove the items you finished. Do not tick
    them; that file holds open work only.
-3. `planning/multiuser_plan.md` §7 and
-   `planning/documents_implementation.md` — append what you built and any
+3. `planning/completed/multiuser_plan.md` §7 and
+   `planning/completed/documents_implementation.md` — append what you built and any
    place you departed from this guide, with the reason.
 
 **If something here is wrong, trust the code over this file** and say what

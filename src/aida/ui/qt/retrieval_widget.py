@@ -1,4 +1,4 @@
-"""``RetrievalRow`` (Phase 8, planning/phase08_rag.md): the retrieval-
+"""``RetrievalRow`` (Phase 8, planning/completed/phase08_rag.md): the retrieval-
 transparency row — "event carries retrieval info so the GUI can show 'used
 these passages'". Same collapsed-summary/expandable-details interaction
 idiom as ``aida.ui.qt.tool_call_widget.ToolCallRow``, built once per

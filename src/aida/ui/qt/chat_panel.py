@@ -397,7 +397,7 @@ class ErrorBanner(QFrame):
     "selectable text + a Copy button" pattern instead of being a dead end.
     """
 
-    #: planning/improvement_plan_2026-09.md §2: a turn ended by the
+    #: planning/completed/improvement_plan_2026-09.md §2: a turn ended by the
     #: iteration cap is almost always one the user wants resumed, exactly
     #: like ``TruncationNotice`` below. Only offered when ``continuable``
     #: (set by ``ChatPanel.handle_event`` for that one specific error, not
@@ -473,7 +473,7 @@ class TruncationNotice(QFrame):
     warning rather than ``ErrorBanner``'s red, since this isn't a failure —
     the turn otherwise succeeded."""
 
-    #: planning/improvement_plan_2026-09.md §2: a cut-off reply is almost
+    #: planning/completed/improvement_plan_2026-09.md §2: a cut-off reply is almost
     #: always one the user wants resumed — "Continue" sends the exact same
     #: text ``MainWindow`` would type by hand, one click instead of it.
     continue_requested = Signal()

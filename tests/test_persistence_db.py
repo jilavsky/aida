@@ -32,7 +32,7 @@ def test_connect_sets_user_version(tmp_path: Path):
 
 
 def test_connect_enables_wal_journal_mode(tmp_path: Path):
-    """planning/improvement_plan_2026-09.md §3: readers (sidebar refresh
+    """planning/completed/improvement_plan_2026-09.md §3: readers (sidebar refresh
     queries) must never block the writer (a running session's inserts) and
     vice versa — the default rollback journal serializes them, WAL
     doesn't."""

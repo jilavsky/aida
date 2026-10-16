@@ -12,7 +12,7 @@ share bundle is now built, and so is selective import — `aida.portability`,
 shipped and §9 for the decisions that shaped it. User-facing guide:
 [`docs/moving-and-sharing.md`](../docs/moving-and-sharing.md).
 
-Related: `planning/multiuser_plan.md` (the `{user}` axis, already shipped —
+Related: `planning/completed/multiuser_plan.md` (the `{user}` axis, already shipped —
 it interacts with path rewriting), `planning/DESIGN.md` §4 (the two-root
 storage layout this all rests on), PLAN.md §2.5 "Sharing" (conversation
 export bundles — a neighbour of this work, not the same thing).

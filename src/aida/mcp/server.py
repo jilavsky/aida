@@ -188,7 +188,7 @@ class ToolCallRecord:
     ``arguments`` and ``content_preview`` (Phase 7) exist for the MCP
     management UI's raw result inspector — "click any tool call in the log
     -> exact MCP response (JSON, base64 lengths noted), copyable"
-    (planning/phase07_mcp_management.md). Built directly from the raw
+    (planning/completed/phase07_mcp_management.md). Built directly from the raw
     content blocks here in ``McpServerHandle.call_tool``, independent of
     ``aida.mcp.results.convert_result``/the artifact-event pipeline, so
     inspecting a call needs no changes anywhere else — this is deliberately
