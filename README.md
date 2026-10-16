@@ -1,6 +1,6 @@
 # AIDA — AI Data Assistant
 
-> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. All ten
+> **Status: 1.0.0.** In daily use at APS beamline 12-ID. All ten
 > phases of the original plan are delivered, the test suite is 2,449 tests
 > green on macOS, Windows and Linux, and the config formats and CLI
 > commands are stable: a breaking change to either now means a new major
