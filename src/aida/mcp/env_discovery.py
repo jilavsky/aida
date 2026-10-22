@@ -68,15 +68,44 @@ def candidate_env_dirs() -> list[Path]:
     """Directories that plausibly hold sibling conda/mamba environments."""
     home = Path.home()
     roots = [
+        # Unix-style per-user installs and the corresponding locations used
+        # by the conda installers on all platforms.
         home / "miniconda3" / "envs",
         home / "anaconda3" / "envs",
         home / "miniforge3" / "envs",
         home / "mambaforge" / "envs",
         home / ".conda" / "envs",
+        # On Windows, the Miniforge/Miniconda installers commonly use
+        # %LOCALAPPDATA%\\miniforge3 (or miniconda3), rather than placing the
+        # distribution directly under %USERPROFILE%. AIDA launched from a
+        # GUI also frequently has neither the activated shell PATH nor a
+        # useful CONDA_PREFIX, so these locations must be searched
+        # explicitly. Keep this conditional so LOCALAPPDATA is harmless on
+        # POSIX systems and avoid adding duplicate roots.
+        Path(os.environ["LOCALAPPDATA"]) / "miniforge3" / "envs"
+        if os.environ.get("LOCALAPPDATA")
+        else home / "__no_localappdata__",
+        Path(os.environ["LOCALAPPDATA"]) / "miniconda3" / "envs"
+        if os.environ.get("LOCALAPPDATA")
+        else home / "__no_localappdata__",
+        Path(os.environ["LOCALAPPDATA"]) / "mambaforge" / "envs"
+        if os.environ.get("LOCALAPPDATA")
+        else home / "__no_localappdata__",
         Path("/opt/homebrew/Caskroom/miniconda/base/envs"),
         Path("/opt/miniconda3/envs"),
         Path("/opt/anaconda3/envs"),
     ]
+    # Preserve search order while removing duplicate paths. This matters in
+    # particular when an installation happens to have LOCALAPPDATA equal to
+    # the user's home directory.
+    unique_roots: list[Path] = []
+    seen_roots: set[str] = set()
+    for root in roots:
+        key = os.path.normcase(os.path.normpath(str(root)))
+        if key not in seen_roots:
+            seen_roots.add(key)
+            unique_roots.append(root)
+    roots = unique_roots
     # CONDA_PREFIX points at the *active* env; its parent is the envs dir
     # for any non-base env, which covers installs in unusual locations.
     conda_prefix = os.environ.get("CONDA_PREFIX")
