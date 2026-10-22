@@ -46,6 +46,12 @@ from aida.config.settings import (
     save_mcp_config,
 )
 from aida.core.context import list_skills
+from aida.mcp.bernardyn_setup import DEFAULT_SERVER_NAME as BERNARDYN_SERVER_NAME
+from aida.mcp.bernardyn_setup import (
+    bernardyn_server_config,
+    bernardyn_version,
+    find_bernardyn_mcp,
+)
 from aida.mcp.config_io import merge_mcp_config
 from aida.mcp.groups import add_group, delete_group, known_group_names, rename_group, resolve_group
 from aida.mcp.manager import ConnectionTestResult
@@ -1062,6 +1068,7 @@ class McpManagementDialog(QDialog):
         for label, handler in [
             ("Add Server…", self._on_add),
             ("Add pyIrena…", self._on_add_pyirena),
+            ("Add Bernardyn…", self._on_add_bernardyn),
             ("Remove…", self._on_remove),
             ("Start", self._on_start),
             ("Stop", self._on_stop),
@@ -1448,6 +1455,122 @@ class McpManagementDialog(QDialog):
             "offered to the model, then use “Test Connection” here to check it starts.",
         )
 
+    def add_bernardyn(self) -> None:
+        """Public entry point for the one-click Bernardyn setup, so another
+        dialog (``OnboardingDialog``) can trigger it without reaching for a
+        private method — same arrangement as ``add_pyirena``."""
+        self._on_add_bernardyn()
+
+    def _on_add_bernardyn(self) -> None:
+        """One-click setup for Bernardyn's five plotting tools — the same
+        mechanical wiring as "Add pyIrena…", for the package that makes the
+        figures from the fits pyIrena produced (see
+        ``aida.mcp.bernardyn_setup``).
+
+        Kept as its own button rather than folded into the pyIrena one:
+        these are two separate installs that can each be present without
+        the other being wanted, and a button that silently configures a
+        second server would undercut the "AIDA shows exactly what it will
+        launch, then asks" posture every other add path here follows. The
+        onboarding screen, where a first-run user genuinely does want both
+        at once, offers the combined version instead.
+        """
+        candidates = find_bernardyn_mcp()
+        if not candidates:
+            QMessageBox.information(
+                self,
+                "Bernardyn Not Found",
+                "No bernardyn-mcp installation was found on this machine.\n\n"
+                'Install it with:\n    pip install "bernardyn[mcp]"\n\n'
+                "Its own conda environment is usually the better layout — AIDA talks to "
+                "it over stdio, so they do not have to share an interpreter, and "
+                "Bernardyn pins PySide6 differently from AIDA. Then click this button "
+                "again, or use “Add Server…” and point it at the bernardyn-mcp "
+                "executable.",
+            )
+            return
+
+        candidate = candidates[0]
+        if len(candidates) > 1:
+            labels = [found.display for found in candidates]
+            choice, accepted = QInputDialog.getItem(
+                self, "Choose Bernardyn Installation", "Several were found — use:", labels, 0, False
+            )
+            if not accepted:
+                return
+            candidate = candidates[labels.index(choice)]
+
+        name = BERNARDYN_SERVER_NAME
+        if name in self._configs():
+            answer = QMessageBox.question(
+                self,
+                "Already Configured",
+                f"An MCP server named {name!r} already exists. Replace its configuration "
+                "with the freshly detected one?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        workspace = self._active_workspace()
+        config = bernardyn_server_config(
+            candidate,
+            name=name,
+            data_root=(
+                workspace.source_folders[0] if workspace and workspace.source_folders else None
+            ),
+            output_root=(workspace.target_folder if workspace else None),
+        )
+        version = bernardyn_version(candidate)
+
+        summary = [
+            f"Command:  {' '.join([config.command, *config.args])}",
+            f"Found in: {candidate.source}",
+            f"Version:  Bernardyn {version}" if version else "Version:  (could not determine)",
+            f"Groups:   {', '.join(config.groups) or '(none)'}",
+        ]
+        if config.env:
+            summary.append("Env:      " + ", ".join(f"{k}={v}" for k, v in config.env.items()))
+        answer = QMessageBox.question(
+            self,
+            "Add Bernardyn MCP Server",
+            "AIDA will add this MCP server and launch it as a subprocess when a "
+            "workspace enables it:\n\n" + "\n".join(summary) + "\n\nAdd it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._settings.mcp.servers[config.name] = config
+        saved = self._save_mcp_config()
+        self._refresh_server_list()
+        if not saved:
+            return
+        if self._bridge is not None:
+            self._bridge.register_mcp_server(config)
+
+        QMessageBox.information(
+            self,
+            "Bernardyn Added",
+            f"Configured {config.name!r} in the {', '.join(config.groups) or 'default'} "
+            "group(s) — five plotting tools, so it is cheap to leave enabled alongside "
+            "pyIrena's.\n\nNext: set a workspace's MCP group to "
+            f"{config.groups[0] if config.groups else 'none'!r} so the tools are actually "
+            "offered to the model, then use “Test Connection” here to check it starts.",
+        )
+
+    def _active_workspace(self):
+        """The ``WorkspaceConfig`` of the session this dialog was opened
+        from, or ``None`` — the source of every path these one-click setups
+        suggest (a data root, an output root). Reached through the bridge's
+        session recorder because the dialog itself is handed only
+        ``Settings``, which has no notion of "current"."""
+        session = getattr(self._bridge, "session", None) if self._bridge is not None else None
+        workspace_name = getattr(getattr(session, "recorder", None), "workspace_name", None)
+        return self._settings.workspaces.workspaces.get(workspace_name) if workspace_name else None
+
     def _suggested_pyirena_data_root(self) -> str | None:
         """The active workspace's first source folder, if there is one.
 
@@ -1457,11 +1580,7 @@ class McpManagementDialog(QDialog):
         folder is by definition the data the user meant to work on. Falls
         back to unset (pyIrena's own default of "any absolute path") rather
         than guessing a path the user never named."""
-        session = getattr(self._bridge, "session", None) if self._bridge is not None else None
-        workspace_name = getattr(getattr(session, "recorder", None), "workspace_name", None)
-        workspace = (
-            self._settings.workspaces.workspaces.get(workspace_name) if workspace_name else None
-        )
+        workspace = self._active_workspace()
         if workspace and workspace.source_folders:
             return workspace.source_folders[0]
         return None

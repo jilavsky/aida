@@ -1,6 +1,6 @@
 """Tests for aida.mcp.env_discovery — the generic console-script search
 extracted from aida.mcp.pyirena_setup, and shared by aievaluator_setup /
-epics_mcp_setup.
+epics_mcp_setup / bernardyn_setup.
 
 Mirrors tests/test_pyirena_setup.py's structure and fixtures closely, since
 this module is that file's search logic generalized.
@@ -16,9 +16,11 @@ import pytest
 
 from aida.mcp.env_discovery import (
     ScriptCandidate,
+    environment_prefix,
     epics_ca_env,
     find_console_script,
     interpreter_for,
+    launch_path,
     resolve_ca_addr_list,
     resolve_editable_source_root,
 )
@@ -174,3 +176,40 @@ def test_resolve_editable_source_root_walks_up_to_pyproject_toml(tmp_path: Path)
 
 def test_resolve_editable_source_root_none_on_bad_interpreter():
     assert resolve_editable_source_root("/no/such/python", "widget") is None
+
+
+# --- cross-environment PATH (launch_path) ---------------------------------
+
+
+def test_environment_prefix_of_a_console_script(tmp_path: Path):
+    prefix = tmp_path / "envs" / "widget"
+    script = prefix / BIN_DIRNAME / SCRIPT_NAME
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    assert environment_prefix(ScriptCandidate(command=str(script))) == prefix
+
+
+def test_environment_prefix_is_none_for_a_bare_command():
+    assert environment_prefix(ScriptCandidate(command="widget-mcp")) is None
+
+
+def test_launch_path_puts_the_servers_own_environment_first(tmp_path: Path, monkeypatch):
+    """The whole point: the MCP SDK hands the subprocess *AIDA's* PATH, so
+    without this a server in another conda env cannot find its own shared
+    libraries (fatal and traceback-free on Windows)."""
+    monkeypatch.setenv("PATH", "/inherited/bin")
+    prefix = tmp_path / "envs" / "widget"
+    script = prefix / BIN_DIRNAME / SCRIPT_NAME
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    value = launch_path(ScriptCandidate(command=str(script)))
+
+    assert value is not None
+    assert value.endswith("/inherited/bin")
+    assert value.split(os.pathsep)[0].startswith(str(prefix))
+
+
+def test_launch_path_is_none_when_no_prefix_can_be_identified():
+    assert launch_path(ScriptCandidate(command="widget-mcp")) is None

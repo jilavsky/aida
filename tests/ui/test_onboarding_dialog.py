@@ -102,3 +102,71 @@ def test_add_workspace_opens_workspace_management_dialog(
 
     assert opened == [True]
     assert "1 workspace(s) configured" in dialog._status_label.text()
+
+
+# --- the combined pyIrena / Bernardyn button ------------------------------
+
+
+def _detect(monkeypatch, *, pyirena: bool, bernardyn: bool) -> None:
+    monkeypatch.setattr(
+        "aida.ui.qt.onboarding_dialog.find_pyirena_mcp",
+        (lambda: [object()]) if pyirena else list,
+    )
+    monkeypatch.setattr(
+        "aida.ui.qt.onboarding_dialog.find_bernardyn_mcp",
+        (lambda: [object()]) if bernardyn else list,
+    )
+
+
+def test_mcp_tools_button_hidden_when_neither_package_is_installed(
+    qapp, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A user who installed AIDA for document work must never see a button
+    for a package they don't have."""
+    _detect(monkeypatch, pyirena=False, bernardyn=False)
+    dialog = OnboardingDialog(load_settings(), None, aida_home / "skills")
+    # isHidden(), not isVisible(): nothing in this test shows the dialog, so
+    # every child is "not visible" regardless — only isHidden() distinguishes
+    # an explicit setVisible(False) from a parent that was simply never shown.
+    assert dialog._mcp_tools_button.isHidden()
+
+
+def test_mcp_tools_button_names_only_what_was_found(
+    qapp, aida_home: Path, records_home: Path, monkeypatch
+):
+    _detect(monkeypatch, pyirena=True, bernardyn=False)
+    dialog = OnboardingDialog(load_settings(), None, aida_home / "skills")
+    assert dialog._mcp_tools_button.text() == "Add pyIrena MCP Tools…"
+
+    _detect(monkeypatch, pyirena=False, bernardyn=True)
+    dialog = OnboardingDialog(load_settings(), None, aida_home / "skills")
+    assert dialog._mcp_tools_button.text() == "Add Bernardyn MCP Tools…"
+
+
+def test_mcp_tools_button_adds_both_when_both_are_installed(
+    qapp, aida_home: Path, records_home: Path, monkeypatch
+):
+    """One click, both servers — the first-run case where a user plainly
+    wants everything they have wired up (each still confirms separately,
+    inside the MCP dialog's own handlers)."""
+    _detect(monkeypatch, pyirena=True, bernardyn=True)
+    dialog = OnboardingDialog(load_settings(), None, aida_home / "skills")
+    assert dialog._mcp_tools_button.text() == "Add pyIrena + Bernardyn MCP Tools…"
+    assert not dialog._mcp_tools_button.isHidden()
+
+    called: list[str] = []
+
+    class _FakeMcpDialog:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def add_pyirena(self):
+            called.append("pyirena")
+
+        def add_bernardyn(self):
+            called.append("bernardyn")
+
+    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.McpManagementDialog", _FakeMcpDialog)
+    dialog._on_add_mcp_tools()
+
+    assert called == ["pyirena", "bernardyn"]

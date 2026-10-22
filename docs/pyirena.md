@@ -6,7 +6,7 @@
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
 > is still open.
 
-**Related:** [installation.md](installation.md) · [mcp-servers.md](mcp-servers.md) · [workspaces.md](workspaces.md) · [context-and-limits.md](context-and-limits.md)
+**Related:** [installation.md](installation.md) · [mcp-servers.md](mcp-servers.md) · [bernardyn.md](bernardyn.md) · [workspaces.md](workspaces.md) · [context-and-limits.md](context-and-limits.md)
 
 [pyIrena](https://github.com/jilavsky/pyirena) is the small-angle scattering
 analysis package AIDA was built to drive. It ships an MCP server
@@ -37,7 +37,8 @@ aida workspace edit my-analysis --mcp-group pyirena-analysis
 
 In the GUI, the same thing is the **MCP Servers…** dialog's **Add pyIrena…**
 button (also offered on the first-run onboarding screen when pyIrena is
-detected). `aida doctor` reports the state of both halves — installed or
+detected — alongside Bernardyn, if that's installed too; see
+[bernardyn.md](bernardyn.md)). `aida doctor` reports the state of both halves — installed or
 not, configured or not — and names the command that fixes whichever is
 missing.
 

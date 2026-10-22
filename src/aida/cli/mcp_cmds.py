@@ -36,6 +36,17 @@ from aida.mcp.aievaluator_setup import (
     find_aievaluator_mcp,
     find_aievaluator_skills_dir,
 )
+from aida.mcp.bernardyn_setup import (
+    DEFAULT_GROUPS as BERNARDYN_GROUPS,
+)
+from aida.mcp.bernardyn_setup import (
+    DEFAULT_SERVER_NAME as BERNARDYN_DEFAULT_NAME,
+)
+from aida.mcp.bernardyn_setup import (
+    bernardyn_server_config,
+    bernardyn_version,
+    find_bernardyn_mcp,
+)
 from aida.mcp.config_io import merge_mcp_config
 from aida.mcp.env_discovery import ScriptCandidate, resolve_ca_addr_list
 from aida.mcp.epics_mcp_setup import (
@@ -603,6 +614,104 @@ def cmd_find_aievaluator(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_add_bernardyn(args: argparse.Namespace) -> int:
+    """``aida mcp add-bernardyn`` — find bernardyn-mcp and configure it in
+    one step, same shape as ``add-pyirena`` (see
+    ``aida.mcp.bernardyn_setup``). Bernardyn is the publication-figure half
+    of the same workflow: five tools that turn a fit result or a data file
+    into a portable plot package. AIDA launches it as a stdio subprocess in
+    its own conda env, never importing it — its PySide6 pin is not AIDA's."""
+    settings = load_settings()
+
+    if args.command:
+        candidate = ScriptCandidate(command=args.command, source="given with --command")
+    else:
+        candidates = find_bernardyn_mcp()
+        if not candidates:
+            print("Could not find bernardyn-mcp on this machine.")
+            print()
+            print("Install Bernardyn's MCP server, either alongside AIDA:")
+            print('    pip install "bernardyn[mcp]"')
+            print("or in its own conda environment (AIDA talks to it over stdio, so they")
+            print("do not have to share an interpreter — and Bernardyn pins PySide6")
+            print("differently, so a separate env is usually the better layout) — then")
+            print("re-run this command, or point it straight at the executable:")
+            print("    aida mcp add-bernardyn --command /path/to/envs/bernardyn/bin/bernardyn-mcp")
+            return 1
+        if len(candidates) > 1 and not args.first:
+            print(f"Found {len(candidates)} bernardyn-mcp installations:")
+            for index, found in enumerate(candidates, start=1):
+                print(f"  {index}. {found.display}")
+            print()
+            print("The first is used by default. Re-run with --first to accept it, or with")
+            print("--command PATH to choose a different one.")
+            return 1
+        candidate = candidates[0]
+
+    existing = _get_server(settings, args.name)
+    if existing is not None and not args.force:
+        print(
+            f"An MCP server named {args.name!r} is already configured (command: {existing.command})."
+        )
+        print("Re-run with --force to replace it, or --name OTHER to add a second one.")
+        return 1
+
+    groups = [g.strip() for g in args.groups.split(",") if g.strip()]
+    server = bernardyn_server_config(
+        candidate,
+        name=args.name,
+        data_root=args.data_root or None,
+        output_root=args.output_root or None,
+        groups=groups,
+    )
+    settings.mcp.servers[server.name] = server
+    save_mcp_config(settings.mcp)
+
+    version = bernardyn_version(candidate)
+    print(f"Configured MCP server {server.name!r}{f' (Bernardyn {version})' if version else ''}.")
+    print(f"  command: {' '.join([server.command, *server.args])}")
+    print(f"  source:  {candidate.source}")
+    print(f"  groups:  {', '.join(server.groups) or '(none)'}")
+    if server.env:
+        print(f"  env:     {', '.join(f'{k}={v}' for k, v in server.env.items())}")
+
+    print()
+    print("Next: point a workspace at it —")
+    print(
+        f"    aida workspace edit <workspace> --mcp-group {server.groups[0] if server.groups else 'none'}"
+    )
+    print(f"Then check it starts:  aida mcp test {server.name}")
+    if not args.output_root:
+        print()
+        print("Tip: --output-root DIR sets BERNARDYN_OUTPUT_ROOT, where created plot")
+        print("packages and preview images land. Without it they go to a temporary")
+        print("bernardyn-mcp cache, which is easy to lose track of; your workspace's")
+        print("target folder is usually the right value.")
+    if not args.data_root:
+        print()
+        print("Tip: --data-root DIR sets BERNARDYN_DATA_ROOT, restricting every file")
+        print("bernardyn-mcp may read to that subtree — your workspace's source folder.")
+    return 0
+
+
+def cmd_find_bernardyn(_args: argparse.Namespace) -> int:
+    """``aida mcp find-bernardyn`` — report what would be found, change
+    nothing."""
+    candidates = find_bernardyn_mcp()
+    if not candidates:
+        print("No bernardyn-mcp installation found.")
+        print('Install it with:  pip install "bernardyn[mcp]"')
+        return 1
+    print(f"Found {len(candidates)} bernardyn-mcp installation(s), best first:")
+    for index, candidate in enumerate(candidates, start=1):
+        version = bernardyn_version(candidate)
+        suffix = f" — Bernardyn {version}" if version else ""
+        print(f"  {index}. {candidate.display}{suffix}")
+    print()
+    print("Configure the first one with:  aida mcp add-bernardyn")
+    return 0
+
+
 def cmd_add_epics_mcp(args: argparse.Namespace) -> int:
     """``aida mcp add-epics-mcp`` — find epics-mcp and configure it in one
     step. Installs only the read-only ``epics-mcp-user`` server by default;
@@ -842,6 +951,44 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser(
+        "find-bernardyn",
+        help="Report where bernardyn-mcp is installed, without changing anything",
+    )
+
+    add_bernardyn = sub.add_parser(
+        "add-bernardyn", help="Find Bernardyn's MCP server and configure it in one step"
+    )
+    add_bernardyn.add_argument(
+        "--command", default="", help="Path to bernardyn-mcp, skipping auto-detection"
+    )
+    add_bernardyn.add_argument(
+        "--data-root",
+        default="",
+        help="Sets BERNARDYN_DATA_ROOT — restricts every file bernardyn-mcp may read to this subtree",
+    )
+    add_bernardyn.add_argument(
+        "--output-root",
+        default="",
+        help="Sets BERNARDYN_OUTPUT_ROOT — where plot packages and previews are written (default: a temp cache)",
+    )
+    add_bernardyn.add_argument(
+        "--name", default=BERNARDYN_DEFAULT_NAME, help="Server name in mcp.json"
+    )
+    add_bernardyn.add_argument(
+        "--groups",
+        default=",".join(BERNARDYN_GROUPS),
+        help="Comma-separated MCP groups to put it in",
+    )
+    add_bernardyn.add_argument(
+        "--first",
+        action="store_true",
+        help="Accept the first candidate without asking when several are found",
+    )
+    add_bernardyn.add_argument(
+        "--force", action="store_true", help="Replace an existing server config with the same name"
+    )
+
+    sub.add_parser(
         "find-epics-mcp", help="Report where epics-mcp is installed, without changing anything"
     )
 
@@ -920,6 +1067,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_add_aievaluator(args)
     if args.subcommand == "find-aievaluator":
         return cmd_find_aievaluator(args)
+    if args.subcommand == "add-bernardyn":
+        return cmd_add_bernardyn(args)
+    if args.subcommand == "find-bernardyn":
+        return cmd_find_bernardyn(args)
     if args.subcommand == "add-epics-mcp":
         return cmd_add_epics_mcp(args)
     if args.subcommand == "find-epics-mcp":

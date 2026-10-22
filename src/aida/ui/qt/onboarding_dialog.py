@@ -26,6 +26,7 @@ from pathlib import Path
 
 from aida.cli.doctor import run_checks
 from aida.config.settings import Settings
+from aida.mcp.bernardyn_setup import find_bernardyn_mcp
 from aida.mcp.pyirena_setup import find_pyirena_mcp
 from aida.ui.qt._qt import (
     QDialog,
@@ -74,16 +75,34 @@ class OnboardingDialog(QDialog):
         self._workspace_button.clicked.connect(self._on_add_workspace)
         layout.addWidget(self._workspace_button)
 
-        # Offered here, on first launch, only when pyIrena is actually
-        # installed on this machine: for the beamline audience that is the
-        # whole point of AIDA, and configuring an MCP server by hand is the
-        # hardest step in setup. Hidden entirely when pyIrena isn't
-        # present, so a user who installed AIDA for document work never
-        # sees a button for a package they don't have.
-        self._pyirena_button = QPushButton("Add pyIrena MCP Tools…", self)
-        self._pyirena_button.clicked.connect(self._on_add_pyirena)
-        self._pyirena_button.setVisible(bool(find_pyirena_mcp()))
-        layout.addWidget(self._pyirena_button)
+        # Offered here, on first launch, only for the sibling packages
+        # actually installed on this machine: for the beamline audience
+        # those tools are the whole point of AIDA, and configuring an MCP
+        # server by hand is the hardest step in setup. Hidden entirely when
+        # neither is present, so a user who installed AIDA for document
+        # work never sees a button for a package they don't have.
+        #
+        # One button, not two, and it adds everything it found: unlike the
+        # MCP dialog (where each preset is its own deliberate action), a
+        # first-run user with both pyIrena and Bernardyn installed wants
+        # both wired up, and each one still shows its own confirmation
+        # with the exact command before anything is written.
+        self._found_pyirena = bool(find_pyirena_mcp())
+        self._found_bernardyn = bool(find_bernardyn_mcp())
+        found_names = [
+            name
+            for name, found in (
+                ("pyIrena", self._found_pyirena),
+                ("Bernardyn", self._found_bernardyn),
+            )
+            if found
+        ]
+        self._mcp_tools_button = QPushButton(
+            f"Add {' + '.join(found_names) or 'pyIrena'} MCP Tools…", self
+        )
+        self._mcp_tools_button.clicked.connect(self._on_add_mcp_tools)
+        self._mcp_tools_button.setVisible(bool(found_names))
+        layout.addWidget(self._mcp_tools_button)
 
         self._status_label = QLabel(self)
         self._status_label.setWordWrap(True)
@@ -137,14 +156,19 @@ class OnboardingDialog(QDialog):
         dialog.exec()
         self._refresh_status()
 
-    def _on_add_pyirena(self) -> None:
-        """Hands straight off to the MCP dialog's own one-click pyIrena
-        setup rather than duplicating it — same reasoning as the profile
-        and workspace buttons above, which defer to the real editors."""
+    def _on_add_mcp_tools(self) -> None:
+        """Hands straight off to the MCP dialog's own one-click setups
+        rather than duplicating them — same reasoning as the profile and
+        workspace buttons above, which defer to the real editors. Runs
+        whichever of the two were detected, in turn; each shows its own
+        confirmation, so declining one does not skip the other."""
         from aida.ui.qt.mcp_management_dialog import McpManagementDialog
 
         dialog = McpManagementDialog(self._settings, self._bridge, self._skills_dir, self)
-        dialog.add_pyirena()
+        if self._found_pyirena:
+            dialog.add_pyirena()
+        if self._found_bernardyn:
+            dialog.add_bernardyn()
         self._refresh_status()
 
 

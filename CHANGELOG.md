@@ -16,6 +16,35 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Added
+
+- **One-click Bernardyn MCP setup**, the counterpart to `add-pyirena` for
+  [Bernardyn](https://github.com/jilavsky/Bernardyn)'s five
+  publication-figure tools: `aida mcp add-bernardyn` / `aida mcp
+  find-bernardyn`, an **Add Bernardyn…** button in the MCP management
+  dialog, and — on the first-run onboarding screen — a single button that
+  adds whichever of pyIrena and Bernardyn it detected ("Add pyIrena +
+  Bernardyn MCP Tools…"), each still confirming separately before
+  anything is written. Detection reuses the existing sibling-conda-env
+  search, so Bernardyn in its own environment (the recommended layout, as
+  it pins PySide6 differently from AIDA) is found without configuration.
+  The server lands in **both** `pyirena-analysis` and `bernardyn-plots`:
+  five tools is ~700 tokens of schema against pyirena-mcp's ~10,200, so
+  an analysis workspace gets plotting without a second setup step, while
+  a figure-only workspace can take the plotting group alone. `--data-root`
+  / `--output-root` set `BERNARDYN_DATA_ROOT` / `BERNARDYN_OUTPUT_ROOT`;
+  the GUI button suggests the active workspace's source and target
+  folders. See [`docs/bernardyn.md`](docs/bernardyn.md).
+
+- **`env_discovery.launch_path`** — the cross-environment `PATH` snapshot
+  that has been part of `add-pyirena` since 0.1.0b6, generalized so every
+  preset can use it. Without it, a server launched from another conda
+  environment cannot find its own shared libraries; on Windows that kills
+  CPython at import with exit 127 and no traceback, surfacing only as
+  "Connection closed". Bernardyn is especially exposed (numpy, h5py,
+  PySide6, PyOpenGL are all extension modules), so its setup writes the
+  snapshot too. `pyirena_setup` keeps its own tested copy unchanged.
+
 ## [1.0.0] - 2026-10-16
 
 **AIDA is 1.0.** All ten phases of the original plan are delivered and in

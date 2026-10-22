@@ -1,6 +1,7 @@
 """Generic "find a console script in a sibling conda/mamba environment" —
-extracted from ``aida.mcp.pyirena_setup`` so a second and third MCP server
-preset (aievaluator, epics-mcp) reuse the same search instead of copying it.
+extracted from ``aida.mcp.pyirena_setup`` so every later MCP server preset
+(aievaluator, epics-mcp, bernardyn) reuses the same search instead of
+copying it.
 
 ``pyirena_setup.py`` itself is left untouched: it predates this module, is
 fully tested, and nothing here changes its behavior. New presets import
@@ -153,6 +154,65 @@ def find_console_script(
     return candidates
 
 
+def environment_prefix(candidate: ScriptCandidate) -> Path | None:
+    """The environment prefix ``candidate`` launches from, or ``None``.
+
+    A console script lives in ``<prefix>/bin`` (``<prefix>\\Scripts`` on
+    Windows); the ``python -m`` form's command *is* ``<prefix>/bin/python``
+    on POSIX and ``<prefix>\\python.exe`` on Windows.
+    """
+    command = Path(candidate.command)
+    parent = command.parent
+    if os.name == "nt" and parent.name.lower() != _BIN_DIRNAME.lower():
+        # `<prefix>\python.exe` — the interpreter sits at the prefix root.
+        return parent if (parent / _BIN_DIRNAME).is_dir() else None
+    return parent.parent if parent.name == _BIN_DIRNAME else None
+
+
+def launch_path(candidate: ScriptCandidate) -> str | None:
+    """A ``PATH`` value that lets ``candidate`` actually load, or ``None``.
+
+    Why this is needed at all: AIDA and the server it launches usually live
+    in *separate* conda environments (the whole point of talking over
+    stdio — see this module's docstring, search order 4). The MCP SDK builds
+    the subprocess environment from ``get_default_environment()``, which
+    inherits **AIDA's** ``PATH``, so the server's own env never appears on
+    it. On Windows that is fatal and nearly undebuggable: conda keeps shared
+    libraries in ``<prefix>\\Library\\bin``, so an extension module's DLL
+    fails to load, CPython dies at import with exit 127 and *no traceback on
+    stderr*, and the client sees only "unhandled errors in a TaskGroup (1
+    sub-exception)" wrapping a bare "Connection closed".
+
+    The value is a snapshot taken now, at configure time, rather than a
+    reference resolved at launch: it goes into ``mcp.json`` as a literal the
+    user can read and edit, which matters because this is the setting they
+    will have to adjust by hand if they ever move the environment. The
+    prefix directories go *first* so the server's env wins over AIDA's own.
+
+    Generic form of ``pyirena_setup._launch_path``, which keeps its own
+    copy for the same reason the rest of that module was left alone (it
+    predates this one and is fully tested); any new preset uses this.
+    """
+    prefix = environment_prefix(candidate)
+    if prefix is None:
+        return None
+    if os.name == "nt":
+        # Mirrors what `conda activate` prepends on Windows.
+        parts = [
+            prefix,
+            prefix / "Library" / "mingw-w64" / "bin",
+            prefix / "Library" / "usr" / "bin",
+            prefix / "Library" / "bin",
+            prefix / "Scripts",
+            prefix / "bin",
+        ]
+    else:
+        parts = [prefix / "bin"]
+    inherited = os.environ.get("PATH", "")
+    joined = os.pathsep.join(str(part) for part in parts)
+    return f"{joined}{os.pathsep}{inherited}" if inherited else joined
+
+
 def epics_ca_env(ca_addr_list: str | None, ca_auto_addr_list: str | None = "NO") -> dict[str, str]:
     """The two env vars an EPICS Channel Access client subprocess needs.
 
@@ -229,9 +289,11 @@ def resolve_editable_source_root(python_executable: str, module_name: str) -> Pa
 __all__ = [
     "ScriptCandidate",
     "candidate_env_dirs",
+    "environment_prefix",
     "epics_ca_env",
     "find_console_script",
     "interpreter_for",
+    "launch_path",
     "resolve_ca_addr_list",
     "resolve_editable_source_root",
     "script_filename",

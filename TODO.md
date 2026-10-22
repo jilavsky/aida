@@ -243,8 +243,9 @@ Carried from `PLAN.md` §1, with the items this review closed removed.
 **Deferred by decision, not forgotten:** native launchd/Task Scheduler
 artefacts for "logged out, not just closed"; a diff view when the agent
 proposes changes to an existing script (needs a UX decision); extending
-one-click MCP setup past pyIrena (needs `bait_mcp`'s real env-var names);
-PyInstaller/Briefcase bundles; a passphrase-encrypted secrets sidecar.
+one-click MCP setup past pyIrena, aievaluator, epics-mcp and Bernardyn
+(`bait_mcp` still needs its real env-var names); PyInstaller/Briefcase
+bundles; a passphrase-encrypted secrets sidecar.
 Everything considered and consciously not committed is in `PLAN.md` §2 —
 including §2.8's sample-holder recognition from the USAXS camera, which is
 the largest piece of thinking parked there.

@@ -9,13 +9,19 @@
 **Related:** [workspaces.md](workspaces.md) · [safety-and-permissions.md](safety-and-permissions.md) · [context-and-limits.md](context-and-limits.md)
 
 
-## Shortcut: pyIrena
+## Shortcut: pyIrena and Bernardyn
 
 If pyIrena is what you're here for, skip the manual setup below —
 `aida mcp add-pyirena` (or the MCP dialog's **Add pyIrena…** button) finds
 it and configures the server, its group, and its skills in one step. See
-[pyirena.md](pyirena.md). The rest of this file covers adding any other MCP
-server by hand.
+[pyirena.md](pyirena.md).
+
+`aida mcp add-bernardyn` (or **Add Bernardyn…**) does the same for
+[Bernardyn](https://github.com/jilavsky/Bernardyn)'s five publication-figure
+tools — see [bernardyn.md](bernardyn.md). On the first-run onboarding
+screen, one button adds whichever of the two it detects.
+
+The rest of this file covers adding any other MCP server by hand.
 
 ## What an MCP server is
 

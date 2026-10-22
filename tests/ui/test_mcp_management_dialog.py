@@ -943,6 +943,77 @@ def test_add_pyirena_writes_the_server_and_installs_its_skills(qapp, aida_home, 
     assert "pyirena-usage" in server.skills
 
 
+# --- one-click Bernardyn setup --------------------------------------------
+
+
+def test_add_bernardyn_explains_the_install_when_nothing_is_found(qapp, aida_home, monkeypatch):
+    from aida.config.settings import load_settings
+
+    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.find_bernardyn_mcp", list)
+    shown: list[tuple] = []
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.information",
+        lambda *args, **kwargs: shown.append(args),
+    )
+
+    settings = load_settings()
+    dialog = McpManagementDialog(settings, None, aida_home / "skills")
+    dialog.add_bernardyn()
+
+    assert shown, "the user must be told something"
+    assert 'pip install "bernardyn[mcp]"' in shown[0][2]
+    assert not settings.mcp.servers
+
+
+def test_add_bernardyn_confirms_before_writing_anything(qapp, aida_home, monkeypatch):
+    from aida.config.settings import load_settings
+    from aida.mcp.bernardyn_setup import BernardynMcpCandidate
+    from aida.ui.qt._qt import QMessageBox
+
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.find_bernardyn_mcp",
+        lambda: [BernardynMcpCandidate(command="/opt/bernardyn-mcp", source="PATH")],
+    )
+    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.bernardyn_version", lambda _c: "1.0.0")
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.question",
+        lambda *a, **k: QMessageBox.StandardButton.No,
+    )
+
+    settings = load_settings()
+    dialog = McpManagementDialog(settings, None, aida_home / "skills")
+    dialog.add_bernardyn()
+
+    assert not settings.mcp.servers
+
+
+def test_add_bernardyn_writes_the_server_in_both_groups(qapp, aida_home, monkeypatch):
+    from aida.config.settings import load_settings
+    from aida.mcp.bernardyn_setup import BernardynMcpCandidate
+    from aida.ui.qt._qt import QMessageBox
+
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.find_bernardyn_mcp",
+        lambda: [BernardynMcpCandidate(command="/opt/bernardyn-mcp", source="PATH")],
+    )
+    monkeypatch.setattr("aida.ui.qt.mcp_management_dialog.bernardyn_version", lambda _c: "1.0.0")
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.question",
+        lambda *a, **k: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(
+        "aida.ui.qt.mcp_management_dialog.QMessageBox.information", lambda *a, **k: None
+    )
+
+    settings = load_settings()
+    dialog = McpManagementDialog(settings, None, aida_home / "skills")
+    dialog.add_bernardyn()
+
+    server = settings.mcp.servers["bernardyn"]
+    assert server.command == "/opt/bernardyn-mcp"
+    assert server.groups == ["pyirena-analysis", "bernardyn-plots"]
+
+
 # --- Skills browser: install bundled skills (PLAN.md §1.5) -----------------
 
 

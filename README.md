@@ -70,8 +70,13 @@ pip install "aida-workbench[gui,docs]" "pyirena[all]"
 aida mcp add-pyirena
 ```
 
-See [`docs/pyirena.md`](docs/pyirena.md) for the compatibility details and
-the GUI equivalent.
+[Bernardyn](https://github.com/jilavsky/Bernardyn), the publication-figure
+workbench, wires up the same way (`aida mcp add-bernardyn`), and the GUI's
+first-run screen offers one button that adds whichever of the two it finds.
+
+See [`docs/pyirena.md`](docs/pyirena.md) and
+[`docs/bernardyn.md`](docs/bernardyn.md) for the compatibility details and
+the GUI equivalents.
 
 From a git checkout, for development:
 

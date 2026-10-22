@@ -519,6 +519,121 @@ def test_add_pyirena_accepts_an_explicit_command_without_detection(aida_home: Pa
     assert load_mcp_config().servers["pyirena"].command == "/custom/pyirena-mcp"
 
 
+# --- add-bernardyn / find-bernardyn ---------------------------------------
+
+
+def _fake_bernardyn_candidate(command: str = "/opt/envs/bernardyn/bin/bernardyn-mcp"):
+    from aida.mcp.bernardyn_setup import BernardynMcpCandidate
+
+    return BernardynMcpCandidate(command=command, source="conda env 'bernardyn'")
+
+
+def test_find_bernardyn_reports_nothing_found(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_bernardyn_mcp", list)
+    assert main(["find-bernardyn"]) == 1
+    assert 'pip install "bernardyn[mcp]"' in capsys.readouterr().out
+
+
+def test_add_bernardyn_configures_the_server_and_both_groups(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_bernardyn_mcp", lambda: [_fake_bernardyn_candidate()]
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.bernardyn_version", lambda _c: "1.0.0")
+
+    assert main(["add-bernardyn"]) == 0
+
+    saved = load_mcp_config().servers["bernardyn"]
+    assert saved.command == "/opt/envs/bernardyn/bin/bernardyn-mcp"
+    assert saved.groups == ["pyirena-analysis", "bernardyn-plots"]
+    out = capsys.readouterr().out
+    assert "Bernardyn 1.0.0" in out
+    # Same reasoning as the pyIrena test: a configured server nobody points
+    # a workspace at is invisible in the chat window.
+    assert "--mcp-group pyirena-analysis" in out
+
+
+def test_add_bernardyn_sets_the_root_env_vars(aida_home: Path, monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_bernardyn_mcp", lambda: [_fake_bernardyn_candidate()]
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.bernardyn_version", lambda _c: None)
+
+    assert (
+        main(
+            [
+                "add-bernardyn",
+                "--data-root",
+                str(tmp_path / "data"),
+                "--output-root",
+                str(tmp_path / "out"),
+            ]
+        )
+        == 0
+    )
+
+    env = load_mcp_config().servers["bernardyn"].env
+    assert env["BERNARDYN_DATA_ROOT"] == str(tmp_path / "data")
+    assert env["BERNARDYN_OUTPUT_ROOT"] == str(tmp_path / "out")
+
+
+def test_add_bernardyn_honors_custom_groups(aida_home: Path, monkeypatch):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_bernardyn_mcp", lambda: [_fake_bernardyn_candidate()]
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.bernardyn_version", lambda _c: None)
+
+    assert main(["add-bernardyn", "--groups", "figures, plots"]) == 0
+
+    assert load_mcp_config().servers["bernardyn"].groups == ["figures", "plots"]
+
+
+def test_add_bernardyn_asks_which_one_when_several_are_found(aida_home: Path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_bernardyn_mcp",
+        lambda: [
+            _fake_bernardyn_candidate("/a/bernardyn-mcp"),
+            _fake_bernardyn_candidate("/b/bernardyn-mcp"),
+        ],
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.bernardyn_version", lambda _c: None)
+
+    assert main(["add-bernardyn"]) == 1
+    assert "--first" in capsys.readouterr().out
+    assert "bernardyn" not in load_mcp_config().servers
+
+    assert main(["add-bernardyn", "--first"]) == 0
+    assert load_mcp_config().servers["bernardyn"].command == "/a/bernardyn-mcp"
+
+
+def test_add_bernardyn_refuses_to_clobber_without_force(aida_home: Path, monkeypatch):
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_bernardyn_mcp", lambda: [_fake_bernardyn_candidate()]
+    )
+    monkeypatch.setattr("aida.cli.mcp_cmds.bernardyn_version", lambda _c: None)
+    assert main(["add-bernardyn"]) == 0
+
+    monkeypatch.setattr(
+        "aida.cli.mcp_cmds.find_bernardyn_mcp",
+        lambda: [_fake_bernardyn_candidate("/other/bernardyn-mcp")],
+    )
+    assert main(["add-bernardyn"]) == 1
+    assert load_mcp_config().servers["bernardyn"].command == "/opt/envs/bernardyn/bin/bernardyn-mcp"
+
+    assert main(["add-bernardyn", "--force"]) == 0
+    assert load_mcp_config().servers["bernardyn"].command == "/other/bernardyn-mcp"
+
+
+def test_add_bernardyn_accepts_an_explicit_command_without_detection(aida_home: Path, monkeypatch):
+    def _must_not_be_called():
+        raise AssertionError("--command must skip detection entirely")
+
+    monkeypatch.setattr("aida.cli.mcp_cmds.find_bernardyn_mcp", _must_not_be_called)
+    monkeypatch.setattr("aida.cli.mcp_cmds.bernardyn_version", lambda _c: None)
+
+    assert main(["add-bernardyn", "--command", "/custom/bernardyn-mcp"]) == 0
+    assert load_mcp_config().servers["bernardyn"].command == "/custom/bernardyn-mcp"
+
+
 # --- add-aievaluator / find-aievaluator -----------------------------------
 
 
