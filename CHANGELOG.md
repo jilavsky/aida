@@ -16,6 +16,12 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-02
+
+A small feature release on top of 1.0.0: one-click setup for Bernardyn's
+plotting tools, and a Windows fix for finding MCP servers installed in
+other conda environments.
+
 ### Added
 
 - **One-click Bernardyn MCP setup**, the counterpart to `add-pyirena` for
@@ -44,6 +50,16 @@ decision revised), unrelated to what shipped when. Entries below link to
   "Connection closed". Bernardyn is especially exposed (numpy, h5py,
   PySide6, PyOpenGL are all extension modules), so its setup writes the
   snapshot too. `pyirena_setup` keeps its own tested copy unchanged.
+
+### Fixed
+
+- **Sibling conda environments are found on Windows** when Miniforge,
+  Miniconda or Mambaforge is installed under `%LOCALAPPDATA%` (the
+  installers' usual per-user location) rather than directly under
+  `%USERPROFILE%`. AIDA launched from a shortcut has neither an activated
+  shell `PATH` nor a useful `CONDA_PREFIX`, so `add-pyirena` /
+  `add-bernardyn` detection previously came up empty. The search roots
+  are also de-duplicated, keeping their order.
 
 ## [1.0.0] - 2026-10-16
 
