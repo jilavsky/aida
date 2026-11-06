@@ -25,7 +25,10 @@ Between two round trips the agent loop may also emit `SteeringMessageDelivered`
 conversation.
 
 `AgentError` can appear at any point and always ends the stream for that
-`complete()`/`run()` call — it is not just informational.
+`complete()`/`run()` call — it is not just informational. The one exception
+is a *transient* provider failure (``AgentError.retryable``) before any of
+the turn was shown: ``aida.providers.retry.complete_with_retries`` turns
+that into a `ProviderRetrying` notice and sends the request again.
 """
 
 from __future__ import annotations
@@ -280,6 +283,40 @@ class AgentError:
     layer: str
     message: str
     detail: str | None = None
+    #: Set by a provider when the failure looks transient — the endpoint
+    #: was busy, overloaded, rate-limited, briefly unreachable, or (the ANL
+    #: Argo pattern) answered with an upstream error such as "Permission
+    #: ... denied on resource" that goes away on the next attempt. It only
+    #: says "the same request might succeed if sent again";
+    #: ``aida.providers.retry.complete_with_retries`` decides whether that
+    #: is actually safe (nothing of the turn shown yet) and how long to
+    #: wait. Defaults to ``False`` so every error that predates this field
+    #: — and every non-provider error — is never retried.
+    retryable: bool = False
+
+    to_dict = _base_dict
+
+
+@dataclass(frozen=True)
+class ProviderRetrying:
+    """The provider call just failed with a transient error and is about to
+    be sent again after ``delay_seconds``.
+
+    Informational, not terminal — unlike ``AgentError`` the stream carries
+    on. Emitted by ``aida.providers.retry.complete_with_retries`` so a
+    frontend can say "Argo is busy, retrying (2/5)" instead of showing a
+    spinner that has silently stopped making progress. ``attempt`` is the
+    1-based number of the attempt that *failed*; ``max_attempts`` is the
+    total the policy allows (so the next try is ``attempt + 1`` of
+    ``max_attempts``). ``message``/``detail`` are the failed attempt's
+    ``AgentError`` fields, verbatim.
+    """
+
+    attempt: int
+    max_attempts: int
+    delay_seconds: float
+    message: str
+    detail: str | None = None
 
     to_dict = _base_dict
 
@@ -298,6 +335,7 @@ AgentEvent = (
     | ContextTrimmed
     | SteeringMessageDelivered
     | ConversationTitled
+    | ProviderRetrying
     | AgentError
 )
 
@@ -309,6 +347,7 @@ __all__ = [
     "FileArtifactCreated",
     "ImageArtifactCreated",
     "MessageFinished",
+    "ProviderRetrying",
     "RetrievalPerformed",
     "SteeringMessageDelivered",
     "TextDelta",

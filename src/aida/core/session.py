@@ -100,6 +100,7 @@ from aida.providers.profiles import (
     build_embeddings_provider,
     build_provider,
 )
+from aida.providers.retry import SHORT_RETRY_POLICY, complete_with_retries
 from aida.workspace.files import default_file_tools
 from aida.workspace.safety import ConfirmationRequest, ConfirmCallback, SafetyGuard
 from aida.workspace.web import default_web_tools
@@ -810,7 +811,17 @@ class ChatSession:
         try:
             summary_text = ""
             for_error: str | None = None
-            async for event in self.provider.complete(request_messages, [], summary_settings):
+            # A short retry budget: a busy provider (Argo) would otherwise
+            # cost the user a summary and fall back to plain dropping, but
+            # this runs mid-turn and already has that fallback, so it is
+            # not worth the agent loop's full half-minute of patience.
+            async for event in complete_with_retries(
+                self.provider,
+                request_messages,
+                [],
+                summary_settings,
+                policy=SHORT_RETRY_POLICY,
+            ):
                 if isinstance(event, TextFinished):
                     summary_text = event.text
                 elif isinstance(event, AgentError):

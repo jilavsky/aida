@@ -32,6 +32,7 @@ from aida.core.events import (
     FileArtifactCreated,
     ImageArtifactCreated,
     MessageFinished,
+    ProviderRetrying,
     SteeringMessageDelivered,
     TextDelta,
     TextFinished,
@@ -144,6 +145,14 @@ def print_event(event: AgentEvent) -> None:
         # it is wrong is now, while `aida conversations rename` is one
         # command away.
         print(f"\n[title] {event.title}")
+    elif isinstance(event, ProviderRetrying):
+        # A transient provider failure (Argo busy, overloaded, rate
+        # limited) is being resent rather than shown as an error — say so,
+        # or a half-minute of backoff looks like a hang.
+        print(
+            f"\n[provider] {event.message} — retrying in {event.delay_seconds:.0f}s "
+            f"(attempt {event.attempt + 1} of {event.max_attempts})"
+        )
     elif isinstance(event, AgentError):
         detail = f" ({event.detail})" if event.detail else ""
         print(f"\n[error:{event.layer}] {event.message}{detail}")

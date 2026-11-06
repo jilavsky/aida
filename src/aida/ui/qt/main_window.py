@@ -49,6 +49,7 @@ from aida.core.cost import estimate_cost_usd
 from aida.core.events import (
     ContextTrimmed,
     ConversationTitled,
+    ProviderRetrying,
     ToolCallFinished,
     ToolCallStarted,
 )
@@ -1105,6 +1106,18 @@ class MainWindow(QMainWindow):
             self._update_conversation_header()
             self._refresh_conversations_sidebar()
             self.statusBar().showMessage(f"Conversation named: {event.title}", 5000)
+        elif isinstance(event, ProviderRetrying):
+            # A transient provider failure (Argo busy, overloaded, rate
+            # limited) is being resent after a backoff — aida.providers.retry.
+            # Without this the "Working…" label just keeps counting through
+            # up to half a minute of waiting with no hint why. Status bar,
+            # like ContextTrimmed: it is not an error, and if the retry
+            # succeeds there is nothing for the transcript to keep.
+            self.statusBar().showMessage(
+                f"Provider busy ({event.message}) — retrying in {event.delay_seconds:.0f} s "
+                f"(attempt {event.attempt + 1} of {event.max_attempts})",
+                int((event.delay_seconds + 10) * 1000),
+            )
         elif isinstance(event, ToolCallStarted):
             # Which tool is in flight, for the "Stopping… waiting for X"
             # label — cancellation is honored between provider events and

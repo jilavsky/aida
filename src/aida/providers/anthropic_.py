@@ -45,6 +45,8 @@ from aida.providers.base import (
     Message,
     ToolSchema,
     is_param_rejection_status,
+    is_transient_failure,
+    is_transport_exception,
     unsupported_request_param,
 )
 from aida.providers.vision import read_image_b64, select_images_within_cap
@@ -496,18 +498,31 @@ class AnthropicProvider(LLMProvider):
                     layer=self.layer_name, message="model not found", detail=str(exc)
                 )
             except APIConnectionError as exc:
+                # ``retryable`` on these: see AgentError.retryable and
+                # aida.providers.retry — the SDK's own retry only covers
+                # failures it sees as an HTTP status before the stream
+                # starts, not the Argo proxy's errors inside a 200 stream.
                 error = AgentError(
-                    layer=self.layer_name, message="connection failed", detail=str(exc)
+                    layer=self.layer_name,
+                    message="connection failed",
+                    detail=str(exc),
+                    retryable=True,
                 )
             except APIStatusError as exc:
                 retry_param = None if emitted else self._param_to_drop(exc, kwargs)
                 error = AgentError(
-                    layer=self.layer_name, message=f"API error ({exc.status_code})", detail=str(exc)
+                    layer=self.layer_name,
+                    message=f"API error ({exc.status_code})",
+                    detail=str(exc),
+                    retryable=is_transient_failure(exc.status_code, str(exc)),
                 )
             except AnthropicError as exc:
                 retry_param = None if emitted else self._param_to_drop(exc, kwargs)
                 error = AgentError(
-                    layer=self.layer_name, message="unexpected provider error", detail=str(exc)
+                    layer=self.layer_name,
+                    message="unexpected provider error",
+                    detail=str(exc),
+                    retryable=is_transient_failure(getattr(exc, "status_code", None), str(exc)),
                 )
             except Exception as exc:  # noqa: BLE001 - see LLMProvider.complete's contract
                 # LLMProvider.complete promises callers "yields a single
@@ -525,6 +540,7 @@ class AnthropicProvider(LLMProvider):
                     layer=self.layer_name,
                     message="unexpected error",
                     detail=f"{type(exc).__name__}: {exc}",
+                    retryable=is_transport_exception(exc),
                 )
 
             if retry_param is not None:

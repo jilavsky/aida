@@ -19,6 +19,7 @@ from typing import Any
 
 from openai import (
     APIConnectionError,
+    APIError,
     APIStatusError,
     AsyncOpenAI,
     AuthenticationError,
@@ -43,6 +44,8 @@ from aida.providers.base import (
     Message,
     ToolSchema,
     is_param_rejection_status,
+    is_transient_failure,
+    is_transport_exception,
     unsupported_request_param,
 )
 from aida.providers.vision import read_image_b64, select_images_within_cap
@@ -406,23 +409,40 @@ class OpenAICompatProvider(LLMProvider):
                     layer=self.layer_name, message="model not found", detail=str(exc)
                 )
             except APIConnectionError as exc:
+                # ``retryable``: see AnthropicProvider.complete and
+                # aida.providers.retry.
                 error = AgentError(
-                    layer=self.layer_name, message="connection failed", detail=str(exc)
+                    layer=self.layer_name,
+                    message="connection failed",
+                    detail=str(exc),
+                    retryable=True,
                 )
             except APIStatusError as exc:
                 retry_param = None if emitted else self._param_to_drop(exc, kwargs)
                 error = AgentError(
-                    layer=self.layer_name, message=f"API error ({exc.status_code})", detail=str(exc)
+                    layer=self.layer_name,
+                    message=f"API error ({exc.status_code})",
+                    detail=str(exc),
+                    retryable=is_transient_failure(exc.status_code, str(exc)),
                 )
             except Exception as exc:  # noqa: BLE001 - any unexpected SDK error still surfaces as AgentError
                 # Not just belt-and-braces: an error delivered *inside* an
                 # SSE stream (HTTP 200, then an error event — the Argo
                 # proxy's shape) reaches us as the SDK's status-less base
                 # APIError, which lands right here rather than in the
-                # APIStatusError branch above.
+                # APIStatusError branch above. Only that, or a network-level
+                # error the SDK did not wrap, is worth retrying — a
+                # TypeError from a malformed request is not.
                 retry_param = None if emitted else self._param_to_drop(exc, kwargs)
+                if isinstance(exc, APIError):
+                    retryable = is_transient_failure(getattr(exc, "status_code", None), str(exc))
+                else:
+                    retryable = is_transport_exception(exc)
                 error = AgentError(
-                    layer=self.layer_name, message="unexpected provider error", detail=str(exc)
+                    layer=self.layer_name,
+                    message="unexpected provider error",
+                    detail=str(exc),
+                    retryable=retryable,
                 )
 
             if retry_param is not None:

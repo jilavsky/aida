@@ -27,6 +27,7 @@ from aida.core.events import (
     FileArtifactCreated,
     ImageArtifactCreated,
     MessageFinished,
+    ProviderRetrying,
     SteeringMessageDelivered,
     TextDelta,
     TextFinished,
@@ -44,6 +45,7 @@ from aida.providers.base import (
     ToolCall,
     ToolSchema,
 )
+from aida.providers.retry import DEFAULT_RETRY_POLICY, RetryPolicy, complete_with_retries
 
 DEFAULT_MAX_ITERATIONS = 50
 
@@ -88,11 +90,16 @@ class AgentLoop:
         *,
         max_iterations: int = DEFAULT_MAX_ITERATIONS,
         before_round_trip: Callable[[], Awaitable[AgentEvent | None]] | None = None,
+        retry_policy: RetryPolicy = DEFAULT_RETRY_POLICY,
     ) -> None:
         self.provider = provider
         self.settings = settings
         self.tools = tools or {}
         self.max_iterations = max_iterations
+        #: How a transient provider failure (Argo busy, overloaded, rate
+        #: limited, ...) is resent before it reaches the user as an error —
+        #: see aida.providers.retry.
+        self.retry_policy = retry_policy
         # planning/completed/improvement_plan_2026-09.md §2: context trimming used to
         # run once, before the turn even started (ChatSession._run_turn) —
         # with max_agent_iterations now 50, a single turn's tool results can
@@ -257,9 +264,23 @@ class AgentLoop:
             # right now, which unwinds the SDK's stream and drops the
             # connection — the difference between "stops" and "looks stopped".
             async with contextlib.aclosing(
-                self.provider.complete(messages, self._tool_schemas(), self.settings)
+                complete_with_retries(
+                    self.provider,
+                    messages,
+                    self._tool_schemas(),
+                    self.settings,
+                    policy=self.retry_policy,
+                    # Polled during a retry backoff, so Stop does not have
+                    # to wait out the delay — see complete_with_retries.
+                    should_cancel=lambda: self._cancelled,
+                )
             ) as stream:
                 async for event in stream:
+                    if isinstance(event, ProviderRetrying):
+                        # The failed attempt and the wait before the next
+                        # one are not part of the round trip the user's
+                        # tokens-per-second figure should describe.
+                        round_trip_started = time.monotonic() + event.delay_seconds
                     # Wallclock duration of this provider round-trip, stamped
                     # here (not by the provider itself) so it's available
                     # uniformly regardless of whether a given provider's own

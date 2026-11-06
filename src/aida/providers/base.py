@@ -107,6 +107,105 @@ def unsupported_request_param(error_text: str, params: Iterable[str]) -> str | N
     return None
 
 
+#: Phrases that mark a failure as worth sending again unchanged, whatever
+#: status code it arrived with. The ANL Argo proxy is the reason this list
+#: exists at all: when it is busy it does not answer 503/429 like a plain
+#: API would, it relays whatever its upstream said — a bare "unexpected
+#: provider error", or a Google Vertex "Permission '...' denied on resource
+#: '...'" that is gone a few seconds later — often as an error event inside
+#: a 200 stream, where the SDK's own retry (HTTP status based) never sees
+#: it. Argo support's guidance is to retry these.
+_TRANSIENT_PHRASES = (
+    "overloaded",
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "resource exhausted",
+    "resource_exhausted",
+    "quota",
+    "capacity",
+    "busy",
+    "try again",
+    "temporarily",
+    "unavailable",
+    "timeout",
+    "timed out",
+    "internal server error",
+    "internal error",
+    "bad gateway",
+    "gateway",
+    "connection reset",
+    "connection closed",
+    "permission",
+    "denied",
+)
+
+#: Phrases that mean the *request itself* is wrong — sending it again
+#: unchanged can only fail the same way, after making the user wait.
+#: Checked after ``_TRANSIENT_PHRASES``, so an Argo envelope that quotes a
+#: 400 *and* says the backend was busy is still retried.
+_PERMANENT_PHRASES = (
+    "invalid_request",
+    "invalid request",
+    "prompt is too long",
+    "context length",
+    "context_length",
+    "maximum context",
+    "too many tokens",
+    "content_policy",
+    "content policy",
+    "content filter",
+)
+
+#: Statuses that, absent a transient phrase, are about the request or the
+#: credentials and so never fixed by resending: bad request, auth, missing
+#: model/route, payload too large, unprocessable. Notably *not* 403 — Argo
+#: answers a busy upstream with "Permission ... denied", and its support
+#: asks clients to retry it; a genuinely missing permission costs only the
+#: bounded retry budget before the error is shown.
+_PERMANENT_STATUSES = frozenset({400, 401, 404, 413, 422})
+
+
+def is_transient_failure(status_code: int | None, error_text: str) -> bool:
+    """Whether a provider failure is worth retrying with the same request.
+
+    Args:
+        status_code: HTTP status the SDK reported, or ``None`` when the
+            error came without one (an error event inside a 200 SSE stream
+            — how the Argo proxy reports most upstream failures).
+        error_text: ``str(exc)`` of the SDK exception.
+
+    Returns:
+        ``True`` for busy/overloaded/rate-limited/unreachable-looking
+        failures, ``False`` for ones that point at the request or the
+        credentials. Only a classification: whether a retry is *safe* (no
+        part of the turn shown yet) is decided by the caller, see
+        ``aida.providers.retry.complete_with_retries``.
+    """
+    if status_code == 401:
+        # Authentication is never transient, whatever the body says ("access
+        # denied" would otherwise match a transient phrase).
+        return False
+    text = error_text.lower()
+    if any(phrase in text for phrase in _TRANSIENT_PHRASES):
+        return True
+    if any(phrase in text for phrase in _PERMANENT_PHRASES):
+        return False
+    return status_code not in _PERMANENT_STATUSES
+
+
+def is_transport_exception(exc: BaseException) -> bool:
+    """Whether a non-SDK exception is a network-level hiccup (an ``httpx``/
+    ``httpcore`` error the SDK did not wrap, a socket timeout or reset)
+    rather than a programming error such as a ``TypeError`` from a bad
+    ``extra`` kwarg, which must never be retried. Checked by module name so
+    this module does not import ``httpx`` itself."""
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    module = type(exc).__module__ or ""
+    return module.startswith(("httpx", "httpcore"))
+
+
 @dataclass
 class ToolCall:
     """A tool invocation the model requested."""

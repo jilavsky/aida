@@ -16,6 +16,26 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Added
+
+- **AIDA now retries a busy or flaky AI provider instead of failing the
+  turn.** When the ANL Argo proxy is overloaded it answers with an error
+  inside an otherwise successful response — a bare "unexpected provider
+  error", or an upstream "Permission ... denied on resource ..." that is
+  gone seconds later. The `anthropic`/`openai` SDKs' built-in retry only
+  looks at HTTP status codes, so it never saw these, and every one ended
+  the turn. A transient failure (busy, overloaded, rate-limited,
+  unreachable, Argo's permission-denied relay) that happens before any of
+  the reply is shown is now resent up to 5 times with exponential backoff
+  (~2, 4, 8, 16 s, jittered); the status bar (or the CLI) says
+  "Provider busy … retrying in N s (attempt 2 of 5)", and Stop still ends
+  the wait at once. Errors that a resend cannot fix — bad credentials, a
+  missing model, an invalid or over-long request — are reported
+  immediately as before, and a reply that already started streaming is
+  never replayed. Context compaction gets a shorter budget (3 tries). See
+  `aida.providers.retry`; Argo support's guidance is that clients should
+  retry these errors.
+
 ## [1.0.1] - 2026-11-02
 
 A small feature release on top of 1.0.0: one-click setup for Bernardyn's

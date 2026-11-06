@@ -8,6 +8,7 @@ from aida.core.events import (
     FileArtifactCreated,
     ImageArtifactCreated,
     MessageFinished,
+    ProviderRetrying,
     TextDelta,
     TextFinished,
     TextStarted,
@@ -28,6 +29,7 @@ ALL_EVENTS = [
     UsageInfo(input_tokens=10, output_tokens=5, total_tokens=15),
     AgentError(layer="provider", message="boom", detail="details here"),
     ConversationTitled(conversation_id="abc123", title="Unified fit of S12_0042.h5"),
+    ProviderRetrying(attempt=1, max_attempts=5, delay_seconds=2.0, message="busy", detail="x"),
 ]
 
 
