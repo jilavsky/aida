@@ -1058,6 +1058,8 @@ class MainWindow(QMainWindow):
         self.bridge.mcp_server_action_failed.connect(self._on_mcp_server_action_failed)
         self.bridge.workspace_folders_applied.connect(self._on_workspace_folders_applied)
         self.bridge.workspace_folders_apply_failed.connect(self._on_workspace_folders_apply_failed)
+        self.bridge.global_folders_applied.connect(self._on_global_folders_applied)
+        self.bridge.global_folders_apply_failed.connect(self._on_global_folders_apply_failed)
         self.bridge.skills_applied.connect(self._on_skills_applied)
         self.bridge.skills_apply_failed.connect(self._on_skills_apply_failed)
         self.bridge.conversation_export_finished.connect(self._on_conversation_export_finished)
@@ -2314,6 +2316,17 @@ class MainWindow(QMainWindow):
         # saveable to the workspace), only this chat didn't take it.
         self.statusBar().showMessage(f"Folders not applied to this chat: {message}", 8000)
 
+    def _on_global_folders_applied(self, summary: str) -> None:
+        self.statusBar().showMessage(summary, 8000)
+
+    def _on_global_folders_apply_failed(self, message: str) -> None:
+        # Not a dialog: the setting is saved and new chats get it; only this
+        # chat didn't take it.
+        self.statusBar().showMessage(
+            f"Allowed folders not applied to this chat (new chats will use them): {message}",
+            8000,
+        )
+
     def _on_sidecar_folder_name_changed(self, name: str) -> None:
         if self._current_workspace_config is not None:
             self._current_workspace_config.sidecar_folder_name = name
@@ -2903,6 +2916,11 @@ class MainWindow(QMainWindow):
         # font size/log level above.
         if self.bridge.session is not None:
             self.bridge.session.loop.max_iterations = self.settings.app.max_agent_iterations
+        # Bug report (2026-11): a folder added to the global allowed list
+        # still prompted in the open chat — the guard's roots were fixed at
+        # session start. Same "takes effect immediately" treatment; the
+        # session ignores an unchanged list.
+        self.bridge.update_global_allowed_folders(self.settings.app.allowed_folders)
         # Same "takes effect immediately" treatment: the scheduler reads
         # its quiet period from this live object every tick, so a changed
         # value applies to the very next one rather than at next launch.

@@ -36,6 +36,17 @@ decision revised), unrelated to what shipped when. Entries below link to
   `aida.providers.retry`; Argo support's guidance is that clients should
   retry these errors.
 
+### Fixed
+
+- **Changing the globally allowed folders in Settings now applies to the
+  open chat.** Previously the running chat kept the folder access it was
+  started with, so a folder just added to the global list still asked for
+  permission on every access (subfolders included) until a new chat was
+  started, while other settings from the same dialog applied immediately.
+  The open chat's allowed folders and the folder list in its instructions
+  are now rebuilt on OK, the agent is told about the change on its next
+  turn, and this works for chats without a workspace too.
+
 ## [1.0.1] - 2026-11-02
 
 A small feature release on top of 1.0.0: one-click setup for Bernardyn's

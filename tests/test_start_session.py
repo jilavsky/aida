@@ -1598,3 +1598,108 @@ async def test_skills_toggled_back_to_the_original_set_send_no_notice(
         assert not any("skills" in notice for notice in session._pending_notices)
     finally:
         await session.aclose()
+
+
+# --- global allowed folders changed mid-conversation (2026-11 bug report) ---
+#
+# "I have /Users/.../USAXS_data/2026/ in globally allowed folders, but I
+# still got request for permissions in subfolders there." The Settings
+# dialog saved the list, but the running chat's guard kept the roots it was
+# built with at session start.
+
+
+@pytest.mark.asyncio
+async def test_global_allowed_folders_changed_mid_session_apply_immediately(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
+    session, _ = await start_session(settings, workspace_name="use-ws")
+    try:
+        allowed = tmp_path / "USAXS_data" / "2026"
+        data_file = allowed / "11_08_run" / "sample_001.h5"
+        data_file.parent.mkdir(parents=True)
+        assert session.guard.is_allowed(data_file) is False
+
+        summary = session.update_global_allowed_folders([str(allowed)])
+
+        assert summary is not None
+        assert session.guard.is_allowed(data_file) is True
+        assert str(allowed) in session.messages[0].content
+        assert session.messages[0].content.count(WORKSPACE_FOLDERS_HEADING) == 1
+        # AIDA's own plumbing roots survive the rebuild.
+        assert session.guard.is_allowed(Path(session.folder_state.scratch_dir) / "x.txt")
+        # The workspace's own folders do too.
+        for folder in session.folder_state.source_folders:
+            assert session.guard.is_allowed(Path(folder) / "x.dat")
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_removing_a_global_allowed_folder_mid_session_revokes_it(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    allowed = tmp_path / "shared"
+    allowed.mkdir()
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
+    settings.app.allowed_folders = [str(allowed)]
+    session, _ = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert session.guard.is_allowed(allowed / "a.dat") is True
+        session.update_global_allowed_folders([])
+        assert session.guard.is_allowed(allowed / "a.dat") is False
+        assert str(allowed) not in session.messages[0].content
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_unchanged_global_allowed_folders_are_a_no_op(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """The Settings dialog calls this on every OK, whatever changed — an
+    unchanged list must not announce a folder change to the model."""
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    settings = _settings(workspaces=WorkspacesConfig(workspaces={"use-ws": _workspace()}))
+    settings.app.allowed_folders = [str(tmp_path)]
+    session, _ = await start_session(settings, workspace_name="use-ws")
+    try:
+        assert session.update_global_allowed_folders([str(tmp_path)]) is None
+        assert session._pending_notices == []
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_global_allowed_folders_apply_to_a_chat_without_a_workspace(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """Global folders apply to every chat, workspace or not — while the
+    workspace-only edit stays refused for a bare chat."""
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    monkeypatch.setattr("aida.core.session.McpManager", _FakeMcpManager)
+
+    session, _ = await start_session(_settings(), profile_name="mock-profile")
+    try:
+        session.update_global_allowed_folders([str(tmp_path)])
+        assert session.guard.is_allowed(tmp_path / "a.dat") is True
+        with pytest.raises(NoWorkspaceFoldersError):
+            session.update_workspace_folders(source_folders=["/tmp"], target_folder=None)
+    finally:
+        await session.aclose()

@@ -279,7 +279,15 @@ class WorkspaceFolderState:
     with (global allowed folders + AIDA's own artifacts and scratch dirs);
     ``context_allowed_folders`` is the shorter list the model is *told*
     about (global allowed folders only). They differ on purpose — see
-    ``start_session``.
+    ``start_session``. ``internal_roots`` is the AIDA-plumbing part of
+    ``guard_extra_roots`` (artifacts + scratch), kept separately so a
+    change to the global allowed folders mid-conversation
+    (``ChatSession.update_global_allowed_folders``) can rebuild
+    ``guard_extra_roots`` without losing it.
+
+    ``in_workspace`` is False for a chat started without a workspace (a
+    bare ``--profile`` chat): it still has global allowed folders worth
+    keeping live, but no source/target folders to edit.
     """
 
     source_folders: list[str] = field(default_factory=list)
@@ -289,6 +297,8 @@ class WorkspaceFolderState:
     sidecar_dirname: str = "figures"
     safety_mode: str = "confirm"
     scratch_dir: str | None = None
+    internal_roots: list[str] = field(default_factory=list)
+    in_workspace: bool = True
 
 
 class ChatSession:
@@ -387,7 +397,8 @@ class ChatSession:
         # The guard this session's file/document/coding tools were built
         # with, and the inputs its system message was built from — both kept
         # so the workspace's folders can be changed mid-conversation without
-        # restarting the chat (``update_workspace_folders``). ``guard`` is
+        # restarting the chat (``update_workspace_folders``,
+        # ``update_global_allowed_folders``). ``guard`` is
         # None only for a session constructed directly in a test that
         # doesn't exercise file tools; ``folder_state`` is None for one
         # started outside ``start_session``.
@@ -462,6 +473,97 @@ class ChatSession:
         if text is not None:
             self._extra_context_texts.insert(0, text)
 
+    def _apply_folder_state(self) -> None:
+        """Rebuild both halves of folder access — the guard's allowed roots
+        and the system-prompt folder block — from ``self.folder_state``.
+        Shared by ``update_workspace_folders`` and
+        ``update_global_allowed_folders`` so the two can't drift apart."""
+        state = self.folder_state
+        if state is None:
+            return
+        if self.guard is not None:
+            # Rebuilt through the same constructor start_session used, so
+            # the roots this session ends up with can't drift from the ones
+            # a fresh session in the same workspace would get. Mutated in
+            # place: every already-built file/document/coding tool holds a
+            # reference to *this* guard object.
+            rebuilt = SafetyGuard.for_workspace(
+                source_folders=state.source_folders,
+                target_folder=state.target_folder,
+                global_allowed_folders=state.guard_extra_roots,
+                mode=self.guard.mode,
+            )
+            self.guard.allowed_roots = rebuilt.allowed_roots
+
+        self._replace_context_block(
+            WORKSPACE_FOLDERS_HEADING,
+            build_workspace_context_block(
+                source_folders=state.source_folders,
+                target_folder=state.target_folder,
+                global_allowed_folders=state.context_allowed_folders,
+                sidecar_dirname=state.sidecar_dirname,
+                safety_mode=state.safety_mode,
+                scratch_dir=state.scratch_dir,
+            ),
+        )
+        self._rebuild_system_message()
+
+    def _announce_folder_change(self, notice: str) -> None:
+        """Tell the model on its next round trip that its folders changed."""
+        if self.is_mutating:
+            # A turn is in flight: hand it over at the next round trip
+            # (same path as a user interjection) rather than holding the
+            # notice back until the turn after — the agent may be about to
+            # list exactly the folder that just changed.
+            self.queue_user_message(notice)
+        else:
+            self._pending_notices.append(notice)
+
+    def update_global_allowed_folders(self, allowed_folders: list[str]) -> str | None:
+        """Apply a changed global ``AppConfig.allowed_folders`` list (the
+        Settings dialog) to this *running* session.
+
+        Bug report (2026-11): a folder added to the globally allowed list
+        in Settings still prompted for every access in the open chat — the
+        guard's roots were only computed in ``start_session``, so the
+        change reached new chats only, while font size, log level and max
+        iterations from the same dialog all applied immediately. Same fix
+        as ``update_workspace_folders``: guard and system prompt together.
+
+        Works for workspace-less chats too (global folders apply to every
+        chat). Returns a one-line summary for the caller to show, or
+        ``None`` when nothing changed or the session has no folder state
+        (one constructed outside ``start_session``)."""
+        state = self.folder_state
+        if state is None:
+            return None
+        folders = [str(folder) for folder in allowed_folders if str(folder).strip()]
+        if folders == state.context_allowed_folders:
+            return None
+        state.context_allowed_folders = folders
+        state.guard_extra_roots = [*folders, *state.internal_roots]
+        self._apply_folder_state()
+
+        if folders:
+            listing = ", ".join(folders)
+            notice = (
+                "The user just changed the globally allowed folders, mid-conversation. "
+                f"You now have access to: {listing}. Your instructions have been updated to "
+                "match; use these from now on and don't ask the user to repeat the paths."
+            )
+        else:
+            notice = (
+                "The user just removed all globally allowed folders, mid-conversation. "
+                "Your instructions have been updated to match."
+            )
+        self._announce_folder_change(notice)
+
+        missing = [folder for folder in folders if not Path(folder).expanduser().exists()]
+        summary = f"Allowed folders applied to this chat — {len(folders)} folder(s)"
+        if missing:
+            summary += " — not found on disk: " + ", ".join(missing)
+        return summary
+
     def update_workspace_folders(
         self,
         *,
@@ -495,7 +597,7 @@ class ChatSession:
         Returns a one-line summary for the caller to show the user, and
         raises ``NoWorkspaceFoldersError`` for a session that has no
         workspace folder state at all (a bare ``--profile`` chat)."""
-        if self.folder_state is None:
+        if self.folder_state is None or not self.folder_state.in_workspace:
             raise NoWorkspaceFoldersError(
                 "This chat isn't running in a workspace, so its folders can't be changed — "
                 "start or resume a chat in a workspace first."
@@ -515,32 +617,7 @@ class ChatSession:
             except OSError as exc:  # noqa: PERF203 - one path, logged and carried on
                 logger.warning("could not create target folder %s: %s", state.target_folder, exc)
 
-        if self.guard is not None:
-            # Rebuilt through the same constructor start_session used, so
-            # the roots this session ends up with can't drift from the ones
-            # a fresh session in the same workspace would get. Mutated in
-            # place: every already-built file/document/coding tool holds a
-            # reference to *this* guard object.
-            rebuilt = SafetyGuard.for_workspace(
-                source_folders=state.source_folders,
-                target_folder=state.target_folder,
-                global_allowed_folders=state.guard_extra_roots,
-                mode=self.guard.mode,
-            )
-            self.guard.allowed_roots = rebuilt.allowed_roots
-
-        self._replace_context_block(
-            WORKSPACE_FOLDERS_HEADING,
-            build_workspace_context_block(
-                source_folders=state.source_folders,
-                target_folder=state.target_folder,
-                global_allowed_folders=state.context_allowed_folders,
-                sidecar_dirname=state.sidecar_dirname,
-                safety_mode=state.safety_mode,
-                scratch_dir=state.scratch_dir,
-            ),
-        )
-        self._rebuild_system_message()
+        self._apply_folder_state()
 
         notice_lines = ["The user just changed this workspace's folders, mid-conversation."]
         if state.source_folders:
@@ -558,15 +635,7 @@ class ChatSession:
             "folders. Use them from now on instead of any folder paths mentioned earlier in this "
             "conversation, and don't ask the user to repeat the paths."
         )
-        notice = "\n".join(notice_lines)
-        if self.is_mutating:
-            # A turn is in flight: hand it over at the next round trip
-            # (same path as a user interjection) rather than holding the
-            # notice back until the turn after — the agent may be about to
-            # list exactly the folder that just changed.
-            self.queue_user_message(notice)
-        else:
-            self._pending_notices.append(notice)
+        self._announce_folder_change("\n".join(notice_lines))
 
         missing = [
             folder for folder in state.source_folders if not Path(folder).expanduser().exists()
@@ -1599,6 +1668,8 @@ async def _start_session(
         sidecar_dirname=sidecar_dirname,
         safety_mode=effective_safety_mode,
         scratch_dir=str(scratch),
+        internal_roots=[str(artifacts_dir()), str(scratch)],
+        in_workspace=workspace is not None,
     )
     guard = SafetyGuard.for_workspace(
         source_folders=folder_state.source_folders,
@@ -1858,7 +1929,9 @@ async def _start_session(
         active_knowledge_bases=active_knowledge_bases,
         identity_text=identity_text,
         guard=guard,
-        folder_state=folder_state if workspace else None,
+        # Kept for workspace-less chats too, so global allowed folders can
+        # still be changed live; in_workspace gates the workspace-only edits.
+        folder_state=folder_state,
     )
     return session, mcp_manager
 

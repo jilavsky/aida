@@ -246,6 +246,12 @@ class ChatBridge(QObject):
     workspace_folders_apply_failed = Signal(str)  # error message
     # Skills toggled in the Skills panel — same applied/failed pair, applied
     # to the live session (see ChatSession.update_skills).
+    # Global allowed folders changed in Settings while a chat is running
+    # (see ChatSession.update_global_allowed_folders). Separate from the
+    # workspace pair: the status text differs (nothing to "Save to
+    # Workspace" — Settings already saved it to config.yaml).
+    global_folders_applied = Signal(str)  # summary to show the user
+    global_folders_apply_failed = Signal(str)  # error message
     skills_applied = Signal(str)  # summary to show the user
     skills_apply_failed = Signal(str)  # error message
 
@@ -601,6 +607,30 @@ class ChatBridge(QObject):
             self.workspace_folders_apply_failed.emit(str(exc))
             return
         self.workspace_folders_applied.emit(summary)
+
+    def update_global_allowed_folders(self, allowed_folders: list[str]) -> None:
+        """Hand the running session the new global allowed-folders list from
+        Settings. Marshalled onto the background loop for the same reason as
+        ``update_workspace_folders``: it rewrites ``session.messages[0]`` and
+        the guard's allowed roots. A no-op with no chat running — the next
+        chat reads the new list from settings anyway."""
+        if self.session is None:
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._update_global_allowed_folders(list(allowed_folders)), self._loop_thread.loop
+        )
+
+    async def _update_global_allowed_folders(self, allowed_folders: list[str]) -> None:
+        if self.session is None:  # closed between the check above and here
+            return
+        try:
+            summary = self.session.update_global_allowed_folders(allowed_folders)
+        except Exception as exc:  # noqa: BLE001 - must never crash the loop thread
+            logger.exception("applying global allowed folders to the live session failed")
+            self.global_folders_apply_failed.emit(str(exc))
+            return
+        if summary:
+            self.global_folders_applied.emit(summary)
 
     # --- live skills ---------------------------------------------------------
 
