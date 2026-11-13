@@ -138,11 +138,7 @@ exclude = ["Claude outputs"]
 # docs/ are written at the indentation they will actually live at, so a
 # reader (or an agent following a guide) can see where a block belongs.
 # Reformatting them to column zero silently destroys that.
-#
-# docs/conf.py is a copy of the jilavsky-docs family template, kept
-# identical outside its PER-PACKAGE block so the copies can be diffed
-# against the template. Formatting it here would make it drift.
-exclude = ["*.md", "docs/conf.py"]
+exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]

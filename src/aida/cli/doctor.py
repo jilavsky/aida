@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from aida._docs import docs_url
 from aida.cli._gui_diagnosis import diagnose_pyside6_import_error
 from aida.config import paths
 from aida.config.secrets import env_var_name, keyring_available
@@ -246,7 +247,7 @@ def _check_provider_endpoints(settings: Settings | None) -> list[CheckResult]:
                 "provider_endpoints",
                 True,
                 "no provider profiles configured yet — add one by editing "
-                f"{providers_yaml}, or use the GUI's Providers… dialog (profile format: docs/reference/providers-and-secrets.md)",
+                f"{providers_yaml}, or use the GUI's Providers… dialog (profile format: {docs_url('providers')})",
             )
         ]
 

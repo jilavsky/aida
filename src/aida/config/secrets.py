@@ -17,6 +17,8 @@ import contextlib
 import keyring
 from keyring.errors import KeyringError
 
+from aida._docs import docs_url
+
 SERVICE_NAME = "aida"
 ENV_PREFIX = "AIDA_SECRET_"
 
@@ -97,5 +99,5 @@ def describe_keyring_error(exc: KeyringError) -> str:
         "backend needs a running, unlocked keyring daemon (gnome-keyring or "
         "kwallet) that isn't available. Set the secret via the "
         "AIDA_SECRET_<PROFILE> environment variable instead — see "
-        "docs/reference/providers-and-secrets.md#secrets — no keychain needed."
+        f"{docs_url('secrets')} — no keychain needed."
     )

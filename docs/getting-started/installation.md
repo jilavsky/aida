@@ -102,6 +102,7 @@ A clean `aida doctor` run means the app is ready to configure further —
 it doesn't yet mean you have a working chat session, since that also
 needs at least one provider profile (next: `providers-and-secrets.md`).
 
+(gui-fails-to-import-on-headless-linux)=
 ### GUI fails to import on headless Linux
 
 `aida-gui` (and `aida doctor`'s `gui` check) says PySide6 isn't installed,

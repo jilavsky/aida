@@ -18,12 +18,17 @@ _BASE = f"https://jilavsky-docs.readthedocs.io/projects/{SUBPROJECT}/en/{{ver}}/
 # GUI id -> page path relative to docs/, without suffix ("" = home page).
 HELP_TARGETS: dict[str, str] = {
     "home": "",
+    "providers": "reference/providers-and-secrets",
 }
 
 # Explicit MyST labels, "(label)=", that the code links to with an anchor.
 # GUI id -> (page path, label)
 HELP_ANCHORS: dict[str, tuple[str, str]] = {
-    # "unified_fit_levels": ("tools/unified-fit", "unified-fit-levels"),
+    "secrets": ("reference/providers-and-secrets", "secrets"),
+    "gui_import_headless": (
+        "getting-started/installation",
+        "gui-fails-to-import-on-headless-linux",
+    ),
 }
 
 

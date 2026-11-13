@@ -159,6 +159,7 @@ embedding_profiles:
     capability_notes: "local embeddings — no data leaves the machine"
 ```
 
+(secrets)=
 ## Secrets
 
 `providers.yaml` **never** stores a raw secret — only a `secret_ref` name.
