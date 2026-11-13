@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from aida import __version__ as AIDA_VERSION
+from aida._docs import docs_url
 from aida.coding.runner import DEFAULT_RUN_TIMEOUT_SECONDS
 from aida.config.logging_setup import configure_logging, get_logger
 from aida.config.paths import (
@@ -335,7 +336,7 @@ class MainWindow(QMainWindow):
         # for anyone who looks there first.
         self.documentation_button = QPushButton("Documentation", self)
         self.documentation_button.setToolTip(
-            f"Open the AIDA documentation in your web browser\n{self.DOCUMENTATION_URL}"
+            f"Open the AIDA documentation in your web browser\n{docs_url()}"
         )
         self.documentation_button.setStyleSheet(
             "QPushButton { background-color: #c0392b; color: white; font-weight: bold; "
@@ -952,23 +953,16 @@ class MainWindow(QMainWindow):
     def _on_compaction_failed(self, message: str) -> None:
         self.statusBar().showMessage(message, 8000)
 
-    #: Where Help ▸ Documentation goes. The docs *index*, not the repo root:
-    #: landing a new user on a source tree and leaving them to notice a
-    #: `docs/` folder wastes the one click this menu item exists to spend.
-    #: GitHub renders `docs/README.md` as the folder's own page, so the
-    #: tree URL is the index — no `blob/main/...` path to rot when a file
-    #: is renamed.
-    DOCUMENTATION_URL = "https://github.com/jilavsky/aida/tree/main/docs"
-
     def _on_open_documentation(self) -> None:
-        """Open the docs in the system browser.
+        """Open the docs home page on Read the Docs in the system browser.
 
-        Deliberately the hosted copy rather than the `docs/` folder of
-        whatever is installed locally: a `pip install` may not ship the
-        docs at all, and a user who cloned months ago would be reading a
-        stale tree while believing it current.
+        Deliberately the hosted site rather than the `docs/` folder of
+        whatever is installed locally: a `pip install` does not ship the
+        docs, and a user who cloned months ago would be reading a stale
+        tree while believing it current. `docs_url()` picks `stable` for a
+        release and `latest` for a dev or pre-release version.
         """
-        QDesktopServices.openUrl(QUrl(self.DOCUMENTATION_URL))
+        QDesktopServices.openUrl(QUrl(docs_url()))
 
     def _on_show_about(self) -> None:
         QMessageBox.about(
@@ -977,7 +971,7 @@ class MainWindow(QMainWindow):
             f"AIDA — AI Data Assistant\nVersion {AIDA_VERSION}\n\n"
             "A local scientific agent workbench.\n\n"
             "https://github.com/jilavsky/aida\n"
-            f"Documentation: {MainWindow.DOCUMENTATION_URL}",
+            f"Documentation: {docs_url()}",
         )
 
     def _wire_ui_signals(self) -> None:

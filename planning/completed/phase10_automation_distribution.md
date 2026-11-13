@@ -3,7 +3,7 @@
 > **Automation half shipped 2026-09-03** on branch `phase10-in-app-scheduler`
 > (merged to `main`). Distribution is still open. Tracked from `PLAN.md`
 > §1.2; this file stays the detailed checklist. User-facing usage docs are
-> in [`docs/workflows.md`](../../docs/workflows.md).
+> in [`docs/guides/workflows.md`](../../docs/guides/workflows.md).
 >
 > **2026-09-02:** the automation half of this phase got a decision
 > document — [`phase10_scheduling_design.md`](phase10_scheduling_design.md).
@@ -87,7 +87,7 @@ need 5.
       Linux machines
 - [ ] conda: environment.yml maintained; evaluate conda-forge feedstock (record
       decision)
-- [x] Docs pass, workflow guide part: [`docs/workflows.md`](../../docs/workflows.md)
+- [x] Docs pass, workflow guide part: [`docs/guides/workflows.md`](../../docs/guides/workflows.md)
       (README quickstart and the rest of the config-reference docs already
       existed pre-Phase-10 — see `docs/README.md`)
 - [ ] Investigate (timeboxed, decision recorded, not committed): PyInstaller/

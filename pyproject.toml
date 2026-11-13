@@ -66,7 +66,7 @@ Issues = "https://github.com/jilavsky/aida/issues"
 # misconfiguration. No system package fixes a missing glibc symbol, so the
 # fix here is capping the resolvable range instead of documenting a
 # manual downgrade per machine (see
-# docs/installation.md#gui-fails-to-import-on-headless-linux for a user
+# docs/getting-started/installation.md#gui-fails-to-import-on-headless-linux for a user
 # who still hits an equivalent wall on an even older system). Revisit this
 # cap if a future PySide6 release restores support for glibc 2.28, or once
 # these control machines get OS upgrades — whichever comes first.
@@ -123,7 +123,7 @@ line-length = 100
 target-version = "py311"
 
 # `Claude outputs/` holds the scripts that draw the diagrams used in talks
-# and in docs/figures, not package code — nothing imports them and nothing
+# and in docs/getting-started/img/concepts, not package code — nothing imports them and nothing
 # ships them. They are written as layout tables: one line per box, columns
 # lined up so the source reads like the picture it produces. `ruff format`
 # explodes each of those rows into eight lines and destroys exactly the
@@ -138,7 +138,11 @@ exclude = ["Claude outputs"]
 # docs/ are written at the indentation they will actually live at, so a
 # reader (or an agent following a guide) can see where a block belongs.
 # Reformatting them to column zero silently destroys that.
-exclude = ["*.md"]
+#
+# docs/conf.py is a copy of the jilavsky-docs family template, kept
+# identical outside its PER-PACKAGE block so the copies can be diffed
+# against the template. Formatting it here would make it drift.
+exclude = ["*.md", "docs/conf.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]

@@ -4,12 +4,12 @@
 > session engine every interactive chat uses — a headless run or a
 > scheduled job is not a separate code path, it's a different *driver* of
 > `start_session`/`ChatSession.send`. See
-> [`planning/completed/phase10_scheduling_design.md`](../planning/completed/phase10_scheduling_design.md)
+> [`planning/completed/phase10_scheduling_design.md`](https://github.com/jilavsky/aida/blob/main/planning/completed/phase10_scheduling_design.md)
 > for the design rationale (why an in-app scheduler rather than
 > launchd/Task Scheduler/cron, why "deferred, not skipped" when you're
 > using AIDA at the time).
 
-**Related:** [workspaces.md](workspaces.md) · [safety-and-permissions.md](safety-and-permissions.md) · [providers-and-secrets.md](providers-and-secrets.md)
+**Related:** [workspaces.md](workspaces.md) · [safety-and-permissions.md](../reference/safety-and-permissions.md) · [providers-and-secrets.md](../reference/providers-and-secrets.md)
 
 ## The four layers
 
@@ -337,7 +337,7 @@ user may be logged out," which is a much narrower gap on that kind of
 machine. Nothing built here is thrown away if they're added later — a
 schedule's `trigger: in-app` field exists specifically so a future
 `trigger: system` value is a config change, not a schema change. See
-[`planning/completed/phase10_scheduling_design.md`](../planning/completed/phase10_scheduling_design.md)
+[`planning/completed/phase10_scheduling_design.md`](https://github.com/jilavsky/aida/blob/main/planning/completed/phase10_scheduling_design.md)
 for the full reasoning, and hand-written cron/launchd/`schtasks` recipes if
 you want to invoke `aida run`/`aida workflow run` from an OS scheduler
 yourself in the meantime — that path works today with no AIDA-side

@@ -112,7 +112,7 @@ RawConfirmCallback = Callable[[ConfirmationRequest], Awaitable[ConfirmAnswer]]
 #: not a denylist of the one excluded action (``fetch_url``) — a future
 #: action type someone adds must opt in by name here, rather than relying
 #: on everyone remembering not to opt `fetch_url` in. This is what backs
-#: docs/safety-and-permissions.md's "fetch_url... every single call asks,
+#: docs/reference/safety-and-permissions.md's "fetch_url... every single call asks,
 #: unconditionally, in every mode" guarantee: even if a future caller
 #: mistakenly attached a ``remember_scope`` to a ``fetch_url`` request, it
 #: still could never be remembered because ``"fetch_url"`` is absent here.

@@ -3,10 +3,10 @@
 > **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
 > is still open.
 
-**Related:** [installation.md](installation.md) · [mcp-servers.md](mcp-servers.md) · [bernardyn.md](bernardyn.md) · [workspaces.md](workspaces.md) · [context-and-limits.md](context-and-limits.md)
+**Related:** [installation.md](../getting-started/installation.md) · [mcp-servers.md](../reference/mcp-servers.md) · [bernardyn.md](bernardyn.md) · [workspaces.md](workspaces.md) · [context-and-limits.md](../reference/context-and-limits.md)
 
 [pyIrena](https://github.com/jilavsky/pyirena) is the small-angle scattering
 analysis package AIDA was built to drive. It ships an MCP server
@@ -47,7 +47,7 @@ missing.
 | Setting | Value | Why |
 |---|---|---|
 | `command` | The **absolute path** to `pyirena-mcp` | A GUI app on macOS or Windows inherits no shell `PATH`, so a bare `pyirena-mcp` fails to launch with a confusing error. This is the single most common MCP misconfiguration. |
-| `groups` | `pyirena-analysis` | pyirena-mcp exposes ~70 tools — measured at ~10,200 tokens of schema JSON sent on *every* request (see [context-and-limits.md](context-and-limits.md)). A group means they're enabled per workspace instead of drowning a small local model in schemas on every conversation. |
+| `groups` | `pyirena-analysis` | pyirena-mcp exposes ~70 tools — measured at ~10,200 tokens of schema JSON sent on *every* request (see [context-and-limits.md](../reference/context-and-limits.md)). A group means they're enabled per workspace instead of drowning a small local model in schemas on every conversation. |
 | `skills` | `saxs-basics`, `pyirena-usage` | Auto-included whenever the server is enabled. Both are installed into `~/.aida/skills/` at the same time, if they aren't there already — an existing file of yours is never overwritten. |
 | `PYIRENA_MAX_ARRAY_POINTS` | `500` | pyIrena's own default, written out explicitly because it's the one knob controlling how much context a single tool result can consume. |
 | `PYIRENA_DATA_ROOT` | Only if you pass `--data-root DIR` | Restricts every file pyirena-mcp will touch to that subtree. pyIrena's docs call it strongly recommended when the server is exposed to an AI agent; your workspace's source folder is usually the right value. The GUI button suggests it automatically from the active workspace. |
@@ -151,7 +151,7 @@ Ask for something concrete to check it end to end:
 > recent scans.
 
 The plot comes back as an inline image, not a wall of text — if it doesn't,
-see [mcp-servers.md](mcp-servers.md) for the tool-call log and raw result
+see [mcp-servers.md](../reference/mcp-servers.md) for the tool-call log and raw result
 inspector.
 
 ## Troubleshooting

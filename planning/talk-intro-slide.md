@@ -1,7 +1,7 @@
 # Intro slide — "What is AIDA?"
 
 Opening slide for the AIDA talk. The figures in
-[`figures/`](figures/) follow it; see [`concepts.md`](concepts.md) for the
+[`docs/getting-started/img/concepts/`](../docs/getting-started/img/concepts/) follow it; see [`concepts.md`](../docs/getting-started/concepts.md) for the
 full explanation of every term used here.
 
 ---

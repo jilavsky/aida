@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the AIDA concept figures (docs/concepts.md sketches A-D) as SVG.
+"""Generate the AIDA concept figures (docs/getting-started/concepts.md sketches A-D) as SVG.
 
 Edit the DATA blocks near the bottom and re-run; nothing else needs touching.
 

@@ -23,7 +23,7 @@ import re
 
 _GLIBC_RE = re.compile(r"GLIBC_(\d+\.\d+)")
 
-_INSTALLATION_DOC = "docs/installation.md#gui-fails-to-import-on-headless-linux"
+_INSTALLATION_DOC = "docs/getting-started/installation.md#gui-fails-to-import-on-headless-linux"
 
 
 def diagnose_pyside6_import_error(exc: BaseException) -> str:

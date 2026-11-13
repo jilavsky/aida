@@ -15,8 +15,9 @@ PyPI name `aida-workbench`, import package `aida`, CLI `aida`, GUI `aida-gui`.
 | What is open | `TODO.md`, then `PLAN.md` §1 for the reasoning |
 | Why AIDA is shaped this way | `planning/DESIGN.md` (§3 layering, §5 safety, §8 dependencies) |
 | What shipped, and why | `CHANGELOG.md`, `planning/COMPLETED.md` |
-| User documentation | `docs/` (index in `docs/README.md`) |
+| User documentation | `docs/`: a Sphinx/MyST site on Read the Docs (`docs/index.md` is the table of contents; sections `getting-started/`, `guides/`, `reference/`; `conf.py` is the family template, edit only its PER-PACKAGE block) |
 | Sample skills (bundled into the wheel) | `skills/` |
+| Where the GUI's Documentation button goes | `src/aida/_docs.py` (`docs_url()`; no Qt) |
 
 | Package (`src/aida/`) | Holds |
 |---|---|
@@ -39,7 +40,11 @@ pip install -e ".[dev,gui,docs,ocr,science]"     # or: conda env create -f envir
 ruff check . && ruff format --check .
 pytest --ignore=tests/ui                          # non-GUI suite
 QT_QPA_PLATFORM=offscreen pytest tests/ui         # GUI suite, run separately (see ci.yml)
+pip install -r docs/requirements.txt && sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
+
+The `docs` extra is the document-reading libraries (PDF, Word, ...), not the
+Sphinx toolchain; that lives only in `docs/requirements.txt`.
 
 Run the two pytest invocations separately, as CI does: combined in one
 process, Qt object churn has caused rare native crashes.
@@ -67,6 +72,12 @@ process, Qt object churn has caused rare native crashes.
   found. History belongs in git and `planning/COMPLETED.md`.
 - **Every user-visible change** gets a bullet under `[Unreleased]` in
   `CHANGELOG.md`, and docs in `docs/` are updated in the same change.
+- **Docs pages.** A new page is listed by hand in its section's `index.md`
+  and the site builds with zero warnings (`-W`, as on Read the Docs). Only
+  user-facing pages go in `docs/`; talk slides and planning notes go in
+  `planning/`. Links from `CHANGELOG.md` or `README.md` into `docs/` are
+  absolute Read the Docs `latest` URLs, because those files are read both
+  on GitHub and (the CHANGELOG) inside the site.
 
 ## Deliberate deviations from the author's other Python packages
 

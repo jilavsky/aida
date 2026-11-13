@@ -269,7 +269,7 @@ halfway through, with no in-app recovery. Full design, steps, and measured
 numbers in
 [`planning/completed/context_management.md`](completed/context_management.md) (marked
 implemented); user-facing docs in
-[`docs/context-and-limits.md`](../docs/context-and-limits.md).
+[`docs/reference/context-and-limits.md`](../docs/reference/context-and-limits.md).
 
 - **Count what is actually sent.** MCP tool schemas, tool-call
   arguments/results (dense-estimated), and vision images are now all
@@ -389,7 +389,7 @@ Every non-interactive `ConfirmCallback` consumer (tests, headless mode's
 untouched — only the two interactive raw callbacks changed their return
 type, and only the two places that supply *defaults* wrap them.
 Documented in
-[docs/safety-and-permissions.md](../docs/safety-and-permissions.md#allow-for-this-chat).
+[docs/reference/safety-and-permissions.md](../docs/reference/safety-and-permissions.md#allow-for-this-chat).
 
 ---
 
@@ -408,7 +408,7 @@ what was built:
 2. **In-app scheduler first, OS schedulers later and additively (Option
    A).** The launchd/Task Scheduler/systemd installers remain deliberately
    unbuilt — see
-   [`docs/workflows.md`](../docs/workflows.md#why-no-os-level-scheduler).
+   [`docs/guides/workflows.md`](../docs/guides/workflows.md#why-no-os-level-scheduler).
    Nothing built for the in-app scheduler is thrown away if they are added
    later (`ScheduleEntry.trigger` exists for exactly this reason).
 3. **The blocker nobody sees coming is secrets, not clocks.** The existing
@@ -450,7 +450,7 @@ Delivered:
   activity soft-blocks it for a configurable quiet period (default 5 min),
   waived after a configurable cap (default 1 h) except mid-turn. The
   status bar shows **⏳ N jobs waiting**; both timings are in Settings.
-  See [`docs/workflows.md`](../docs/workflows.md#deferred-not-skipped--the-scheduler-and-you-at-the-same-time)
+  See [`docs/guides/workflows.md`](../docs/guides/workflows.md#deferred-not-skipped--the-scheduler-and-you-at-the-same-time)
   and §7 of the design doc.
 - `docs/workflows.md` — usage for all three layers, headless confirmation
   and secrets caveats up front, and why OS-level triggers were deferred
@@ -587,7 +587,7 @@ closure (`aida.portability.closure`), `--map FROM=TO` prefix remapping,
 the import dialog's Contents/Paths tabs, and `--check` as a genuinely
 side-effect-free dry run — it had been creating things while claiming not
 to. Analysis in [`portability.md`](portability.md); user guide in
-[`../docs/moving-and-sharing.md`](../docs/moving-and-sharing.md). Tier 3
+[`../docs/guides/moving-and-sharing.md`](../docs/guides/moving-and-sharing.md). Tier 3
 (the database, artifacts and indexes) stays open.
 
 ### Reach — remote MCP, and three more one-click presets

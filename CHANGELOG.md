@@ -4,24 +4,34 @@ All notable changes to AIDA are recorded here, newest first. The format
 loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/): `bN` marks a pre-release
 beta cycle leading up to a release (as `0.1.0b1`–`0.1.0b7` did for `0.1.0`).
-See [`TODO.md`](TODO.md) for where 1.0 stands and what is still open.
+See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for where 1.0 stands and what is still open.
 
 This file is the terse, dated "what changed and for whom," by release. Two
-other files are easy to confuse it with: [`planning/COMPLETED.md`](planning/COMPLETED.md)
+other files are easy to confuse it with: [`planning/COMPLETED.md`](https://github.com/jilavsky/aida/blob/main/planning/COMPLETED.md)
 holds the fuller design rationale behind shipped work, in narrative form, not
-tied to a version number; [`planning/DESIGN.md`](planning/DESIGN.md) §2 has
+tied to a version number; [`planning/DESIGN.md`](https://github.com/jilavsky/aida/blob/main/planning/DESIGN.md) §2 has
 its own "Changelog" — dated amendments to the *design document itself* (a
 decision revised), unrelated to what shipped when. Entries below link to
-`COMPLETED.md` where useful; [`TODO.md`](TODO.md) tracks what's still open.
+`COMPLETED.md` where useful; [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) tracks what's still open.
 
 ## [Unreleased]
+
+### Changed
+
+- **The documentation moved to Read the Docs**, at
+  <https://jilavsky-docs.readthedocs.io/projects/aida/>, as part of the
+  family site with pyIrena and Bernardyn. The pages are the same, now
+  grouped into Getting started, How-to guides and Reference, with search.
+  The **Documentation** button and Help ▸ Documentation open it (the
+  `stable` version for a release, `latest` for a development version)
+  instead of the `docs/` folder on GitHub.
 
 ## [1.1.0] - 2026-11-13
 
 Repeating workflow steps for long unattended batch jobs, provider retries
 for a busy Argo proxy, skills that carry their own scripts, much faster
 knowledge-base retrieval, and the fixes from the November 2026 code review
-(recorded in [`planning/COMPLETED.md`](planning/COMPLETED.md) §13). Config
+(recorded in [`planning/COMPLETED.md`](https://github.com/jilavsky/aida/blob/main/planning/COMPLETED.md) §13). Config
 files, databases and bundles from 1.0.x load unchanged, and neither
 database schema changes.
 
@@ -38,7 +48,7 @@ database schema changes.
   The GUI step editor has matching fields, `aida workflow show`/`validate`
   know about them, and the run manifest records each step's passes.
   Workflows without these fields load, run and save exactly as before. See
-  [`docs/workflows.md`](docs/workflows.md#repeating-steps--long-batch-jobs-that-run-unattended).
+  [`docs/guides/workflows.md`](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/workflows.html#repeating-steps--long-batch-jobs-that-run-unattended).
 - **AIDA now retries a busy or flaky AI provider instead of failing the
   turn.** When the ANL Argo proxy is overloaded it answers with an error
   inside an otherwise successful response — a bare "unexpected provider
@@ -65,7 +75,7 @@ database schema changes.
   the target folder so outputs land with your results), but any write or
   delete in the skills folder always asks. Export/import and skill
   installation now carry the whole folder, scripts included. New guide:
-  [`docs/skills.md`](docs/skills.md).
+  [`docs/guides/skills.md`](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/skills.html).
 - **Knowledge-base retrieval is about 10–100× faster.** Vectors are loaded
   once per chat and normalised, scoring runs off the event loop, and
   several knowledge bases are queried at once. At about 12,000 chunks a
@@ -196,7 +206,7 @@ other conda environments.
   a figure-only workspace can take the plotting group alone. `--data-root`
   / `--output-root` set `BERNARDYN_DATA_ROOT` / `BERNARDYN_OUTPUT_ROOT`;
   the GUI button suggests the active workspace's source and target
-  folders. See [`docs/bernardyn.md`](docs/bernardyn.md).
+  folders. See [`docs/guides/bernardyn.md`](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/bernardyn.html).
 
 - **`env_discovery.launch_path`** — the cross-environment `PATH` snapshot
   that has been part of `add-pyirena` since 0.1.0b6, generalized so every
@@ -226,9 +236,9 @@ Nothing in this release is a new subsystem — it is the round that closed
 the last rough edges and the review that confirmed there was no missing
 feature left. What that review found, and what is still open (manual
 acceptance checks that need a real beamline, a conda-forge decision, full
-backup and restore), is in [`TODO.md`](TODO.md). The six weeks of work
+backup and restore), is in [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md). The six weeks of work
 between 0.1.0b1 and here are written up in
-[`planning/COMPLETED.md`](planning/COMPLETED.md) §12.
+[`planning/COMPLETED.md`](https://github.com/jilavsky/aida/blob/main/planning/COMPLETED.md) §12.
 
 ### Added
 
@@ -269,7 +279,7 @@ between 0.1.0b1 and here are written up in
   and user label under it. Click the ✎ there — or use the sidebar's
   **Rename…**, or `aida conversations rename` — to name it yourself, which
   switches automatic naming off for that conversation permanently. See
-  [`docs/organizing-conversations.md`](docs/organizing-conversations.md#how-conversations-get-their-names).
+  [`docs/guides/organizing-conversations.md`](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/organizing-conversations.html#how-conversations-get-their-names).
 
 ### Changed
 
@@ -517,7 +527,7 @@ the `pip install aida-workbench` resolution problem that every prior
   the CLI, or the new Type dropdown in the GUI's Add/Edit Server form.
   Everything else (groups, skills, `disabled_tools`/`confirm_tools`, Test
   Connection, Start/Stop) works identically regardless of transport. See
-  [`docs/mcp-servers.md`](docs/mcp-servers.md#remote-http-mcp-servers).
+  [`docs/reference/mcp-servers.md`](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/reference/mcp-servers.html#remote-http-mcp-servers).
 
 ### Changed
 
@@ -591,8 +601,8 @@ buries the conversation it belongs to.
   to `<name>.bak-<timestamp>` first. The import report ends by naming what
   a bundle *cannot* carry and this machine does not have: missing conda
   envs, unreachable folders, secrets to set. See
-  [`docs/moving-and-sharing.md`](docs/moving-and-sharing.md) and
-  [`planning/portability.md`](planning/portability.md).
+  [`docs/guides/moving-and-sharing.md`](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/moving-and-sharing.html) and
+  [`planning/portability.md`](https://github.com/jilavsky/aida/blob/main/planning/portability.md).
 
 - **`edit_file`: the agent can now change part of a file instead of
   rewriting all of it.** Until now the only way to modify a file was
@@ -760,7 +770,7 @@ buries the conversation it belongs to.
   already-documented `AIDA_SECRET_<PROFILE>` environment-variable
   fallback, which needs no keyring daemon at all — and the profile itself
   is still saved even when its secret couldn't be. See
-  [`docs/installation.md`](docs/installation.md#storing-a-secret-fails-with-keyringlocked-on-headless-linux).
+  [`docs/getting-started/installation.md`](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/getting-started/installation.html#storing-a-secret-fails-with-keyringlocked-on-headless-linux).
 
 - **`aida-gui` and `aida doctor` no longer blame a missing PySide6 install
   when PySide6 is actually installed and just failing to import.** Bug
@@ -782,7 +792,7 @@ buries the conversation it belongs to.
   instead of a generic "not installed" message. AIDA's `gui` extra also
   gained a `<6.11` cap (`pyproject.toml`) so a fresh install on this class
   of machine no longer resolves to the broken release at all. See
-  [`docs/installation.md`](docs/installation.md#gui-fails-to-import-on-headless-linux).
+  [`docs/getting-started/installation.md`](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/getting-started/installation.html#gui-fails-to-import-on-headless-linux).
 
 ## [0.1.0b6] - 2026-09-08
 
@@ -878,7 +888,7 @@ nothing behaves as 0.1.0b3 did.
   persisted to disk; a New Chat, a resumed conversation, a workspace
   switch, or a fresh `aida chat` process all forget it. `fetch_url` is
   deliberately excluded and keeps asking unconditionally, every time. See
-  [docs/safety-and-permissions.md](docs/safety-and-permissions.md#allow-for-this-chat).
+  [docs/reference/safety-and-permissions.md](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/reference/safety-and-permissions.html#allow-for-this-chat).
 
 - **Optional Mistral OCR backend for reading figures**, off by default.
   The built-in extractor pairs an image with the caption nearest to it on
@@ -1102,7 +1112,7 @@ nothing behaves as 0.1.0b3 did.
   sidebar can filter by user while always keeping unlabelled legacy chats
   visible and providing an **All users** escape hatch, and its text search
   now matches workspace and user as well as title. See
-  [docs/organizing-conversations.md](docs/organizing-conversations.md).
+  [docs/guides/organizing-conversations.md](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/organizing-conversations.html).
 
 ### Fixed
 
@@ -1120,7 +1130,7 @@ nothing behaves as 0.1.0b3 did.
   logo counts once rather than once per page, the note is appended after
   the size budget so truncation can never drop the explanation itself, and
   an ordinary text-only document with no images gets no note at all. See
-  [`planning/completed/document_images.md`](planning/completed/document_images.md) for the
+  [`planning/completed/document_images.md`](https://github.com/jilavsky/aida/blob/main/planning/completed/document_images.md) for the
   richer options this is the floor of.
 
 - Reading or attaching a real document (e.g. a multi-page PDF) silently
@@ -1226,7 +1236,7 @@ nothing behaves as 0.1.0b3 did.
   path — some servers (browser-automation tools like Playwright MCP
   especially) sandbox their own separate output directory and reject a
   path built from AIDA's scratch folder outright. New
-  [mcp-servers.md](docs/mcp-servers.md) section on the failure mode and
+  [mcp-servers.md](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/reference/mcp-servers.html) section on the failure mode and
   the fix.
 
 ## [0.1.0b2] - 2026-08-29
@@ -1237,13 +1247,13 @@ nothing behaves as 0.1.0b3 did.
   profile, context-fullness display in the CLI and GUI status bar, and
   automatic + manual (`/compact`, **Compact Conversation**) conversation
   summarization when a session runs low on context. See
-  [`docs/context-and-limits.md`](docs/context-and-limits.md) and
+  [`docs/reference/context-and-limits.md`](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/reference/context-and-limits.html) and
   `planning/COMPLETED.md` §6.
 - One-click pyIrena MCP setup: `aida mcp add-pyirena` / `aida mcp
   find-pyirena` and an **Add pyIrena…** button in the MCP management
   dialog, which detect an installed `pyirena-mcp`, write its server
   config, and install the matching bundled skills. See
-  [`docs/pyirena.md`](docs/pyirena.md) and `planning/COMPLETED.md` §4.
+  [`docs/guides/pyirena.md`](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/pyirena.html) and `planning/COMPLETED.md` §4.
 - Estimated tool count per MCP group in the Groups dialog, summed over
   each group's running member servers.
 - `{{image:ARTIFACT_ID}}` placeholder support in `write_markdown_report`

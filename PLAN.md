@@ -20,7 +20,7 @@ and it is the only place §2 (considered, not committed) exists.
 - What has been delivered, with rationale → [`planning/COMPLETED.md`](planning/COMPLETED.md)
 - What shipped in which release → [`CHANGELOG.md`](CHANGELOG.md)
 - Per-phase checklists, archived → [`planning/completed/`](planning/completed/README.md)
-- User-facing setup and configuration → [`docs/`](docs/README.md)
+- User-facing setup and configuration → [`docs/`](docs/index.md)
 
 Two companion proposals live under `planning/` rather than in §1, because
 they are accepted-in-principle but not yet committed work. Items graduate
@@ -74,7 +74,7 @@ Nothing here is speculative work; it is what the first releases are for.
       (Windows and macOS, conda rather than a venv) — it has been verified
       in a clean Linux venv, both install orders, but conda's own resolver
       and Windows path handling are the ones that actually matter here.
-      See `docs/pyirena.md`.
+      See `docs/guides/pyirena.md`.
 - [ ] Mirror any future pyIrena PySide6 pin change into AIDA's `gui` extra.
       The two are deliberately kept identical so no pip resolution order can
       break the other package; nothing enforces that automatically.
@@ -82,7 +82,7 @@ Nothing here is speculative work; it is what the first releases are for.
 ### 1.2 Phase 10 — the distribution half (`phase10_automation_distribution.md`)
 
 The **automation** half shipped 2026-09-03: `aida run`, stored workflows,
-the in-app scheduler with its deferral policy, and `docs/workflows.md`.
+the in-app scheduler with its deferral policy, and `docs/guides/workflows.md`.
 Full account in [`planning/COMPLETED.md`](planning/COMPLETED.md) §9. What
 remains is distribution, plus one deliberate deferral:
 
@@ -177,7 +177,7 @@ naming what the target machine is still missing. **Tier 2**: `--list`,
 run, `--map FROM=TO` prefix path remapping, and the import dialog's
 Contents/Paths tabs. Full analysis in
 [`planning/portability.md`](planning/portability.md); user-facing guide in
-[`docs/moving-and-sharing.md`](docs/moving-and-sharing.md). What remains:
+[`docs/guides/moving-and-sharing.md`](docs/guides/moving-and-sharing.md). What remains:
 
 - [ ] **Tier 3 — full backup and restore.** `aida.db`, `artifacts/`,
       `knowledge/` and optionally the records dir, on top of the Tier 1

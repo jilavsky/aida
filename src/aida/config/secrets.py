@@ -86,7 +86,7 @@ def describe_keyring_error(exc: KeyringError) -> str:
     console/SSH login typically has neither — there is no desktop session to
     prompt for an unlock, and no system package fixes a daemon that was
     never started. The supported escape hatch, already documented in
-    ``docs/providers-and-secrets.md``, is the ``AIDA_SECRET_<PROFILE>``
+    ``docs/reference/providers-and-secrets.md``, is the ``AIDA_SECRET_<PROFILE>``
     environment variable: it is checked before the keychain and needs no
     keyring daemon at all.
     """
@@ -97,5 +97,5 @@ def describe_keyring_error(exc: KeyringError) -> str:
         "backend needs a running, unlocked keyring daemon (gnome-keyring or "
         "kwallet) that isn't available. Set the secret via the "
         "AIDA_SECRET_<PROFILE> environment variable instead — see "
-        "docs/providers-and-secrets.md#secrets — no keychain needed."
+        "docs/reference/providers-and-secrets.md#secrets — no keychain needed."
     )

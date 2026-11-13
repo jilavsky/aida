@@ -3,10 +3,10 @@
 > **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
 > is still open.
 
-**Related:** [workspaces.md](workspaces.md) · [providers-and-secrets.md](providers-and-secrets.md) · [safety-and-permissions.md](safety-and-permissions.md) · [mcp-servers.md](mcp-servers.md) · [coding-and-scripting.md](coding-and-scripting.md) · [knowledge-bases.md](knowledge-bases.md)
+**Related:** [workspaces.md](../guides/workspaces.md) · [providers-and-secrets.md](../reference/providers-and-secrets.md) · [safety-and-permissions.md](../reference/safety-and-permissions.md) · [mcp-servers.md](../reference/mcp-servers.md) · [coding-and-scripting.md](../guides/coding-and-scripting.md) · [knowledge-bases.md](../guides/knowledge-bases.md)
 
 This is a map of the `aida-gui` window — what's where, and which doc covers
 it in depth. It's not a manual; each item below links to the file that
@@ -19,18 +19,18 @@ explains its fields and behavior.
   project. Type a name and press Return to start using a new one. First on
   purpose: the three selectors read left to right in the order the choices
   narrow each other. See
-  [organizing-conversations.md](organizing-conversations.md).
+  [organizing-conversations.md](../guides/organizing-conversations.md).
 - **Workspace selector** — a dropdown of configured workspaces, plus
   "(no workspace)". Switching asks for confirmation and starts a new
-  conversation in the chosen workspace. See [workspaces.md](workspaces.md).
+  conversation in the chosen workspace. See [workspaces.md](../guides/workspaces.md).
 - **Profile selector** — a dropdown of configured provider profiles.
   Switching mid-conversation is allowed and keeps history. See
-  [providers-and-secrets.md](providers-and-secrets.md).
+  [providers-and-secrets.md](../reference/providers-and-secrets.md).
 - **New Chat** — starts a fresh conversation in the current workspace/profile
   without switching either; the old conversation stays saved in the sidebar.
 - **Code Editor…** — opens a syntax-highlighted Python editor (Save/Save
   As/Run/Kill) pre-filled from a chat code block, or blank. See
-  [coding-and-scripting.md](coding-and-scripting.md).
+  [coding-and-scripting.md](../guides/coding-and-scripting.md).
 
 That is the whole toolbar, and it is deliberately short: everything on it
 is part of running a session. The seven configuration dialogs that used to
@@ -52,25 +52,25 @@ At the right-hand end, separated from the rest:
   of AIDA's own folders in the system file browser, so you never have to
   hunt for them. The config, scratch and skills folders live under
   `~/.aida/`, which most file browsers hide by default; this is the way in.
-  See [mcp-servers.md](mcp-servers.md#adding-editing-via-the-gui) for what
+  See [mcp-servers.md](../reference/mcp-servers.md#adding-editing-via-the-gui) for what
   goes in the skills folder.
 - **File → Open Conversation Folder** — the current conversation's
-  attachment folder. See [documents.md](documents.md).
+  attachment folder. See [documents.md](../guides/documents.md).
 - **File → Export Conversation As…** — write a standalone snapshot of the
   current conversation's Markdown transcript to any folder (an Obsidian
   vault, say), with its own choice of how much tool-result text to include.
   Independent of the transcript this conversation already keeps up to date
   in the configured Records folder — see
-  [`moving-and-sharing.md`](moving-and-sharing.md). The conversations
+  [`moving-and-sharing.md`](../guides/moving-and-sharing.md). The conversations
   sidebar's right-click menu has the same **Export…** for any past
   conversation, not just the open one.
 - **File → Manage Users…** — rename a label (renaming onto an existing name
   merges them), or clear one. Also **New User…**, which starts using a
-  name. See [organizing-conversations.md](organizing-conversations.md).
+  name. See [organizing-conversations.md](../guides/organizing-conversations.md).
 - **File → Compact Conversation** — summarize older turns to free context.
-  See [context-and-limits.md](context-and-limits.md).
+  See [context-and-limits.md](../reference/context-and-limits.md).
 - **File → Save Conversation as Workflow…** — turn the prompts you have
-  already sent into a stored workflow. See [workflows.md](workflows.md).
+  already sent into a stored workflow. See [workflows.md](../guides/workflows.md).
 - **View → Conversations Column / Session Column / Reset Column Widths** —
   show or hide either side column, or put all three back to their default
   widths. The way back from a column you dragged shut.
@@ -80,17 +80,17 @@ At the right-hand end, separated from the rest:
 - **Configure → Workspaces… / Providers… / MCP Servers… / Knowledge
   Bases…** — the four objects a session is built out of: a workspace picks
   a provider profile, an MCP group and its knowledge bases. See
-  [workspaces.md](workspaces.md),
-  [providers-and-secrets.md](providers-and-secrets.md),
-  [mcp-servers.md](mcp-servers.md) and
-  [knowledge-bases.md](knowledge-bases.md).
+  [workspaces.md](../guides/workspaces.md),
+  [providers-and-secrets.md](../reference/providers-and-secrets.md),
+  [mcp-servers.md](../reference/mcp-servers.md) and
+  [knowledge-bases.md](../guides/knowledge-bases.md).
 - **Configure → Workflows… / Schedules…** — a stored sequence of prompts,
   and the in-app scheduler that runs one unattended (with each schedule's
-  last-run status). See [workflows.md](workflows.md).
+  last-run status). See [workflows.md](../guides/workflows.md).
 - **Configure → Settings…** (`Ctrl+,`) — font size, records folder, log
   level, max agent iterations, assistant name and personal context,
   scheduler timings, and the optional document-OCR key. See
-  [documents.md](documents.md#optional-mistral-ocr) for the OCR part. On
+  [documents.md](../guides/documents.md#optional-mistral-ocr) for the OCR part. On
   macOS this one is in the application menu, **AIDA → Settings…** (`⌘,`),
   where Qt puts it to match the platform convention.
 - **Help → Documentation** — opens this documentation in your web browser.
@@ -108,8 +108,8 @@ The window splits into three columns:
     covers everything a session may touch, not just folders — shows the
     workspace's source folders, target folder, sidecar folder name, allowed
     commands, and Python interpreter, each editable in place with a "Save to
-    Workspace" button — see [workspaces.md](workspaces.md) and
-    [coding-and-scripting.md](coding-and-scripting.md) (for the command
+    Workspace" button — see [workspaces.md](../guides/workspaces.md) and
+    [coding-and-scripting.md](../guides/coding-and-scripting.md) (for the command
     allowlist and interpreter).
   - **Quick Tasks** — a per-workspace list of short, reusable prompt
     templates for routine jobs ("summarize today's scans in the source
@@ -130,7 +130,7 @@ The window splits into three columns:
     checked state always reflects which servers are actually running,
     refreshed after every start/stop. A "MCP Servers…" button below the
     checkboxes opens the full management dialog. See
-    [mcp-servers.md](mcp-servers.md).
+    [mcp-servers.md](../reference/mcp-servers.md).
 
 ### Stopping a turn
 
@@ -146,7 +146,7 @@ not a kill switch — it takes effect at the next safe point, which is one of:
 
 The one thing it cannot interrupt is a **tool call already in flight**. That
 call runs to completion (bounded by the server's own `timeout_seconds` — see
-[mcp-servers.md](mcp-servers.md)) and the stop lands the moment it returns;
+[mcp-servers.md](../reference/mcp-servers.md)) and the stop lands the moment it returns;
 killing it mid-call would leave an MCP server with an orphaned request and a
 half-written file with no way to tell which. While that is what you are
 waiting on, the label says so by name — *"Stopping… 12s — waiting for
@@ -196,7 +196,7 @@ Above the transcript, a strip shows what this conversation is called, with
 the workspace, provider profile and user label underneath it. The name is
 written by the model from the conversation's own content and re-checked
 every few turns — see
-[organizing-conversations.md](organizing-conversations.md#how-conversations-get-their-names).
+[organizing-conversations.md](../guides/organizing-conversations.md#how-conversations-get-their-names).
 
 Click the ✎ (or double-click the strip) to name it yourself. A name you
 type is never changed again.
@@ -225,7 +225,7 @@ alone.
 Right-clicking gives **Resume**, **Rename…**, **Export…**, **Move to User**
 and **Delete…**; a multi-row selection gives **Move to User** and
 **Delete…**. **Move to User** is how a conversation started under the wrong
-name is put right. See [organizing-conversations.md](organizing-conversations.md).
+name is put right. See [organizing-conversations.md](../guides/organizing-conversations.md).
 **Export…** writes that conversation's transcript to a folder you pick,
 without opening it — the same "Export Conversation As…" dialog as the File
 menu's, see above.
@@ -250,22 +250,22 @@ menu's, see above.
     produced are always linked regardless of this setting.
 - **MCP Servers dialog** (`mcp_management_dialog.py`) — add/edit/remove MCP
   servers, per-tool permissions, groups, skills, live start/stop/restart,
-  connection tests, and a tool-call log. See [mcp-servers.md](mcp-servers.md).
+  connection tests, and a tool-call log. See [mcp-servers.md](../reference/mcp-servers.md).
   Its **Add pyIrena…** button is a one-click setup for pyIrena's MCP server:
   it finds the installation, shows you what it found, and on confirmation
   writes the server, its group, its skills, and its env vars —
-  see [pyirena.md](pyirena.md).
+  see [pyirena.md](../guides/pyirena.md).
 - **Knowledge Bases dialog** (`knowledge_management_dialog.py`) — add/edit/
   remove RAG knowledge bases and build/update their indexes. See
-  [knowledge-bases.md](knowledge-bases.md).
+  [knowledge-bases.md](../guides/knowledge-bases.md).
 - **Providers dialog** (`profiles_dialog.py`) — add/edit/remove provider and
-  embedding profiles. See [providers-and-secrets.md](providers-and-secrets.md).
+  embedding profiles. See [providers-and-secrets.md](../reference/providers-and-secrets.md).
 - **Workspace Management dialog** (`workspace_management_dialog.py`) —
   add/edit/remove named workspaces (`workspaces.yaml`) from the GUI instead
-  of hand-editing YAML. See [workspaces.md](workspaces.md).
+  of hand-editing YAML. See [workspaces.md](../guides/workspaces.md).
 - **Code Editor dialog** (`code_editor_dialog.py`) — write, save, and run
   Python scripts against the workspace's saved-scripts folder and
-  interpreter. See [coding-and-scripting.md](coding-and-scripting.md).
+  interpreter. See [coding-and-scripting.md](../guides/coding-and-scripting.md).
 
 ## First launch
 
@@ -285,7 +285,7 @@ tokens now)" whenever old history is cut to fit the context window) and a
 permanent token/cost label — input/output token counts and an estimated USD
 cost, updated after every turn. Three buttons appear only when needed:
 **⚠ N schedule failures** and **⏳ N jobs waiting** (see
-[workflows.md](workflows.md)), and a red **⚠ Scheduler problem** when the
+[workflows.md](../guides/workflows.md)), and a red **⚠ Scheduler problem** when the
 scheduler itself cannot poll, for example because a config file has a
 syntax error; it clears itself once the next poll works.
 
@@ -299,4 +299,4 @@ input box is free straight away; a message you send while the title is
 still being generated waits a moment for it. Confirmation
 prompts (for actions gated by the safety model, workspace switches, deletes,
 etc.) appear as modal dialogs, not in the status bar — see
-[safety-and-permissions.md](safety-and-permissions.md).
+[safety-and-permissions.md](../reference/safety-and-permissions.md).

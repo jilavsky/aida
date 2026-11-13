@@ -192,7 +192,7 @@ OSes was verified in this review and the boxes are ticked.
       macOS, under conda rather than a venv. Verified so far only in a
       clean Linux venv, both install orders; conda's resolver and Windows
       path handling are the ones that actually matter. See
-      `docs/pyirena.md`.
+      `docs/guides/pyirena.md`.
 
 ### Knowledge bases
 
@@ -285,4 +285,4 @@ file. Full writeup in
 | What has been delivered, with rationale | `planning/COMPLETED.md` |
 | What shipped in which release | `CHANGELOG.md` |
 | The per-phase checklists, archived | `planning/completed/` |
-| User-facing setup and configuration | `docs/` |
+| User-facing setup and configuration | `docs/` (built on Read the Docs) |

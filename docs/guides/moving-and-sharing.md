@@ -226,7 +226,7 @@ under `~/Documents/Aida/`; a knowledge-base index lives in
 rebuild any knowledge base whose source folders moved
 (`aida kb build <name>`). A supported full-backup command that also fixes
 the absolute paths recorded inside the database is planned — see
-[`planning/portability.md`](../planning/portability.md).
+[`planning/portability.md`](https://github.com/jilavsky/aida/blob/main/planning/portability.md).
 
 To hand off or archive *one* conversation rather than the whole database,
 use **File → Export Conversation As…** (or the conversations sidebar's

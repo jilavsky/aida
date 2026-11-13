@@ -38,3 +38,5 @@ htmlcov/
 
 #to delete
 _to_delete/*
+# Sphinx build output
+docs/_build/

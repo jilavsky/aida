@@ -3,15 +3,15 @@
 > **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
 > is still open.
 
-**Related:** [installation.md](installation.md) · [workspaces.md](workspaces.md) · [knowledge-bases.md](knowledge-bases.md) · [context-and-limits.md](context-and-limits.md)
+**Related:** [installation.md](../getting-started/installation.md) · [workspaces.md](../guides/workspaces.md) · [knowledge-bases.md](../guides/knowledge-bases.md) · [context-and-limits.md](context-and-limits.md)
 
 A **provider profile** tells AIDA how to reach one LLM endpoint: a name, a
 `kind`, a `base_url`, a `model`, and a `secret_ref` pointing at the OS
 keychain (never a raw key). Profiles live in `~/.aida/providers.yaml`, and a
-workspace picks one by name (see [workspaces.md](workspaces.md)).
+workspace picks one by name (see [workspaces.md](../guides/workspaces.md)).
 
 ## Provider profile fields
 
@@ -145,7 +145,7 @@ Embedding profiles have the exact same shape (`kind`, `base_url`, `model`,
 `secret_ref`, `capability_notes`) but live under a separate
 `embedding_profiles:` key in `providers.yaml`, because turning text into
 vectors is a different capability than chat. They're only needed for RAG
-knowledge bases — see [knowledge-bases.md](knowledge-bases.md). Today only
+knowledge bases — see [knowledge-bases.md](../guides/knowledge-bases.md). Today only
 `kind: openai_compat` is implemented (there's no `anthropic` embeddings kind
 — Anthropic has no first-party embeddings API):
 
@@ -172,7 +172,7 @@ The actual API key or ANL username is resolved at runtime, in this order:
    `aida`. On a console/SSH login to a Linux machine with no desktop
    session (common on beamline control machines), storing a secret this way
    can fail with a locked/unavailable keyring — see
-   [installation.md](installation.md#storing-a-secret-fails-with-keyringlocked-on-headless-linux)
+   [installation.md](../getting-started/installation.md#storing-a-secret-fails-with-keyringlocked-on-headless-linux)
    for the fix (option 1, above, sidesteps it entirely).
 
 To store a secret in the keychain, run:
@@ -218,7 +218,7 @@ secret set/get/delete` (above) or through the OS keychain.
 ## Full example
 
 Rather than re-deriving every field, see
-[`examples/config/providers.yaml`](../examples/config/providers.yaml) in the
+[`examples/config/providers.yaml`](https://github.com/jilavsky/aida/blob/main/examples/config/providers.yaml) in the
 repo for a fully commented example covering local (Ollama), direct Claude,
 and Argo-proxied profiles for both `profiles:` and `embedding_profiles:`.
 

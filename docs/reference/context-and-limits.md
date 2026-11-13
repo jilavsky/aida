@@ -3,10 +3,10 @@
 > **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
 > is still open.
 
-**Related:** [providers-and-secrets.md](providers-and-secrets.md) · [mcp-servers.md](mcp-servers.md) · [pyirena.md](pyirena.md)
+**Related:** [providers-and-secrets.md](providers-and-secrets.md) · [mcp-servers.md](mcp-servers.md) · [pyirena.md](../guides/pyirena.md)
 
 Every model has a finite context window — the total number of tokens it can
 read in one request, covering the system prompt, every MCP tool's schema,

@@ -3,10 +3,10 @@
 > **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
 > is still open.
 
-**Related:** [providers-and-secrets.md](providers-and-secrets.md) · [workspaces.md](workspaces.md)
+**Related:** [providers-and-secrets.md](../reference/providers-and-secrets.md) · [workspaces.md](workspaces.md)
 
 A **knowledge base** is a named set of folders/files that AIDA chunks,
 embeds, and stores in a local SQLite index so the agent can retrieve
@@ -18,7 +18,7 @@ workspace opts into using specific ones by name.
 
 Before you can create a knowledge base you need at least one **embedding
 profile** configured in `providers.yaml` (`embedding_profiles:`) — see
-[providers-and-secrets.md](providers-and-secrets.md#embedding-profiles). The
+[providers-and-secrets.md](../reference/providers-and-secrets.md#embedding-profiles). The
 GUI's Add dialog refuses to open without one ("Configure an embedding
 profile in providers.yaml (embedding_profiles:) first."), and the CLI's
 `build`/`update`/`query` commands all fail with a clear message if the
