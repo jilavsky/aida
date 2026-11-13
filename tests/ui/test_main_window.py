@@ -4377,7 +4377,14 @@ def test_a_generated_title_reaches_the_header_the_sidebar_and_the_status_bar(
             qapp,
             lambda: window.conversation_header.title_text() == "Unified fit of S12_0042.h5",
         )
-        assert "Unified fit of S12_0042.h5" in window.statusBar().currentMessage()
+        # Waited for separately: the background titling task stores the title
+        # before it queues ConversationTitled, so the turn-end header refresh
+        # can show the new name before the event that sets the status bar
+        # has been delivered (seen on a slow Windows runner).
+        assert pump_until(
+            qapp,
+            lambda: "Unified fit of S12_0042.h5" in window.statusBar().currentMessage(),
+        )
         # The history column renamed itself live, without a manual refresh.
         assert conv_id in window.sidebar.listed_conversation_ids()
         row = window.sidebar._ids_by_row.index(conv_id)
