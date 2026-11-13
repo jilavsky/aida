@@ -600,3 +600,39 @@ def test_normalize_path_falls_back_when_resolve_raises_oserror(tmp_path, monkeyp
     result = normalize_path(messy)
     assert ".." not in result.parts
     assert result == tmp_path / "file.txt"
+
+
+# --- read-only roots (the skills folder) -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_read_only_root_reads_without_asking_but_writes_are_confirmed(tmp_path: Path):
+    skills = tmp_path / "skills"
+    (skills / "s").mkdir(parents=True)
+    asked = []
+
+    async def _confirm(request: ConfirmationRequest) -> bool:
+        asked.append(request.action)
+        return False
+
+    guard = SafetyGuard(
+        allowed_roots=[tmp_path / "target"],
+        mode="relaxed",
+        confirm_callback=_confirm,
+        read_only_roots=[skills],
+    )
+    await guard.authorize_read(skills / "s" / "SKILL.md")
+    assert asked == []
+    with pytest.raises(ConfirmationDenied):
+        await guard.authorize_write(skills / "s" / "SKILL.md")
+    with pytest.raises(ConfirmationDenied):
+        await guard.authorize_delete(skills / "s" / "SKILL.md")
+    assert asked == ["write", "delete"]
+
+
+def test_for_workspace_passes_read_only_folders(tmp_path: Path):
+    guard = SafetyGuard.for_workspace(
+        target_folder=str(tmp_path / "t"), read_only_folders=[str(tmp_path / "skills")]
+    )
+    assert guard.is_read_only(tmp_path / "skills" / "x" / "scripts" / "a.py")
+    assert not guard.is_read_only(tmp_path / "t" / "a.py")

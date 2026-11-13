@@ -17,9 +17,10 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
 
@@ -29,7 +30,26 @@ from aida.core.proc_lock import config_write_lock
 
 CURRENT_CONFIG_VERSION = 1
 
+T = TypeVar("T")
+
 _logger = logging.getLogger("aida.config")
+
+
+class ConfigFileError(ValueError):
+    """A config file exists but cannot be used: a YAML/JSON syntax error,
+    or a structure the loader cannot read (a list where a mapping belongs,
+    a ``null`` entry). The message names the file and, for syntax errors,
+    the line, so ``aida doctor``, the CLI and the GUI can show something a
+    user can act on instead of a parser traceback. Wrong *values* inside a
+    well-formed file are not this error; those fall back to defaults with a
+    warning, as before."""
+
+    def __init__(self, path: Path, problem: str, *, line: int | None = None) -> None:
+        where = f"{path} line {line}" if line is not None else str(path)
+        super().__init__(f"{where}: {problem}")
+        self.path = path
+        self.line = line
+        self.problem = problem
 
 
 class ConfigConflictError(RuntimeError):
@@ -83,7 +103,13 @@ def _coerce(kind: str, value: Any) -> Any:
     if base == "bool":
         return _strict_bool(value)
     if base == "list[str]":
-        if isinstance(value, str) or not isinstance(value, (list, tuple)):
+        if isinstance(value, str):
+            # `allowed_folders: /one/path` means a one-item list, the same
+            # reading _coerce_str_list gives a workspace's source_folders;
+            # it used to fall back to an empty list without a word.
+            _logger.warning("expected a list, got the single string %r; using [%r]", value, value)
+            return [value]
+        if not isinstance(value, (list, tuple)):
             raise ValueError("expected a list")
         return [str(item) for item in value]
     if base == "list[int]":
@@ -1319,6 +1345,9 @@ class KnowledgeConfig:
 # workflows/NAME.yaml (Phase 10 — planning/completed/phase10_scheduling_design.md §4)
 # --------------------------------------------------------------------------
 
+#: Pass limit of a repeating workflow step when its YAML gives none.
+DEFAULT_MAX_PASSES = 20
+
 
 @dataclass
 class WorkflowStep:
@@ -1329,20 +1358,53 @@ class WorkflowStep:
     patterns checked against the workspace's target folder after the step
     completes; an empty list means "no assertion, whatever the agent did is
     accepted." Deliberately not a richer expression language — see the
-    design doc's §10 "out of scope, deliberately"."""
+    design doc's §10 "out of scope, deliberately".
+
+    ``repeat_until`` makes the step a *repeating* step: it is sent again,
+    each pass starting from a cleared context, until a file matching that
+    glob pattern appears in the target folder, for at most ``max_passes``
+    passes. It is for long batch jobs that keep their progress in a state
+    file (``aida.core.workflows._run_repeating_step``)."""
 
     prompt: str
     expect_files: list[str] = field(default_factory=list)
+    #: Glob pattern, checked in the workspace's target folder after each
+    #: pass, whose first match ends a repeating step. ``None``: run once.
+    repeat_until: str | None = None
+    #: Upper bound on the passes of a repeating step; reaching it without a
+    #: ``repeat_until`` match fails the step. Ignored for a one-pass step.
+    max_passes: int = DEFAULT_MAX_PASSES
 
     @classmethod
     def from_dict(cls, source: str, data: dict[str, Any]) -> WorkflowStep:
+        raw_until = data.get("repeat_until")
+        if raw_until is not None and not isinstance(raw_until, str):
+            _logger.warning(
+                "%s: repeat_until must be one glob pattern (a string) — ignoring %r",
+                source,
+                raw_until,
+            )
+            raw_until = None
+        repeat_until = raw_until.strip() if raw_until else None
+        if not repeat_until and data.get("max_passes") is not None:
+            _logger.warning("%s: max_passes has no effect without repeat_until", source)
         return cls(
             prompt=str(data.get("prompt", "")),
             expect_files=_coerce_str_list(source, "expect_files", data.get("expect_files")),
+            repeat_until=repeat_until or None,
+            max_passes=_coerce_positive_number(
+                source, "max_passes", data.get("max_passes"), default=DEFAULT_MAX_PASSES, kind=int
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {"prompt": self.prompt, "expect_files": self.expect_files}
+        data: dict[str, Any] = {"prompt": self.prompt, "expect_files": self.expect_files}
+        # Written only for a repeating step, so a one-pass step saves exactly
+        # as it did before these fields existed.
+        if self.repeat_until:
+            data["repeat_until"] = self.repeat_until
+            data["max_passes"] = self.max_passes
+        return data
 
 
 def _coerce_workflow_steps(source: str, value: Any) -> list[WorkflowStep]:
@@ -1543,11 +1605,39 @@ class SchedulesConfig:
 # --------------------------------------------------------------------------
 
 
+def _require_mapping(path: Path, data: Any) -> dict[str, Any]:
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ConfigFileError(
+            path, f"expected a mapping of settings at the top level, found {type(data).__name__}"
+        )
+    return data
+
+
 def _read_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
+        try:
+            data = yaml.safe_load(fh)
+        except yaml.YAMLError as exc:
+            mark = getattr(exc, "problem_mark", None)
+            problem = getattr(exc, "problem", None) or str(exc)
+            line = mark.line + 1 if mark is not None else None
+            raise ConfigFileError(path, f"YAML syntax error: {problem}", line=line) from exc
+    return _require_mapping(path, data)
+
+
+def _load_config_file(path: Path, data: dict[str, Any], from_dict: Callable[..., T]) -> T:
+    """``from_dict(data)``, turning a structural surprise deep inside the
+    file (``workspaces: {w: null}``, a string where a mapping belongs) into a
+    ``ConfigFileError`` naming the file instead of an ``AttributeError``
+    traceback from every command."""
+    try:
+        return from_dict(data)
+    except (AttributeError, TypeError) as exc:
+        raise ConfigFileError(path, f"unexpected structure ({exc})") from exc
 
 
 def _atomic_write_text(path: Path, text: str, *, expected_mtime: float | None = None) -> None:
@@ -1595,7 +1685,11 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as fh:
-        return json.load(fh) or {}
+        try:
+            data = json.load(fh)
+        except json.JSONDecodeError as exc:
+            raise ConfigFileError(path, f"JSON syntax error: {exc.msg}", line=exc.lineno) from exc
+    return _require_mapping(path, data) if data else {}
 
 
 def _write_json(path: Path, data: dict[str, Any], *, expected_mtime: float | None = None) -> None:
@@ -1604,7 +1698,7 @@ def _write_json(path: Path, data: dict[str, Any], *, expected_mtime: float | Non
 
 def load_app_config(base_dir: Path | None = None) -> AppConfig:
     path = (base_dir or config_dir()) / "config.yaml"
-    return AppConfig.from_dict(_read_yaml(path))
+    return _load_config_file(path, _read_yaml(path), AppConfig.from_dict)
 
 
 def save_app_config(
@@ -1617,7 +1711,7 @@ def save_app_config(
 
 def load_providers_config(base_dir: Path | None = None) -> ProvidersConfig:
     path = (base_dir or config_dir()) / "providers.yaml"
-    return ProvidersConfig.from_dict(_read_yaml(path))
+    return _load_config_file(path, _read_yaml(path), ProvidersConfig.from_dict)
 
 
 def save_providers_config(
@@ -1630,7 +1724,7 @@ def save_providers_config(
 
 def load_workspaces_config(base_dir: Path | None = None) -> WorkspacesConfig:
     path = (base_dir or config_dir()) / "workspaces.yaml"
-    return WorkspacesConfig.from_dict(_read_yaml(path))
+    return _load_config_file(path, _read_yaml(path), WorkspacesConfig.from_dict)
 
 
 def save_workspaces_config(
@@ -1643,7 +1737,7 @@ def save_workspaces_config(
 
 def load_mcp_config(base_dir: Path | None = None) -> McpConfig:
     path = (base_dir or config_dir()) / "mcp.json"
-    return McpConfig.from_dict(_read_json(path))
+    return _load_config_file(path, _read_json(path), McpConfig.from_dict)
 
 
 def save_mcp_config(
@@ -1656,7 +1750,7 @@ def save_mcp_config(
 
 def load_knowledge_config(base_dir: Path | None = None) -> KnowledgeConfig:
     path = (base_dir or config_dir()) / "knowledge.yaml"
-    return KnowledgeConfig.from_dict(_read_yaml(path))
+    return _load_config_file(path, _read_yaml(path), KnowledgeConfig.from_dict)
 
 
 def save_knowledge_config(
@@ -1669,7 +1763,7 @@ def save_knowledge_config(
 
 def load_schedules_config(base_dir: Path | None = None) -> SchedulesConfig:
     path = (base_dir or config_dir()) / "schedules.yaml"
-    return SchedulesConfig.from_dict(_read_yaml(path))
+    return _load_config_file(path, _read_yaml(path), SchedulesConfig.from_dict)
 
 
 def save_schedules_config(
@@ -1697,7 +1791,8 @@ def load_workflow(name: str, directory: Path | None = None) -> WorkflowConfig:
     if not path.exists():
         available = ", ".join(list_workflow_names(d)) or "(none)"
         raise FileNotFoundError(f"no workflow named {name!r} in {d}. Available: {available}")
-    return WorkflowConfig.from_dict(name, _read_yaml(path))
+    data = _read_yaml(path)
+    return _load_config_file(path, data, lambda d: WorkflowConfig.from_dict(name, d))
 
 
 def save_workflow(

@@ -321,3 +321,29 @@ def test_export_transcript_to_defaults_to_the_recorder_s_own_mode(tmp_path: Path
     path = rec.export_transcript_to(tmp_path / "vault")
 
     assert "a very long raw payload" not in path.read_text(encoding="utf-8")
+
+
+def test_unwritable_transcript_does_not_fail_record_message(tmp_path: Path, monkeypatch):
+    """A locked or unreachable transcript file (open in a Windows program, a
+    sync client, a dropped share) must not make ``record_message`` raise:
+    the message is already in the DB. The transcript stays dirty and a
+    later flush writes it once the file is writable again."""
+    import aida.persistence.recorder as recorder_module
+
+    rec = _recorder(tmp_path)
+    real_write = recorder_module.write_transcript
+    calls = {"n": 0}
+
+    def _locked(**kwargs):
+        calls["n"] += 1
+        raise PermissionError(13, "The process cannot access the file")
+
+    monkeypatch.setattr(recorder_module, "write_transcript", _locked)
+    rec.record_message(Message(role="user", content="hello"))
+    assert calls["n"] == 1
+    assert [m.content for m in rec.load_history()] == ["hello"]
+
+    monkeypatch.setattr(recorder_module, "write_transcript", real_write)
+    path = rec.flush_transcript()
+    assert path is not None and path.exists()
+    assert "hello" in path.read_text(encoding="utf-8")

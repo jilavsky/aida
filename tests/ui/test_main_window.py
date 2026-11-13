@@ -38,8 +38,10 @@ from aida.ui.qt._qt import (
     QDialog,
     QMenu,
     QMessageBox,
+    QObject,
     Qt,
     QToolBar,
+    Signal,
 )
 from aida.ui.qt.artifact_widgets import InlineImageWidget
 from aida.ui.qt.chat_panel import MessageBubble
@@ -3657,6 +3659,10 @@ def test_sidebar_content_search_finds_a_conversation_by_message_text(
         assert window.sidebar.count >= 1
 
         window.sidebar._search_edit.setText("sample X01")
+        # Debounced: nothing queried until typing pauses.
+        assert window._content_search_timer.isActive()
+        window._content_search_timer.stop()
+        window._run_conversation_content_search()
 
         assert window.sidebar.listed_conversation_ids() == [conv]
     finally:
@@ -4450,3 +4456,69 @@ def test_renaming_from_the_sidebar_also_updates_the_header(
         assert window.conversation_header.title_text() == "Renamed from the list"
     finally:
         window.close()
+
+
+def test_startup_warnings_are_shown_in_the_chat_not_printed(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, capsys
+):
+    """A workspace naming a knowledge base that does not exist used to
+    produce only a print() to a console a GUI user never sees (review P4)."""
+    from aida.ui.qt.chat_panel import StartupNoticeBanner
+
+    settings = _settings_with_profile()
+    settings.workspaces = WorkspacesConfig(
+        workspaces={
+            "ws": WorkspaceConfig(name="ws", profile="mock-profile", knowledge_bases=["no-such-kb"])
+        }
+    )
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], workspace_name="ws"
+    )
+    try:
+        banners = window.chat_panel.findChildren(StartupNoticeBanner)
+        assert len(banners) == 1
+        assert any("no-such-kb" in line for line in banners[0].lines)
+        assert "startup warning" in window.statusBar().currentMessage()
+        assert "no-such-kb" not in capsys.readouterr().out
+    finally:
+        window.close()
+
+
+def test_scheduler_health_badge_appears_and_clears(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """A failing scheduler used to be a log line only (review P6)."""
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        window.scheduler_bridge.health_changed.emit("config.yaml line 3: YAML syntax error")
+        assert pump_until(qapp, lambda: window._scheduler_health_button.isVisibleTo(window))
+        assert "config.yaml line 3" in window._scheduler_health_button.toolTip()
+
+        window.scheduler_bridge.health_changed.emit("")
+        assert pump_until(qapp, lambda: not window._scheduler_health_button.isVisibleTo(window))
+    finally:
+        window.close()
+
+
+def test_schedules_dialog_shows_the_scheduler_problem(qapp, aida_home: Path):
+    from aida.config.settings import load_settings
+    from aida.ui.qt.schedule_management_dialog import ScheduleManagementDialog
+
+    class _Bridge(QObject):
+        run_started = Signal(str)
+        run_finished = Signal(str, bool, str, str)
+        health_changed = Signal(str)
+        health_error = "poll failed: database is locked"
+
+    bridge = _Bridge()
+    dialog = ScheduleManagementDialog(load_settings(), bridge)
+    try:
+        assert dialog._health_label.isVisibleTo(dialog)
+        assert "database is locked" in dialog._health_label.text()
+        bridge.health_changed.emit("")
+        assert not dialog._health_label.isVisibleTo(dialog)
+    finally:
+        dialog.close()

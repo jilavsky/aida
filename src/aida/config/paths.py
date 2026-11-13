@@ -90,7 +90,7 @@ def bundled_skills_dir() -> Path | None:
 
 
 def install_skills_from(source_dir: Path, names: Sequence[str] | None = None) -> list[str]:
-    """Copy `*.md` skills from an arbitrary `source_dir` into
+    """Copy skills (`*.md` files and `<name>/SKILL.md` folders) from an arbitrary `source_dir` into
     `~/.aida/skills/`, skipping any that already exist, and return the names
     actually installed.
 
@@ -110,14 +110,31 @@ def install_skills_from(source_dir: Path, names: Sequence[str] | None = None) ->
         if source.stem == "README" or (names is not None and source.stem not in names):
             continue
         destination = target_dir / source.name
-        if destination.exists():
+        if destination.exists() or (target_dir / source.stem).exists():
             continue
         try:
             shutil.copyfile(source, destination)
         except OSError:
             continue  # a read-only or full home directory must not break setup
         installed.append(source.stem)
-    return installed
+    # Folder skills (<name>/SKILL.md plus scripts and reference files) are
+    # copied whole, under the same never-overwrite rule.
+    for folder in sorted(p for p in source_dir.iterdir() if p.is_dir()):
+        if not (folder / "SKILL.md").is_file():
+            continue
+        if names is not None and folder.name not in names:
+            continue
+        destination = target_dir / folder.name
+        if destination.exists() or (target_dir / f"{folder.name}.md").exists():
+            continue
+        try:
+            shutil.copytree(
+                folder, destination, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".*")
+            )
+        except OSError:
+            continue
+        installed.append(folder.name)
+    return sorted(installed)
 
 
 def install_bundled_skills(names: Sequence[str] | None = None) -> list[str]:

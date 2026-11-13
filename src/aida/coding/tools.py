@@ -14,6 +14,7 @@ are a per-workspace on/off switch away from being registered at all
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +113,26 @@ def _effective_timeout(arguments: dict[str, Any], workspace: WorkspaceConfig) ->
     return min(requested, workspace.script_timeout_seconds)
 
 
+#: Scientific packages worth telling the model about when they are
+#: importable (the optional ``science`` extra installs the first three).
+SCIENCE_PACKAGES = ("numpy", "scipy", "matplotlib", "h5py")
+
+
+def _available_packages_note(python_interpreter: str | None) -> str:
+    """Sentence naming the scientific packages scripts can import.
+
+    Only checked for AIDA's own Python. For a workspace ``python_interpreter``
+    AIDA cannot tell cheaply what is installed, so it says nothing rather
+    than guess.
+    """
+    if python_interpreter:
+        return ""
+    available = [name for name in SCIENCE_PACKAGES if importlib.util.find_spec(name) is not None]
+    if not available:
+        return ""
+    return " Packages available to scripts include: " + ", ".join(available) + "."
+
+
 def default_coding_tools(
     guard: SafetyGuard,
     *,
@@ -133,17 +154,29 @@ def default_coding_tools(
     @_tool
     async def run_python_script(arguments: dict[str, Any]) -> ToolResult:
         path = arguments["path"]
-        args = list(arguments.get("args", []))
+        raw_args = arguments.get("args") or []
+        # A lone string (some local models send one) is one argument, not a
+        # sequence of single characters.
+        args = [raw_args] if isinstance(raw_args, str) else [str(a) for a in raw_args]
         candidate = await guard.authorize_read(path)
         if not candidate.is_file():
             return ToolResult(content=f"Not a file: {candidate}", is_error=True)
         await guard.authorize_run_script(candidate)
         timeout = _effective_timeout(arguments, workspace)
+        # A skill's script lives in the read-only skills folder; running it
+        # there would drop its output files into the skill itself. It runs
+        # in the workspace's target folder instead (scratch as fallback).
+        cwd = candidate.parent
+        if guard.is_read_only(candidate):
+            for option in (_default_cwd(workspace), scratch_dir):
+                if option and Path(option).expanduser().is_dir():
+                    cwd = Path(option).expanduser()
+                    break
         result = await _run_python_script(
             candidate,
             args,
             interpreter=workspace.python_interpreter,
-            cwd=candidate.parent,
+            cwd=cwd,
             timeout=timeout,
         )
         return ToolResult(
@@ -176,7 +209,14 @@ def default_coding_tools(
         NativeTool(
             schema=ToolSchema(
                 name="run_python_script",
-                description="Run a Python script that already lives in an allowed folder, with optional arguments.",
+                description=(
+                    "Run a Python script that already lives in an allowed folder, or a "
+                    "script shipped with a loaded skill, with optional arguments. Skill "
+                    "scripts run with the workspace target folder as the working directory. "
+                    "Matplotlib uses the non-interactive Agg backend: save figures with "
+                    "savefig instead of calling show."
+                    + _available_packages_note(workspace.python_interpreter)
+                ),
                 parameters={
                     "type": "object",
                     "properties": {

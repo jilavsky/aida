@@ -345,7 +345,7 @@ def export_bundle(
             archive.writestr("config/knowledge.yaml", _yaml(knowledge_data))
             archive.writestr("config/schedules.yaml", _yaml(schedules_data))
 
-            result.counts["skills"] = _add_tree(archive, skills_root, "skills", suffixes=(".md",))
+            result.counts["skills"] = _add_skills(archive, skills_root)
             result.counts["workflows"] = _add_tree(
                 archive, workflows_root, "workflows", suffixes=(".yaml",)
             )
@@ -460,11 +460,8 @@ def _collect_secret_refs(providers: ProvidersConfig) -> list[str]:
 def _add_tree(
     archive: zipfile.ZipFile, root: Path, prefix: str, *, suffixes: tuple[str, ...]
 ) -> int:
-    """Copy a folder of plain content files into the bundle verbatim.
-
-    Handles both skill layouts (``<name>.md`` and ``<name>/SKILL.md`` with
-    its sibling files) by simply walking everything with a matching suffix.
-    """
+    """Copy a folder of plain content files with a matching suffix into the
+    bundle verbatim (workflows). Skills go through ``_add_skills``."""
     if not root.is_dir():
         return 0
     count = 0
@@ -474,6 +471,41 @@ def _add_tree(
         if path.name == "README.md" and path.parent == root:
             continue  # the bundled-skills README, not a skill
         archive.write(path, f"{prefix}/{path.relative_to(root).as_posix()}")
+        count += 1
+    return count
+
+
+#: Never exported from a skill folder: caches, editor and OS litter.
+_SKILL_EXPORT_SKIP_PARTS = ("__pycache__",)
+_SKILL_EXPORT_SKIP_SUFFIXES = (".pyc", ".pyo")
+
+
+def _add_skills(archive: zipfile.ZipFile, root: Path) -> int:
+    """Copy the skills folder into the bundle: every top-level ``*.md``
+    skill, and every file inside a ``<name>/SKILL.md`` folder skill (its
+    scripts, templates and reference files, not only Markdown, or a skill
+    that ships code would arrive without it). Returns the number of files.
+    """
+    if not root.is_dir():
+        return 0
+    count = 0
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        if len(relative.parts) == 1:
+            if path.suffix.lower() != ".md" or path.name == "README.md":
+                continue  # loose files and the bundled-skills README are not skills
+        else:
+            if not (root / relative.parts[0] / "SKILL.md").is_file():
+                continue  # a folder that is not a skill
+            if any(
+                part.startswith(".") or part in _SKILL_EXPORT_SKIP_PARTS for part in relative.parts
+            ):
+                continue
+            if path.suffix.lower() in _SKILL_EXPORT_SKIP_SUFFIXES:
+                continue
+        archive.write(path, f"skills/{relative.as_posix()}")
         count += 1
     return count
 

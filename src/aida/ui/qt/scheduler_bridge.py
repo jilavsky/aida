@@ -43,6 +43,9 @@ class SchedulerBridge(QObject):
     #: listener can just replace whatever it was showing (see
     #: ``aida.core.scheduler_runtime.scheduler_loop``'s docstring).
     deferred_changed = Signal(object)  # dict[str, str]
+    #: ``""`` when the scheduler is polling normally, otherwise what is
+    #: wrong (a poll failed, or the loop stopped). Emitted on change only.
+    health_changed = Signal(str)
 
     def __init__(
         self,
@@ -67,6 +70,9 @@ class SchedulerBridge(QObject):
         self._should_defer = self.activity.should_defer if defer_to_user else None
         self._stop_event: asyncio.Event | None = None
         self._future: concurrent.futures.Future | None = None
+        #: Last value emitted on ``health_changed`` — for a dialog opened
+        #: after the fact.
+        self.health_error = ""
 
     def start(self) -> None:
         """Idempotent: a second call while already running is a no-op —
@@ -86,9 +92,17 @@ class SchedulerBridge(QObject):
                 should_defer=self._should_defer,
                 on_deferred_changed=self._emit_deferred_changed,
                 stop_event=self._stop_event,
+                on_health_changed=self._emit_health_changed,
             )
-        except Exception:  # noqa: BLE001 - must never crash the loop thread
+        except Exception as exc:  # noqa: BLE001 - must never crash the loop thread
             logger.exception("scheduler loop crashed")
+            self._emit_health_changed(
+                f"the scheduler stopped ({exc}); scheduled jobs will not run until AIDA is restarted"
+            )
+
+    def _emit_health_changed(self, error: str) -> None:
+        self.health_error = error
+        self.health_changed.emit(error)
 
     def _emit_started(self, name: str) -> None:
         self.run_started.emit(name)

@@ -1,6 +1,6 @@
 # Coding and scripting
 
-> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
@@ -51,8 +51,16 @@ name would mean shelling into `conda activate` first, which is fragile and
 platform-dependent; a direct path to the interpreter binary works the same
 way everywhere and needs no shell activation step. Leave it unset (`None`)
 and `run_python_script` uses whatever interpreter AIDA's own process is
-running under (`sys.executable`) — fine for quick checks, but usually not
-where your instrument/analysis packages are actually installed.
+running under (`sys.executable`). Installing AIDA with the `science` extra
+(the conda `environment.yml` does this) puts numpy, matplotlib and h5py in
+that environment, which covers most quick analysis and plotting scripts;
+when they are present, the tool description tells the model so. For your
+instrument or analysis packages, point `python_interpreter` at their
+environment.
+
+Scripts run with `MPLBACKEND=Agg` unless you set a backend yourself, so a
+`plt.show()` does not open a window and wait; figures are saved with
+`savefig`.
 
 Set it with:
 
@@ -128,6 +136,15 @@ before this context existed, where the model would try `run_command`
 with a raw `python3 -c "..."` just to find out what interpreter/packages
 were available, triggering a confirmation prompt for something
 `run_python_script` could have answered without one.
+
+## Scripts shipped with a skill
+
+A folder skill can carry tested scripts (`~/.aida/skills/<name>/scripts/`).
+The agent runs them with `run_python_script` like any other script, with
+two differences: they run with the workspace's target folder as the
+working directory (so outputs land with your results, not in the skill),
+and the skills folder doesn't need to be an allowed folder. See
+[skills.md](skills.md#shipping-code-with-a-skill).
 
 ## `templates_dir` — house conventions for generated scripts
 

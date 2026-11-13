@@ -336,3 +336,246 @@ async def test_run_workflow_closes_session_even_when_a_step_fails(
 
     assert result.ok is False
     assert closed == [True]
+
+
+@pytest.mark.parametrize("prompt", ["Use {} here.", "Stray } brace.", "Stray { brace."])
+def test_render_step_prompt_stray_braces_are_a_config_error(prompt):
+    """``{}`` raises IndexError and a lone brace ValueError inside
+    ``str.format``; both used to escape as unexpected errors and stop the
+    scheduler (review B3)."""
+    with pytest.raises(WorkflowConfigError, match=r"\{\{"):
+        render_step_prompt(WorkflowStep(prompt=prompt), {})
+
+
+# --- repeating steps (repeat_until) ---------------------------------------
+
+
+def _marker_after(target: Path, passes: int, name: str = "scan.done"):
+    """An ``on_event`` that creates ``target/name`` when the ``passes``-th
+    turn finishes — standing in for the agent writing its finished marker."""
+    from aida.core.events import MessageFinished
+
+    finished = {"count": 0}
+
+    def on_event(index, event):
+        if isinstance(event, MessageFinished) and event.stop_reason == "stop":
+            finished["count"] += 1
+            if finished["count"] == passes:
+                (target / name).write_text("done", encoding="utf-8")
+
+    return on_event
+
+
+def _step_requests(provider: MockProvider, prompt: str):
+    """The message lists of provider calls made for ``prompt``'s turns
+    (excluding any titling request)."""
+    return [
+        messages
+        for messages, _tools, _settings in provider.calls
+        if any(m.role == "user" and m.content == prompt for m in messages)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repeating_step_runs_until_marker_with_a_clean_context_each_pass(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    target = tmp_path / "target"
+    target.mkdir()
+    provider = MockProvider([MockTurn(text=f"batch {n} done") for n in range(1, 10)])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
+    settings = _settings(target_folder=str(target))
+    prompt = "Process the next batch from state.json."
+    workflow = WorkflowConfig(
+        name="w",
+        workspace="use-ws",
+        steps=[WorkflowStep(prompt=prompt, repeat_until="*.done", max_passes=10)],
+    )
+
+    result = await run_workflow(
+        settings,
+        workflow,
+        confirm_callback=_confirm(yes_in_allowed=False),
+        origin="workflow",
+        on_event=_marker_after(target, 3),
+    )
+
+    assert result.ok is True, result.error
+    assert result.steps[0].passes == 3
+    requests = _step_requests(provider, prompt)
+    assert len(requests) == 3
+    for messages in requests:
+        # Only the system prompt and this pass's own prompt: nothing from
+        # earlier passes is sent.
+        assert [m.role for m in messages if m.role != "system"] == ["user"]
+        assert not any(" done" in str(m.content or "") for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_repeating_step_stays_in_one_conversation_and_later_steps_run(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    from aida.persistence.store import ConversationStore
+
+    target = tmp_path / "target"
+    target.mkdir()
+    provider = MockProvider([MockTurn(text="ok") for _ in range(10)])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
+    settings = _settings(target_folder=str(target))
+    workflow = WorkflowConfig(
+        name="w",
+        workspace="use-ws",
+        steps=[
+            WorkflowStep(prompt="batch", repeat_until="scan.done", max_passes=5),
+            WorkflowStep(prompt="write the report"),
+        ],
+    )
+
+    result = await run_workflow(
+        settings,
+        workflow,
+        confirm_callback=_confirm(yes_in_allowed=False),
+        origin="workflow",
+        on_event=_marker_after(target, 2),
+    )
+
+    assert result.ok is True, result.error
+    assert [s.passes for s in result.steps] == [2, 1]
+    with ConversationStore() as store:
+        stored = store.load_messages(result.conversation_id)
+    # Every pass is kept in the stored conversation, though the context
+    # sent to the model was cleared between them.
+    assert [m.content for m in stored if m.role == "user"] == [
+        "batch",
+        "batch",
+        "write the report",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repeating_step_fails_when_max_passes_reached(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    target = tmp_path / "target"
+    target.mkdir()
+    provider = MockProvider([MockTurn(text="ok") for _ in range(10)])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
+    settings = _settings(target_folder=str(target))
+    workflow = WorkflowConfig(
+        name="w",
+        workspace="use-ws",
+        steps=[
+            WorkflowStep(prompt="batch", repeat_until="scan.done", max_passes=3),
+            WorkflowStep(prompt="never reached"),
+        ],
+    )
+
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
+
+    assert result.ok is False
+    assert len(result.steps) == 1
+    assert result.steps[0].passes == 3
+    assert "after 3 pass" in result.error
+    assert len(_step_requests(provider, "batch")) == 3
+
+
+@pytest.mark.asyncio
+async def test_repeating_step_stops_at_a_failed_pass(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    target = tmp_path / "target"
+    target.mkdir()
+    provider = MockProvider([MockTurn(text="ok"), MockTurn(error="boom"), MockTurn(text="ok")])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
+    settings = _settings(target_folder=str(target))
+    settings.app.auto_title_conversations = False  # keep the script one turn per pass
+    workflow = WorkflowConfig(
+        name="w",
+        workspace="use-ws",
+        steps=[WorkflowStep(prompt="batch", repeat_until="scan.done", max_passes=5)],
+    )
+
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
+
+    assert result.ok is False
+    assert result.steps[0].passes == 2
+    assert "pass 2" in result.error and "boom" in result.error
+
+
+@pytest.mark.asyncio
+async def test_repeating_step_refuses_a_leftover_marker(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "scan.done").write_text("from yesterday", encoding="utf-8")
+    provider = MockProvider([MockTurn(text="ok")])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
+    settings = _settings(target_folder=str(target))
+    workflow = WorkflowConfig(
+        name="w",
+        workspace="use-ws",
+        steps=[WorkflowStep(prompt="batch", repeat_until="scan.done")],
+    )
+
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
+
+    assert result.ok is False
+    assert result.steps[0].passes == 0
+    assert "already matches" in result.error
+    assert _step_requests(provider, "batch") == []
+
+
+@pytest.mark.asyncio
+async def test_repeating_step_needs_a_target_folder(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    provider = MockProvider([MockTurn(text="ok")])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
+    settings = _settings(target_folder=None)
+    workflow = WorkflowConfig(
+        name="w",
+        workspace="use-ws",
+        steps=[WorkflowStep(prompt="batch", repeat_until="scan.done")],
+    )
+
+    result = await run_workflow(
+        settings, workflow, confirm_callback=_confirm(yes_in_allowed=False), origin="workflow"
+    )
+
+    assert result.ok is False
+    assert "target folder" in result.error
+    assert _step_requests(provider, "batch") == []
+
+
+@pytest.mark.asyncio
+async def test_repeating_step_passes_are_in_the_manifest(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    target = tmp_path / "target"
+    target.mkdir()
+    provider = MockProvider([MockTurn(text="ok") for _ in range(5)])
+    monkeypatch.setattr("aida.core.session.build_provider", lambda profile: provider)
+    settings = _settings(target_folder=str(target))
+    workflow = WorkflowConfig(
+        name="w",
+        workspace="use-ws",
+        steps=[WorkflowStep(prompt="batch", repeat_until="scan.done", max_passes=5)],
+    )
+
+    result = await run_workflow(
+        settings,
+        workflow,
+        confirm_callback=_confirm(yes_in_allowed=False),
+        origin="workflow",
+        on_event=_marker_after(target, 2),
+    )
+
+    manifest = json.loads(Path(result.manifest_path).read_text(encoding="utf-8"))
+    assert manifest["steps"][0]["passes"] == 2

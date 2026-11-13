@@ -1,7 +1,7 @@
 # AIDA — AI Data Assistant
 
-> **Status: 1.0.1.** In daily use at APS beamline 12-ID. All ten
-> phases of the original plan are delivered, the test suite is 2,449 tests
+> **Status: 1.1.0.** In daily use at APS beamline 12-ID. All ten
+> phases of the original plan are delivered, the test suite is 2,575 tests
 > green on macOS, Windows and Linux, and the config formats and CLI
 > commands are stable: a breaking change to either now means a new major
 > version. Every change is dated in [`CHANGELOG.md`](CHANGELOG.md).
@@ -52,7 +52,7 @@ for the rationale.
 From PyPI (recommended):
 
 ```bash
-pip install "aida-workbench[gui,docs]"
+pip install "aida-workbench[gui,docs,science]"
 aida doctor
 aida-gui
 ```
@@ -60,7 +60,8 @@ aida-gui
 The PyPI distribution name is `aida-workbench`; the import package and the
 console scripts are `aida` / `aida-gui`. Extras: `gui` (PySide6 desktop app),
 `docs` (PDF/DOCX/XLSX/PPTX reading, image handling), `ocr` (the optional
-Mistral OCR backend for figure extraction).
+Mistral OCR backend for figure extraction), `science` (numpy, matplotlib and
+h5py for the scripts the agent runs; AIDA itself does not need them).
 
 Already using pyIrena? Install both — in either order, in one environment or
 two — and wire up its MCP tools with a single command:
@@ -83,7 +84,7 @@ From a git checkout, for development:
 ```bash
 git clone https://github.com/jilavsky/aida.git
 cd aida
-conda env create -f environment.yml   # or: pip install -e ".[dev,gui,docs]"
+conda env create -f environment.yml   # or: pip install -e ".[dev,gui,docs,science]"
 conda activate aida
 aida doctor
 ```

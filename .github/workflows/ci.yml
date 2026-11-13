@@ -13,6 +13,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.13"]
+        # 3.12 is claimed in the classifiers; one Linux leg is enough to
+        # back that claim without growing the matrix by three jobs.
+        include:
+          - os: ubuntu-latest
+            python-version: "3.12"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -85,6 +90,29 @@ jobs:
 
       - name: Pytest (GUI)
         run: pytest -v tests/ui
+
+  # The test job above installs the newest release of every dependency, so
+  # a floor in pyproject.toml that no longer works (an SDK that predates an
+  # API AIDA calls, or one broken by a newer transitive httpx) would pass CI
+  # and fail for a user whose environment is older. `--resolution
+  # lowest-direct` installs exactly the declared minimums of AIDA's own
+  # dependencies. Non-GUI only: the GUI floor (PySide6 6.6) is not covered.
+  lowest-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          activate-environment: true
+
+      - name: Install the declared minimum versions
+        run: uv pip install --resolution lowest-direct -e ".[dev]"
+
+      - name: Pytest (non-GUI, minimum versions)
+        run: pytest -q --ignore=tests/ui
 
   # Validates the artifact users actually install, which the test job above
   # does not: it runs against an editable install of the source tree, so a

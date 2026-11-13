@@ -101,3 +101,22 @@ def test_install_bundled_skills_never_overwrites_a_users_edited_copy(aida_home):
 
     assert install_bundled_skills(["saxs-basics"]) == []
     assert mine.read_text(encoding="utf-8") == "# my own version\n"
+
+
+def test_install_skills_from_copies_folder_skills_whole(aida_home, tmp_path):
+    source = tmp_path / "source"
+    (source / "overview" / "scripts" / "__pycache__").mkdir(parents=True)
+    (source / "overview" / "SKILL.md").write_text("# overview\n", encoding="utf-8")
+    (source / "overview" / "scripts" / "make.py").write_text("print(1)\n", encoding="utf-8")
+    (source / "overview" / "scripts" / "__pycache__" / "x.pyc").write_bytes(b"")
+    (source / "not-a-skill").mkdir()
+
+    assert paths.install_skills_from(source) == ["overview"]
+    target = paths.skills_dir() / "overview"
+    assert (target / "scripts" / "make.py").is_file()
+    assert not (target / "scripts" / "__pycache__").exists()
+    assert not (paths.skills_dir() / "not-a-skill").exists()
+
+    (target / "SKILL.md").write_text("# edited\n", encoding="utf-8")
+    assert paths.install_skills_from(source) == []  # never overwrites
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == "# edited\n"

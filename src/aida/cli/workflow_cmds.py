@@ -73,6 +73,8 @@ def cmd_show(args: argparse.Namespace) -> int:
         print(f"  {index}. {step.prompt}")
         if step.expect_files:
             print(f"     expect_files: {', '.join(step.expect_files)}")
+        if step.repeat_until:
+            print(f"     repeat_until: {step.repeat_until} (max {step.max_passes} passes)")
     return EXIT_OK
 
 
@@ -92,8 +94,14 @@ def cmd_validate(args: argparse.Namespace) -> int:
         problems.append("no workspace configured")
     else:
         settings = load_settings()
-        if workflow.workspace not in settings.workspaces.workspaces:
+        workspace = settings.workspaces.workspaces.get(workflow.workspace)
+        if workspace is None:
             problems.append(f"unknown workspace {workflow.workspace!r}")
+        elif not workspace.target_folder and any(s.repeat_until for s in workflow.steps):
+            problems.append(
+                f"workspace {workflow.workspace!r} has no target folder, which a step "
+                "with repeat_until needs (the finished-marker file is looked for there)"
+            )
     if not workflow.steps:
         problems.append("no steps")
 

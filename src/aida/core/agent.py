@@ -21,6 +21,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from aida.artifacts.base import Artifact, FileArtifact, ImageArtifact
 from aida.config.logging_setup import get_logger
+from aida.core.argument_coercion import coerce_arguments
 from aida.core.events import (
     AgentError,
     AgentEvent,
@@ -136,6 +137,12 @@ class AgentLoop:
         request and a half-written file with no way to tell which.
         """
         self._cancelled = True
+
+    def clear_cancel(self) -> None:
+        """Drop a pending cancellation request. ``ChatSession`` calls this
+        when a turn ends, so a Stop that arrives after the run finished but
+        before the turn's own cleanup did cannot cancel the next turn."""
+        self._cancelled = False
 
     def queue_user_message(self, text: str) -> None:
         """Hand the running turn a message to deliver at its next round trip
@@ -410,7 +417,20 @@ class AgentLoop:
                     )
                 else:
                     try:
-                        result = await tool.func(tc.arguments)
+                        # Weaker local models send "false" for a boolean or
+                        # "3" for an integer; without this a native tool's
+                        # bool(arguments["overwrite"]) reads "false" as True.
+                        # MCP tools are coerced again in McpManager, which
+                        # is a no-op on already-coerced arguments.
+                        arguments, notes = coerce_arguments(tc.arguments, tool.schema.parameters)
+                        if notes:
+                            logger.warning(
+                                "tool call %s: auto-corrected %d argument(s): %s",
+                                tc.name,
+                                len(notes),
+                                "; ".join(notes),
+                            )
+                        result = await tool.func(arguments)
                         result_content = result.content
                         is_error = result.is_error
                         result_artifacts = result.artifacts

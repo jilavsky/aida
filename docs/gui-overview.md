@@ -1,6 +1,6 @@
 # GUI overview
 
-> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
@@ -216,7 +216,8 @@ Double-clicking an entry resumes it. Resuming replays chat history and any
 still-present image/file artifacts.
 
 Above the list, a search box matches the title, workspace and user label,
-and — once any conversation carries a user label — a filter narrows the
+plus the text of your messages and the agent's replies (not tool output;
+this part runs once you pause typing, from three characters on), and — once any conversation carries a user label — a filter narrows the
 list to one name, to **(no user)**, or to **All users**. The filter follows
 the toolbar's User box when you switch, and otherwise leaves your choice
 alone.
@@ -282,7 +283,20 @@ Shows session status messages (e.g. "Starting session…", "Ready — \<profile\
 "Startup failed", or a transient "Context trimmed: dropped N old turns (~M
 tokens now)" whenever old history is cut to fit the context window) and a
 permanent token/cost label — input/output token counts and an estimated USD
-cost, updated after every turn. Confirmation
+cost, updated after every turn. Three buttons appear only when needed:
+**⚠ N schedule failures** and **⏳ N jobs waiting** (see
+[workflows.md](workflows.md)), and a red **⚠ Scheduler problem** when the
+scheduler itself cannot poll, for example because a config file has a
+syntax error; it clears itself once the next poll works.
+
+If something went wrong while a chat was starting (a knowledge base
+skipped, an MCP server that failed to start, more tools than the provider
+accepts), an amber **"This chat started with N warnings"** notice appears
+in the chat itself, and the "Ready" message says so.
+
+The conversation's title is generated after the answer is complete, so the
+input box is free straight away; a message you send while the title is
+still being generated waits a moment for it. Confirmation
 prompts (for actions gated by the safety model, workspace switches, deletes,
 etc.) appear as modal dialogs, not in the status bar — see
 [safety-and-permissions.md](safety-and-permissions.md).

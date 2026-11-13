@@ -18,7 +18,7 @@ import importlib.util
 import sys
 
 from aida.config.logging_setup import configure_logging
-from aida.config.settings import load_settings
+from aida.config.settings import ConfigFileError, load_settings
 
 _COMMANDS = {
     "doctor": "Report environment/config diagnostics",
@@ -69,7 +69,19 @@ def main(argv: list[str] | None = None) -> int:
         _print_top_level_help()
         return 1
 
-    settings = load_settings()
+    try:
+        settings = load_settings()
+    except ConfigFileError as exc:
+        # `aida doctor` still runs and reports the broken file as a failed
+        # check; every other command stops with the file and line named,
+        # rather than a parser traceback.
+        if command == "doctor":
+            from aida.cli.doctor import main as doctor_main
+
+            return doctor_main()
+        print(f"aida: configuration error in {exc}", file=sys.stderr)
+        print("Fix the file (or move it aside to get defaults) and try again.", file=sys.stderr)
+        return 1
     configure_logging(settings.app.log_level)
 
     if command == "doctor":

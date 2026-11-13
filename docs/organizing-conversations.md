@@ -64,7 +64,8 @@ Conversations are listed under date headings — **Today**, **Yesterday**,
 it was last used, its workspace and its user label.
 
 The sidebar search matches the visible title and workspace as well as the
-user label, and the text of the messages themselves. Once any conversation
+user label, and the text of your messages and the agent's replies (tool
+results are not searched). Once any conversation
 carries a label, a filter above the list narrows it to one name.
 
 Selecting a name shows **only** that name's conversations. Conversations

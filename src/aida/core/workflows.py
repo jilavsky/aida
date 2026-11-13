@@ -10,6 +10,14 @@ config shape alone:
   prompt ("write a summary of what you just did") can actually refer to
   earlier steps' work, and so MCP servers start once per run, not once per
   step.
+- **A repeating step (``repeat_until``) clears the context before each
+  pass** but stays in that same session and conversation. Each pass is a
+  fresh turn that reads its progress from a state file the prompt names,
+  so a 13-batch job never fills the context and the MCP servers are not
+  restarted between batches. The step ends when a file matching
+  ``repeat_until`` appears in the target folder, and fails if it is
+  already there before the first pass (left over from an earlier run) or
+  still missing after ``max_passes`` passes.
 - **A step fails only for an ``AgentError`` or an unmet ``expect_files``
   assertion** — not merely because ``ToolCallFinished.is_error`` appeared
   mid-turn. ``AgentLoop`` already lets the model see a tool error and try
@@ -48,6 +56,7 @@ from aida.core.events import (
     ToolCallFinished,
 )
 from aida.core.session import (
+    ChatSession,
     UnknownMcpServerError,
     UnknownProfileError,
     UnknownWorkspaceError,
@@ -79,12 +88,17 @@ class StepResult:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     missing_expect_files: list[str] = field(default_factory=list)
+    #: Turns sent for this step: always 1 for a one-pass step, the number of
+    #: passes run for a repeating step. ``tool_calls`` and ``artifacts``
+    #: collect every pass.
+    passes: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "index": self.index,
             "prompt": self.prompt,
             "ok": self.ok,
+            "passes": self.passes,
             "stop_reason": self.stop_reason,
             "error": self.error,
             "tool_calls": self.tool_calls,
@@ -116,6 +130,13 @@ def render_step_prompt(step: WorkflowStep, resolved_vars: dict[str, str]) -> str
             f"step references {{{missing}}}, which has no value "
             f"(pass --var {missing}=... or add it to the workflow's own vars:)"
         ) from exc
+    except (IndexError, ValueError) as exc:
+        # ``{}`` raises IndexError and a lone ``{`` or ``}`` raises
+        # ValueError; both mean literal braces in the prompt text.
+        raise WorkflowConfigError(
+            f"step prompt has unmatched or empty braces ({exc}); "
+            "write a literal brace as {{ or }}, and placeholders as {name}"
+        ) from exc
 
 
 def _check_expect_files(patterns: list[str], target_folder: str | None) -> list[str]:
@@ -133,6 +154,87 @@ def _check_expect_files(patterns: list[str], target_folder: str | None) -> list[
         return list(patterns)
     existing = [p.name for p in folder.iterdir()]
     return [pattern for pattern in patterns if not fnmatch.filter(existing, pattern)]
+
+
+async def _run_turn(
+    session: ChatSession,
+    index: int,
+    prompt: str,
+    step_result: StepResult,
+    on_event: OnEvent | None,
+) -> None:
+    """Send ``prompt`` as one turn and fold its events into ``step_result``:
+    tool calls and artifacts are appended, an ``AgentError`` marks it failed."""
+    async for event in session.send(prompt):
+        if on_event is not None:
+            on_event(index, event)
+        if isinstance(event, ToolCallFinished):
+            step_result.tool_calls.append(
+                {"tool_name": event.tool_name, "is_error": event.is_error}
+            )
+        elif isinstance(event, (ImageArtifactCreated, FileArtifactCreated)):
+            step_result.artifacts.append({"path": event.path, "mime_type": event.mime_type})
+        elif isinstance(event, MessageFinished):
+            step_result.stop_reason = event.stop_reason
+        elif isinstance(event, AgentError):
+            step_result.ok = False
+            step_result.error = f"{event.layer}: {event.message}"
+
+
+def _until_matches(pattern: str, target_folder: str | None) -> bool:
+    return not _check_expect_files([pattern], target_folder)
+
+
+async def _run_repeating_step(
+    session: ChatSession,
+    index: int,
+    step: WorkflowStep,
+    prompt: str,
+    target_folder: str | None,
+    on_event: OnEvent | None,
+) -> StepResult:
+    """Run ``prompt`` pass after pass, each from a cleared context, until a
+    file matching ``step.repeat_until`` exists in ``target_folder``.
+
+    Fails without sending anything if there is no target folder or the
+    marker already exists. Stops at the first failed pass, and fails if
+    ``step.max_passes`` passes run without the marker appearing."""
+    pattern = step.repeat_until or ""
+    step_result = StepResult(index=index, prompt=prompt, ok=True, passes=0)
+    if not target_folder:
+        step_result.ok = False
+        step_result.error = (
+            "repeat_until needs a workspace with a target folder, which is where the "
+            "finished-marker file is looked for"
+        )
+        return step_result
+    if _until_matches(pattern, target_folder):
+        step_result.ok = False
+        step_result.error = (
+            f"repeat_until {pattern!r} already matches a file in {target_folder} before the "
+            "first pass — left over from an earlier run? Remove it, or have an earlier step "
+            "start a new run, then try again"
+        )
+        return step_result
+
+    for pass_number in range(1, step.max_passes + 1):
+        cleared = await session.clear_context()
+        if cleared is not None and on_event is not None:
+            on_event(index, cleared)
+        step_result.passes = pass_number
+        await _run_turn(session, index, prompt, step_result, on_event)
+        if not step_result.ok:
+            step_result.error = f"pass {pass_number}: {step_result.error}"
+            return step_result
+        if _until_matches(pattern, target_folder):
+            return step_result
+
+    step_result.ok = False
+    step_result.error = (
+        f"repeat_until {pattern!r} still not found after {step.max_passes} pass(es) "
+        "(raise max_passes if the job needs more)"
+    )
+    return step_result
 
 
 def _manifest_dict(
@@ -189,7 +291,8 @@ async def run_workflow(
     on_event: OnEvent | None = None,
     resume_conversation_id: str | None = None,
 ) -> WorkflowResult:
-    """Runs every step of ``workflow`` in one ``ChatSession`` — a new one,
+    """Runs every step of ``workflow`` in one ``ChatSession`` (a repeating
+    step clears its context between passes but stays in it) — a new one,
     unless ``resume_conversation_id`` is given, in which case every step
     appends to that existing conversation instead (the scheduler's
     ``reuse_chat`` support, ``aida.core.scheduler_runtime._fire``). Stops
@@ -226,28 +329,27 @@ async def run_workflow(
         raise WorkflowConfigError(str(exc)) from exc
 
     started_at = datetime.now(UTC).isoformat()
-    workspace_cfg = get_workspace(settings, workflow.workspace)
-    target_folder = workspace_cfg.target_folder if workspace_cfg else None
+    # The session's own folder state holds the target folder with any
+    # {user} placeholder already expanded (start_session resolves it); the
+    # raw workspace config would put the manifest in a literal "{user}"
+    # folder and check expect_files there.
+    if session.folder_state is not None:
+        target_folder = session.folder_state.target_folder
+    else:
+        workspace_cfg = get_workspace(settings, workflow.workspace)
+        target_folder = workspace_cfg.target_folder if workspace_cfg else None
     conversation_id = session.recorder.conversation_id if session.recorder else None
 
     result = WorkflowResult(workflow_name=workflow.name, ok=True, conversation_id=conversation_id)
     try:
         for index, (step, prompt) in enumerate(zip(workflow.steps, rendered_prompts, strict=True)):
-            step_result = StepResult(index=index, prompt=prompt, ok=True)
-            async for event in session.send(prompt):
-                if on_event is not None:
-                    on_event(index, event)
-                if isinstance(event, ToolCallFinished):
-                    step_result.tool_calls.append(
-                        {"tool_name": event.tool_name, "is_error": event.is_error}
-                    )
-                elif isinstance(event, (ImageArtifactCreated, FileArtifactCreated)):
-                    step_result.artifacts.append({"path": event.path, "mime_type": event.mime_type})
-                elif isinstance(event, MessageFinished):
-                    step_result.stop_reason = event.stop_reason
-                elif isinstance(event, AgentError):
-                    step_result.ok = False
-                    step_result.error = f"{event.layer}: {event.message}"
+            if step.repeat_until:
+                step_result = await _run_repeating_step(
+                    session, index, step, prompt, target_folder, on_event
+                )
+            else:
+                step_result = StepResult(index=index, prompt=prompt, ok=True)
+                await _run_turn(session, index, prompt, step_result, on_event)
 
             if step_result.ok and step.expect_files:
                 missing = _check_expect_files(step.expect_files, target_folder)
@@ -262,9 +364,11 @@ async def run_workflow(
                 result.error = f"step {index}: {step_result.error}"
                 break
     finally:
-        await session.aclose()
-        if mcp_manager is not None:
-            await mcp_manager.aclose()
+        try:
+            await session.aclose()
+        finally:
+            if mcp_manager is not None:
+                await mcp_manager.aclose()
 
     finished_at = datetime.now(UTC).isoformat()
     manifest = _manifest_dict(

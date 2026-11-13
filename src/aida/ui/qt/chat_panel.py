@@ -466,6 +466,51 @@ class ErrorBanner(QFrame):
         layout.addWidget(label)
 
 
+class StartupNoticeBanner(QFrame):
+    """The warnings ``start_session`` collected for this chat (a knowledge
+    base skipped, an MCP server that failed to start, too many tools for
+    the provider), shown once at the top of the chat. They used to be
+    printed to a console that a GUI user never sees, so a missing tool or
+    knowledge base just looked like the agent ignoring it.
+
+    Amber rather than ``ErrorBanner``'s pink: the chat works, something in
+    it is missing. Selectable, with a Copy button, for the same reason as
+    ``ErrorBanner``."""
+
+    def __init__(self, lines: list[str], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.lines = list(lines)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        # Fixed colours readable in light and dark themes (see ErrorBanner).
+        self.setStyleSheet("background-color: #fff4d6; color: #6b4a00;")
+        layout = QVBoxLayout(self)
+        header = QHBoxLayout()
+        count = len(self.lines)
+        title = QLabel(
+            f"<b>This chat started with {count} warning{'s' if count != 1 else ''}</b>", self
+        )
+        header.addWidget(title)
+        header.addStretch(1)
+        self._raw_text = "\n".join(self.lines)
+        copy_button = QPushButton("⧉ Copy", self)
+        copy_button.setFlat(True)
+        copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_button.setStyleSheet(
+            "QPushButton { border: none; background: transparent; color: #6b4a00; font-size: 10px; }"
+            "QPushButton:hover { text-decoration: underline; }"
+        )
+        copy_button.clicked.connect(lambda: QGuiApplication.clipboard().setText(self._raw_text))
+        header.addWidget(copy_button)
+        layout.addLayout(header)
+        label = QLabel(self._raw_text, self)
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        layout.addWidget(label)
+
+
 class TruncationNotice(QFrame):
     """Shown when ``MessageFinished.stop_reason == "length"`` — the reply
     was cut off mid-sentence by ``max_tokens`` with no other indication why
@@ -682,6 +727,15 @@ class ChatPanel(QWidget):
     @property
     def tool_display_mode(self) -> str:
         return self._tool_display_mode
+
+    def add_startup_notices(self, lines: list[str]) -> StartupNoticeBanner | None:
+        """Show this chat's startup warnings as one banner (nothing for an
+        empty list)."""
+        if not lines:
+            return None
+        banner = StartupNoticeBanner(lines, parent=self._content)
+        self._append_widget(banner)
+        return banner
 
     def add_artifact_widget(self, widget: QWidget) -> None:
         """Append an already-built artifact widget (``InlineImageWidget``/

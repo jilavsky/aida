@@ -1,6 +1,6 @@
 # Automation: `aida run`, workflows, and schedules
 
-> **Status: 1.0.0.** Implemented on top of the same
+> **Status: 1.1.0.** Implemented on top of the same
 > session engine every interactive chat uses — a headless run or a
 > scheduled job is not a separate code path, it's a different *driver* of
 > `start_session`/`ChatSession.send`. See
@@ -157,6 +157,58 @@ aida workflow validate daily-report --var folder=/data/latest
 aida workflow run daily-report --var folder=/data/latest --json
 ```
 
+### Repeating steps — long batch jobs that run unattended
+
+Some jobs are too long for one conversation: a citation watch over 324
+papers in 13 batches of 25 fills the context window long before it
+finishes. A **repeating step** sends the same prompt again and again, each
+pass starting from a *cleared* context, until the agent writes a "finished"
+marker file:
+
+```yaml
+name: citation-watch
+workspace: literature
+steps:
+  - prompt: >
+      Read citation_state.json in the target folder (create it if missing:
+      13 batches, none done). Process the next unfinished batch of 25
+      papers, add any candidates to candidates.json, mark the batch done in
+      citation_state.json, then stop. If every batch is now done, also
+      write citation_watch.done.
+    repeat_until: "citation_watch.done"   # glob, looked for in the target folder
+    max_passes: 20                         # the step fails if still not done after 20
+  - prompt: "Write the citation report from candidates.json, then delete citation_watch.done."
+```
+
+How it behaves:
+
+- **Each pass is a fresh turn with an empty history.** The system prompt,
+  skills, tools and MCP servers stay, but nothing from earlier passes is
+  sent. The state file is the only memory between passes, so the prompt
+  must say where it is and what to record in it. Each pass gets the normal
+  per-turn tool-call limit, and no pass comes near the context limit.
+- **One conversation.** Every pass is kept in the same conversation (one
+  sidebar entry, one Markdown record), so you can read the whole run
+  afterwards. Only what is *sent to the model* is cleared.
+- **It stops when the marker appears**, checked in the workspace's target
+  folder after every pass. The next step then runs. That step starts with
+  only the last pass in its context, so have it work from the files too.
+- **It fails loudly** if a pass fails (the run stops, as for any step), if
+  `max_passes` passes go by without the marker, or if the marker *already*
+  exists before the first pass (usually left over from the previous run).
+  For a scheduled watch, have the last step delete the marker, as above.
+- A repeating step needs a workspace with a **target folder**;
+  `aida workflow validate` checks this.
+- An interrupted run resumes where it stopped: run the workflow again and
+  the first pass reads the state file. `expect_files` on a repeating step is
+  checked once, after the last pass. The manifest records how many passes
+  each step took.
+
+In the GUI, the step editor (Configure → Workflows… → Edit → a step) has
+**Repeat until file** and **Max passes** fields for the same settings.
+
+### Checking and running
+
 `validate` checks the workspace exists, there's at least one step, and
 every placeholder resolves — without running anything. `run` takes the
 same `--yes-in-allowed`/`--preapprove-tool`/`--json` flags as `aida run`.
@@ -178,10 +230,10 @@ result can always be traced back to exactly what produced it.
   the active workspace — opens the same Add-workflow form the Workflows…
   dialog uses, so you can rename steps or add `expect_files` before saving.
 - **Configure → Workflows…** opens the full management dialog:
-  Add/Edit/Remove against every stored workflow, and a **Run** button that
-  executes one into a normal conversation view (so you watch it happen,
-  same as typing the prompts yourself) — the conversation is tagged so it's
-  visually distinguishable in the sidebar from an ordinary chat.
+  Add/Edit/Remove against every stored workflow. To run one from the GUI,
+  give it a schedule and use **Run Now** in the Schedules dialog; the run
+  appears in the sidebar as its own conversation, tagged so it's
+  distinguishable from an ordinary chat.
 
 ## Schedules
 
@@ -216,6 +268,12 @@ opens the management dialog (Add/Edit/Remove/Enable/Disable, plus **Run
 Now** to force an immediate fire) and shows last-run time/status per
 schedule. A failed run shows a **⚠ N schedule failures** button in the
 status bar; clicking it opens the Schedules dialog and clears the count.
+A run that fails for an unexpected reason (an unreachable target folder,
+say) is recorded as failed the same way, and the scheduler keeps going. If
+the scheduler cannot poll at all (typically a syntax error saved into a
+config file while AIDA is open), a red **⚠ Scheduler problem** button
+appears in the status bar and at the top of the Schedules dialog, and goes
+away once the next poll succeeds.
 
 **Headless, no GUI:**
 

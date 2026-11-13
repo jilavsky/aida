@@ -230,6 +230,7 @@ class MainWindow(QMainWindow):
         self.scheduler_bridge.run_started.connect(self._on_schedule_run_started)
         self.scheduler_bridge.run_finished.connect(self._on_schedule_run_finished)
         self.scheduler_bridge.deferred_changed.connect(self._on_schedule_deferred_changed)
+        self.scheduler_bridge.health_changed.connect(self._on_scheduler_health_changed)
 
         # Column widths: the widths the user dragged are saved a beat after
         # the drag stops (see _on_splitter_moved), and a column hidden from
@@ -466,6 +467,16 @@ class MainWindow(QMainWindow):
         self._schedule_pending_button.clicked.connect(self.open_schedule_management_dialog)
         self._schedule_pending_button.hide()
         self.statusBar().addPermanentWidget(self._schedule_pending_button)
+        # The scheduler itself failing (a poll error such as a broken config
+        # file, or the loop stopping) — used to be a log line only, while
+        # scheduled jobs silently stopped running. Clears itself when the
+        # next poll succeeds.
+        self._scheduler_health_button = QPushButton("", self)
+        self._scheduler_health_button.setFlat(True)
+        self._scheduler_health_button.setStyleSheet("color: #b00020;")
+        self._scheduler_health_button.clicked.connect(self.open_schedule_management_dialog)
+        self._scheduler_health_button.hide()
+        self.statusBar().addPermanentWidget(self._scheduler_health_button)
 
     def _build_menu_bar(self) -> None:
         """U7 paper cut: "A menu bar (File/Help) with 'Open config folder',
@@ -865,8 +876,7 @@ class MainWindow(QMainWindow):
             return
         destination, tool_result_mode = prompt
 
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             try:
                 recorder = ConversationRecorder(
                     store,
@@ -888,8 +898,6 @@ class MainWindow(QMainWindow):
                     self, "Export Conversation", f"Could not write to {destination}:\n{exc}"
                 )
                 return
-        finally:
-            store.close()
         QMessageBox.information(self, "Conversation Exported", f"Exported transcript to:\n{path}")
 
     def _on_import_setup(self) -> None:
@@ -982,6 +990,10 @@ class MainWindow(QMainWindow):
         self.sidebar.cleanup_requested.connect(self._on_cleanup_requested)
         self.sidebar.rename_requested.connect(self._on_rename_requested)
         self.sidebar.export_requested.connect(self._on_export_requested)
+        self._pending_content_search = ""
+        self._content_search_timer = QTimer(self)
+        self._content_search_timer.setSingleShot(True)
+        self._content_search_timer.timeout.connect(self._run_conversation_content_search)
         self.sidebar.search_query_changed.connect(self._on_conversations_search_query_changed)
         self.conversation_header.rename_requested.connect(self._on_header_rename_requested)
         self.chat_panel.code_editor_requested.connect(self._on_code_editor_requested)
@@ -1175,6 +1187,27 @@ class MainWindow(QMainWindow):
         # ten minutes of the user being idle.
         self._note_user_activity()
 
+    def _show_startup_warnings(self, session) -> None:
+        """Warnings ``start_session`` collected (skipped knowledge bases,
+        MCP servers that failed to start, too many tools): one banner in
+        the chat and a status-bar hint. Informational notices (folders
+        created, tool counts) stay in the log; the MCP panel shows those."""
+        warnings = [
+            notice
+            for notice in getattr(session, "startup_notices", [])
+            if notice.level == "warning"
+        ]
+        if not warnings:
+            return
+        self.chat_panel.add_startup_notices([n.line for n in warnings])
+        # Still starts with "Ready": that is the session's "started" signal
+        # for anything reading the status bar.
+        self.statusBar().showMessage(
+            f"Ready — {session.profile_name} — {len(warnings)} startup warning(s), "
+            "see the notice in the chat",
+            10000,
+        )
+
     def _set_session_mutating(self, busy: bool) -> None:
         """Enable/disable the controls that mutate session state from
         outside a turn.
@@ -1263,6 +1296,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Ready — {session.profile_name}", 5000)
         if session.recorder is not None:
             self._load_resumed_history(session.recorder.conversation_id)
+        self._show_startup_warnings(session)
         self._refresh_mcp_panel()
         self._refresh_folder_display()
         self._refresh_skills_panel()
@@ -1373,12 +1407,9 @@ class MainWindow(QMainWindow):
         (recorded before U6(b) added the column, or any future caller that
         doesn't know it) are appended after the whole transcript instead,
         same as v1's behavior."""
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             rows = store.load_messages_with_seq(conversation_id)
             records: list[ArtifactRecord] = store.load_artifacts(conversation_id)
-        finally:
-            store.close()
 
         artifacts_by_seq: dict[int, list[ArtifactRecord]] = {}
         undated_records: list[ArtifactRecord] = []
@@ -1902,6 +1933,16 @@ class MainWindow(QMainWindow):
         )
         self._schedule_pending_button.show()
 
+    def _on_scheduler_health_changed(self, error: str) -> None:
+        if not error:
+            self._scheduler_health_button.hide()
+            return
+        self._scheduler_health_button.setText("⚠ Scheduler problem")
+        self._scheduler_health_button.setToolTip(
+            f"{error}\n\nScheduled jobs are not running while this lasts. Click to open Schedules."
+        )
+        self._scheduler_health_button.show()
+
     def _on_schedule_run_started(self, name: str) -> None:
         """Previously unconnected: a scheduled run gave no sign at all that
         it was underway, so a burst of MCP/provider activity had no visible
@@ -1956,12 +1997,9 @@ class MainWindow(QMainWindow):
         refresh handed it the raw database names, so a freshly declared
         name reappeared and then vanished again on the next refresh.
         """
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             summaries = store.list_conversations()
             from_db = store.known_users()
-        finally:
-            store.close()
 
         merged = {name.casefold(): name for name in self.settings.app.known_users}
         merged.update({name.casefold(): name for name in from_db})
@@ -1991,14 +2029,11 @@ class MainWindow(QMainWindow):
         pattern (``_on_delete_requested`` etc.)."""
         if conversation_id is None:
             return
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             summary = store.get_conversation(conversation_id)
             if summary is not None and summary.message_count == 0:
                 records_dir = ensure_records_dir(self.settings.app.records_dir)
                 delete_conversation(store, conversation_id, records_dir=records_dir)
-        finally:
-            store.close()
 
     def _on_resume_requested(self, conversation_id: str) -> None:
         # Bug report: "I restored prior session and have selected local AI
@@ -2020,12 +2055,9 @@ class MainWindow(QMainWindow):
         )
 
     def _on_delete_requested(self, conversation_id: str) -> None:
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             records_dir = ensure_records_dir(self.settings.app.records_dir)
             delete_conversation(store, conversation_id, records_dir=records_dir)
-        finally:
-            store.close()
         self._refresh_conversations_sidebar()
 
     def _on_delete_many_requested(self, conversation_ids: list[str]) -> None:
@@ -2033,13 +2065,10 @@ class MainWindow(QMainWindow):
         multi-select Delete already confirmed once for the whole batch, so
         this just deletes each and refreshes once at the end, same
         "loop then refresh once" shape as ``_on_cleanup_requested`` below."""
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             records_dir = ensure_records_dir(self.settings.app.records_dir)
             for conversation_id in conversation_ids:
                 delete_conversation(store, conversation_id, records_dir=records_dir)
-        finally:
-            store.close()
         self._refresh_conversations_sidebar()
 
     def _update_conversation_header(self) -> None:
@@ -2096,16 +2125,13 @@ class MainWindow(QMainWindow):
         ``ConversationStore.set_title`` and ``aida.core.titling``."""
         from datetime import UTC, datetime
 
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             store.set_title(
                 conversation_id,
                 title,
                 timestamp=datetime.now(UTC).isoformat(),
                 source=TITLE_MANUAL,
             )
-        finally:
-            store.close()
         # The row that was just renamed may be the conversation currently
         # open, whose live recorder caches both the title and the lock.
         # Without this the header would keep showing the old name (it
@@ -2126,14 +2152,11 @@ class MainWindow(QMainWindow):
         from datetime import UTC, datetime, timedelta
 
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             records_dir = ensure_records_dir(self.settings.app.records_dir)
             stale = list_conversations_older_than(store, cutoff)
             for summary in stale:
                 delete_conversation(store, summary.id, records_dir=records_dir)
-        finally:
-            store.close()
         self._refresh_conversations_sidebar()
 
     #: Below this length a substring search is too broad to be worth a full
@@ -2141,7 +2164,23 @@ class MainWindow(QMainWindow):
     #: own docstring on ``search_query_changed``.
     _MIN_CONTENT_SEARCH_CHARS = 3
 
+    #: Typing pause before the content search runs. The query is a full
+    #: scan on the GUI thread, so running it on every keystroke stuttered
+    #: on a large database.
+    _CONTENT_SEARCH_DEBOUNCE_MS = 250
+
     def _on_conversations_search_query_changed(self, query: str) -> None:
+        """Debounce: clear stale matches at once, but run the message-content
+        query only once typing pauses (``_run_conversation_content_search``)."""
+        query = query.strip()
+        self._pending_content_search = query
+        if len(query) < self._MIN_CONTENT_SEARCH_CHARS:
+            self._content_search_timer.stop()
+            self.sidebar.set_content_matches(None)
+            return
+        self._content_search_timer.start(self._CONTENT_SEARCH_DEBOUNCE_MS)
+
+    def _run_conversation_content_search(self) -> None:
         """U5 follow-up: the sidebar's own filter only ever matched title/
         workspace/user (``aida.ui.qt.conversations_sidebar._matches``) —
         "which chat did I analyze sample X in?" had no answer short of
@@ -2149,15 +2188,11 @@ class MainWindow(QMainWindow):
         persistence" (its own docstring), so the actual
         ``messages.content`` query happens here, and the matching ids are
         handed back via ``set_content_matches``."""
-        query = query.strip()
+        query = self._pending_content_search
         if len(query) < self._MIN_CONTENT_SEARCH_CHARS:
-            self.sidebar.set_content_matches(None)
             return
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             matches = store.search_conversations(query)
-        finally:
-            store.close()
         self.sidebar.set_content_matches(matches)
 
     # --- selectors / panels ------------------------------------------------
@@ -2768,8 +2803,7 @@ class MainWindow(QMainWindow):
         toolbar; restarting there would cost the user their chat for a
         spelling fix.
         """
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             dialog = UsersDialog(store, self, active_user=self.settings.app.active_user or "")
             dialog.exec()
             switch_to = dialog.new_active_user
@@ -2779,8 +2813,6 @@ class MainWindow(QMainWindow):
             )
             if switch_to is None and not dialog.changed:
                 return
-        finally:
-            store.close()
 
         if switch_to is not None:
             # Picking a name here and typing one in the toolbar must end in
@@ -2820,13 +2852,10 @@ class MainWindow(QMainWindow):
         """
         from datetime import UTC, datetime
 
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             moved = store.set_conversation_user(
                 conversation_ids, user, timestamp=datetime.now(UTC).isoformat()
             )
-        finally:
-            store.close()
         if user:
             self._remember_user(user)
         where = f"user {user!r}" if user else "no user"
@@ -2843,11 +2872,8 @@ class MainWindow(QMainWindow):
         switched away — which is exactly what happened. The remembered list
         can only add, never subtract, so it cannot contradict the database.
         """
-        store = ConversationStore()
-        try:
+        with ConversationStore() as store:
             from_db = store.known_users()
-        finally:
-            store.close()
         merged = {name.casefold(): name for name in self.settings.app.known_users}
         merged.update({name.casefold(): name for name in from_db})
         return sorted(merged.values(), key=str.casefold)

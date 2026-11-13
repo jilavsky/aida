@@ -658,3 +658,34 @@ def test_compaction_summary_message_is_a_labeled_user_message():
     assert message.role == "user"
     assert "Summary of earlier conversation" in message.content
     assert "Rg=32.4" in message.content
+
+
+def test_folder_skill_gets_its_path_and_a_file_list(tmp_path: Path):
+    """A skill that ships code names its scripts as {skill_dir}/...; the
+    loader fills in the real folder and tells the model what is there, so
+    the user configures nothing."""
+    skills_dir = tmp_path / "skills"
+    folder = skills_dir / "overview"
+    (folder / "scripts").mkdir(parents=True)
+    (folder / "SKILL.md").write_text(
+        "Run `{skill_dir}/scripts/make.py`. Keep {braces} and {{json}} as-is.", encoding="utf-8"
+    )
+    (folder / "scripts" / "make.py").write_text("print(1)", encoding="utf-8")
+    (folder / "scripts" / "__pycache__").mkdir()
+    (folder / "scripts" / "__pycache__" / "make.cpython-313.pyc").write_bytes(b"")
+
+    [text] = load_skill_texts(skills_dir, ["overview"])
+    assert f"Run `{folder}/scripts/make.py`" in text
+    assert "{braces} and {{json}}" in text
+    assert "- `scripts/make.py`" in text
+    assert "__pycache__" not in text
+    assert "read-only" in text
+
+
+def test_flat_skill_has_no_file_note(tmp_path: Path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "basics.md").write_text("Folder: {skill_dir}", encoding="utf-8")
+    [text] = load_skill_texts(skills_dir, ["basics"])
+    assert f"Folder: {skills_dir}" in text
+    assert "This skill's files" not in text

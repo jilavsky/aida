@@ -288,25 +288,12 @@ def test_shutdown_cancels_and_waits_for_an_in_flight_turn(
     assert pump_until(qapp, started.is_set)
 
     events_before = len(events)
-    # Windows CI flake (real report, not a theoretical worry): this used to
-    # be `call_soon_threadsafe(release.set)` immediately followed by
-    # `bridge.shutdown(...)`, racing two independent, unsynchronized actions
-    # on two different OS threads. `shutdown()`'s `self._closing = True` is
-    # the very first thing it does, synchronously, right here on this
-    # thread — but for the assertion below to hold, that write has to land
-    # before the *background loop thread* finishes processing `release.set`,
-    # resuming the blocked tool call, and emitting its `ToolCallFinished`
-    # event, which takes several loop-thread scheduling hops versus this
-    # thread's single next bytecode. That margin was apparently always wide
-    # enough on Linux/macOS CI to look deterministic, and wasn't always wide
-    # enough on Windows CI, which showed up as one extra event in the list —
-    # a race in this test's own instrumentation, not evidence ChatBridge
-    # actually leaked the event under real timing. Setting `_closing`
-    # directly here, before `release` is even scheduled to fire, makes the
-    # ordering this test cares about (turn in flight *and already closing*
-    # must not leak further events) true by construction instead of by
-    # scheduling luck — `bridge.shutdown()` below just re-sets the same
-    # flag, a harmless no-op, before doing its real async cleanup.
+    # `_closing` is set before the tool is released, so "a turn in flight
+    # and already closing must not leak further events" holds by
+    # construction rather than by thread scheduling; `bridge.shutdown()`
+    # below sets the same flag again before its async cleanup. Events
+    # already queued for the Qt thread are covered separately by
+    # test_event_queued_before_shutdown_is_not_delivered_after_it.
     bridge._closing = True
     loop_thread.loop.call_soon_threadsafe(release.set)
     bridge.shutdown(timeout=10.0)
@@ -321,3 +308,38 @@ def test_shutdown_cancels_and_waits_for_an_in_flight_turn(
     }
     answered = {m.tool_call_id for m in bridge.session.messages if m.role == "tool"}
     assert announced == answered
+
+
+def test_event_queued_before_shutdown_is_not_delivered_after_it(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """Qt delivers a queued cross-thread call even after ``disconnect()``.
+    An event the loop thread emitted just before New Chat therefore used to
+    reach the window *after* the chat panel was cleared, starting a stray
+    bubble in the new chat (a Windows CI failure:
+    ``test_new_chat_confirmed_starts_a_fresh_conversation_same_workspace_and_profile``).
+    ``_emit_unless_closing`` re-checks ``_closing`` on the Qt thread."""
+    from aida.core.events import TextDelta
+
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="hi")])
+    )
+    bridge = ChatBridge(loop_thread)
+    bridge.start(_settings_with_profile(), profile_name="mock-profile")
+    assert pump_until(qapp, lambda: bridge.session is not None)
+    qapp.processEvents()
+
+    events: list[object] = []
+    bridge.event_received.connect(events.append)
+    emitted = asyncio.run_coroutine_threadsafe(
+        _emit_from_loop(bridge, TextDelta(message_id="m", text="late")), loop_thread.loop
+    )
+    emitted.result(timeout=5)  # queued for the Qt thread, not yet delivered
+    bridge.shutdown(timeout=10.0)
+    qapp.processEvents()
+
+    assert events == [], "an event queued before shutdown reached the window after it"
+
+
+async def _emit_from_loop(bridge: ChatBridge, event: object) -> None:
+    bridge._emit_unless_closing(bridge.event_received, event)

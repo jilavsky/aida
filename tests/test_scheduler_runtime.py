@@ -634,3 +634,83 @@ async def test_reuse_chat_falls_back_to_a_fresh_conversation_if_the_pin_is_stale
     pin = store.get_pin("s")
     store.close()
     assert pin.conversation_id == finished[1][2]  # re-pinned to the fresh conversation
+
+
+# --- unexpected errors must not stop the scheduler (review B3) -------------
+
+
+@pytest.mark.asyncio
+async def test_unexpected_run_error_is_recorded_as_failed(
+    monkeypatch, aida_home: Path, records_home: Path
+):
+    """Anything other than a config error used to propagate out of
+    ``_fire``: no run row was written, so the schedule was due again on the
+    next start, and the GUI's scheduler loop ended for the session."""
+    _workflow()
+    settings = _settings(
+        SchedulesConfig(schedules={"s": ScheduleEntry(name="s", workflow="daily", every="1h")})
+    )
+
+    async def _explode(*args, **kwargs):
+        raise RuntimeError("target folder unreachable")
+
+    monkeypatch.setattr("aida.core.scheduler_runtime.run_workflow", _explode)
+
+    finished = []
+    await run_due_schedules(
+        settings,
+        now=datetime(2026, 9, 2, 10, 0),
+        on_run_finished=lambda *args: finished.append(args),
+    )
+
+    assert finished and finished[0][1] is False
+    assert "target folder unreachable" in finished[0][3]
+    store = ScheduleRunStore()
+    last = store.last_run("s")
+    store.close()
+    assert last.status == "failed"
+    assert "RuntimeError" in last.error
+
+
+@pytest.mark.asyncio
+async def test_scheduler_loop_keeps_polling_after_a_failed_poll(monkeypatch):
+    calls = {"n": 0}
+    stop_event = asyncio.Event()
+
+    async def _flaky_poll(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("config.yaml line 3: syntax error")
+        stop_event.set()
+        return []
+
+    monkeypatch.setattr("aida.core.scheduler_runtime.run_due_schedules", _flaky_poll)
+    await asyncio.wait_for(
+        scheduler_loop(poll_interval_seconds=0.01, stop_event=stop_event), timeout=5.0
+    )
+    assert calls["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_scheduler_loop_reports_health_changes_once(monkeypatch):
+    """A failed poll is reported to on_health_changed, and the report
+    clears when polling works again (review P6)."""
+    outcomes = iter([ValueError("config.yaml line 3"), ValueError("config.yaml line 3"), None])
+    stop_event = asyncio.Event()
+    health = []
+
+    async def _poll(**kwargs):
+        outcome = next(outcomes)
+        if outcome is not None:
+            raise outcome
+        stop_event.set()
+        return []
+
+    monkeypatch.setattr("aida.core.scheduler_runtime.run_due_schedules", _poll)
+    await asyncio.wait_for(
+        scheduler_loop(
+            poll_interval_seconds=0.01, stop_event=stop_event, on_health_changed=health.append
+        ),
+        timeout=5.0,
+    )
+    assert health == ["config.yaml line 3", ""]

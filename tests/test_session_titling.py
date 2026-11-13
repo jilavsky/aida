@@ -467,3 +467,91 @@ async def test_a_persistently_failing_endpoint_is_not_retried_every_turn(
         assert session.recorder.title_source == TITLE_DERIVED
     finally:
         await session.aclose()
+
+
+# --- Stop pressed after the answer must not cancel the next turn (review B4)
+
+
+@pytest.mark.asyncio
+async def test_cancel_between_turns_does_not_cancel_the_next_turn(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    session = _session(
+        monkeypatch,
+        tmp_path,
+        [MockTurn(text="first answer"), MockTurn(text="A Title"), MockTurn(text="second answer")],
+    )
+    await _turn(session, "first question")
+    session.cancel()  # nothing is running: must be a no-op
+    events = await _turn(session, "second question")
+    assert not any(type(e).__name__ == "AgentError" for e in events)
+    assert session.messages[-1].content == "second answer"
+    await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stop_pressed_late_in_a_turn_does_not_leak_into_the_next(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """Stop pressed while the last events of a turn are still being
+    delivered (or while the title is generated after it) used to leave the
+    loop's cancel flag set, so the next message returned "cancelled" at
+    once and was saved with no reply."""
+    session = _session(
+        monkeypatch,
+        tmp_path,
+        [MockTurn(text="first answer"), MockTurn(text="A Title"), MockTurn(text="second answer")],
+    )
+    seen = []
+    async for event in session.send("first question"):
+        seen.append(event)
+        if session.messages[-1].content == "first answer":
+            session.cancel()  # answer complete, title still to come
+    assert any(isinstance(e, ConversationTitled) for e in seen)
+    events = await _turn(session, "second question")
+    assert not any(type(e).__name__ == "AgentError" for e in events)
+    assert session.messages[-1].content == "second answer"
+    await session.aclose()
+
+
+# --- titling off the turn path (review P2) -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_with_a_listener_titling_runs_after_send_returns(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """With ``on_background_event`` set (the GUI), ``send()`` ends with the
+    answer; the title arrives through the listener afterwards, and the next
+    ``send()`` waits for it rather than sharing the provider."""
+    import asyncio
+
+    session = _session(
+        monkeypatch,
+        tmp_path,
+        [MockTurn(text="first answer"), MockTurn(text="A Title"), MockTurn(text="second answer")],
+    )
+    delivered = []
+    session.on_background_event = delivered.append
+
+    events = await _turn(session, "first question")
+    assert not any(isinstance(e, ConversationTitled) for e in events)
+    assert session._title_task is not None
+
+    events = await _turn(session, "second question")  # queued behind the title
+    assert [e.title for e in delivered] == ["A Title"]
+    assert session.messages[-1].content == "second answer"
+    assert not any(type(e).__name__ == "AgentError" for e in events)
+    await asyncio.sleep(0)
+    await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_closing_cancels_a_pending_background_title(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    session = _session(monkeypatch, tmp_path, [MockTurn(text="answer"), MockTurn(text="T")])
+    session.on_background_event = lambda event: None
+    await _turn(session, "question")
+    await session.aclose()  # must not raise or hang
+    assert session._title_task is None

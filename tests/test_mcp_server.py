@@ -670,3 +670,36 @@ async def test_http_transport_plain_headers_reach_a_running_server():
             assert handle.is_running
         finally:
             await handle.stop()
+
+
+# --- B10: a dead server is noticed and explained -----------------------------
+
+
+@pytest.mark.asyncio
+async def test_dead_server_is_marked_stopped_with_restart_advice():
+    async with _running_handle() as handle:
+        with pytest.raises(McpServerError) as first:
+            await handle.call_tool("crash_process", {})
+        assert "has stopped" in str(first.value)
+        assert "Restart" in str(first.value)
+        assert not handle.is_running
+        assert handle.exited_message is not None
+
+        # Later calls give the same explanation, not a generic "call failed".
+        with pytest.raises(McpServerError) as second:
+            await handle.call_tool("echo_text", {"message": "x"})
+        assert str(second.value) == handle.exited_message
+
+        await handle.restart()
+        assert handle.exited_message is None
+        result = await handle.call_tool("echo_text", {"message": "ok"})
+        assert result.content[0].text == "echo: ok"
+
+
+@pytest.mark.asyncio
+async def test_failing_tool_on_live_server_does_not_mark_it_dead():
+    async with _running_handle() as handle:
+        result = await handle.call_tool("always_fails", {})
+        assert result.isError
+        assert handle.is_running
+        assert handle.exited_message is None

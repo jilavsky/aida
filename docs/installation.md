@@ -1,6 +1,6 @@
 # Installation
 
-> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
@@ -11,7 +11,7 @@
 ## Install from PyPI
 
 ```bash
-pip install "aida-workbench[gui,docs]"
+pip install "aida-workbench[gui,docs,science]"
 aida doctor
 aida-gui
 ```
@@ -32,6 +32,8 @@ Extras:
 |---|---|---|
 | `gui` | PySide6 | the desktop app (`aida-gui`) — the CLI works without it |
 | `docs` | pymupdf, python-docx, openpyxl, python-pptx, Pillow | reading PDF/DOCX/XLSX/PPTX, writing DOCX, downscaling images for vision |
+| `ocr` | httpx | the optional Mistral OCR backend for figure extraction |
+| `science` | numpy, matplotlib, h5py | not AIDA itself: scripts the agent runs (`run_python_script`, skill scripts) use AIDA's Python unless the workspace sets `python_interpreter`, and SAXS work needs arrays, plots and HDF5 files. With NumPy present, knowledge-base search is also faster. |
 
 Nothing else is optional: the LLM SDKs, the MCP client, YAML, and keyring are
 core dependencies.
@@ -43,7 +45,7 @@ Python **>= 3.11** is required.
 ```bash
 git clone https://github.com/jilavsky/aida.git
 cd aida
-conda env create -f environment.yml   # or: pip install -e ".[dev,gui,docs]"
+conda env create -f environment.yml   # or: pip install -e ".[dev,gui,docs,science]"
 conda activate aida
 aida doctor
 ```

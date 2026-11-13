@@ -1,6 +1,6 @@
 # Workspaces
 
-> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
@@ -31,7 +31,7 @@ editor, from the GUI's **Configure** menu.
 | `target_folder` | `None` | Folder this workspace writes results into. |
 | `sidecar_folder_name` | `"figures"` | Subfolder under `target_folder` where generated report images get copied (Obsidian-style attachments folder). |
 | `mcp_group` | `"none"` | Named MCP server group from `mcp.json` enabled for this workspace — see [mcp-servers.md](mcp-servers.md). |
-| `skills` | `[]` | Skill names available to this workspace. |
+| `skills` | `[]` | Skill names available to this workspace. See [skills.md](skills.md). |
 | `system_prompt` | `None` | Extra system prompt text appended for this workspace. |
 | `safety` | `"confirm"` | `"confirm"` (ask before every write/delete) or `"relaxed"` (only asks for actions outside the workspace's allowed folders) — see [safety-and-permissions.md](safety-and-permissions.md). |
 | `knowledge_bases` | `[]` | Names into `knowledge.yaml`'s knowledge bases this workspace can search — see [knowledge-bases.md](knowledge-bases.md). |

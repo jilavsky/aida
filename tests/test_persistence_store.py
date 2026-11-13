@@ -533,3 +533,25 @@ def test_pins_for_different_schedules_are_independent(tmp_path: Path):
 
     assert store.get_pin("a").conversation_id == conv_a
     assert store.get_pin("b").conversation_id == conv_b
+
+
+def test_search_conversations_ignores_tool_results(tmp_path: Path):
+    """Tool results (whole data files, MCP JSON) are not what a person
+    searches their chats for, and dominate the table by volume."""
+    store = ConversationStore(tmp_path / "aida.db")
+    conv_id = store.create_conversation(timestamp=T0)
+    store.append_message(
+        conv_id, Message(role="tool", content="Rg=42 sample X01", tool_call_id="c1"), timestamp=T0
+    )
+    assert store.search_conversations("X01") == set()
+
+
+def test_store_closes_its_connection_as_a_context_manager(tmp_path: Path):
+    import sqlite3
+
+    import pytest
+
+    with ConversationStore(tmp_path / "aida.db") as store:
+        store.create_conversation(timestamp="2026-11-11T00:00:00+00:00", title="x")
+    with pytest.raises(sqlite3.ProgrammingError):
+        store._conn.execute("SELECT 1")

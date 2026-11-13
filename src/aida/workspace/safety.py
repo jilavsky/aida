@@ -148,9 +148,16 @@ class SafetyGuard:
     #: the workspace's relaxed/confirm mode to apply at all; see
     #: authorize_execute's docstring for the exact rule (PLAN.md §5).
     command_allowlist: CommandAllowlist = field(default_factory=CommandAllowlist.empty)
+    #: Folders the agent may read, and run scripts from, without being
+    #: asked, but not write to or delete in (``~/.aida/skills``: a skill's
+    #: own scripts and reference files). Writes and deletes there are
+    #: treated as outside the allowed folders and always confirmed, so the
+    #: agent cannot quietly rewrite its own instructions or code.
+    read_only_roots: list[Path] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.allowed_roots = [normalize_path(p) for p in self.allowed_roots]
+        self.read_only_roots = [normalize_path(p) for p in self.read_only_roots]
         # Second line of defense behind config-load validation: whatever
         # reaches the guard is coerced to a mode it actually understands,
         # so no code path can reach an authorize_* call with a value that
@@ -175,6 +182,7 @@ class SafetyGuard:
         confirm_callback: ConfirmCallback | None = None,
         trash_enabled: bool = True,
         command_allowlist: list[str] | None = None,
+        read_only_folders: list[str] | None = None,
     ) -> SafetyGuard:
         """Builds the allowed-roots union PLAN.md describes: a workspace's
         own source/target folders plus whatever's globally allowed —
@@ -194,6 +202,7 @@ class SafetyGuard:
             trash_enabled=trash_enabled,
             confirm_callback=confirm_callback or deny_all,
             command_allowlist=CommandAllowlist(patterns=list(command_allowlist or [])),
+            read_only_roots=[Path(r) for r in read_only_folders or []],
         )
 
     def _containing_root(self, candidate: Path) -> Path | None:
@@ -201,6 +210,14 @@ class SafetyGuard:
             if candidate == root or root in candidate.parents:
                 return root
         return None
+
+    def is_read_only(self, path: str | Path) -> bool:
+        """Whether ``path`` is inside a read-only root (and not also inside
+        an ordinary allowed folder, which would grant more)."""
+        candidate = normalize_path(path)
+        if self._containing_root(candidate) is not None:
+            return False
+        return any(candidate == root or root in candidate.parents for root in self.read_only_roots)
 
     def is_allowed(self, path: str | Path) -> bool:
         return self._containing_root(normalize_path(path)) is not None
@@ -212,9 +229,12 @@ class SafetyGuard:
         *,
         always_confirm_in_bounds: bool,
         detail_verb: str | None = None,
+        read_only_counts_as_inside: bool = False,
     ) -> Path:
         candidate = normalize_path(path)
-        inside = self._containing_root(candidate) is not None
+        inside = self._containing_root(candidate) is not None or (
+            read_only_counts_as_inside and self.is_read_only(candidate)
+        )
         # "Allow for this chat" (RememberingConfirm) remembers per (action,
         # folder) — the containing folder, not the exact file, so approving
         # one write into a folder covers the next differently-named file
@@ -280,7 +300,7 @@ class SafetyGuard:
         only reads *outside* the allowed set need confirmation (handled by
         ``_authorize``'s inside/outside branch)."""
         candidate = normalize_path(path)
-        if self._containing_root(candidate) is None:
+        if self._containing_root(candidate) is None and not self.is_read_only(candidate):
             return await self._authorize("read", candidate, always_confirm_in_bounds=False)
         return candidate
 
@@ -306,9 +326,17 @@ class SafetyGuard:
         chat" by folder (this one: the script's containing folder;
         ``authorize_execute``: the command's cwd), and sharing one action
         string would let an approval for one silently cover the other
-        whenever those two folders happen to coincide."""
+        whenever those two folders happen to coincide.
+
+        A script inside a read-only root (a skill's own ``scripts/``) is
+        treated like one inside an allowed folder: the workspace's mode
+        decides, so relaxed runs it and confirm asks."""
         return await self._authorize(
-            "run_script", path, always_confirm_in_bounds=False, detail_verb="run script"
+            "run_script",
+            path,
+            always_confirm_in_bounds=False,
+            detail_verb="run script",
+            read_only_counts_as_inside=True,
         )
 
     async def authorize_execute(self, command: str, cwd: str | Path) -> Path:

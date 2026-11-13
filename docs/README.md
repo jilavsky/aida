@@ -1,6 +1,6 @@
 # AIDA documentation
 
-> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
@@ -17,6 +17,7 @@ commented example config files, see [`examples/config/`](../examples/config/).
 | [`installation.md`](installation.md) | Install AIDA, run `aida doctor`, understand the `~/.aida/` layout |
 | [`providers-and-secrets.md`](providers-and-secrets.md) | LLM/embedding provider profiles (Ollama, OpenAI, Claude, ANL Argo), API keys in the OS keychain |
 | [`workspaces.md`](workspaces.md) | Named workspaces: source/target folders, which profile/MCP servers/skills a workspace uses |
+| [`skills.md`](skills.md) | Skills: single-file and folder skills, how they get switched on, shipping scripts with a skill |
 | [`safety-and-permissions.md`](safety-and-permissions.md) | What AIDA is allowed to read/write/run without asking, and what always asks |
 | [`mcp-servers.md`](mcp-servers.md) | Adding MCP servers (pyIrena, bait_mcp, web search, ...), groups, per-tool permissions |
 | [`context-and-limits.md`](context-and-limits.md) | The model's context window, what fills it, compaction, and the fullness indicator |

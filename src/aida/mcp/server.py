@@ -12,17 +12,21 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import tempfile
 import time
+from collections import deque
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+import anyio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+from mcp.shared.exceptions import McpError
 from mcp.types import CallToolResult, Tool
 
 from aida.config.secrets import get_secret
@@ -223,6 +227,42 @@ class ToolCallRecord:
 #: enough to actually debug a real response, capped so one huge document
 #: doesn't bloat every in-memory call record.
 _PREVIEW_TEXT_CHARS = 2000
+#: Per-server call-log length; matches the most ``recent_calls`` ever shows.
+_CALL_LOG_MAX_RECORDS = 200
+
+
+def _is_connection_closed(exc: BaseException) -> bool:
+    """True when ``exc`` means the server's transport is gone (process exited,
+    stream closed), as opposed to one call failing on a live server."""
+    if isinstance(
+        exc,
+        (
+            anyio.ClosedResourceError,
+            anyio.BrokenResourceError,
+            anyio.EndOfStream,
+            BrokenPipeError,
+            ConnectionResetError,
+        ),
+    ):
+        return True
+    return isinstance(exc, McpError) and "connection closed" in str(exc).lower()
+
+
+def _structured_preview(structured: Any) -> dict[str, Any]:
+    """``structuredContent`` for the call log: kept as-is when small, or
+    as a truncated JSON string when large (pyIrena returns whole arrays),
+    capped the same way text previews are."""
+    try:
+        text = json.dumps(structured, default=str)
+    except (TypeError, ValueError):
+        text = repr(structured)
+    if len(text) <= _PREVIEW_TEXT_CHARS:
+        return {"type": "structuredContent", "json": structured}
+    return {
+        "type": "structuredContent",
+        "json_truncated": text[:_PREVIEW_TEXT_CHARS],
+        "json_length": len(text),
+    }
 
 
 def _block_payload_size(block: Any) -> int:
@@ -331,7 +371,10 @@ class McpServerHandle:
         #: doesn't pass one, e.g. direct unit tests of this class.
         self._cwd = cwd
         self.stderr: StderrCapture | None = None
-        self.calls: list[ToolCallRecord] = []
+        #: Bounded: ``McpManager.recent_calls`` shows at most this many,
+        #: and an unbounded list kept every argument and structured result
+        #: of a day of pyIrena calls in memory.
+        self.calls: deque[ToolCallRecord] = deque(maxlen=_CALL_LOG_MAX_RECORDS)
         #: The server's own ``instructions`` string from the MCP
         #: ``initialize`` handshake (``mcp.types.InitializeResult.
         #: instructions``), or ``None`` if it didn't declare one. A FastMCP
@@ -349,6 +392,9 @@ class McpServerHandle:
         self._serve_task: asyncio.Task[None] | None = None
         self._stop_event: asyncio.Event | None = None
         self._start_error: McpServerError | None = None
+        #: Set when a call finds the transport closed (B10); explains to the
+        #: model and user that the server is gone and how to restart it.
+        self._exited_message: str | None = None
 
     @property
     def name(self) -> str:
@@ -357,6 +403,11 @@ class McpServerHandle:
     @property
     def is_running(self) -> bool:
         return self._session is not None
+
+    @property
+    def exited_message(self) -> str | None:
+        """Why the server stopped on its own, or ``None`` if it has not."""
+        return self._exited_message
 
     async def start(self) -> list[Tool]:
         """Launch the subprocess, initialize the session, and discover
@@ -389,6 +440,7 @@ class McpServerHandle:
 
         self._stop_event = asyncio.Event()
         self._start_error = None
+        self._exited_message = None
         ready = asyncio.Event()
         self._serve_task = asyncio.create_task(self._serve(ready))
         try:
@@ -541,8 +593,23 @@ class McpServerHandle:
     def list_tools(self) -> list[Tool]:
         return list(self._tools.values())
 
+    async def _mark_exited(self) -> str:
+        """Tear down a handle whose transport has closed and remember why."""
+        tail = "\n".join(self.stderr.tail()) if self.stderr is not None else ""
+        detail = f" Last stderr output: {tail}" if tail else ""
+        self._exited_message = (
+            f"mcp server {self.config.name!r} has stopped: its process exited or "
+            f"the connection closed.{detail} Its tools are unavailable until it is "
+            "restarted: in the GUI, MCP Servers → select it → Restart; in the CLI, "
+            "start a new chat. Tell the user rather than retrying this tool."
+        )
+        await self.stop()
+        return self._exited_message
+
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> CallToolResult:
         if self._session is None:
+            if self._exited_message is not None:
+                raise McpServerError(self._exited_message)
             raise McpServerError(f"mcp server {self.config.name!r} is not running")
         if tool_name not in self._tools:
             raise McpServerError(f"mcp server {self.config.name!r} has no tool named {tool_name!r}")
@@ -570,9 +637,11 @@ class McpServerHandle:
                 tool_name,
                 time.monotonic() - start,
                 is_error=True,
-                error_message=str(exc),
+                error_message=str(exc) or type(exc).__name__,
                 arguments=arguments,
             )
+            if _is_connection_closed(exc):
+                raise McpServerError(await self._mark_exited()) from exc
             raise McpServerError(
                 f"mcp server {self.config.name!r} tool {tool_name!r} call failed: {exc}"
             ) from exc
@@ -581,7 +650,7 @@ class McpServerHandle:
         payload_bytes = sum(_block_payload_size(block) for block in result.content)
         content_preview = [_block_preview(block) for block in result.content]
         if result.structuredContent is not None:
-            content_preview.append({"type": "structuredContent", "json": result.structuredContent})
+            content_preview.append(_structured_preview(result.structuredContent))
         self._record_call(
             tool_name,
             time.monotonic() - start,

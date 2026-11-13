@@ -233,6 +233,7 @@ async def test_start_all_launches_servers_concurrently(tmp_path, monkeypatch):
         def __init__(self, config: McpServerConfig, **kwargs: object) -> None:
             self._config = config
             self.instructions: str | None = None
+            self.is_running = True
 
         async def start(self) -> list:
             await asyncio.sleep(0.2)
@@ -827,3 +828,71 @@ async def test_native_tool_call_logs_nothing_when_arguments_are_already_valid(tm
         await tool.func({"depth": 3, "fullPage": True})
 
     assert caplog.messages == []
+
+
+# --- B8 / B10: guarded start and cleanup, dead servers ----------------------
+
+
+@pytest.mark.asyncio
+async def test_start_all_isolates_an_unexpected_start_exception(tmp_path, monkeypatch):
+    from aida.mcp import server as server_module
+
+    real_start = server_module.McpServerHandle.start
+
+    async def flaky_start(self):
+        if self.config.name == "broken":
+            raise RuntimeError("boom")
+        return await real_start(self)
+
+    monkeypatch.setattr(server_module.McpServerHandle, "start", flaky_start)
+    manager = McpManager(
+        [_mock_server_config("broken"), _mock_server_config("good")],
+        artifact_store=ArtifactStore(base_dir=tmp_path),
+    )
+    try:
+        tools = await manager.start_all()
+        assert "good__echo_text" in tools
+        assert manager.running_server_names == ["good"]
+        assert manager.start_errors["broken"] == "RuntimeError: boom"
+    finally:
+        await manager.aclose()
+
+
+@pytest.mark.asyncio
+async def test_aclose_stops_every_server_even_if_one_stop_fails(tmp_path, monkeypatch):
+    from aida.mcp import server as server_module
+
+    manager = McpManager(
+        [_mock_server_config("first"), _mock_server_config("second")],
+        artifact_store=ArtifactStore(base_dir=tmp_path),
+    )
+    await manager.start_all()
+    handles = dict(manager._handles)
+    real_stop = server_module.McpServerHandle.stop
+
+    async def failing_stop(self):
+        await real_stop(self)
+        if self.config.name == "first":
+            raise RuntimeError("stop failed")
+
+    monkeypatch.setattr(server_module.McpServerHandle, "stop", failing_stop)
+    await manager.aclose()  # must not raise
+    assert not handles["first"].is_running
+    assert not handles["second"].is_running
+    assert manager.running_server_names == []
+
+
+@pytest.mark.asyncio
+async def test_dead_server_leaves_running_list_and_restart_brings_it_back(tmp_path):
+    manager = McpManager([_mock_server_config()], artifact_store=ArtifactStore(base_dir=tmp_path))
+    try:
+        await manager.start_all()
+        result = await manager._call_tool("mock-mcp", "crash_process", {})
+        assert result.is_error
+        assert "has stopped" in result.content
+        assert manager.running_server_names == []
+
+        await manager.restart_server("mock-mcp")
+        assert manager.running_server_names == ["mock-mcp"]
+    finally:
+        await manager.aclose()

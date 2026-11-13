@@ -4,9 +4,15 @@ channels:
 dependencies:
   - python=3.11
   - pip
+  # The `science` extra, from conda-forge rather than pip: h5py's HDF5
+  # library and matplotlib's binary pieces are better served by conda.
+  # AIDA does not need them; agent scripts do (see pyproject.toml).
+  - numpy>=1.24
+  - matplotlib>=3.7
+  - h5py>=3.9
   - pip:
       # Matches what CI installs, `ocr` included: it is only httpx, which
       # the openai/anthropic SDKs already pull in, so adding it costs
       # nothing and keeps the documented conda path exercising the same
       # optional-import branches CI does.
-      - -e .[gui,docs,ocr,dev]
+      - -e .[gui,docs,ocr,science,dev]

@@ -1,6 +1,6 @@
 # Safety and permissions
 
-> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
@@ -27,6 +27,13 @@ one question first, then a second one:
      `~/.aida/` (`config.yaml`, secret references, the SQLite DB) is **not**
      in the allowed set and stays gated like any other outside path.
 2. **If it's inside that set, what does the workspace's `safety` mode say?**
+
+One more folder has its own rule: **`~/.aida/skills/` is read-only** for
+the agent. It may read files there and run a skill's scripts (subject to
+the mode, like any script run) without the folder being in the allowed
+set, but every write or delete there asks, in both modes, so the agent
+cannot quietly rewrite its own instructions or code. See
+[skills.md](skills.md#what-the-agent-may-do-with-skill-files).
 
 **Reads are never gated inside the allowed set**, in either mode — if a
 folder is configured as a source/target folder (or globally allowed), the

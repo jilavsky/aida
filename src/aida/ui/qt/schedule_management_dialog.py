@@ -292,7 +292,18 @@ class ScheduleManagementDialog(QDialog):
         #: feedback immediately rather than only once the run completes.
         self._running_names: set[str] = set()
 
-        outer = QHBoxLayout(self)
+        root = QVBoxLayout(self)
+        #: Shown only while the scheduler reports a problem (see
+        #: SchedulerBridge.health_changed).
+        self._health_label = QLabel(self)
+        self._health_label.setWordWrap(True)
+        self._health_label.setStyleSheet(
+            "background-color: #ffe5e5; color: #7a1f1f; padding: 6px; border-radius: 3px;"
+        )
+        self._health_label.hide()
+        root.addWidget(self._health_label)
+        outer = QHBoxLayout()
+        root.addLayout(outer)
 
         left = QVBoxLayout()
         self._schedule_list = QListWidget(self)
@@ -327,6 +338,9 @@ class ScheduleManagementDialog(QDialog):
         outer.addWidget(details_box, stretch=2)
 
         if self._scheduler_bridge is not None:
+            self._show_health(getattr(self._scheduler_bridge, "health_error", ""))
+            if hasattr(self._scheduler_bridge, "health_changed"):
+                self._scheduler_bridge.health_changed.connect(self._show_health)
             self._scheduler_bridge.run_started.connect(self._on_run_started)
             self._scheduler_bridge.run_finished.connect(self._on_run_finished)
 
@@ -511,6 +525,13 @@ class ScheduleManagementDialog(QDialog):
             )
             return
         self._scheduler_bridge.run_now(name, entry, self._settings)
+
+    def _show_health(self, error: str) -> None:
+        if error:
+            self._health_label.setText(f"⚠ Scheduler problem: {error}")
+            self._health_label.show()
+        else:
+            self._health_label.hide()
 
     def _on_run_started(self, name: str) -> None:
         self._running_names.add(name)

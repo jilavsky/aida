@@ -193,8 +193,63 @@ def load_skill_texts(skills_dir: Path, skill_names: list[str]) -> list[str]:
     for name in skill_names:
         path = skill_path(skills_dir, name)
         if path is not None:
-            texts.append(f"# Skill: {name}\n\n{path.read_text(encoding='utf-8')}")
+            texts.append(render_skill_text(name, path, skills_dir))
     return texts
+
+
+#: Placeholder a skill may use for the absolute path of its own folder, so
+#: it can name its scripts portably (``{skill_dir}/scripts/fit.py``) on any
+#: machine, user account or OS. Replaced literally, not with str.format, so
+#: other braces in a skill (code samples, JSON) are left alone.
+SKILL_DIR_PLACEHOLDER = "{skill_dir}"
+
+
+def _skill_extra_files(folder: Path) -> list[str]:
+    """Relative paths of the files a folder skill carries besides
+    ``SKILL.md`` (scripts, templates, reference notes), skipping caches."""
+    names: list[str] = []
+    for item in sorted(folder.rglob("*")):
+        if not item.is_file() or item.name == "SKILL.md":
+            continue
+        relative = item.relative_to(folder)
+        if any(part.startswith(".") or part == "__pycache__" for part in relative.parts):
+            continue
+        names.append(relative.as_posix())
+    return names
+
+
+def render_skill_text(name: str, path: Path, skills_dir: Path) -> str:
+    """One skill as it goes into the system context.
+
+    For a folder skill (``<name>/SKILL.md``), ``{skill_dir}`` becomes the
+    folder's absolute path, and when the folder holds more than
+    ``SKILL.md`` a short note lists those files and says how to use them —
+    so a skill that ships code works without the user configuring
+    anything. For a single-file skill ``{skill_dir}`` is the skills folder.
+    """
+    text = path.read_text(encoding="utf-8")
+    is_folder_skill = path.name == "SKILL.md" and path.parent != skills_dir
+    folder = path.parent if is_folder_skill else skills_dir
+    text = text.replace(SKILL_DIR_PLACEHOLDER, str(folder))
+    header = f"# Skill: {name}\n\n"
+    if is_folder_skill:
+        extra = _skill_extra_files(folder)
+        if extra:
+            shown = extra[:MAX_LISTED_SKILL_FILES]
+            listing = "\n".join(f"- `{item}`" for item in shown)
+            if len(extra) > len(shown):
+                listing += f"\n- … and {len(extra) - len(shown)} more"
+            header += (
+                f"This skill's files are in `{folder}`:\n{listing}\n\n"
+                "You can read them, and run its Python scripts with `run_python_script` "
+                "(they run with the workspace target folder as the working directory). "
+                "The folder is read-only: do not write outputs there.\n\n"
+            )
+    return header + text
+
+
+#: A folder skill with many files lists only the first ones in its note.
+MAX_LISTED_SKILL_FILES = 30
 
 
 #: Heading the workspace-folders context block starts with. Used both to
@@ -664,6 +719,8 @@ def compaction_summary_message(summary_text: str) -> Message:
 
 __all__ = [
     "COMPACTION_PROMPT",
+    "SKILL_DIR_PLACEHOLDER",
+    "render_skill_text",
     "CONTEXT_SAFETY_FRACTION",
     "DEFAULT_RESERVED_OUTPUT_TOKENS",
     "DENSE_CHARS_PER_TOKEN",

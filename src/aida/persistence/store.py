@@ -203,8 +203,8 @@ class ConversationStore:
         return [self._row_to_summary(row, row["message_count"]) for row in rows]
 
     def search_conversations(self, term: str) -> set[str]:
-        """Ids of every conversation with at least one message whose
-        content contains ``term`` (a plain case-insensitive substring
+        """Ids of every conversation with at least one user or assistant
+        message whose content contains ``term`` (a plain case-insensitive substring
         match — SQLite's ``LIKE`` is already case-insensitive for ASCII).
 
         The sidebar's own filter (``aida.ui.qt.conversations_sidebar.
@@ -222,8 +222,12 @@ class ConversationStore:
         term = term.strip()
         if not term:
             return set()
+        # User and assistant messages only: tool results (whole data files,
+        # MCP JSON) are most of the table by volume, make the scan slow,
+        # and match on noise rather than on what the conversation was about.
         rows = self._conn.execute(
-            "SELECT DISTINCT conversation_id FROM messages WHERE content LIKE ?",
+            "SELECT DISTINCT conversation_id FROM messages "
+            "WHERE role IN ('user', 'assistant') AND content LIKE ?",
             (f"%{term}%",),
         ).fetchall()
         return {row["conversation_id"] for row in rows}
@@ -596,6 +600,12 @@ class ConversationStore:
 
     def close(self) -> None:
         self._conn.close()
+
+    def __enter__(self) -> ConversationStore:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
 
 @dataclass

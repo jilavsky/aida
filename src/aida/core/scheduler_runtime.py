@@ -251,6 +251,15 @@ async def _fire(
         if on_run_finished is not None:
             on_run_finished(name, False, None, str(exc))
         return
+    except Exception as exc:  # noqa: BLE001 - e.g. a YAML syntax error in the workflow file
+        error = f"workflow {entry.workflow!r} could not be loaded: {exc}"
+        logger.warning("schedule %r: %s", name, error)
+        run_store.record_run(
+            schedule_name=name, fired_at=fired_at, status="config_error", error=error
+        )
+        if on_run_finished is not None:
+            on_run_finished(name, False, None, error)
+        return
 
     confirm_callback = build_headless_confirm_callback(
         yes_in_allowed=entry.yes_in_allowed,
@@ -291,6 +300,17 @@ async def _fire(
         )
         if on_run_finished is not None:
             on_run_finished(name, False, None, str(exc))
+        return
+    except Exception as exc:  # noqa: BLE001 - one bad run must not stop the scheduler
+        # Anything else (an unreachable target folder while writing the
+        # manifest, a transcript write failure, a provider bug) is recorded
+        # as a failed run, so it is visible in the Schedules dialog and is
+        # not due again on the next start as if it had never fired.
+        error = f"{type(exc).__name__}: {exc}"
+        logger.exception("schedule %r failed: %s", name, error)
+        run_store.record_run(schedule_name=name, fired_at=fired_at, status="failed", error=error)
+        if on_run_finished is not None:
+            on_run_finished(name, False, None, error)
         return
 
     run_store.record_run(
@@ -354,6 +374,7 @@ async def scheduler_loop(
     should_defer: DeferCheck | None = None,
     on_deferred_changed: Callable[[dict[str, str]], None] | None = None,
     stop_event: asyncio.Event | None = None,
+    on_health_changed: Callable[[str], None] | None = None,
 ) -> None:
     """Runs ``run_due_schedules`` forever, sleeping ``poll_interval_seconds``
     between ticks. The one function the GUI's background asyncio task
@@ -372,17 +393,42 @@ async def scheduler_loop(
     by design: a scheduler that stops on an unhandled exception from one
     bad tick would silently stop watching every other schedule too, so a
     tick's own failures are caught and recorded per-schedule inside
-    ``run_due_schedules`` instead of ever propagating here."""
+    ``run_due_schedules`` instead of ever propagating here.
+
+    ``on_health_changed`` receives the error text when a poll fails, and
+    ``""`` when polling works again; called only when that state changes,
+    so a frontend can show a "scheduler problem" indicator that clears
+    itself."""
+    health_error = ""
+
+    def _set_health(error: str) -> None:
+        nonlocal health_error
+        if error != health_error:
+            health_error = error
+            if on_health_changed is not None:
+                on_health_changed(error)
+
     while True:
         deferred: dict[str, str] = {}
-        await run_due_schedules(
-            on_run_started=on_run_started,
-            on_run_finished=on_run_finished,
-            should_defer=should_defer,
-            on_run_deferred=deferred.__setitem__,
-        )
-        if on_deferred_changed is not None:
-            on_deferred_changed(deferred)
+        try:
+            await run_due_schedules(
+                on_run_started=on_run_started,
+                on_run_finished=on_run_finished,
+                should_defer=should_defer,
+                on_run_deferred=deferred.__setitem__,
+            )
+        except Exception as exc:  # noqa: BLE001 - a failed poll must not end the loop
+            # E.g. a syntax error saved into a config file while the GUI is
+            # open (run_due_schedules reloads settings on every poll), or
+            # the run-history DB being briefly unavailable. Log it and poll
+            # again next interval; the next poll after the cause is fixed
+            # simply works.
+            logger.exception("scheduler poll failed; will retry in %.0f s", poll_interval_seconds)
+            _set_health(str(exc) or type(exc).__name__)
+        else:
+            _set_health("")
+            if on_deferred_changed is not None:
+                on_deferred_changed(deferred)
         if stop_event is not None:
             if stop_event.is_set():
                 return

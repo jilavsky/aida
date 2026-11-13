@@ -457,3 +457,12 @@ email or chat notification; any workflow step that is not a prompt.
 Every one of these is a reasonable thing to want and none of them is what
 was asked for. If a workflow needs branching, the answer is that the agent
 is supposed to be doing the branching — that is what it is for.
+
+**One bounded exception, added 2026-11 (after 1.0.1):** a step may *repeat*
+(`repeat_until` a glob in the target folder appears, at most `max_passes`
+times), each pass from a cleared context in the same session. It was added
+for long batch jobs such as a 13-batch citation watch, which otherwise fill
+the context window and need a person to restart them. It is not branching:
+the condition is the same file-glob check `expect_files` already makes,
+there is no expression language, and the agent still decides everything
+inside a pass. See `docs/workflows.md` "Repeating steps".

@@ -1004,3 +1004,44 @@ async def test_uncancelled_turn_still_streams_to_completion():
     assert "".join(e.text for e in events if isinstance(e, TextDelta)) == "abcdefghij"
     assert [m.content for m in messages if m.role == "assistant"] == ["abcdefghij"]
     assert not any(isinstance(e, AgentError) for e in events)
+
+
+@pytest.mark.asyncio
+async def test_native_tool_arguments_are_coerced_against_the_schema():
+    """A weaker model sending ``"false"`` for a boolean used to reach a
+    native tool unchanged, where ``bool("false")`` is True — e.g. an
+    ``overwrite`` the model meant to leave off (review B9)."""
+    received = {}
+
+    async def _write(args):
+        received.update(args)
+        return ToolResult(content="ok")
+
+    tool = NativeTool(
+        schema=ToolSchema(
+            name="write_file",
+            description="",
+            parameters={
+                "type": "object",
+                "properties": {"overwrite": {"type": "boolean"}, "count": {"type": "integer"}},
+            },
+        ),
+        func=_write,
+    )
+    provider = MockProvider(
+        [
+            MockTurn(
+                tool_calls=[
+                    MockToolCall(
+                        name="write_file",
+                        arguments={"overwrite": "false", "count": "3"},
+                        id="call_1",
+                    )
+                ]
+            ),
+            MockTurn(text="done"),
+        ]
+    )
+    loop = AgentLoop(provider, _settings(), tools={"write_file": tool})
+    [e async for e in loop.run([Message(role="user", content="hi")])]
+    assert received == {"overwrite": False, "count": 3}

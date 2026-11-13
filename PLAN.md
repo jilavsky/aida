@@ -3,8 +3,8 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 1.0.1, released 2026-11-02.** All ten phases are implemented,
-tested (2,449 tests, three OSes, CI green on all six matrix legs) and in
+**Status: 1.1.0, released 2026-11-13.** All ten phases are implemented,
+tested (2,575 tests, three OSes, CI green on all six matrix legs) and in
 daily use. This file holds **only what is not done** —
 anything ticked here has been moved to `planning/COMPLETED.md`, and
 anything shipped is dated in `CHANGELOG.md`. If you find a `[x]` below,
@@ -55,16 +55,16 @@ gets a dated note appended there; error messages say *which* layer failed.
 
 ## 1. Planned
 
-### 1.1 Beta feedback loop — the current priority
+### 1.1 Post-1.0 feedback loop — the current priority
 
-Nothing here is speculative work; it is what a beta is for.
+Nothing here is speculative work; it is what the first releases are for.
 
-- [ ] Verify `pip install "aida-workbench[gui,docs]"` → working `aida-gui`
-      on a clean macOS, Windows, and Linux machine. *Publishing is done*
-      — 0.2.0 is on PyPI (and 1.0.0 will go the same way, through
-      `publish.yml`); what remains is the clean-machine check, including
-      that a bare `pip install aida-workbench` resolves correctly instead
-      of silently landing on the abandoned `0.0.1` snapshot.
+- [ ] Verify `pip install "aida-workbench[gui,docs,science]"` → working
+      `aida-gui` on a clean macOS, Windows, and Linux machine. *Publishing
+      is done* — 1.0.1 is on PyPI, released through `publish.yml`; what
+      remains is the clean-machine check, including that a bare
+      `pip install aida-workbench` resolves correctly instead of silently
+      landing on the abandoned `0.0.1` snapshot.
 - [ ] First outside users installing from PyPI, with issues triaged into this
       file rather than fixed ad hoc.
 - [ ] Watch for the two things most likely to bite a new user: a provider
@@ -119,8 +119,8 @@ left this box open for the same reason are ticked too.*
       with local *and* Argo embeddings; the ten canned USAXS questions
       answered with correct citations.
 - [ ] RAG benchmark on a real corpus (USAXS instructions + a pyIrena docs
-      folder + an Obsidian vault) — the escape hatch to a vector DB is only
-      justified by measurement.
+      folder + an Obsidian vault). Speed is settled (see §2.4); what is
+      owed is retrieval quality on real documents.
 - [ ] Stop button interrupts a long generation cleanly and the app stays
       usable; manual smoke checklist on macOS *and* Windows.
 
@@ -145,7 +145,9 @@ pass below.*
       that had already gone stale. The rule going forward: a code comment
       states the *current* invariant and why it exists; the history and the
       rationale move to `planning/COMPLETED.md` or a short decision record.
-      A read-through, wanted once before 1.0 rather than continuously.
+      A read-through, done file by file: `core/session.py` and
+      `ui/qt/bridge.py` on 2026-11-11 (November 2026 review, D3); the
+      rest when next touched.
 - [ ] Set a workspace's default MCP group from the MCP dialog itself
       (`phase07`) — no longer blocked: the workspace editor it was waiting
       on now exists, so this is adding the control to the MCP dialog and
@@ -315,9 +317,11 @@ concrete asks for it.
 - **RAG over past conversations** ("what did we conclude last week?").
 - **A reranking model** in retrieval, if quality plateaus.
 - **Automatic knowledge-base refresh** via a folder watcher.
-- **Retrieval currently loads every chunk vector per query** — fine at present
-  corpus sizes; revisit past roughly 10k chunks. This is the plan's own escape
-  hatch, and it needs the §1.4 benchmark before anyone acts on it.
+- **Vector search speed — settled 2026-11-11.** The November 2026 review
+  measured 2.4 s per query at 11,800 chunks. Vectors are now cached and
+  normalised once per chat, scored off the event loop, with NumPy used when
+  installed: about 0.03 s in pure Python. A vector database is not needed
+  until indexes are an order of magnitude larger.
 - **Parallel tool fan-out within a turn** ("plot all of these") would speed up
   UC3/UC4 but complicates cancellation and event ordering. Only if it becomes
   a felt bottleneck.

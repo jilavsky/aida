@@ -11,7 +11,7 @@ build-backend = "hatchling.build"
 # documented fallback; `pip install aida-workbench[gui]` still gives you
 # `import aida` and the `aida` / `aida-gui` console scripts.
 name = "aida-workbench"
-version = "1.0.1"
+version = "1.1.0"
 description = "AIDA — AI Data Assistant: a local scientific agent workbench."
 readme = "README.md"
 license = { text = "MIT" }
@@ -27,10 +27,14 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Physics",
     "Topic :: Scientific/Engineering :: Chemistry",
+    "Typing :: Typed",
 ]
+# Floors are what the lower-bound CI job actually tests (2026-11-11). Older
+# openai/anthropic releases pass `proxies=` to httpx, which httpx 0.28 (pulled
+# in by mcp) removed, so they fail at client construction.
 dependencies = [
-    "openai>=1.40",
-    "anthropic>=0.34",
+    "openai>=1.55.3",
+    "anthropic>=0.41",
     "mcp>=1.28,<2.0",
     "pyyaml>=6.0",
     "keyring>=24.0",
@@ -75,6 +79,12 @@ docs = ["pymupdf>=1.24", "python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=0.6.
 # because depending on a transitive dependency is what breaks on someone
 # else's resolver.
 ocr = ["httpx>=0.27"]
+# Not imported by AIDA itself (retrieval only uses NumPy if it happens to be
+# present). These are for the agent: scripts run with run_python_script use
+# AIDA's Python unless a workspace sets python_interpreter, and SAXS work
+# needs arrays, plots and HDF5/NXcanSAS files. Optional so a plain install
+# stays small; the conda environment.yml installs them.
+science = ["numpy>=1.24", "matplotlib>=3.7", "h5py>=3.9"]
 dev = [
     "pytest>=8.0",
     "pytest-timeout>=2.3",
@@ -131,7 +141,7 @@ exclude = ["Claude outputs"]
 exclude = ["*.md"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]

@@ -1,7 +1,9 @@
 # Sample skills
 
 Example/starter skills. AIDA reads skills from `~/.aida/skills/`, not from
-this folder directly.
+this folder directly. For how skills work (single-file and folder skills,
+how they are switched on, shipping scripts with a skill), see
+[`docs/skills.md`](../docs/skills.md).
 
 **These ship inside the installed package too** (`pyproject.toml`
 force-includes this folder as `aida/resources/skills`), so a

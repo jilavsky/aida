@@ -806,9 +806,11 @@ def test_app_config_rejects_nonsensical_but_well_typed_values():
     assert AppConfig.from_dict({"max_context_tokens": -5}).max_context_tokens >= 0
 
 
-def test_app_config_rejects_a_scalar_where_a_list_belongs():
+def test_app_config_reads_a_scalar_where_a_list_belongs_as_one_item():
+    """Same reading a workspace's ``source_folders: /a/b`` gets; it used to
+    be silently read as an empty list (review, minor items)."""
     config = AppConfig.from_dict({"allowed_folders": "/tmp/one"})
-    assert config.allowed_folders == []
+    assert config.allowed_folders == ["/tmp/one"]
 
 
 def test_app_config_accepts_null_only_for_optional_fields():
@@ -1165,3 +1167,49 @@ def test_workflow_step_skips_malformed_entries():
         },
     )
     assert [s.prompt for s in loaded.steps] == ["do the thing"]
+
+
+def test_workflow_step_repeat_fields_round_trip(aida_home: Path):
+    from aida.config.settings import WorkflowConfig, WorkflowStep, load_workflow, save_workflow
+
+    save_workflow(
+        WorkflowConfig(
+            name="watch",
+            workspace="ws",
+            steps=[
+                WorkflowStep(prompt="next batch", repeat_until="scan.done", max_passes=15),
+                WorkflowStep(prompt="report"),
+            ],
+        )
+    )
+    loaded = load_workflow("watch")
+    assert loaded.steps[0].repeat_until == "scan.done"
+    assert loaded.steps[0].max_passes == 15
+    assert loaded.steps[1].repeat_until is None
+
+
+def test_workflow_step_one_pass_step_saves_without_repeat_keys():
+    """A step without repeat_until writes exactly the keys it always did."""
+    from aida.config.settings import WorkflowStep
+
+    assert WorkflowStep(prompt="go").to_dict() == {"prompt": "go", "expect_files": []}
+
+
+def test_workflow_step_repeat_defaults_and_bad_values(caplog):
+    from aida.config.settings import DEFAULT_MAX_PASSES, WorkflowStep
+
+    plain = WorkflowStep.from_dict("w", {"prompt": "go"})
+    assert plain.repeat_until is None
+    assert plain.max_passes == DEFAULT_MAX_PASSES
+
+    defaulted = WorkflowStep.from_dict("w", {"prompt": "go", "repeat_until": "x.done"})
+    assert defaulted.max_passes == DEFAULT_MAX_PASSES
+
+    bad = WorkflowStep.from_dict("w", {"prompt": "go", "repeat_until": ["a", "b"], "max_passes": 0})
+    assert bad.repeat_until is None
+    assert bad.max_passes == DEFAULT_MAX_PASSES
+    assert "repeat_until" in caplog.text
+    assert "max_passes" in caplog.text
+
+    blank = WorkflowStep.from_dict("w", {"prompt": "go", "repeat_until": "  "})
+    assert blank.repeat_until is None

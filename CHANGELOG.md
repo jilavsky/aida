@@ -16,8 +16,29 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-13
+
+Repeating workflow steps for long unattended batch jobs, provider retries
+for a busy Argo proxy, skills that carry their own scripts, much faster
+knowledge-base retrieval, and the fixes from the November 2026 code review
+(recorded in [`planning/COMPLETED.md`](planning/COMPLETED.md) §13). Config
+files, databases and bundles from 1.0.x load unchanged, and neither
+database schema changes.
+
 ### Added
 
+- **Workflow steps can repeat, for long batch jobs that run unattended.**
+  A step with `repeat_until: "scan.done"` is sent again and again until the
+  agent writes that file in the target folder (at most `max_passes` times,
+  default 20). Each pass starts with a cleared context in the same
+  conversation and keeps the same MCP servers, so a job tracked in a state
+  file, such as a 13-batch citation watch, no longer fills the context
+  window or needs someone to restart it. The run stops at a failed pass,
+  after `max_passes`, or if the marker is left over from an earlier run.
+  The GUI step editor has matching fields, `aida workflow show`/`validate`
+  know about them, and the run manifest records each step's passes.
+  Workflows without these fields load, run and save exactly as before. See
+  [`docs/workflows.md`](docs/workflows.md#repeating-steps--long-batch-jobs-that-run-unattended).
 - **AIDA now retries a busy or flaky AI provider instead of failing the
   turn.** When the ANL Argo proxy is overloaded it answers with an error
   inside an otherwise successful response — a bare "unexpected provider
@@ -35,9 +56,58 @@ decision revised), unrelated to what shipped when. Entries below link to
   never replayed. Context compaction gets a shorter budget (3 tries). See
   `aida.providers.retry`; Argo support's guidance is that clients should
   retry these errors.
+- **Skills can ship their own scripts and reference files.** A folder
+  skill (`~/.aida/skills/<name>/SKILL.md` plus anything next to it) can
+  name its files as `{skill_dir}/scripts/...`; AIDA fills in the real path
+  on each machine and tells the model which files the skill carries. The
+  agent reads them and runs the scripts without the skills folder being an
+  allowed folder (scripts follow the workspace's safety mode, and run in
+  the target folder so outputs land with your results), but any write or
+  delete in the skills folder always asks. Export/import and skill
+  installation now carry the whole folder, scripts included. New guide:
+  [`docs/skills.md`](docs/skills.md).
+- **Knowledge-base retrieval is about 10–100× faster.** Vectors are loaded
+  once per chat and normalised, scoring runs off the event loop, and
+  several knowledge bases are queried at once. At about 12,000 chunks a
+  turn's retrieval drops from about 2.4 s to about 0.03 s in pure Python,
+  or a few milliseconds when NumPy is installed (used if present, never
+  required).
+- **The input is free as soon as the answer is complete.** In the GUI the
+  conversation title is now generated after the turn; a message sent
+  meanwhile waits for it.
+- **Startup warnings are shown in the GUI.** A skipped knowledge base, an
+  MCP server that failed to start, or more tools than the provider accepts
+  now appear as a notice in the chat instead of only on a console nobody
+  sees.
+- **Scheduler problems are visible.** A red "⚠ Scheduler problem" button
+  in the status bar (and a banner in the Schedules dialog) appears while
+  the scheduler cannot poll, and clears itself.
+- **Conversation search no longer stutters.** The sidebar's message search
+  runs once you pause typing and looks only at your messages and the
+  agent's replies, not tool output.
+- **A `science` extra for the agent's scripts.**
+  `pip install "aida-workbench[science]"` adds numpy, matplotlib and h5py,
+  and the conda `environment.yml` now includes them. AIDA itself doesn't
+  use them; scripts the agent runs do. When they are installed in AIDA's
+  Python, the `run_python_script` tool tells the model they are available.
+  Scripts now run with `MPLBACKEND=Agg` (unless you set a backend), so a
+  `plt.show()` returns at once instead of waiting until the timeout.
+
+### Changed
+
+- **Minimum SDK versions raised** to `openai>=1.55.3` and
+  `anthropic>=0.41`. Older releases fail with the httpx version that the
+  MCP SDK installs, so the old floors only looked supported. A new CI job
+  tests the declared minimums, and a Python 3.12 leg covers the version
+  the package metadata already claimed.
 
 ### Fixed
 
+- **New Chat no longer picks up the end of the previous reply.** Pressing
+  New Chat (or switching workspace, or resuming a conversation) while an
+  answer was still arriving could put the last fragment of that answer into
+  the new, empty chat. Events already on their way from the old chat are now
+  dropped once it is closed.
 - **Changing the globally allowed folders in Settings now applies to the
   open chat.** Previously the running chat kept the folder access it was
   started with, so a folder just added to the global list still asked for
@@ -46,6 +116,61 @@ decision revised), unrelated to what shipped when. Entries below link to
   The open chat's allowed folders and the folder list in its instructions
   are now rebuilt on OK, the agent is told about the change on its next
   turn, and this works for chats without a workspace too.
+- **Long turns are saved completely again.** When the conversation was
+  trimmed or compacted in the middle of a turn (typical of long pyIrena
+  analyses), the rest of that turn, including the tool result and the final
+  answer, was kept in memory only: missing from `aida.db`, from the
+  Markdown record and from the conversation when resumed.
+- **A locked or unreachable transcript file no longer blocks the chat.** If
+  the `.md` record could not be written (open in another program on
+  Windows, held by a sync client, a records folder on a dropped share),
+  every message failed before the model was called. The write is now
+  retried later and the turn goes ahead; the database copy was never at
+  risk.
+- **The scheduler keeps running after an unexpected error.** One failing
+  run (an unreachable target folder, a `{}` or stray brace in a workflow
+  prompt, a syntax error in a workflow file) stopped all scheduled runs for
+  the rest of the session, and the run was not recorded, so it fired again
+  at the next start. It is now recorded as failed and the scheduler goes on
+  polling. Workflow prompts with stray braces get a message explaining
+  `{{` and `}}`.
+- **Pressing Stop after an answer no longer cancels the next message.** A
+  Stop that arrived while the conversation title was being generated (or
+  just as a turn ended) made the next message return "cancelled" at once.
+- **A typo in a config file gives a clear message.** A YAML or JSON syntax
+  error, or a wrong structure (a list where a mapping belongs, a `null`
+  entry), used to give a traceback from every command, and on Windows
+  `aida-gui` failed to start with no message at all. AIDA now names the
+  file and line: in a dialog for `aida-gui`, on the terminal for `aida`,
+  and as a failed check in `aida doctor`.
+- **`"false"` from a local model now means false.** Native tools (file
+  writes, script runs) now get their arguments repaired against the tool's
+  schema the way MCP tools already did, so `overwrite: "false"` no longer
+  overwrites a file, and a single string passed as a script's `args` is one
+  argument rather than a list of characters.
+- **A crashed MCP server is noticed.** If a server's process exits, the
+  next tool call says so and explains how to restart it (MCP Servers →
+  Restart), and the server shows as stopped. Before, every later call
+  failed with a generic "call failed" and the server still showed as
+  running.
+- **Database upgrades are safe when two AIDA windows start together.**
+  Each schema migration and its version bump now run in one transaction,
+  so two processes upgrading the same `~/.aida` can no longer collide on
+  "duplicate column", and a crash mid-upgrade rolls back cleanly. A
+  database written by a newer AIDA is opened with a logged warning.
+- **One MCP server failing to start or stop no longer affects the
+  others.** An unexpected error while starting a server is reported for
+  that server alone, and closing a chat stops every server even if one
+  fails to stop.
+- Smaller fixes: the per-server MCP call log is capped at 200 entries and
+  large structured results are truncated in it; scripts no longer inherit
+  stdin (which competed with the `aida chat` prompt); oversized MCP results
+  from tools with `/` or `:` in their name are spilled to a valid file name
+  instead of being lost; workflow manifests and `expect_files` checks use
+  the `{user}`-expanded target folder; closing a chat closes the knowledge
+  bases and database even if closing the provider fails; and
+  `allowed_folders: /one/path` in `config.yaml` is read as a one-item list
+  instead of being ignored.
 
 ## [1.0.1] - 2026-11-02
 
@@ -1158,7 +1283,9 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/jilavsky/aida/compare/v1.0.1...v1.1.0
+[1.0.1]: https://github.com/jilavsky/aida/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/jilavsky/aida/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/jilavsky/aida/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jilavsky/aida/compare/v0.0.1b7...v0.1.0

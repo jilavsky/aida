@@ -244,6 +244,65 @@ async def test_context_is_rechecked_mid_turn_not_only_before_it(
 
 
 @pytest.mark.asyncio
+async def test_mid_turn_trim_does_not_stop_the_rest_of_the_turn_being_recorded(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """A mid-turn trim shortens the front of ``session.messages``. The
+    persistence position used to be a plain index local to ``_run_turn``
+    that the trim never adjusted, so everything after the trim (the tool
+    result that triggered it and the final answer) existed in memory only
+    and was missing from the DB and the transcript."""
+    from aida.artifacts.store import ArtifactStore
+    from aida.core.tools import NativeTool, ToolResult
+    from aida.persistence.recorder import ConversationRecorder
+    from aida.persistence.store import ConversationStore
+    from aida.providers.base import ToolSchema
+    from aida.providers.mock import MockToolCall
+
+    settings = _settings_with_profile()
+    settings.app.max_context_tokens = 2000
+    monkeypatch.setattr(
+        "aida.core.session.build_provider",
+        lambda profile: MockProvider(
+            [
+                MockTurn(tool_calls=[MockToolCall(name="huge_tool", id="call_1")]),
+                MockTurn(text="summary of the old turns"),  # the compaction call
+                MockTurn(text="done"),
+            ]
+        ),
+    )
+
+    async def _huge_tool(_args):
+        return ToolResult(content="z" * 40_000)
+
+    tools = {
+        "huge_tool": NativeTool(
+            schema=ToolSchema(name="huge_tool", description="", parameters={"type": "object"}),
+            func=_huge_tool,
+        )
+    }
+    recorder = ConversationRecorder(
+        ConversationStore(tmp_path / "aida.db"),
+        ArtifactStore(base_dir=tmp_path / "artifacts"),
+        tmp_path / "records",
+    )
+    session = ChatSession(settings, "mock-profile", tools=tools, recorder=recorder)
+    _add_old_turns(session, 5, size=1500)
+
+    events = [e async for e in session.send("trigger the tool")]
+    assert any(isinstance(e, ContextTrimmed) for e in events)
+
+    stored = recorder.load_history()
+    in_memory_turn = session.messages[-4:]
+    assert [m.role for m in in_memory_turn] == ["user", "assistant", "tool", "assistant"]
+    assert [(m.role, m.content) for m in stored[-4:]] == [
+        (m.role, m.content) for m in in_memory_turn
+    ]
+    assert stored[-1].content == "done"
+    await session.aclose()
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_before_round_trip_hook_is_the_sessions_trim_context(
     monkeypatch, aida_home: Path, records_home: Path
 ):

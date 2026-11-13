@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from aida.config.paths import workflows_dir
 from aida.config.settings import (
+    DEFAULT_MAX_PASSES,
     Settings,
     WorkflowConfig,
     WorkflowStep,
@@ -51,6 +52,7 @@ from aida.ui.qt._qt import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     Qt,
     QVBoxLayout,
     QWidget,
@@ -64,6 +66,8 @@ NO_MCP_GROUP_LABEL = "(workspace default)"
 def _step_summary(step: WorkflowStep) -> str:
     first_line = step.prompt.strip().splitlines()[0] if step.prompt.strip() else "(empty prompt)"
     suffix = f"  [expect: {', '.join(step.expect_files)}]" if step.expect_files else ""
+    if step.repeat_until:
+        suffix += f"  [repeat until {step.repeat_until}, max {step.max_passes}]"
     return first_line + suffix
 
 
@@ -76,7 +80,7 @@ class StepFormDialog(QDialog):
     def __init__(self, *, step: WorkflowStep | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Edit Step" if step else "Add Step")
-        self.resize(440, 320)
+        self.resize(440, 380)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -95,6 +99,27 @@ class StepFormDialog(QDialog):
         self._expect_files_edit.setMaximumHeight(80)
         form.addRow("Expect files:", self._expect_files_edit)
 
+        self._repeat_until_edit = QLineEdit((step.repeat_until or "") if step else "", self)
+        self._repeat_until_edit.setPlaceholderText(
+            "Optional: repeat this step until a file matching this pattern appears, e.g. scan.done"
+        )
+        self._repeat_until_edit.setToolTip(
+            "Each pass starts with a cleared context, so the prompt should read its "
+            "progress from a state file and update it. The pattern is looked for in "
+            "the workspace's target folder after every pass."
+        )
+        form.addRow("Repeat until file:", self._repeat_until_edit)
+
+        self._max_passes_spin = QSpinBox(self)
+        self._max_passes_spin.setRange(1, 1000)
+        self._max_passes_spin.setValue(step.max_passes if step else DEFAULT_MAX_PASSES)
+        self._max_passes_spin.setToolTip(
+            "The step fails if the file has not appeared after this many passes."
+        )
+        form.addRow("Max passes:", self._max_passes_spin)
+        self._repeat_until_edit.textChanged.connect(self._update_max_passes_enabled)
+        self._update_max_passes_enabled()
+
         layout.addLayout(form)
 
         buttons = QDialogButtonBox(
@@ -103,6 +128,9 @@ class StepFormDialog(QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _update_max_passes_enabled(self) -> None:
+        self._max_passes_spin.setEnabled(bool(self._repeat_until_edit.text().strip()))
 
     def _on_accept(self) -> None:
         if not self._prompt_edit.toPlainText().strip():
@@ -118,6 +146,8 @@ class StepFormDialog(QDialog):
                 for line in self._expect_files_edit.toPlainText().splitlines()
                 if line.strip()
             ],
+            repeat_until=self._repeat_until_edit.text().strip() or None,
+            max_passes=self._max_passes_spin.value(),
         )
 
 

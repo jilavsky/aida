@@ -28,6 +28,7 @@ import threading
 from pathlib import Path
 
 from aida.config.paths import db_path
+from aida.persistence.migrate import apply_migrations
 
 CURRENT_SCHEMA_VERSION = 8
 
@@ -285,16 +286,9 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    current = conn.execute("PRAGMA user_version").fetchone()[0]
-    for version in range(current + 1, CURRENT_SCHEMA_VERSION + 1):
-        script = _MIGRATIONS.get(version)
-        if script is None:
-            continue  # a version number with no schema change of its own
-        conn.executescript(script)
-        # PRAGMA doesn't accept bound parameters; `version` is an int from
-        # our own fixed range, never user input.
-        conn.execute(f"PRAGMA user_version = {version}")
-    conn.commit()
+    apply_migrations(
+        conn, _MIGRATIONS, CURRENT_SCHEMA_VERSION, database_label="Conversation database"
+    )
 
 
 __all__ = ["CURRENT_SCHEMA_VERSION", "connect"]

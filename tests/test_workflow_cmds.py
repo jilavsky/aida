@@ -183,3 +183,35 @@ def test_run_bad_var_syntax_is_config_error(
     code = main(["run", "daily", "--var", "not-a-kv-pair"])
 
     assert code == EXIT_CONFIG_ERROR
+
+
+def test_validate_reports_repeat_until_without_target_folder(
+    aida_home: Path, records_home: Path, capsys, monkeypatch
+):
+    monkeypatch.setattr("aida.cli.workflow_cmds.load_settings", _settings)
+    save_workflow(
+        WorkflowConfig(
+            name="watch",
+            workspace="use-ws",
+            steps=[WorkflowStep(prompt="next batch", repeat_until="scan.done")],
+        )
+    )
+
+    code = main(["validate", "watch"])
+
+    assert code == EXIT_CONFIG_ERROR
+    assert "target folder" in capsys.readouterr().out
+
+
+def test_show_prints_repeat_until(aida_home: Path, records_home: Path, capsys):
+    save_workflow(
+        WorkflowConfig(
+            name="watch",
+            workspace="use-ws",
+            steps=[WorkflowStep(prompt="next batch", repeat_until="scan.done", max_passes=15)],
+        )
+    )
+    code = main(["show", "watch"])
+    out = capsys.readouterr().out
+    assert code == EXIT_OK
+    assert "repeat_until: scan.done (max 15 passes)" in out

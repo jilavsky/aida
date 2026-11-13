@@ -27,9 +27,9 @@ from aida.artifacts.policy import describe_for_model
 from aida.artifacts.store import ArtifactStore
 from aida.config.logging_setup import get_logger
 from aida.config.settings import McpServerConfig
+from aida.core.argument_coercion import coerce_arguments
 from aida.core.confirmation import ConfirmationRequest, ConfirmCallback, deny_all
 from aida.core.tools import NativeTool, ToolResult
-from aida.mcp.argument_coercion import coerce_arguments
 from aida.mcp.results import convert_result
 from aida.mcp.server import McpServerError, McpServerHandle, ToolCallRecord
 from aida.providers.base import ToolSchema
@@ -180,7 +180,9 @@ class McpManager:
 
     @property
     def running_server_names(self) -> list[str]:
-        return list(self._handles.keys())
+        """Servers that are up. One whose process died (B10) is left out, so
+        the MCP panel shows it as stopped and offers Restart."""
+        return [name for name, handle in self._handles.items() if handle.is_running]
 
     def tool_names(self, server_name: str) -> list[str]:
         """Unnamespaced tool names discovered on a *running* server, or an
@@ -236,6 +238,10 @@ class McpManager:
         first.
         """
 
+        # Handles that finished starting, so a cancelled or crashed gather
+        # never leaves a subprocess that aclose() does not know about.
+        started: dict[str, McpServerHandle] = {}
+
         async def _start_one(
             name: str, config: McpServerConfig
         ) -> tuple[McpServerHandle, dict[str, NativeTool]] | None:
@@ -245,11 +251,28 @@ class McpManager:
             except McpServerError as exc:
                 self.start_errors[name] = str(exc)
                 return None
-            return handle, self._tools_for(name, config, mcp_tools)
+            except Exception as exc:
+                # An unexpected failure is isolated like a config error.
+                self.start_errors[name] = f"{type(exc).__name__}: {exc}"
+                await _stop_quietly(name, handle)
+                return None
+            started[name] = handle
+            try:
+                return handle, self._tools_for(name, config, mcp_tools)
+            except Exception as exc:
+                self.start_errors[name] = f"{type(exc).__name__}: {exc}"
+                started.pop(name, None)
+                await _stop_quietly(name, handle)
+                return None
 
-        results = await asyncio.gather(
-            *(_start_one(name, config) for name, config in self._configs.items())
-        )
+        try:
+            results = await asyncio.gather(
+                *(_start_one(name, config) for name, config in self._configs.items())
+            )
+        except BaseException:
+            for name, handle in started.items():
+                await _stop_quietly(name, handle)
+            raise
 
         tools: dict[str, NativeTool] = {}
         for name, result in zip(self._configs.keys(), results, strict=True):
@@ -510,7 +533,11 @@ class McpManager:
         results_dir = self._scratch_dir / "tool-results"
         results_dir.mkdir(parents=True, exist_ok=True)
         call_id = new_artifact_id()
-        path = results_dir / f"{server_name}__{tool_name}-{call_id}.txt"
+        # Sanitized: a tool name containing "/" or ":" made the write fail
+        # and the full result was lost.
+        safe_server = _sanitize_part(server_name, limit=40)
+        safe_tool = _sanitize_part(tool_name, limit=60)
+        path = results_dir / f"{safe_server}__{safe_tool}-{call_id}.txt"
         path.write_text(text, encoding="utf-8")
         omitted = len(text) - MCP_RESULT_MAX_CHARS
         head = text[:MCP_RESULT_MAX_CHARS]
@@ -531,9 +558,18 @@ class McpManager:
         return artifact
 
     async def aclose(self) -> None:
-        for handle in self._handles.values():
-            await handle.stop()
-        self._handles = {}
+        """Stop every server. One failing to stop does not keep the others running."""
+        handles, self._handles = self._handles, {}
+        for name, handle in handles.items():
+            await _stop_quietly(name, handle)
+
+
+async def _stop_quietly(name: str, handle: McpServerHandle) -> None:
+    """Stop one server, logging rather than raising a failure."""
+    try:
+        await handle.stop()
+    except Exception:
+        logger.warning("MCP server %r did not stop cleanly", name, exc_info=True)
 
 
 __all__ = [

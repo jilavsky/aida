@@ -90,6 +90,22 @@ alternative web frontend.
 
 ### Changelog
 
+- **2026-11-11** — Three decisions from the November 2026 code review.
+  (1) **Remote MCP servers are trusted like local ones once configured**
+  (§5). Adding a `type: http` server to `mcp.json` is the user's consent
+  to send it tool arguments, exactly as adding a local server is consent
+  to run it; per-tool confirmation stays available through
+  `confirm_tools`. The "always confirmed: sends local content to a
+  network destination" rule is about destinations the *agent* picks
+  (`fetch_url`), not ones the user configured. (2) **Vector search** keeps
+  plain SQLite (§8), with vectors cached and normalised per chat and NumPy
+  used when present (2.4 s → 0.03 s per query at 11,800 chunks). (3) A
+  **`science` extra** (numpy, matplotlib, h5py) for the scripts the agent
+  runs; AIDA itself does not import them (§8). Also recorded: one
+  `~/.aida` is only ever used by one installed AIDA version at a time, so
+  schema migrations need to be safe across processes but not across
+  versions; a database newer than the code is opened with a logged warning.
+
 - **2026-10-16** — §3's repository-structure listing refreshed. It had
   drifted: it named `core/conversation.py` and `core/permissions.py`
   (neither exists — the agent loop lives in `session.py`, permissions in
@@ -337,6 +353,14 @@ Premise (user decision): working folders are backed up; disaster recovery is
 - **Always confirmed regardless of mode**: any path outside allowed folders; shell
   commands not on the command allowlist; anything that sends local content to a
   network destination other than the configured LLM provider.
+  *2026-11-11:* a remote MCP server (`type: http`) the user added to `mcp.json`
+  counts as configured, like the LLM provider: its tools run without a prompt
+  unless listed in `confirm_tools`. The rule covers destinations the agent
+  chooses (`fetch_url`), not ones the user set up.
+- **Skills folder** (`~/.aida/skills/`, 2026-11-11): read-only for the agent.
+  Reading is free, running a skill's script follows the safety mode, and any
+  write or delete there always asks, so the agent cannot rewrite its own
+  instructions.
 - Command allowlist: a short, user-editable list of safe shell/python invocations
   runnable inside allowed folders (Phase 9). `AppConfig.command_allowlist` (global)
   and `WorkspaceConfig.command_allowlist` (per-workspace) union the same way
@@ -409,7 +433,8 @@ demonstrated need.
 | Markdown render (GUI) | Qt rich text first; add a md lib only if needed | |
 | PDF read | `pymupdf` (extra: `docs`) | BeamlineAdvisor precedent |
 | DOCX/XLSX/PPTX | `python-docx`, `openpyxl`, `python-pptx` (extra: `docs`) | read + docx write |
-| RAG (Phase 8) | **Decided:** plain SQLite (own schema, own file per knowledge base) + pure-Python cosine similarity — no vector DB. Realistic corpora here (instrument docs, one Obsidian vault) are hundreds to low thousands of chunks; brute-force ranking is tens of milliseconds at that scale, so `sqlite-vec`/ChromaDB add a second persistence engine for no measured benefit. See `planning/completed/phase08_rag.md`. | LlamaIndex only if the minimal path proves insufficient at real corpus sizes |
+| RAG (Phase 8) | **Decided:** plain SQLite (own schema, own file per knowledge base) + pure-Python cosine similarity — no vector DB. *2026-11-11:* vectors cached and normalised per chat; NumPy used if importable, never required. Realistic corpora here (instrument docs, one Obsidian vault) are hundreds to low thousands of chunks; brute-force ranking is tens of milliseconds at that scale, so `sqlite-vec`/ChromaDB add a second persistence engine for no measured benefit. See `planning/completed/phase08_rag.md`. | LlamaIndex only if the minimal path proves insufficient at real corpus sizes |
+| Agent scripts | `numpy`, `matplotlib`, `h5py` (extra: `science`) | Not imported by AIDA; installed for `run_python_script` and skill scripts in AIDA's own Python. The conda `environment.yml` includes them. |
 | Code editor (Phase 9) | Qt plain-text editor + syntax highlighting; consider `QScintilla` only if needed | |
 
 pyIrena is **not** an import dependency — AIDA talks to it only through

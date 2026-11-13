@@ -22,8 +22,8 @@ import sys
 from typing import Any
 
 from aida.config.logging_setup import configure_logging
-from aida.config.settings import Settings, load_settings
-from aida.ui.qt._qt import QApplication
+from aida.config.settings import ConfigFileError, Settings, load_settings
+from aida.ui.qt._qt import QApplication, QMessageBox
 from aida.ui.qt.bridge import AsyncLoopThread
 from aida.ui.qt.icon import app_icon
 from aida.ui.qt.main_window import MainWindow
@@ -62,7 +62,19 @@ def _resolve_start_kwargs(args: argparse.Namespace, settings: Settings) -> dict[
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(sys.argv[1:] if argv is None else argv)
 
-    settings = load_settings()
+    try:
+        settings = load_settings()
+    except ConfigFileError as exc:
+        # aida-gui is a windowed script on Windows: without a dialog a
+        # broken config file would mean the app silently never appears.
+        app = QApplication.instance() or QApplication(sys.argv)  # noqa: F841 - must exist
+        QMessageBox.critical(
+            None,
+            "AIDA — configuration error",
+            f"AIDA could not read one of its configuration files:\n\n{exc}\n\n"
+            "Fix the file (or move it aside to get defaults) and start AIDA again.",
+        )
+        return 1
     configure_logging(settings.app.log_level)
 
     app = QApplication(sys.argv)

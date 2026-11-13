@@ -377,3 +377,84 @@ async def test_oversized_stdout_without_a_scratch_dir_falls_back_to_truncation(t
     assert "x" * n_chars not in result.content
     assert "omitted" in result.content
     assert "saved to" not in result.content
+
+
+# --- scripts shipped with a skill (read-only skills folder) -----------------
+
+
+def _skill_guard(target: Path, skills: Path, *, mode: str = "relaxed", confirm=_deny):
+    return SafetyGuard(
+        allowed_roots=[target], mode=mode, confirm_callback=confirm, read_only_roots=[skills]
+    )
+
+
+@pytest.mark.asyncio
+async def test_skill_script_runs_without_asking_in_the_target_folder(tmp_path: Path):
+    target = tmp_path / "target"
+    target.mkdir()
+    scripts = tmp_path / "skills" / "overview" / "scripts"
+    scripts.mkdir(parents=True)
+    script = scripts / "make_report.py"
+    script.write_text(
+        "import os, pathlib; pathlib.Path('report.md').write_text('x'); print(os.getcwd())",
+        encoding="utf-8",
+    )
+    tools = default_coding_tools(
+        _skill_guard(target, tmp_path / "skills"), workspace=_workspace(target)
+    )
+
+    result = await _call(tools, "run_python_script", path=str(script))
+    assert not result.is_error, result.content
+    assert (target / "report.md").exists()
+    assert not (scripts / "report.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_skill_script_in_confirm_mode_asks(tmp_path: Path):
+    target = tmp_path / "target"
+    target.mkdir()
+    scripts = tmp_path / "skills" / "overview" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "s.py").write_text("print('ran')", encoding="utf-8")
+    asked = []
+
+    async def _record(request: ConfirmationRequest) -> bool:
+        asked.append(request)
+        return True
+
+    tools = default_coding_tools(
+        _skill_guard(target, tmp_path / "skills", mode="confirm", confirm=_record),
+        workspace=_workspace(target),
+    )
+    result = await _call(tools, "run_python_script", path=str(scripts / "s.py"))
+    assert "ran" in result.content
+    assert len(asked) == 1 and asked[0].in_allowed_roots is True
+
+
+# --- science packages note and headless matplotlib ---------------------------
+
+
+def test_subprocess_environment_defaults_matplotlib_to_agg(monkeypatch):
+    from aida.coding.runner import subprocess_environment
+
+    monkeypatch.delenv("MPLBACKEND", raising=False)
+    assert subprocess_environment()["MPLBACKEND"] == "Agg"
+    monkeypatch.setenv("MPLBACKEND", "QtAgg")
+    assert subprocess_environment()["MPLBACKEND"] == "QtAgg"
+
+
+def test_packages_note_lists_only_importable_packages(monkeypatch):
+    from aida.coding import tools as tools_module
+
+    present = {"numpy", "h5py"}
+    monkeypatch.setattr(
+        tools_module.importlib.util,
+        "find_spec",
+        lambda name: object() if name in present else None,
+    )
+    note = tools_module._available_packages_note(None)
+    assert note == " Packages available to scripts include: numpy, h5py."
+    # A custom interpreter is not inspected, so nothing is claimed for it.
+    assert tools_module._available_packages_note("/opt/env/bin/python") == ""
+    present.clear()
+    assert tools_module._available_packages_note(None) == ""

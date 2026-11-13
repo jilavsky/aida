@@ -1,6 +1,6 @@
 # Knowledge bases (RAG)
 
-> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
@@ -135,6 +135,14 @@ This embeds the question, scores it against every stored chunk by cosine
 similarity, and prints each result's source path, heading (if any),
 similarity score, and text — the same retrieval path the agent uses during
 a chat turn, run standalone.
+
+**Speed.** In a chat, each knowledge base's vectors are loaded once and
+kept in memory (reloaded automatically when the index is rebuilt), and the
+scoring runs off the GUI's event loop, so retrieval adds well under a
+second per turn even at around 12,000 chunks. If NumPy is installed in
+AIDA's environment (it is whenever pyIrena is), it is used and retrieval
+takes a few milliseconds; without it AIDA uses a pure-Python fallback that
+gives the same results. NumPy is not required.
 
 ## Attaching a knowledge base to a workspace
 

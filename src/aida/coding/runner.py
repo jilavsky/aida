@@ -216,6 +216,19 @@ def _suppress_process_gone():
     return contextlib.suppress(ProcessLookupError, OSError)
 
 
+def subprocess_environment() -> dict[str, str]:
+    """Environment for scripts and commands the agent runs.
+
+    AIDA's own environment, plus ``MPLBACKEND=Agg`` unless the user set a
+    backend: these runs have no stdin and captured output, so a
+    ``plt.show()`` that opened a window would block until the timeout.
+    With Agg it returns at once and ``savefig`` works as usual.
+    """
+    env = dict(os.environ)
+    env.setdefault("MPLBACKEND", "Agg")
+    return env
+
+
 async def run_subprocess(
     argv: list[str],
     *,
@@ -236,6 +249,10 @@ async def run_subprocess(
     proc = await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(cwd),
+        env=subprocess_environment(),
+        # Never inherit stdin: in `aida chat` a script reading it would
+        # compete with the prompt for the user's keystrokes.
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         **_process_group_kwargs(),

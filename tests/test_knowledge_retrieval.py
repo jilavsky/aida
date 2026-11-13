@@ -125,3 +125,79 @@ async def test_retrieved_passage_carries_source_and_heading(tmp_path: Path):
     assert results[0].heading == "Doc 0"
     assert results[0].source_path.endswith("doc_0.md")
     assert 0.0 <= results[0].score <= 1.0
+
+
+# --- VectorCache (review P1) -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cached_retrieval_matches_plain_cosine_over_every_chunk(tmp_path: Path):
+    """The cached, normalised dot product must rank and score exactly like
+    the cosine over freshly loaded chunks it replaced (to float32 precision
+    on the NumPy path)."""
+    import math
+
+    from aida.knowledge.rag.retrieval import VectorCache
+
+    texts = [f"Passage {i} about SAXS level {i % 4} and Porod slope {i % 7}." for i in range(40)]
+    conn = kb_index.connect(tmp_path / "kb.db")
+    await _seed_async(conn, texts)
+    query = "Porod slope of level 2"
+    query_vector = (await MockEmbeddings().embed([query]))[0]
+
+    def cosine(a, b):
+        dot = sum(x * y for x, y in zip(a, b, strict=True))
+        na, nb = math.sqrt(sum(x * x for x in a)), math.sqrt(sum(y * y for y in b))
+        return 0.0 if na == 0 or nb == 0 else dot / (na * nb)
+
+    expected = sorted(
+        ((cosine(query_vector, c.embedding), c.source_path) for c in kb_index.all_chunks(conn)),
+        reverse=True,
+    )[:5]
+
+    results = await retrieve(
+        conn,
+        query,
+        embeddings_provider=MockEmbeddings(),
+        embedding_profile_name="mock",
+        top_k=5,
+        cache=VectorCache(),
+    )
+    # Mock embeddings produce exact ties, so compare the scores in rank
+    # order, and each passage's score against its own chunk's cosine.
+    assert [r.score for r in results] == pytest.approx([s for s, _ in expected], abs=1e-5)
+    by_path = {c.source_path: c.embedding for c in kb_index.all_chunks(conn)}
+    for result in results:
+        assert result.score == pytest.approx(
+            cosine(query_vector, by_path[result.source_path]), abs=1e-5
+        )
+    conn.close()
+
+
+@pytest.mark.asyncio
+async def test_vector_cache_is_reused_and_reloads_when_the_index_changes(tmp_path: Path):
+    from aida.knowledge.rag.retrieval import VectorCache
+
+    conn = kb_index.connect(tmp_path / "kb.db")
+    await _seed_async(conn, ["alpha beta", "gamma delta"])
+    cache = VectorCache()
+    kwargs = dict(embeddings_provider=MockEmbeddings(), embedding_profile_name="mock", cache=cache)
+
+    await retrieve(conn, "alpha", **kwargs)
+    first_vectors = cache.vectors
+    await retrieve(conn, "gamma", **kwargs)
+    assert cache.vectors is first_vectors  # unchanged index: not reloaded
+
+    vector = (await MockEmbeddings().embed(["epsilon zeta"]))[0]
+    kb_index.replace_file_chunks(
+        conn,
+        source_path="/docs/new.md",
+        mtime=9.0,
+        chunks_with_embeddings=[(Chunk(text="epsilon zeta", heading=None, chunk_index=0), vector)],
+        embedding_profile="mock",
+    )
+    results = await retrieve(conn, "epsilon zeta", **kwargs)
+    assert cache.vectors is not first_vectors
+    assert len(cache.row_ids) == 3
+    assert results[0].source_path == "/docs/new.md"
+    conn.close()

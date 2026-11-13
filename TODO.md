@@ -1,10 +1,13 @@
-# AIDA — where we are, and what 1.0.0 needs
+# AIDA — where we are, and what is left
 
-**Reviewed 2026-10-16, against `main` at `e221e09`; 1.0.0 cut the same
-day.** This file answers two questions and nothing else: *is AIDA ready
-to be called 1.0?* and *what is actually left?* It is the working list;
-`PLAN.md` keeps the reasoning behind each item and
+**Updated 2026-11-13 for 1.1.0.** §1 and §2 below are the 1.0 readiness
+review of 2026-10-16, kept as the record of that release; §3 to §5 are the
+live working list. `PLAN.md` keeps the reasoning behind each item and
 `planning/COMPLETED.md` keeps what is already done.
+
+The November 2026 code review was worked through for 1.1.0 and is
+recorded, item by item, in `planning/COMPLETED.md` §13. The one item left
+from it (S1, splitting the three largest files) is in §4.
 
 ---
 
@@ -26,7 +29,7 @@ the time (RAG, the scheduler, portability).
 | `ruff check .` | clean |
 | `ruff format --check` | clean across `src/` and `tests/` (254 files), and gated in CI |
 | Layering rules (`DESIGN.md` §3) | hold — no Qt outside `aida.ui.qt`, no direct `PySide6` import outside `_qt.py`, no matplotlib in core |
-| PyPI | `aida-workbench` 0.2.0 published; `publish.yml` ran for real on the v0.2.0 release |
+| PyPI | `aida-workbench` 0.2.0 published at the time; 1.0.0 and 1.0.1 since, both through `publish.yml` |
 | `aida doctor` on a live install | 27/31, the four failures being the config bug fixed below |
 | CLI smoke (`workspace`/`kb`/`workflow`/`schedule`/`conversations`) | all work |
 
@@ -62,7 +65,8 @@ version. It is *not* a claim that every manual acceptance demo in
       lives here. Its "Cutting a release" section now describes the real
       process (tag, GitHub release, trusted publishing) instead of a
       manual `twine` upload.
-- [ ] **Tag `v1.0.0` and publish a GitHub release** — the one step left.
+- [x] **Tag `v1.0.0` and publish a GitHub release** — done 2026-10-16;
+      `v1.0.1` followed on 2026-11-02.
       `.github/workflows/publish.yml` fires on release publication and
       uploads through trusted publishing; no manual `twine`. It refuses
       to build if the tag and the two version strings disagree.
@@ -197,12 +201,12 @@ OSes was verified in this review and the boxes are ticked.
       base working with local *and* Argo embeddings, and the ten canned
       USAXS questions answered with correct citations.
 - [ ] **RAG benchmark on a real corpus** (USAXS instructions + a pyIrena
-      docs folder + an Obsidian vault). This one has a consequence:
-      retrieval currently loads every chunk vector per query, and the
-      escape hatch to a vector DB (`PLAN.md` §2.4) is only justified by
-      measurement. Current indexes are ~11,800 / ~2,800 / ~2,000 chunks,
-      which is already past the ~10k figure §2.4 names as the point to
-      look again.
+      docs folder + an Obsidian vault). The synthetic benchmark at 11,800
+      chunks × 1,024 dimensions was done in the November 2026 review: the
+      per-query cost was 2.4 s, and with vectors now cached and normalised
+      per chat it is about 0.03 s (a few ms with NumPy). No vector DB is
+      needed at these sizes. What is still owed is retrieval *quality* on
+      the real corpus.
 
 ### GUI, on each OS
 
@@ -211,8 +215,8 @@ OSes was verified in this review and the boxes are ticked.
       usable afterwards, and the flagship pyIrena demo on both a cloud and
       a local Ollama model.
 - [ ] **Clean-machine install from PyPI on all three OSes** —
-      `pip install "aida-workbench[gui,docs]"` → working `aida-gui`. Worth
-      doing *after* the 1.0 upload rather than before.
+      `pip install "aida-workbench[gui,docs,science]"` → working
+      `aida-gui`. 1.0.1 is on PyPI, so this can be done now.
 
 ### Automation
 
@@ -229,8 +233,15 @@ Carried from `PLAN.md` §1, with the items this review closed removed.
       regardless. (`PLAN.md` §1.2)
 - [ ] **Comment hygiene pass** — long "this used to be broken because…"
       comments go stale as the code moves on; the rule is that a comment
-      states the current invariant and the history moves to
-      `COMPLETED.md`. A read-through, wanted once. (`PLAN.md` §1.5)
+      states the current invariant and the history stays in git.
+      `core/session.py` and `ui/qt/bridge.py` were done on 2026-11-11;
+      the rest of the tree is file by file, when next touched.
+      (`PLAN.md` §1.5)
+- [ ] **Split the three largest files when next working in them** —
+      `ui/qt/main_window.py` (conversation management out of the window),
+      `core/session.py` (`_start_session` into builders for folders and
+      guard, knowledge bases, MCP, recorder) and `config/settings.py` (one
+      generic config loader). Review item S1; `planning/COMPLETED.md` §13.
 - [ ] **Set a workspace's default MCP group from the MCP dialog** — no
       longer blocked; the workspace editor it waited on exists.
       (`PLAN.md` §1.5, `phase07`)

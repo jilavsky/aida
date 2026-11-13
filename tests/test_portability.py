@@ -1074,3 +1074,24 @@ def test_a_selected_workspace_brings_its_prompt_file(populated_home: Path, tmp_p
     target = _fresh_home(tmp_path)
     import_bundle(bundle, base_dir=target, select={("workspace", "analysis")})
     assert (target / "prompts" / "pyirena.md").is_file()
+
+
+def test_folder_skill_scripts_travel_with_the_bundle(aida_home: Path, tmp_path: Path):
+    """Export used to copy only ``*.md``, so a skill that ships code
+    arrived on the new machine without it."""
+    skill = aida_home / "skills" / "overview"
+    (skill / "scripts" / "__pycache__").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# overview\n", encoding="utf-8")
+    (skill / "scripts" / "make.py").write_text("print(1)\n", encoding="utf-8")
+    (skill / "scripts" / "__pycache__" / "make.pyc").write_bytes(b"")
+    (aida_home / "skills" / "loose.py").write_text("not a skill\n", encoding="utf-8")
+    bundle = tmp_path / "setup.zip"
+    export_bundle(bundle, base_dir=aida_home)
+
+    names = set(zipfile.ZipFile(bundle).namelist())
+    assert "skills/overview/scripts/make.py" in names
+    assert not any("__pycache__" in n or n.endswith("loose.py") for n in names)
+
+    target = _fresh_home(tmp_path)
+    import_bundle(bundle, base_dir=target)
+    assert (target / "skills" / "overview" / "scripts" / "make.py").is_file()

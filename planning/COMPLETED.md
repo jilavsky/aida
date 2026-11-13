@@ -705,3 +705,59 @@ on PyPI with an automated publish workflow, and six weeks of real use
 behind the rough edges. The open list — manual acceptance demos that need
 a beamline, a conda-forge decision, portability Tier 3 — is in
 [`../TODO.md`](../TODO.md), and none of it is a missing feature.
+
+## 13. The November 2026 code review, and 1.1.0 (2026-11-09 → 2026-11-13)
+
+An external review of `main` at `6f4dcdd` (1.0.1 plus the unreleased
+retry work) found four bugs worth fixing before the next release, all
+reproduced, plus lower-priority risks, cheap improvements and planning
+drift. Every item below is done and in `CHANGELOG.md` under 1.1.0. The
+review document itself was retired once worked through. Its item codes
+still appear in test comments, so they are kept here.
+
+**Bugs.**
+B1: a mid-turn context trim stopped the rest of the turn being saved (the
+persist index was not shifted when trimming rewrote the message list).
+B2: an unwritable `.md` transcript failed every turn before the model was
+called. B3: one unexpected error stopped the scheduler for the session and
+the run was not recorded; `{}` or a stray brace in a workflow prompt was
+one trigger. B4: Stop pressed during title generation cancelled the next
+message. B5: a syntax or structure error in any config file was a raw
+traceback (on Windows, `aida-gui` failed silently). B6: schema migrations
+were neither atomic nor safe across two processes (now
+`persistence/migrate.py`). B7: the per-server MCP call log grew without
+limit. B8: cleanup in `McpManager`, `ChatSession.aclose` and
+`run_workflow` stopped at the first failure. B9: native tools did not
+coerce argument types, so `overwrite: "false"` overwrote. B10: a dead MCP
+server was not noticed.
+
+**Improvements.** P1: knowledge-base vectors cached and normalised per
+chat, scoring off the event loop, NumPy used if present (2.4 s to about
+0.03 s per turn at 11,800 chunks). P2: titling off the turn path. P3:
+debounced sidebar search over user and assistant messages only. P4:
+startup warnings as structured `StartupNotices` shown by each frontend.
+P5: typed `ConfigFileError` naming file and line (the B5 fix). P6:
+scheduler health in the status bar.
+
+**Drift and housekeeping.** D1/D2: `TODO.md` and `PLAN.md` brought up to
+1.0.1. D5: remote MCP servers are trusted like local ones once configured,
+recorded in `DESIGN.md`. D6: `{user}` expanded in the workflow runner. D7:
+`AGENTS.md`, `CLAUDE.md`, `py.typed`, ruff `W`. D3/S7: comment hygiene in
+`core/session.py` and `ui/qt/bridge.py`. S2/S3: `ConversationStore` as a
+context manager at all 12 window sites; `core/session.py` documented as
+the composition root.
+
+**Tests.** T1 to T5 cover B1 to B5. T6 makes the suite root-safe. T7/T8
+added a lower-bound dependency CI job (floors raised to `openai>=1.55.3`,
+`anthropic>=0.41`) and a Python 3.12 leg.
+
+**Still open:** S1, splitting `ui/qt/main_window.py`, `core/session.py`
+and `config/settings.py` along the seams the review named, when each is
+next worked on. Tracked in `TODO.md` §4.
+
+**Also in 1.1.0.** Repeating workflow steps (`repeat_until`), for long
+batch jobs that keep their progress in a state file; a fix for queued
+signals from a retired `ChatBridge` reaching the new chat (Qt delivers an
+already-queued cross-thread call even after `disconnect()`, which showed
+up as a Windows-only CI failure); and live application of changed global
+allowed folders.

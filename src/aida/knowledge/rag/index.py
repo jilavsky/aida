@@ -20,6 +20,8 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
+from aida.persistence.migrate import apply_migrations
+
 CURRENT_SCHEMA_VERSION = 1
 
 _MIGRATIONS: dict[int, str] = {
@@ -85,14 +87,9 @@ def connect(path: Path) -> sqlite3.Connection:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    current = conn.execute("PRAGMA user_version").fetchone()[0]
-    for version in range(current + 1, CURRENT_SCHEMA_VERSION + 1):
-        script = _MIGRATIONS.get(version)
-        if script is None:
-            continue
-        conn.executescript(script)
-        conn.execute(f"PRAGMA user_version = {version}")  # noqa: S608 - version is our own fixed int range
-    conn.commit()
+    apply_migrations(
+        conn, _MIGRATIONS, CURRENT_SCHEMA_VERSION, database_label="Knowledge-base index"
+    )
 
 
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:

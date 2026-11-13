@@ -62,6 +62,26 @@ def test_step_form_result_step_round_trips(qapp):
     assert step.expect_files == ["*.png", "*.pdf"]
 
 
+def test_step_form_repeat_fields_round_trip(qapp):
+    step = WorkflowStep(prompt="Next batch.", repeat_until="scan.done", max_passes=15)
+    dialog = StepFormDialog(step=step)
+    assert dialog._repeat_until_edit.text() == "scan.done"
+    assert dialog._max_passes_spin.value() == 15
+    assert dialog._max_passes_spin.isEnabled()
+    edited = dialog.result_step()
+    assert edited.repeat_until == "scan.done"
+    assert edited.max_passes == 15
+
+
+def test_step_form_without_repeat_disables_max_passes(qapp):
+    dialog = StepFormDialog()
+    assert not dialog._max_passes_spin.isEnabled()
+    dialog._prompt_edit.setPlainText("Plot it.")
+    assert dialog.result_step().repeat_until is None
+    dialog._repeat_until_edit.setText("x.done")
+    assert dialog._max_passes_spin.isEnabled()
+
+
 def test_step_form_rejects_blank_prompt(qapp, monkeypatch):
     dialog = StepFormDialog()
     warned = []

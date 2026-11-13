@@ -72,7 +72,7 @@ untouched. `{user}` placeholders survive too — see
 | MCP server definitions | Artifacts and knowledge-base indexes |
 | Knowledge-base definitions | Window size/position, font size, layout |
 | Schedules and stored workflows | Personal context and workspace notes *(unless you ask)* |
-| Skills and prompt files | |
+| Skills (folder skills with their scripts) and prompt files | Caches inside skill folders (`__pycache__`, hidden files) |
 
 A bundle is a plain zip — open it and read it before sending it to anyone.
 `README.txt` inside says what it holds, `secrets.json` lists the secret

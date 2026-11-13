@@ -311,6 +311,10 @@ async def test_rebuild_with_one_good_and_one_missing_folder_ingests_the_good_one
 @pytest.mark.skipif(
     sys.platform == "win32", reason="chmod-based permission denial isn't meaningful on Windows"
 )
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root can list a chmod 000 folder, so there is nothing to deny (e.g. in a container)",
+)
 @pytest.mark.asyncio
 async def test_rebuild_reports_a_folder_it_cannot_actually_list(tmp_path: Path):
     """A folder can pass `is_dir()` while still being unreadable — the case

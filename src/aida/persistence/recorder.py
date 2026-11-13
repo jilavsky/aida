@@ -105,6 +105,9 @@ class ConversationRecorder:
         #: turn, session close) rather than waiting out the interval.
         self._transcript_dirty = False
         self._last_transcript_export: float | None = None
+        #: True while opportunistic transcript writes keep failing, so the
+        #: warning is logged once per run of failures (``_try_export_transcript``).
+        self._transcript_export_failing = False
         #: Cached so the row is written once per conversation, not on every
         #: attachment. Populated from the row on resume.
         self._attachments_path: Path | None = None
@@ -253,8 +256,34 @@ class ConversationRecorder:
             >= self.transcript_min_interval_seconds
         )
         if elapsed_enough:
-            self.export_transcript()
+            self._try_export_transcript()
         return seq
+
+    def _try_export_transcript(self) -> None:
+        """The opportunistic transcript write from ``record_message``.
+
+        The message is already durable in the DB at this point; the
+        Markdown file is a convenience copy. An ``OSError`` here (the file
+        open and locked in another program on Windows, a sync client holding
+        it, a records folder on a share that has dropped) must not fail the
+        turn, so it is logged — once per run of failures, not on every
+        message — and the transcript stays dirty for a later
+        ``flush_transcript`` to retry. The rate-limit clock is still
+        advanced, so a hanging share is not retried on every message.
+        """
+        try:
+            self.export_transcript()
+        except OSError as exc:
+            self._last_transcript_export = time.monotonic()
+            if not self._transcript_export_failing:
+                logger.warning(
+                    "could not write the conversation transcript %s (will retry): %s",
+                    self._record_path,
+                    exc,
+                )
+            self._transcript_export_failing = True
+        else:
+            self._transcript_export_failing = False
 
     def _own_attached_images(self, images: list[ImageRef]) -> list[ImageRef]:
         """Copy each attachment into the artifact store and return refs to

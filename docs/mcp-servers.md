@@ -1,6 +1,6 @@
 # MCP servers
 
-> **Status: 1.0.0.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
 > [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
@@ -119,6 +119,12 @@ MCP client) reaches it over stdio or http is entirely the connecting
 client's choice; a server that supports streamable-HTTP typically offers it
 via a `--transport http` flag of its own (check that server's docs).
 
+Adding a remote server is treated as trusting it, the same as a local one:
+its tools run without asking, and the agent's tool arguments are sent to
+that URL. List a tool in `confirm_tools` (see
+[Per-tool permissions](#per-tool-permissions)) if you want to approve each
+call.
+
 ## Adding a server via CLI
 
 ```bash
@@ -234,7 +240,10 @@ immediately, no separate "Save" step for most actions).
   servers at once (e.g. at workspace launch) launches them concurrently
   rather than one after another, so N servers cost roughly the slowest
   single handshake, not the sum of all of them; one server failing to
-  start still leaves the rest running normally.
+  start still leaves the rest running normally. If a server's process
+  crashes during a chat, its next tool call tells the model (and you) that
+  it has stopped, and the server shows as stopped here: select it and
+  click **Restart**. In `aida chat`, start a new chat.
 - **Test Connection** does the same initialize-and-list-tools check as
   `aida mcp server test`, reporting tool count and timing (or the error).
 - **Import mcp.json…** file-picks a config and merges it the same
