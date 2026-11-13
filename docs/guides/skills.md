@@ -63,7 +63,7 @@ becomes active in any of these ways, and they add up:
    [workspaces.md](workspaces.md).
 2. **An MCP server attaches it**: a server's `skills` list in `mcp.json`
    is loaded whenever that server is running, for example
-   `pyirena-usage` with pyIrena. See [mcp-servers.md](mcp-servers.md).
+   `pyirena-usage` with pyIrena. See [mcp-servers.md](../reference/mcp-servers.md).
 3. **You switch it on for this chat**: the Skills panel in the GUI, or
    `--skills a,b` on `aida chat` / `aida-gui`. **Save to Workspace** in the
    panel keeps the choice.
@@ -75,7 +75,7 @@ Skills panel); a new chat always reads the current files.
 
 Every active skill costs context on every turn, so keep skills focused, and
 switch off the ones a chat doesn't need. See
-[context-and-limits.md](context-and-limits.md).
+[context-and-limits.md](../reference/context-and-limits.md).
 
 ## Shipping code with a skill
 
@@ -135,7 +135,7 @@ The skills folder is **read-only** for the agent:
 Writes always ask so that the agent cannot quietly rewrite its own
 instructions or code. If you want the agent to improve a skill, approve the
 write when it asks, or edit the file yourself. See
-[safety-and-permissions.md](safety-and-permissions.md).
+[safety-and-permissions.md](../reference/safety-and-permissions.md).
 
 ## Writing a good skill
 
@@ -155,7 +155,7 @@ write when it asks, or edit the file yourself. See
 ## Sample skills
 
 AIDA ships a few starter skills (`saxs-basics`, `pyirena-usage`,
-`review-checklist`, and others, in the repo's [`skills/`](../skills/)
+`review-checklist`, and others, in the repo's [`skills/`](https://github.com/jilavsky/aida/tree/main/skills)
 folder). `aida mcp add-pyirena` installs the ones pyIrena uses. A skill
 already in `~/.aida/skills/` is never overwritten by an install or an
 upgrade: once it is there, it is yours. The same rule applies to folder

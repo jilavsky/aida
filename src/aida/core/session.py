@@ -1537,7 +1537,7 @@ async def _start_session(
         command_allowlist=settings.app.command_allowlist
         + (workspace.command_allowlist if workspace else []),
         # Skill scripts/reference files are readable without asking; writes
-        # are always confirmed (SafetyGuard.read_only_roots, docs/skills.md).
+        # are always confirmed (SafetyGuard.read_only_roots, docs/guides/skills.md).
         read_only_folders=[str(skills_dir())],
     )
 

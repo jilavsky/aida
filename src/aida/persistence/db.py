@@ -263,7 +263,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
         # a one-time switch per database: every connection after the first
         # that ever ran this line just confirms the file is already in WAL
         # mode. Requires the DB file on local disk, not a network share
-        # (SQLite's own WAL constraint) — noted in docs/installation.md.
+        # (SQLite's own WAL constraint) — noted in docs/getting-started/installation.md.
         #
         # Under the same _migrate_lock as _migrate() below, not before it:
         # this exact PRAGMA is itself a real instance of the race that

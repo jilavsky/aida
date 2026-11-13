@@ -3,10 +3,10 @@
 > **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
 > is still open.
 
-**Related:** [workspaces.md](workspaces.md) · [safety-and-permissions.md](safety-and-permissions.md) · [context-and-limits.md](context-and-limits.md)
+**Related:** [workspaces.md](../guides/workspaces.md) · [safety-and-permissions.md](safety-and-permissions.md) · [context-and-limits.md](context-and-limits.md)
 
 
 ## Shortcut: pyIrena and Bernardyn
@@ -14,11 +14,11 @@
 If pyIrena is what you're here for, skip the manual setup below —
 `aida mcp add-pyirena` (or the MCP dialog's **Add pyIrena…** button) finds
 it and configures the server, its group, and its skills in one step. See
-[pyirena.md](pyirena.md).
+[pyirena.md](../guides/pyirena.md).
 
 `aida mcp add-bernardyn` (or **Add Bernardyn…**) does the same for
 [Bernardyn](https://github.com/jilavsky/Bernardyn)'s five publication-figure
-tools — see [bernardyn.md](bernardyn.md). On the first-run onboarding
+tools — see [bernardyn.md](../guides/bernardyn.md). On the first-run onboarding
 screen, one button adds whichever of the two it detects.
 
 The rest of this file covers adding any other MCP server by hand.
@@ -301,7 +301,7 @@ its inline "add a new group" box, but the Groups… dialog's version handles
 several servers at once. Picking a name that already exists asks for
 confirmation before adding the checked servers to it.
 
-A [workspace](workspaces.md) picks exactly one group via
+A [workspace](../guides/workspaces.md) picks exactly one group via
 `WorkspaceConfig.mcp_group`; every server listing that group name is
 started and offered to the model for that workspace's sessions. The
 sentinel value `"none"` (the default) means no MCP servers/tools at all for
@@ -338,7 +338,7 @@ the same way you'd add and group any other MCP server described above. The
 exact `--command`/`--arg` values depend on which search server you install
 (check its own docs), but the shape is the same as any other server, e.g.:
 
-```bash
+```text
 aida mcp server add brave-search \
   --command npx \
   --arg -y --arg <the search server's package name> \
@@ -347,7 +347,7 @@ aida mcp server add brave-search \
 ```
 
 Then set `mcp_group: web-search` on the workspace(s) that should have it
-(see [workspaces.md](workspaces.md)).
+(see [workspaces.md](../guides/workspaces.md)).
 
 This is different from `fetch_url`, which **is** a small built-in tool (no
 MCP server needed) that fetches a page's readable text — but it always
@@ -392,6 +392,6 @@ ways to fix it:
 
 ## Full example
 
-See [`examples/config/mcp.json`](../examples/config/mcp.json) in the repo
+See [`examples/config/mcp.json`](https://github.com/jilavsky/aida/blob/main/examples/config/mcp.json) in the repo
 for a fully commented, complete `mcp.json` covering a pyIrena analysis
 server and an instrument-control server, each in their own group.

@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import re
 
+from aida._docs import docs_url
+
 _GLIBC_RE = re.compile(r"GLIBC_(\d+\.\d+)")
 
-_INSTALLATION_DOC = "docs/installation.md#gui-fails-to-import-on-headless-linux"
+_INSTALLATION_DOC = docs_url("gui_import_headless")
 
 
 def diagnose_pyside6_import_error(exc: BaseException) -> str:

@@ -3,10 +3,10 @@
 > **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
 > is still open.
 
-**Related:** [pyirena.md](pyirena.md) · [mcp-servers.md](mcp-servers.md) · [workspaces.md](workspaces.md)
+**Related:** [pyirena.md](pyirena.md) · [mcp-servers.md](../reference/mcp-servers.md) · [workspaces.md](workspaces.md)
 
 [Bernardyn](https://github.com/jilavsky/Bernardyn) is the publication-figure
 workbench for the same scattering data pyIrena fits. Its MCP server

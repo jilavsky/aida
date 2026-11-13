@@ -38,7 +38,7 @@ for the rationale.
   conversation's own folder with the text that was extracted from it, and
   deleted again with the conversation. Ask about a figure and the agent
   fetches that one by label rather than being handed every image in the
-  file. Optional [Mistral OCR](docs/documents.md#optional-mistral-ocr) makes
+  file. Optional [Mistral OCR](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/documents.html#optional-mistral-ocr) makes
   those labels reliable on multi-column journal PDFs — off by default, per
   workspace, and it asks before a document leaves your machine.
 - **Keep conversations sorted** — label them by person on a shared beamline
@@ -75,8 +75,8 @@ aida mcp add-pyirena
 workbench, wires up the same way (`aida mcp add-bernardyn`), and the GUI's
 first-run screen offers one button that adds whichever of the two it finds.
 
-See [`docs/pyirena.md`](docs/pyirena.md) and
-[`docs/bernardyn.md`](docs/bernardyn.md) for the compatibility details and
+See [AIDA with pyIrena](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/pyirena.html) and
+[AIDA with Bernardyn](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/bernardyn.html) for the compatibility details and
 the GUI equivalents.
 
 From a git checkout, for development:
@@ -92,7 +92,7 @@ aida doctor
 `environment.yml` already includes the `gui`, `docs` and `ocr` extras. If
 `aida doctor` or `aida-gui` says PySide6 isn't installed on a headless
 Linux machine even though the install above reported no errors, see
-[GUI fails to import on headless Linux](docs/installation.md#gui-fails-to-import-on-headless-linux)
+[GUI fails to import on headless Linux](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/getting-started/installation.html#gui-fails-to-import-on-headless-linux)
 — it's usually a missing system Qt library, not a missing Python package.
 
 ## First run
@@ -104,16 +104,17 @@ Linux machine even though the install above reported no errors, see
    (`aida workspace new`).
 3. Pick a workspace and profile in the toolbar and start typing.
 
-[`docs/installation.md`](docs/installation.md) →
-[`docs/providers-and-secrets.md`](docs/providers-and-secrets.md) →
-[`docs/workspaces.md`](docs/workspaces.md) is the full path from nothing to a
+[Installation](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/getting-started/installation.html) →
+[Providers and secrets](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/reference/providers-and-secrets.html) →
+[Workspaces](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/workspaces.html) is the full path from nothing to a
 working session.
 
 ## Documentation
 
 Task-oriented setup and configuration guides — providers, workspaces, the
-safety model, MCP servers, scripting, RAG, a GUI tour — live in
-[`docs/`](docs/README.md). Fully-commented example config files are in
+safety model, MCP servers, scripting, RAG, a GUI tour — are on Read the Docs:
+<https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/> (sources in
+[`docs/`](docs/)). Fully-commented example config files are in
 [`examples/config/`](examples/config/).
 
 ## Status and roadmap
@@ -122,9 +123,9 @@ All ten phases are implemented: config and diagnostics, the provider layer
 and agent loop, MCP with typed artifacts, persistence and workspaces, the
 PySide6 GUI, documents and the safety model, MCP management UI, RAG,
 coding/scripting, headless automation (`aida run`, stored workflows, the
-in-app scheduler — see [`docs/workflows.md`](docs/workflows.md)), and
+in-app scheduler — see [Workflows](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/workflows.html)), and
 moving a setup between machines
-([`docs/moving-and-sharing.md`](docs/moving-and-sharing.md)).
+([Moving and sharing](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/moving-and-sharing.html)).
 
 What is still open — manual acceptance checks that need a real beamline, a
 conda-forge decision, full backup/restore — is in [`TODO.md`](TODO.md).

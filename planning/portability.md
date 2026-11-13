@@ -10,7 +10,7 @@ deliverables (a share bundle and a full backup) built on one format. The
 share bundle is now built, and so is selective import — `aida.portability`,
 `aida config export/import`, File → Export/Import Setup… — see §10 for what
 shipped and §9 for the decisions that shaped it. User-facing guide:
-[`docs/moving-and-sharing.md`](../docs/moving-and-sharing.md).
+[`docs/guides/moving-and-sharing.md`](../docs/guides/moving-and-sharing.md).
 
 Related: `planning/completed/multiuser_plan.md` (the `{user}` axis, already shipped —
 it interacts with path rewriting), `planning/DESIGN.md` §4 (the two-root

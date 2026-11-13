@@ -3,10 +3,10 @@
 > **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
 > is still open.
 
-**Related:** [workspaces.md](workspaces.md) · [coding-and-scripting.md](coding-and-scripting.md) · [mcp-servers.md](mcp-servers.md)
+**Related:** [workspaces.md](../guides/workspaces.md) · [coding-and-scripting.md](../guides/coding-and-scripting.md) · [mcp-servers.md](mcp-servers.md)
 
 ## The mental model
 
@@ -33,7 +33,7 @@ the agent. It may read files there and run a skill's scripts (subject to
 the mode, like any script run) without the folder being in the allowed
 set, but every write or delete there asks, in both modes, so the agent
 cannot quietly rewrite its own instructions or code. See
-[skills.md](skills.md#what-the-agent-may-do-with-skill-files).
+[skills.md](../guides/skills.md#what-the-agent-may-do-with-skill-files).
 
 **Reads are never gated inside the allowed set**, in either mode — if a
 folder is configured as a source/target folder (or globally allowed), the
@@ -137,7 +137,7 @@ workspace is `relaxed` or `confirm`:
 
 (Running a script that already lives in an allowed folder, via
 `run_python_script`, is different from `run_command` — see
-[coding-and-scripting.md](coding-and-scripting.md) for that distinction and
+[coding-and-scripting.md](../guides/coding-and-scripting.md) for that distinction and
 when to use which.)
 
 ## Deletes go to `_trash`, not gone
@@ -176,9 +176,9 @@ The allowlist is configured in two places that get unioned together:
 To edit the per-workspace list, use `aida workspace edit NAME
 --command-allowlist "git status,git log *"` (comma-separated patterns) or
 the FolderDisplay panel in the GUI — see
-[workspaces.md](workspaces.md) for the full editing workflow.
+[workspaces.md](../guides/workspaces.md) for the full editing workflow.
 
-See [coding-and-scripting.md](coding-and-scripting.md) for guidance on
+See [coding-and-scripting.md](../guides/coding-and-scripting.md) for guidance on
 *when* to reach for the allowlist versus not: it's meant for a short list of
 fixed, known-safe invocations (`git status`, a specific lint/test command,
 etc.), not for ad hoc one-off shell commands. For "run some Python I don't

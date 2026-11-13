@@ -3,10 +3,10 @@
 > **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
 > is still open.
 
-**Related:** [safety-and-permissions.md](safety-and-permissions.md) · [workspaces.md](workspaces.md)
+**Related:** [safety-and-permissions.md](../reference/safety-and-permissions.md) · [workspaces.md](workspaces.md)
 
 ## The pieces
 
@@ -19,7 +19,7 @@ six `WorkspaceConfig` fields:
 | `python_interpreter` | `None` | Path to the `python` executable `run_python_script` runs with. `None` uses whatever AIDA itself runs under. |
 | `templates_dir` | `None` | A flat folder of `.py` files whose docstrings get surfaced to the model as house-convention templates. |
 | `saved_scripts_dir` | `None` | Where the Code Editor's Save/Save As write to. `None` defaults to `<target_folder>/saved_scripts`. |
-| `command_allowlist` | `[]` | Shell command patterns `run_command` may run without asking — see [safety-and-permissions.md](safety-and-permissions.md). |
+| `command_allowlist` | `[]` | Shell command patterns `run_command` may run without asking — see [safety-and-permissions.md](../reference/safety-and-permissions.md). |
 | `script_timeout_seconds` | `30.0` | Seconds a `run_python_script`/`run_command` invocation (or a Code Editor **Run**) gets before its subprocess is killed — see below. |
 
 ## `scripting_enabled` — the master switch
@@ -110,7 +110,7 @@ timeout (see `script_timeout_seconds` above), using the workspace's
 `python_interpreter`.
 
 **`run_command` is gated by both** folder containment *and* the command
-allowlist (see [safety-and-permissions.md](safety-and-permissions.md) for
+allowlist (see [safety-and-permissions.md](../reference/safety-and-permissions.md) for
 the full allowlist syntax) — both conditions have to hold before the
 workspace's `confirm`/`relaxed` mode even applies; if either fails, it
 always asks first.

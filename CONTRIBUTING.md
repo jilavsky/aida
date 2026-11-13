@@ -50,7 +50,7 @@ Questions or design discussion: open a GitHub issue on
    `publish.yml` re-checks both against the tag before building, because
    PyPI will not let a version be re-uploaded once it is wrong.
 3. Update the `**Status: ...**` line at the top of `README.md`, `PLAN.md`,
-   and every file under `docs/` that carries one.
+   and every page under `docs/` that carries one (including `docs/index.md`).
 4. Commit, tag `vX.Y.Z`, push the tag, and publish a GitHub release from
    it — `.github/workflows/publish.yml` fires on release publication and
    uploads to PyPI through trusted publishing. Do not run `twine` by hand.

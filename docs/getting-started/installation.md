@@ -3,10 +3,10 @@
 > **Status: 1.1.0.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
-> [`CHANGELOG.md`](../CHANGELOG.md). See [`TODO.md`](../TODO.md) for what
+> [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
 > is still open.
 
-**Related:** [providers-and-secrets.md](providers-and-secrets.md) (next step after install) · [gui-overview.md](gui-overview.md)
+**Related:** [providers-and-secrets.md](../reference/providers-and-secrets.md) (next step after install) · [gui-overview.md](gui-overview.md)
 
 ## Install from PyPI
 
@@ -60,7 +60,7 @@ Once `aida doctor` is clean, you still need one provider profile and
 - **GUI:** launch `aida-gui`. On a fresh install it offers to set up a
   provider profile and a first workspace; you can reopen either later from
   the **Configure** menu's **Providers…** and **Workspaces…** entries.
-- **CLI:** see [providers-and-secrets.md](providers-and-secrets.md) for the
+- **CLI:** see [providers-and-secrets.md](../reference/providers-and-secrets.md) for the
   `providers.yaml` format and `aida config secret set` for API keys, then
   `aida workspace new` for a workspace.
 
@@ -76,7 +76,7 @@ aida mcp add-pyirena
 ```
 
 `aida doctor` reports whether pyIrena is installed and whether AIDA is
-configured to use it. See [pyirena.md](pyirena.md), which also covers
+configured to use it. See [pyirena.md](../guides/pyirena.md), which also covers
 installing both packages into one environment.
 
 ## `aida doctor`
@@ -88,7 +88,7 @@ checks, and reports pass/fail for each:
 - `~/.aida/config.yaml`, `providers.yaml`, `workspaces.yaml`, `mcp.json`
   parse and load correctly
 - The OS keychain backend is available (needed for provider secrets —
-  see [providers-and-secrets.md](providers-and-secrets.md))
+  see [providers-and-secrets.md](../reference/providers-and-secrets.md))
 - The `gui` extra: PySide6 not installed is reported OK (a CLI-only install
   is a normal, deliberate choice), but PySide6 *installed and still failing
   to import* is flagged — see
@@ -102,6 +102,7 @@ A clean `aida doctor` run means the app is ready to configure further —
 it doesn't yet mean you have a working chat session, since that also
 needs at least one provider profile (next: `providers-and-secrets.md`).
 
+(gui-fails-to-import-on-headless-linux)=
 ### GUI fails to import on headless Linux
 
 `aida-gui` (and `aida doctor`'s `gui` check) says PySide6 isn't installed,
@@ -165,7 +166,7 @@ package fixes this: unlocking is normally done by a desktop login prompt,
 which doesn't exist here.
 
 The supported workaround, already the documented order of precedence in
-[providers-and-secrets.md](providers-and-secrets.md#secrets), is to skip
+[providers-and-secrets.md](../reference/providers-and-secrets.md#secrets), is to skip
 the keychain entirely and set the secret as an environment variable instead
 — it's checked before the keychain on every lookup:
 
@@ -213,7 +214,7 @@ share (NFS, SMB, a mapped drive), keep `aida.db` off it, or expect SQLite
 locking errors.
 
 Secrets (API keys, the ANL Argo username) never live in any of these
-files — see [providers-and-secrets.md](providers-and-secrets.md).
+files — see [providers-and-secrets.md](../reference/providers-and-secrets.md).
 
 ### Overriding the location
 
@@ -228,7 +229,7 @@ aida doctor
 
 ## Fully-commented example configs
 
-[`examples/config/`](../examples/config/) in the repo has illustrative,
+[`examples/config/`](https://github.com/jilavsky/aida/tree/main/examples/config) in the repo has illustrative,
 fully-commented versions of `config.yaml`, `providers.yaml`,
 `workspaces.yaml`, and `mcp.json` — **not** auto-copied anywhere, just
 reference material the other docs in this folder link to instead of

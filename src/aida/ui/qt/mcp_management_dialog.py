@@ -637,7 +637,7 @@ class GroupsDialog(QDialog):
     group's row show a real tool-count sum for its *running* member
     servers — the reminder of why lean groups matter for a small local
     model once tool schemas are counted (see
-    ``docs/context-and-limits.md``). A server that isn't running
+    ``docs/reference/context-and-limits.md``). A server that isn't running
     contributes no number (there's no way to know its tool count without
     starting it), so the row says so explicitly rather than silently
     under-counting.
