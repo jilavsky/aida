@@ -1,3 +1,4 @@
+(workspaces)=
 # Workspaces
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -8,6 +9,7 @@
 
 **Related:** [safety-and-permissions.md](../reference/safety-and-permissions.md) · [mcp-servers.md](../reference/mcp-servers.md) · [coding-and-scripting.md](coding-and-scripting.md) · [knowledge-bases.md](knowledge-bases.md)
 
+(workspaces-what)=
 ## What a workspace is
 
 A workspace is a named bundle of everything AIDA needs to work on one
@@ -22,6 +24,7 @@ Workspaces live in `~/.aida/workspaces.yaml`, keyed by name. You can manage
 them with the `aida workspace` CLI or, for the parts that already have an
 editor, from the GUI's **Configure** menu.
 
+(workspaces-fields)=
 ## Fields
 
 | Field | Default | What it does |
@@ -41,8 +44,11 @@ editor, from the GUI's **Configure** menu.
 | `templates_dir` | `None` | Folder of `.py` code templates offered to this workspace; `None` means no templates — see [coding-and-scripting.md](coding-and-scripting.md). |
 | `saved_scripts_dir` | `None` | Where the Code Editor saves scripts; `None` defaults to `<target_folder>/saved_scripts` — see [coding-and-scripting.md](coding-and-scripting.md). |
 | `quick_tasks` | `[]` | Up to ten named prompt templates for this workspace's routine jobs, shown in the GUI's **Quick Tasks** panel — see [gui-overview.md](../getting-started/gui-overview.md). Each entry is a `name`/`text` pair; managed from the panel's right-click menu, no CLI flag. |
+% CHECK(Jan): the table has no rows for `use_ocr` (the form's "Document OCR" checkbox, see
+% guides/documents.md) or `notes` (the "Workspace Notes" panel); both are WorkspaceConfig fields.
 | `script_timeout_seconds` | `30.0` | Seconds a `run_python_script`/`run_command` invocation gets before its subprocess is killed — a true per-workspace ceiling (a model-requested longer timeout is capped at this, not honored unbounded) — see [coding-and-scripting.md](coding-and-scripting.md). |
 
+(workspaces-cli)=
 ## CLI usage
 
 ```bash
@@ -83,6 +89,7 @@ aida workspace new usaxs-review \
 aida workspace edit usaxs-review --safety confirm
 ```
 
+(workspaces-gui)=
 ## GUI usage
 
 The toolbar's **workspace selector** dropdown lists every configured
@@ -121,6 +128,15 @@ One limit: MCP servers that were started with folder paths of their own
 until they are restarted. AIDA's own file, document and script tools pick
 up the new folders right away.
 
+(workspaces-dialog)=
+### The Workspaces dialog
+
+```{figure} img/workspaces/workspaces-01-management.png
+:alt: The Workspaces dialog. On the left a list with notebook and saxs-analysis, saxs-analysis selected, and the buttons Add, Edit and Remove; on the right a Details box listing every field of saxs-analysis, from profile local-ollama and its folders to quick_tasks and notes.
+
+**Configure → Workspaces…**: every saved workspace, with all fields of the selected one.
+```
+
 Separately, **Configure → Workspaces…** opens the Workspace
 Management dialog — Add…/Edit…/Remove… against the full list of saved
 workspaces, persisted immediately (no "Save to Workspace" step). Its
@@ -131,10 +147,17 @@ at all: `profile`, `mcp_group`, `skills`, `knowledge_bases`,
 **Script/command timeout** spinner (1-3600s) for `script_timeout_seconds`,
 and folder pickers for `templates_dir` and `saved_scripts_dir`.
 
+```{figure} img/workspaces/workspaces-02-edit-form.png
+:alt: The Edit Workspace form for saxs-analysis, scrolled to the top. Fields for name, profile, source folders, target folder, sidecar folder name, MCP group, skills and knowledge bases as tick lists, safety mode, system prompt with a Use a File Reference button, Document OCR, and the Scripting group with enabled, Python interpreter, command allowlist, script and command timeout and templates folder. OK and Cancel at the bottom.
+
+**Edit…** on `saxs-analysis`: the form scrolls; OK and Cancel stay visible.
+```
+
 The only two fields it does not edit are `quick_tasks` and `notes`, each of
 which has its own panel in the main window; both survive an edit here
 untouched.
 
+(workspaces-example)=
 ## Full example
 
 See [`examples/config/workspaces.yaml`](https://github.com/jilavsky/aida/blob/main/examples/config/workspaces.yaml)
