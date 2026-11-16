@@ -51,3 +51,11 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | ID | page | dataset | state to set up | must show | automated? | status |
 |---|---|---|---|---|---|---|
 | skills-01-panel | skills | all bundled sample skills installed | main window, standard settings; grab the Skills section | one checkbox per skill, pyirena-usage and saxs-basics ticked, Reload, Save to Workspace | yes | done |
+
+## organizing-conversations
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| organizing-conversations-01-sidebar | organizing-conversations | 5 seeded conversations, users usaxs-team, saxs-student, none | main window, sidebar filter All users; grab the sidebar | filter (1), search (2), date headings, two-line entries incl. one without a label | yes | done |
+| organizing-conversations-02-manage-users | organizing-conversations | same | Manage Users dialog, usaxs-team selected | labels with counts, active marker, New User / Rename or Merge / Clear Label | yes | done |
+| organizing-conversations-03-move-to-user | organizing-conversations | same | sidebar right-click menu on the first entry, Move to User submenu open | both menus side by side | yes | done |

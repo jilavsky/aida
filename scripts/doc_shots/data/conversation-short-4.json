@@ -1,0 +1,10 @@
+{
+  "title": "Guinier fits for the student samples",
+  "workspace": "saxs-analysis",
+  "profile": "local-ollama",
+  "user": "saxs-student",
+  "messages": [
+    {"role": "user", "content": "Fit a Guinier region for each of my samples."},
+    {"role": "assistant", "content": "Here are the Guinier fits."}
+  ]
+}
