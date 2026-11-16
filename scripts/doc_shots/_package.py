@@ -94,6 +94,12 @@ def make_app():
     from aida.ui.qt.icon import app_icon
 
     app.setWindowIcon(app_icon())
+    # AIDA's default font size, as aida-gui applies it at start-up, so a
+    # dialog shot does not depend on what an earlier shot set.
+    from aida.config.settings import AppConfig
+    from aida.ui.qt.window_state import apply_font_size
+
+    apply_font_size(app, AppConfig())
     return app
 
 
