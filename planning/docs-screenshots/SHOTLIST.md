@@ -115,3 +115,10 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | moving-and-sharing-01-export | moving-and-sharing | none | File → Export Setup… dialog, destination /tmp/aida-docs/transfer | destination field, Browse…, the personal-fields checkbox (off) | yes | done |
 | moving-and-sharing-02-import-contents | moving-and-sharing | bundle exported in the shot from the scratch setup | Import Setup dialog on a "second machine" (fresh HOME/AIDA_HOME), only workspace saxs-analysis ticked | Contents tree with the workspace's dependencies ticked, and the "Also needed" line; callouts 1–2 | yes | done |
 | moving-and-sharing-03-import-paths | moving-and-sharing | same bundle | same dialog, Paths tab | rows for ${HOME}/Experiments/2026 and the bait conda env, editable "Use instead" column | yes | done |
+
+## pyirena
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| pyirena-01-inline-plot | pyirena | conversation-unified-overlay.json | resume the seeded conversation, window 1400×1180 | transcript: question, collapsed "2 tool calls" line (1), the I(Q) plot inline (2), the answer | yes | done |
+| pyirena-02-add-confirmation | pyirena | a machine with pyIrena installed in its own conda env | Configure → MCP Servers… → Add pyIrena…, stop at the "Add pyIrena MCP Server" question | the confirmation: Command, Found in, Version, Group, Skills, Env; crop the PATH value if it shows a home folder. Modal QMessageBox, so not automated | no | todo |
