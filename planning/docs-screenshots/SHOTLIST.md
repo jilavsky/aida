@@ -122,3 +122,9 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 |---|---|---|---|---|---|---|
 | pyirena-01-inline-plot | pyirena | conversation-unified-overlay.json | resume the seeded conversation, window 1400×1180 | transcript: question, collapsed "2 tool calls" line (1), the I(Q) plot inline (2), the answer | yes | done |
 | pyirena-02-add-confirmation | pyirena | a machine with pyIrena installed in its own conda env | Configure → MCP Servers… → Add pyIrena…, stop at the "Add pyIrena MCP Server" question | the confirmation: Command, Found in, Version, Group, Skills, Env; crop the PATH value if it shows a home folder. Modal QMessageBox, so not automated | no | todo |
+
+## bernardyn
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| bernardyn-01-add-confirmation | bernardyn | a machine with Bernardyn in its own conda env, a workspace with source and target folders active | Configure → MCP Servers… → Add Bernardyn…, stop at the confirmation question | command, groups (pyirena-analysis, bernardyn-plots), suggested BERNARDYN_OUTPUT_ROOT / DATA_ROOT; modal QMessageBox, so not automated; crop any home-folder PATH | no | todo |
