@@ -99,3 +99,11 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 |---|---|---|---|---|---|---|
 | documents-01-attached | documents | placeholder /tmp/aida-docs/papers/silica-pdms-usaxs.pdf | fresh session; file attached, question typed, not sent | chat column: attachment chip in the input box, Attach… button, callouts 1–2 | yes | done |
 | documents-02-settings-ocr | documents | none | Settings dialog on scratch config, no key | the Document OCR group: help text, key field, Verify key, Clear key | yes | done |
+
+## coding-and-scripting
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| coding-and-scripting-01-open-in-editor | coding-and-scripting | conversation-script.json | resume the seeded conversation | the assistant bubble with a code block and its "</> Open in Editor" button (callout 1) | yes | done |
+| coding-and-scripting-02-code-editor | coding-and-scripting | placeholder S1–S3_silica.h5 under /tmp/aida-docs/data/usaxs-2026-11 | Code Editor opened on saved_scripts/list_h5.py, Run clicked, finished | editor, button row, output pane with exit code and stdout; callouts 1–3 | yes | done |
+| coding-and-scripting-03-scripting-group | coding-and-scripting | none | workspace form for saxs-analysis | the Scripting group: Enabled, Python interpreter, Command allowlist, timeout, Templates and Saved scripts folders | yes | done |
