@@ -1,3 +1,4 @@
+(gui-overview)=
 # GUI overview
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -12,6 +13,39 @@ This is a map of the `aida-gui` window — what's where, and which doc covers
 it in depth. It's not a manual; each item below links to the file that
 explains its fields and behavior.
 
+(gui-overview-window)=
+## The window
+
+```{figure} img/gui-overview/gui-overview-01-window.png
+:alt: The AIDA main window. Menu bar and toolbar across the top with the User, Workspace and Profile selectors, New Chat, Code Editor and the red Documentation button. Below, three columns: the conversations sidebar on the left; in the middle the conversation title, a user question about Unified fits, a collapsed line reading 2 tool calls, an I(Q) plot returned by pyIrena and the start of the answer, with the input box under it; on the right the collapsible Folders, MCP Servers, Skills and Quick Tasks sections. The status bar reads Ready, local-ollama. Numbered circles mark the parts described in the legend.
+
+The AIDA window resuming a conversation with pyIrena: a question, two tool calls collapsed into
+one line, the I(Q) plot the tool returned, and the answer. (The conversation was written into a
+scratch database for the screenshot; no model was running.)
+```
+
+1. **Menu bar**: File, View, Configure and Help. See [Menus](#gui-overview-menus).
+2. **User selector**: who new conversations are labelled with.
+3. **Workspace selector**: the workspace this conversation runs in.
+4. **Profile selector**: the provider profile (model) answering.
+5. **New Chat** and **Code Editor…**.
+6. **Documentation**: opens these pages in your browser. Items 2–6 are described under
+   [Toolbar](#gui-overview-toolbar).
+7. **Conversations sidebar**: user filter, search, past conversations by date, and the
+   Resume / Delete… / Rename… / Clean Up… buttons. See
+   [Conversations sidebar](#gui-overview-sidebar).
+8. **Conversation title strip**: the name, with workspace, profile and user underneath. See
+   [Conversation title strip](#gui-overview-title-strip).
+9. **Transcript**: messages, tool calls collapsed into one line ("2 tool calls"), and images
+   returned by tools. See [Tool calls in the transcript](#gui-overview-tool-calls).
+10. **Input box** with **Send** and **Attach…**; **Stop** appears here while a turn runs. See
+    [Stopping a turn](#gui-overview-stopping).
+11. **Session column**: the active workspace's live state, in collapsible sections. See
+    [Main area](#gui-overview-main-area).
+12. **Status bar**: session status, token use and cost, context use. See
+    [Status bar](#gui-overview-status-bar).
+
+(gui-overview-toolbar)=
 ## Toolbar (left to right)
 
 - **User selector** — an editable box naming who (or what) new
@@ -46,6 +80,7 @@ At the right-hand end, separated from the rest:
   recognisable before anything has been read. The same link is under
   **Help → Documentation**.
 
+(gui-overview-menus)=
 ## Menus
 
 - **File → Open Config / Records / Scratch / Skills Folder** — opens each
@@ -67,6 +102,9 @@ At the right-hand end, separated from the rest:
 - **File → Manage Users…** — rename a label (renaming onto an existing name
   merges them), or clear one. Also **New User…**, which starts using a
   name. See [organizing-conversations.md](../guides/organizing-conversations.md).
+% CHECK(Jan): the File menu also has "Export Setup…" and "Import Setup…" (between "Export
+% Conversation As…" and "Compact Conversation"); they are not listed here. Covered in
+% guides/moving-and-sharing.md?
 - **File → Compact Conversation** — summarize older turns to free context.
   See [context-and-limits.md](../reference/context-and-limits.md).
 - **File → Save Conversation as Workflow…** — turn the prompts you have
@@ -96,6 +134,7 @@ At the right-hand end, separated from the rest:
 - **Help → Documentation** — opens this documentation in your web browser.
 - **Help → About AIDA** — version and project link.
 
+(gui-overview-main-area)=
 ## Main area
 
 The window splits into three columns:
@@ -103,7 +142,12 @@ The window splits into three columns:
 - **Conversations sidebar** (left) — see below.
 - **Chat column** (center) — a title strip, the message transcript, and
   the input box (attachments, drag-and-drop, cancel/send).
+% CHECK(Jan): the session column has five collapsible sections, titled "Folders", "MCP Servers",
+% "Skills", "Quick Tasks" and "Workspace Notes". Skills and Workspace Notes are not described
+% below, and the order below (Folders, Quick Tasks, MCP) differs from the window.
 - **Session column** (right) — the active workspace's live state:
+  % CHECK(Jan): the section header in the window says "Folders"; the "Workspace permissions"
+  % group-box title is cleared by CollapsibleSection, so that label is not visible.
   - **FolderDisplay** — labeled "Workspace permissions" in the UI, since it
     covers everything a session may touch, not just folders — shows the
     workspace's source folders, target folder, sidecar folder name, allowed
@@ -132,6 +176,7 @@ The window splits into three columns:
     checkboxes opens the full management dialog. See
     [mcp-servers.md](../reference/mcp-servers.md).
 
+(gui-overview-stopping)=
 ### Stopping a turn
 
 While a turn runs, a red **Stop** button appears beside Send (`Esc` does the
@@ -160,6 +205,7 @@ an aborted round trip is not counted, so the cost estimate in the status bar
 slightly under-reports a session you stop often — the request was still
 billed.
 
+(gui-overview-tool-calls)=
 ### Tool calls in the transcript
 
 When the agent goes off and does things — reading files, running a fit,
@@ -190,6 +236,7 @@ mode, so **if a turn goes wrong, switch to Expanded and the whole failed
 turn is right there to inspect** — nothing has to be re-run. That is the
 one to reach for before sending a bug report.
 
+(gui-overview-title-strip)=
 ### Conversation title strip
 
 Above the transcript, a strip shows what this conversation is called, with
@@ -201,6 +248,7 @@ every few turns — see
 Click the ✎ (or double-click the strip) to name it yourself. A name you
 type is never changed again.
 
+(gui-overview-sidebar)=
 ## Conversations sidebar
 
 Lists past conversations under date headings — **Today**, **Yesterday**,
@@ -230,7 +278,11 @@ name is put right. See [organizing-conversations.md](../guides/organizing-conver
 without opening it — the same "Export Conversation As…" dialog as the File
 menu's, see above.
 
+(gui-overview-dialogs)=
 ## Dialogs reachable from the Configure menu
+
+% CHECK(Jan): the Code Editor dialog at the end of this list opens from the toolbar, not the
+% Configure menu; the Workflows… and Schedules… dialogs (Configure menu) are not listed.
 
 - **Settings dialog** (`settings_dialog.py`) — font size and log level take
   effect immediately, no restart needed; also sets the records folder and
@@ -267,6 +319,7 @@ menu's, see above.
   Python scripts against the workspace's saved-scripts folder and
   interpreter. See [coding-and-scripting.md](../guides/coding-and-scripting.md).
 
+(gui-overview-first-launch)=
 ## First launch
 
 On a fresh install (no provider profiles configured), `aida-gui` opens an
@@ -277,7 +330,11 @@ settings are reachable from **Providers…**, **Workspaces…**, and
 **MCP Servers…** at any time. Afterwards the app reopens the workspace and
 profile you last used.
 
+(gui-overview-status-bar)=
 ## Status bar
+
+% CHECK(Jan): the status bar also shows a permanent "Context: Nk / Mk (P%)" label next to the
+% cost (described in reference/context-and-limits.md), not mentioned here.
 
 Shows session status messages (e.g. "Starting session…", "Ready — \<profile\>",
 "Startup failed", or a transient "Context trimmed: dropped N old turns (~M

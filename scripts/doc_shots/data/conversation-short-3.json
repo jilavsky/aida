@@ -1,0 +1,10 @@
+{
+  "title": "Size distributions for S1-S6",
+  "workspace": "saxs-analysis",
+  "profile": "local-ollama",
+  "user": "",
+  "messages": [
+    {"role": "user", "content": "Compare the size distributions of S1 to S6."},
+    {"role": "assistant", "content": "S1 to S6 all peak near 40 nm."}
+  ]
+}

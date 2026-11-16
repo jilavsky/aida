@@ -36,6 +36,27 @@ opening a PR:
    is what turns into that release's notes; it's cheap to add now and
    tedious to reconstruct later from commit messages.
 
+## Documentation screenshots
+
+The screenshots in `docs/` are made by a script, on a throw-away `AIDA_HOME`
+with AIDA's mock provider (no model, no network, no key; your `~/.aida`,
+records folder and keychain are not touched). With the `gui` extra installed:
+
+```bash
+python scripts/make_doc_screenshots.py                          # every shot
+python scripts/make_doc_screenshots.py --only gui-overview      # one page
+python scripts/make_doc_screenshots.py --only gui-overview-01-window
+python scripts/make_doc_screenshots.py --list
+```
+
+Each image is written next to its page (`<page dir>/img/<page>/<id>.png`).
+[`planning/docs-screenshots/SHOTLIST.md`](planning/docs-screenshots/SHOTLIST.md)
+lists every shot, including the ones still taken by hand (an invisible
+`% SCREENSHOT <id>: …` comment in the page until the image exists);
+`tests/test_doc_screenshots.py` keeps pages, list, images and the
+`scripts/doc_shots/<page>.py` modules in step. Fonts come from the operating
+system, so regenerate a page's shots on one machine.
+
 Questions or design discussion: open a GitHub issue on
 [jilavsky/aida](https://github.com/jilavsky/aida).
 

@@ -1,0 +1,10 @@
+{
+  "title": "Background level for the WAXS series",
+  "workspace": "saxs-analysis",
+  "profile": "local-ollama",
+  "user": "usaxs-team",
+  "messages": [
+    {"role": "user", "content": "What flat background did we use for the WAXS series last week?"},
+    {"role": "assistant", "content": "The stored fits use 0.012 cm⁻¹ for all twelve samples."}
+  ]
+}

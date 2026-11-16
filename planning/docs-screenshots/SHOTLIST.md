@@ -1,0 +1,24 @@
+# Documentation screenshots: shot list
+
+One row per screenshot in `docs/`. The ID is `<page>-<nn>-<what>`, where `<page>` is the page's
+file name; the image lives next to the page at `<page dir>/img/<page>/<id>.png`.
+
+- **automated: yes**: `python scripts/make_doc_screenshots.py --only <id>` makes it.
+- **automated: no**: needs judgment (real data, a tricky state, an OS dialog). The page holds an
+  invisible `% SCREENSHOT <id>: …` comment until the image exists; then replace the comment with
+  a `figure` that has alt text and a caption, and set the status to `done`.
+- **status**: `done` (image committed and shown), `todo` (placeholder only).
+
+`tests/test_doc_screenshots.py` checks that this list, the pages, the images and the
+`@shot` functions agree.
+
+Column order: ID · page · dataset · state to set up · must show · automated? · status.
+
+Inputs are under `scripts/doc_shots/data/` (seeded conversations as JSON, the returned plot PNG).
+Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, no network, no key.
+
+## gui-overview
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| gui-overview-01-window | gui-overview | conversation-unified-overlay.json + 3 short ones | resume the seeded pyIrena conversation, user usaxs-team, 1600×940 | whole window, 12 numbered callouts matching the legend | yes | done |

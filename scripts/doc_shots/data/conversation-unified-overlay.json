@@ -1,0 +1,58 @@
+{
+  "title": "Unified fits in the November folder",
+  "workspace": "saxs-analysis",
+  "profile": "local-ollama",
+  "user": "usaxs-team",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Which files in the source folder already have a Unified fit? Plot them together with their models."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "name": "pyirena__pyirena_list_files",
+          "arguments": {"folder": "/tmp/aida-docs/data/usaxs-2026-11"}
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "name": "pyirena__pyirena_list_files",
+      "content": "[{\"name\": \"unified_two_level.h5\", \"analyses\": [\"unified_fit\"]}, {\"name\": \"unified_one_level.h5\", \"analyses\": [\"unified_fit\"]}, {\"name\": \"unified_one_level_slitsmeared.h5\", \"analyses\": [\"unified_fit\"]}]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_2",
+          "name": "pyirena__pyirena_plot_iq",
+          "arguments": {
+            "paths": [
+              "/tmp/aida-docs/data/usaxs-2026-11/unified_two_level.h5",
+              "/tmp/aida-docs/data/usaxs-2026-11/unified_one_level.h5",
+              "/tmp/aida-docs/data/usaxs-2026-11/unified_one_level_slitsmeared.h5"
+            ],
+            "overlay": true
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_2",
+      "name": "pyirena__pyirena_plot_iq",
+      "content": "I(Q) plot of 3 files (PNG attached).",
+      "image": "pyirena-plot-iq.png"
+    },
+    {
+      "role": "assistant",
+      "content": "Three files have a stored Unified fit:\n\n| File | Q range (Å⁻¹) |\n|---|---|\n| `unified_two_level.h5` | 0.0001 – 0.3 |\n| `unified_one_level.h5` | 0.0005 – 0.3 |\n| `unified_one_level_slitsmeared.h5` | 0.0005 – 0.3 |\n\nThe plot above overlays each dataset with its Unified model. All three models follow the data from the Guinier knee down to the flat background. Do you want the fitted Rg and G values in a table?"
+    }
+  ]
+}
