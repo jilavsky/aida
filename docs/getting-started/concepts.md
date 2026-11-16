@@ -1,3 +1,4 @@
+(concepts)=
 # AIDA in ten boxes — concepts, and three setups that actually do something
 
 **Who this is for:** you have used Claude Desktop, ChatGPT, or Copilot, and
@@ -11,6 +12,10 @@ in that script and re-run it rather than redrawing anything by hand:
 ```bash
 python docs/getting-started/img/concepts/make_figures.py --png     # SVG for slides, PNG for anything else
 ```
+
+% CHECK(Jan): `--png` needs `cairosvg`, which is in no extra or environment.yml; without it the
+% script writes the SVGs and then stops with ModuleNotFoundError. The regenerated SVG matched the
+% committed one apart from its embedded metadata.
 
 ---
 
@@ -199,6 +204,7 @@ the message as much as the filled ones do.
 
 ---
 
+(concepts-minimum-configurations)=
 ## 6. Minimum working configurations
 
 ### 0. Prerequisites (once)
@@ -218,7 +224,7 @@ minutes: make an account at <https://openrouter.ai>, create an API key.
 > text, or anything under embargo. For real work use ANL Argo, a direct
 > Claude/OpenAI key, or a local Ollama model.
 
-In the GUI: **Providers… → Add**
+In the GUI: **Configure → Providers… → Add…**
 
 | Field | Value |
 |---|---|
@@ -230,8 +236,10 @@ In the GUI: **Providers… → Add**
 | Secret value | *your key* (stored in the OS keychain, never in a file) |
 | Max tokens | `8000` |
 | Context window | your model's real window — **not** the same field as max tokens |
-| Supports vision | on, if the model can see images |
+| Vision | on, if the model can see images |
 
+% CHECK(Jan): Test is a button in the Providers dialog (select the profile after OK), and the
+% result is a "Profile OK" / "Profile Not Reachable" message box, not a green indicator.
 Press **Test**. Green means the key works. Equivalent CLI:
 
 ```bash
@@ -304,8 +312,11 @@ fixes that but uploads the document, and asks first
 ```bash
 pip install "pyirena[mcp]"
 aida mcp add-pyirena --data-root /share1/USAXS_data
-aida mcp server test pyirena-mcp        # must list ~70 tools
+aida mcp test pyirena                   # must list ~70 tools
 ```
+
+% CHECK(Jan): with pyIrena 1.2.1 (the anisa env here) `aida mcp test pyirena` lists 28 tools, not
+% ~70. With several pyirena-mcp installs, `add-pyirena` stops and asks for --first or --command.
 
 `add-pyirena` writes the server, its group `pyirena-analysis`, and installs
 the `saxs-basics` and `pyirena-usage` skills — it never overwrites a skill
