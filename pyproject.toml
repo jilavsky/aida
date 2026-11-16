@@ -44,6 +44,7 @@ dependencies = [
 Homepage = "https://github.com/jilavsky/aida"
 Repository = "https://github.com/jilavsky/aida"
 Issues = "https://github.com/jilavsky/aida/issues"
+Documentation = "https://jilavsky-docs.readthedocs.io/projects/aida/"
 
 [project.optional-dependencies]
 # The `!=6.7.*,!=6.10.*` exclusions mirror pyirena[gui]'s own PySide6 pin,
