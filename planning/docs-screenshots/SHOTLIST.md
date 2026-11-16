@@ -22,3 +22,18 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | ID | page | dataset | state to set up | must show | automated? | status |
 |---|---|---|---|---|---|---|
 | gui-overview-01-window | gui-overview | conversation-unified-overlay.json + 3 short ones | resume the seeded pyIrena conversation, user usaxs-team, 1600×940 | whole window, 12 numbered callouts matching the legend | yes | done |
+
+## workspaces
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| workspaces-01-management | workspaces | standard settings | Workspaces dialog, saxs-analysis selected | list, Add/Edit/Remove, Details of saxs-analysis | yes | done |
+| workspaces-02-edit-form | workspaces | standard settings + usaxs-notes KB | Edit Workspace form for saxs-analysis | the form from Name down to the Scripting group, OK/Cancel | yes | done |
+
+## knowledge-bases
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| knowledge-bases-01-dialog | knowledge-bases | ollama-embed profile, usaxs-notes KB (not built) | Knowledge Bases dialog, usaxs-notes selected | list, Add/Edit/Remove/Rebuild/Update, Details | yes | done |
+| knowledge-bases-02-add-form | knowledge-bases | same | the Add/Edit form on usaxs-notes | name, source folders, embedding profile, chunk size and overlap | yes | done |
+| knowledge-bases-03-retrieval | knowledge-bases | two example passages (invented) | RetrievalRow, expanded | summary line, Details button, passages with file, heading, score, text | yes | done |
