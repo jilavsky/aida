@@ -3,7 +3,7 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 1.1.0, released 2026-11-13.** All ten phases are implemented,
+**Status: 1.1.1, released 2026-11-16.** All ten phases are implemented,
 tested (2,575 tests, three OSes, CI green on all six matrix legs) and in
 daily use. This file holds **only what is not done** —
 anything ticked here has been moved to `planning/COMPLETED.md`, and

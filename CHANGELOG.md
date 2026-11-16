@@ -16,6 +16,12 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-16
+
+Documentation release: the manual now lives on Read the Docs, and this is
+the first release to publish a `stable` version of it. No config,
+database or bundle format changes from 1.1.0; files from 1.1.0 load unchanged.
+
 ### Changed
 
 - **The documentation moved to Read the Docs**, at
@@ -1293,7 +1299,8 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/jilavsky/aida/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/jilavsky/aida/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/jilavsky/aida/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/jilavsky/aida/compare/v0.2.0...v1.0.0
