@@ -205,6 +205,18 @@ def test_no_path_is_invented_when_the_command_is_not_in_an_environment():
     assert "PATH" not in config.env
 
 
+def test_no_path_is_invented_from_a_bin_folder_in_the_current_directory(
+    tmp_path: Path, monkeypatch
+):
+    """A ``scripts/`` folder in the current directory (``Scripts`` on
+    case-insensitive Windows) does not make it the bare command's prefix."""
+    (tmp_path / BIN_DIRNAME).mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    config = pyirena_server_config(PyirenaMcpCandidate(command="pyirena-mcp"))
+    assert "PATH" not in config.env
+
+
 def test_interpreter_is_found_at_a_conda_prefix_root(tmp_path: Path):
     """Only a venv puts python.exe in Scripts\\; a conda prefix keeps it one
     level up. Searching just the script's own directory found neither the

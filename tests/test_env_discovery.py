@@ -194,6 +194,19 @@ def test_environment_prefix_is_none_for_a_bare_command():
     assert environment_prefix(ScriptCandidate(command="widget-mcp")) is None
 
 
+def test_environment_prefix_ignores_a_bin_folder_in_the_current_directory(
+    tmp_path: Path, monkeypatch
+):
+    """A bare command name says nothing about the current folder: a
+    ``scripts/`` folder there (``Scripts`` on case-insensitive Windows) must
+    not make it look like an environment prefix."""
+    (tmp_path / BIN_DIRNAME).mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    assert environment_prefix(ScriptCandidate(command="widget-mcp")) is None
+    assert launch_path(ScriptCandidate(command="widget-mcp")) is None
+
+
 def test_launch_path_puts_the_servers_own_environment_first(tmp_path: Path, monkeypatch):
     """The whole point: the MCP SDK hands the subprocess *AIDA's* PATH, so
     without this a server in another conda env cannot find its own shared

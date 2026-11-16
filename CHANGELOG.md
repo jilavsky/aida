@@ -16,6 +16,14 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Fixed
+
+- **Add pyIrena (and the other one-click MCP setups) on Windows no longer
+  invent a `PATH` when started from a folder that has a `Scripts`
+  subfolder.** A server found as a bare command name on `PATH` was taken to
+  live in an environment rooted at the current folder, and a made-up
+  `PATH` (`.;Library\bin;...`) was written into `mcp.json`.
+
 ## [1.1.1] - 2026-11-16
 
 Documentation release: the manual now lives on Read the Docs, and this is
