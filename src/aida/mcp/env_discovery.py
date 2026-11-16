@@ -192,6 +192,11 @@ def environment_prefix(candidate: ScriptCandidate) -> Path | None:
     """
     command = Path(candidate.command)
     parent = command.parent
+    if parent == Path("."):
+        # A bare name (`widget-mcp`) is resolved through PATH at launch; its
+        # "parent" is the current folder, which says nothing about where the
+        # server is installed.
+        return None
     if os.name == "nt" and parent.name.lower() != _BIN_DIRNAME.lower():
         # `<prefix>\python.exe` — the interpreter sits at the prefix root.
         return parent if (parent / _BIN_DIRNAME).is_dir() else None
