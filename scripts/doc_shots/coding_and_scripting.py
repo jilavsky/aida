@@ -100,6 +100,9 @@ def code_editor(ctx: Context):
 def scripting_group(ctx: Context):
     reset_docs_tmp()
     settings = standard_settings()
+    from aida.ui.qt.window_state import apply_font_size
+
+    apply_font_size(ctx.app, settings.app)
     from aida.config.paths import skills_dir
     from aida.ui.qt._qt import QGroupBox
     from aida.ui.qt.workspace_management_dialog import WorkspaceFormDialog

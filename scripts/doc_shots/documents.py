@@ -46,6 +46,9 @@ def attached(ctx: Context):
 def settings_ocr(ctx: Context):
     reset_docs_tmp()
     settings = standard_settings()
+    from aida.ui.qt.window_state import apply_font_size
+
+    apply_font_size(ctx.app, settings.app)
     from aida.ui.qt.settings_dialog import SettingsDialog
 
     dialog = SettingsDialog(settings.app, settings.providers.profiles)

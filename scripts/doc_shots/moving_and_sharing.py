@@ -52,6 +52,14 @@ def _bundle() -> Path:
     return bundle
 
 
+def _app_font(ctx: Context) -> None:
+    """AIDA's configured font size, as aida-gui applies it at startup."""
+    from aida.config.settings import AppConfig
+    from aida.ui.qt.window_state import apply_font_size
+
+    apply_font_size(ctx.app, AppConfig())
+
+
 def _second_machine(ctx: Context) -> None:
     os.environ["HOME"] = shown_folder("second-machine-home")
     os.environ["AIDA_HOME"] = str(ctx.scratch / "second-machine-aida")
@@ -60,7 +68,10 @@ def _second_machine(ctx: Context) -> None:
 @shot("moving-and-sharing-01-export")
 def export(ctx: Context):
     reset_docs_tmp()
-    standard_settings()
+    settings = standard_settings()
+    from aida.ui.qt.window_state import apply_font_size
+
+    apply_font_size(ctx.app, settings.app)
     from aida.ui.qt.portability_dialog import ExportSetupDialog
 
     dialog = ExportSetupDialog(default_dir=Path(shown_folder("transfer")))
@@ -72,6 +83,7 @@ def export(ctx: Context):
 def import_contents(ctx: Context):
     bundle = _bundle()
     _second_machine(ctx)
+    _app_font(ctx)
     from aida.ui.qt.portability_dialog import _KEY_ROLE, ImportSetupDialog
 
     dialog = ImportSetupDialog(source=bundle)
@@ -98,6 +110,7 @@ def import_contents(ctx: Context):
 def import_paths(ctx: Context):
     bundle = _bundle()
     _second_machine(ctx)
+    _app_font(ctx)
     from aida.ui.qt.portability_dialog import ImportSetupDialog
 
     dialog = ImportSetupDialog(source=bundle)
