@@ -66,8 +66,27 @@ def isolate_settings(scratch: Path) -> None:
         del os.environ[name]
 
 
+_RUN_LOCK = None
+
+
+def _hold_run_lock() -> None:
+    """One screenshot run at a time: every run rebuilds ``<tmp>/aida-docs``.
+
+    A second run (another checkout or worktree) waits here until the first
+    exits. POSIX only; on Windows runs are not guarded.
+    """
+    global _RUN_LOCK
+    if _RUN_LOCK is not None or os.name == "nt":
+        return
+    import fcntl
+
+    _RUN_LOCK = open(DOCS_TMP.parent / "aida-docs.lock", "w")  # noqa: SIM115 - held until exit
+    fcntl.flock(_RUN_LOCK, fcntl.LOCK_EX)
+
+
 def make_app():
     """Create the offscreen QApplication the way ``aida-gui`` does."""
+    _hold_run_lock()
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from aida.ui.qt._qt import QApplication
 
