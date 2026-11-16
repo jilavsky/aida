@@ -80,3 +80,9 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | mcp-servers-01-dialog | mcp-servers | page-local mcp.json: pyirena (neutral command, not started) + http example | Configure → MCP Servers…, pyirena selected | server list, button column, tabs, Edit…; 7 callouts | yes | done |
 | mcp-servers-02-server-form | mcp-servers | same | Edit… on pyirena | the form with env hidden, groups and skills ticked | yes | done |
 | mcp-servers-03-tools-tab | mcp-servers | a real pyirena-mcp install | Start pyirena, open the Tools tab, tick a Confirm box | per-tool Enabled / Confirm before run checkboxes and Save Tool Permissions | no | todo |
+
+## safety-and-permissions
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| safety-and-permissions-01-confirm-dialog | safety-and-permissions | none | SafetyGuard.authorize_write in a confirm-mode workspace's target folder; MainWindow._ask_confirmation with exec replaced by show-and-grab | the question, Allow / Allow for This Chat / Deny | yes | done |

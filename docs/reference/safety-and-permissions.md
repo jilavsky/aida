@@ -1,3 +1,4 @@
+(safety-and-permissions)=
 # Safety and permissions
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -8,6 +9,7 @@
 
 **Related:** [workspaces.md](../guides/workspaces.md) · [coding-and-scripting.md](../guides/coding-and-scripting.md) · [mcp-servers.md](mcp-servers.md)
 
+(safety-and-permissions-model)=
 ## The mental model
 
 Every native file operation, script run, and shell command goes through a
@@ -42,6 +44,7 @@ agent can read files there without asking. Only *writes*, *deletes*, and
 **outside** the allowed set still asks for confirmation, same as a write
 would.
 
+(safety-and-permissions-modes)=
 ## `safety: confirm` vs `safety: relaxed`
 
 Each workspace has a `safety` setting (`WorkspaceConfig.safety`) — the
@@ -73,8 +76,20 @@ writes. It has a refusal of its own on top: if the text to replace matches
 more than once it changes nothing and says so, rather than guessing which
 occurrence was meant.
 
+(safety-and-permissions-allow-for-chat)=
 ## "Allow for this chat"
 
+```{figure} img/safety-and-permissions/safety-and-permissions-01-confirm-dialog.png
+:alt: A confirmation dialog with a question-mark icon asking Write /private/tmp/aida-docs/results/usaxs-2026-11/unified-rg-table.csv? and three buttons: Allow, Allow for This Chat, Deny.
+
+The GUI's confirmation for a write into the workspace's target folder in a `confirm`-mode
+workspace. **Deny** is the default button. (On macOS `/tmp` is shown as `/private/tmp`:
+AIDA resolves the real path before asking.)
+```
+
+% CHECK(Jan): the third button and the CLI's `a` answer appear only when the request can be
+% remembered (never for fetch_url, as said below; the CLI prompt is then `[y/N]`), so "every
+% confirmation … offers a third answer" is slightly too strong.
 Every confirmation dialog/prompt offers a third answer alongside Deny and
 Allow: **"Allow for this chat"** (CLI: answer `a` at the `[y/N/a]` prompt).
 It exists because a `confirm`-mode workspace pops a fresh, identical-looking
@@ -115,6 +130,7 @@ approval for the rest of the current conversation only:
   not include `fetch_url`), specifically so this guarantee can't be
   accidentally broken by a future change to one of those two places alone.
 
+(safety-and-permissions-always-asks)=
 ## What *always* asks, regardless of mode
 
 This is the part that matters most, because it's independent of whether the
@@ -148,6 +164,7 @@ removed. You can recover a deleted file from there. This can be turned off
 per session (`trash_enabled=False`), which makes deletes permanent instead;
 that's not something you'd normally configure by hand.
 
+(safety-and-permissions-allowlist)=
 ## The command allowlist
 
 `run_command` also checks the command text itself against a **command
@@ -173,6 +190,8 @@ The allowlist is configured in two places that get unioned together:
   workspace), and
 - per-workspace, in that workspace's own `command_allowlist`.
 
+% CHECK(Jan): "the FolderDisplay panel" is the **Folders** section of the main window's session
+% column (its "Allowed commands" row and Add Command button); the class name is not shown anywhere.
 To edit the per-workspace list, use `aida workspace edit NAME
 --command-allowlist "git status,git log *"` (comma-separated patterns) or
 the FolderDisplay panel in the GUI — see
