@@ -86,3 +86,9 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | ID | page | dataset | state to set up | must show | automated? | status |
 |---|---|---|---|---|---|---|
 | safety-and-permissions-01-confirm-dialog | safety-and-permissions | none | SafetyGuard.authorize_write in a confirm-mode workspace's target folder; MainWindow._ask_confirmation with exec replaced by show-and-grab | the question, Allow / Allow for This Chat / Deny | yes | done |
+
+## context-and-limits
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| context-and-limits-01-status-bar | context-and-limits | conversation-unified-overlay.json (as gui-overview-01) | resume on local-ollama (context_window 32768); crop the right end of the status bar | Session total and Context labels, 2 callouts | yes | done |
