@@ -72,3 +72,11 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 |---|---|---|---|---|---|---|
 | providers-and-secrets-01-providers-dialog | providers-and-secrets | standard_settings() profiles | Configure → Providers…, claude-direct selected | tabs, list, buttons, details; 4 callouts | yes | done |
 | providers-and-secrets-02-profile-form | providers-and-secrets | standard_settings() profiles | Edit… on claude-direct | the form, Secret ref set, Secret value empty | yes | done |
+
+## mcp-servers
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| mcp-servers-01-dialog | mcp-servers | page-local mcp.json: pyirena (neutral command, not started) + http example | Configure → MCP Servers…, pyirena selected | server list, button column, tabs, Edit…; 7 callouts | yes | done |
+| mcp-servers-02-server-form | mcp-servers | same | Edit… on pyirena | the form with env hidden, groups and skills ticked | yes | done |
+| mcp-servers-03-tools-tab | mcp-servers | a real pyirena-mcp install | Start pyirena, open the Tools tab, tick a Confirm box | per-tool Enabled / Confirm before run checkboxes and Save Tool Permissions | no | todo |
