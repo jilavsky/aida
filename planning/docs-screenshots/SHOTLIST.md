@@ -65,3 +65,10 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | ID | page | dataset | state to set up | must show | automated? | status |
 |---|---|---|---|---|---|---|
 | installation-01-onboarding | installation | none (empty scratch AIDA_HOME) | fresh install, no profiles | the first-run dialog; the MCP button depends on what is installed on the machine | yes | done |
+
+## providers-and-secrets
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| providers-and-secrets-01-providers-dialog | providers-and-secrets | standard_settings() profiles | Configure → Providers…, claude-direct selected | tabs, list, buttons, details; 4 callouts | yes | done |
+| providers-and-secrets-02-profile-form | providers-and-secrets | standard_settings() profiles | Edit… on claude-direct | the form, Secret ref set, Secret value empty | yes | done |
