@@ -45,3 +45,9 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | workflows-01-dialog | workflows | daily-report and citation-watch from the page's YAML | Workflows dialog, daily-report selected | list, Add/Edit/Remove, details with vars and steps | yes | done |
 | workflows-02-repeating-step | workflows | citation-watch | step editor on its repeating step | prompt, Expect files, Repeat until file, Max passes | yes | done |
 | workflows-03-schedules | workflows | nightly-report (ok) and hourly-check (failed) runs written to the scratch DB | Schedules dialog, hourly-check selected | list, all buttons incl. Run Now, details with the failed status line | yes | done |
+
+## skills
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| skills-01-panel | skills | all bundled sample skills installed | main window, standard settings; grab the Skills section | one checkbox per skill, pyirena-usage and saxs-basics ticked, Reload, Save to Workspace | yes | done |

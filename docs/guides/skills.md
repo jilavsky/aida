@@ -1,3 +1,4 @@
+(skills)=
 # Skills
 
 A skill is a set of written instructions, saved as a Markdown file, that
@@ -15,6 +16,7 @@ This page covers where skills live, the two shapes a skill can take, how
 one gets switched on, how to ship code with a skill, and what the agent is
 allowed to do with it.
 
+(skills-where)=
 ## Where skills live
 
 All skills live in one folder, **`~/.aida/skills/`** (on Windows,
@@ -27,6 +29,7 @@ transcripts and is safe to clean up; the skills folder is part of your
 setup. Export and import carry it to another machine (see
 [moving-and-sharing.md](moving-and-sharing.md)).
 
+(skills-shapes)=
 ## Two shapes of skill
 
 | Shape | On disk | Use it when |
@@ -53,6 +56,7 @@ A folder skill can hold anything next to `SKILL.md`, for example:
     └── record_format.md
 ```
 
+(skills-active)=
 ## When a skill is active
 
 A skill is only seen by the model when it is active in the current chat. It
@@ -68,6 +72,13 @@ becomes active in any of these ways, and they add up:
    `--skills a,b` on `aida chat` / `aida-gui`. **Save to Workspace** in the
    panel keeps the choice.
 
+```{figure} img/skills/skills-01-panel.png
+:alt: The Skills section of the main window's session column: a checkbox per skill in the skills folder, in two columns. pyirena-usage and saxs-basics are ticked; review-checklist, size_distribution, size_distribution_default, unified_fit and unified_fit_default are not. Reload and Save to Workspace buttons below.
+
+The **Skills** panel with AIDA's sample skills installed. The two ticked ones are attached by
+the pyIrena MCP server; the rest can be switched on for this chat.
+```
+
 You can change skills during a chat. The model is told which were added or
 removed on its next turn. Edits you make to a skill file reach a running
 chat when you next change its skill selection (or click Reload in the
@@ -77,6 +88,7 @@ Every active skill costs context on every turn, so keep skills focused, and
 switch off the ones a chat doesn't need. See
 [context-and-limits.md](../reference/context-and-limits.md).
 
+(skills-code)=
 ## Shipping code with a skill
 
 Put the scripts in the skill's folder and refer to them in `SKILL.md`
@@ -102,6 +114,7 @@ more than `SKILL.md`, AIDA adds a short note above the skill's text naming
 the folder and its files (up to 30, ignoring `__pycache__` and hidden
 files), and saying the folder is read-only.
 
+(skills-scripts)=
 ### How the scripts run
 
 The agent runs a skill's script with `run_python_script`, like any other
@@ -122,6 +135,7 @@ script:
   default). In a chat without a workspace the agent can still read the
   skill's files but cannot run them.
 
+(skills-permissions)=
 ### What the agent may do with skill files
 
 The skills folder is **read-only** for the agent:
@@ -137,6 +151,7 @@ instructions or code. If you want the agent to improve a skill, approve the
 write when it asks, or edit the file yourself. See
 [safety-and-permissions.md](../reference/safety-and-permissions.md).
 
+(skills-writing)=
 ## Writing a good skill
 
 - **Start with when to use it.** One or two sentences: "Use this when the
@@ -152,6 +167,7 @@ write when it asks, or edit the file yourself. See
   material in a separate file in the skill's folder and tell the model to
   read it when needed.
 
+(skills-samples)=
 ## Sample skills
 
 AIDA ships a few starter skills (`saxs-basics`, `pyirena-usage`,
@@ -161,6 +177,7 @@ already in `~/.aida/skills/` is never overwritten by an install or an
 upgrade: once it is there, it is yours. The same rule applies to folder
 skills, which are copied whole.
 
+(skills-troubleshooting)=
 ## Troubleshooting
 
 - **"skill file(s) not found (will be skipped)"**: the name in the
