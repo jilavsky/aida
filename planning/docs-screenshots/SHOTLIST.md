@@ -107,3 +107,11 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | coding-and-scripting-01-open-in-editor | coding-and-scripting | conversation-script.json | resume the seeded conversation | the assistant bubble with a code block and its "</> Open in Editor" button (callout 1) | yes | done |
 | coding-and-scripting-02-code-editor | coding-and-scripting | placeholder S1–S3_silica.h5 under /tmp/aida-docs/data/usaxs-2026-11 | Code Editor opened on saved_scripts/list_h5.py, Run clicked, finished | editor, button row, output pane with exit code and stdout; callouts 1–3 | yes | done |
 | coding-and-scripting-03-scripting-group | coding-and-scripting | none | workspace form for saxs-analysis | the Scripting group: Enabled, Python interpreter, Command allowlist, timeout, Templates and Saved scripts folders | yes | done |
+
+## moving-and-sharing
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| moving-and-sharing-01-export | moving-and-sharing | none | File → Export Setup… dialog, destination /tmp/aida-docs/transfer | destination field, Browse…, the personal-fields checkbox (off) | yes | done |
+| moving-and-sharing-02-import-contents | moving-and-sharing | bundle exported in the shot from the scratch setup | Import Setup dialog on a "second machine" (fresh HOME/AIDA_HOME), only workspace saxs-analysis ticked | Contents tree with the workspace's dependencies ticked, and the "Also needed" line; callouts 1–2 | yes | done |
+| moving-and-sharing-03-import-paths | moving-and-sharing | same bundle | same dialog, Paths tab | rows for ${HOME}/Experiments/2026 and the bait conda env, editable "Use instead" column | yes | done |
