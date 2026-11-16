@@ -59,3 +59,9 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | organizing-conversations-01-sidebar | organizing-conversations | 5 seeded conversations, users usaxs-team, saxs-student, none | main window, sidebar filter All users; grab the sidebar | filter (1), search (2), date headings, two-line entries incl. one without a label | yes | done |
 | organizing-conversations-02-manage-users | organizing-conversations | same | Manage Users dialog, usaxs-team selected | labels with counts, active marker, New User / Rename or Merge / Clear Label | yes | done |
 | organizing-conversations-03-move-to-user | organizing-conversations | same | sidebar right-click menu on the first entry, Move to User submenu open | both menus side by side | yes | done |
+
+## installation
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| installation-01-onboarding | installation | none (empty scratch AIDA_HOME) | fresh install, no profiles | the first-run dialog; the MCP button depends on what is installed on the machine | yes | done |
