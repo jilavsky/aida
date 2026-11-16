@@ -1,3 +1,4 @@
+(workflows)=
 # Automation: `aida run`, workflows, and schedules
 
 > **Status: 1.1.1.** Implemented on top of the same
@@ -11,6 +12,7 @@
 
 **Related:** [workspaces.md](workspaces.md) · [safety-and-permissions.md](../reference/safety-and-permissions.md) · [providers-and-secrets.md](../reference/providers-and-secrets.md)
 
+(workflows-layers)=
 ## The four layers
 
 1. **`aida run`** — one prompt, one workspace, one turn, no GUI, an exit
@@ -29,7 +31,10 @@ Each layer only adds on top of the previous one. You can use `aida run`
 without ever creating a workflow, and a workflow without ever scheduling
 it.
 
+(workflows-aida-run)=
 ## `aida run` — a single headless turn
+
+% CHECK(Jan): not run, needs a model (the two `aida run` examples in this section).
 
 ```bash
 aida run --workspace use-pyirena "reduce and report new data in /data/run42" --json
@@ -46,6 +51,9 @@ aida run --workspace W PROMPT
   --preapprove-tool SERVER__TOOL   approve one MCP tool despite its confirm-before-run flag (repeatable)
   --json                      machine-readable result summary instead of plain text
 ```
+
+% CHECK(Jan): `aida run --help` also lists `--user USER` (the conversation's user label, see
+% guides/organizing-conversations.md); it is missing from the listing above.
 
 If `PROMPT` is omitted, `aida run` reads it from stdin — so it composes
 with a pipeline:
@@ -74,6 +82,7 @@ react to.
 }
 ```
 
+(workflows-headless-confirmations)=
 ## Headless confirmations — never hangs, never widens safety
 
 Nobody is watching a terminal for a scheduled or piped run, so a
@@ -98,6 +107,7 @@ This is the same reasoning as `--yes-in-allowed` on `aida run`: unattended
 execution should only ever be able to do what the workspace already
 permits, never more.
 
+(workflows-secrets)=
 ## Non-interactive secrets
 
 A keychain prompt can't be answered by a process with no terminal
@@ -117,6 +127,7 @@ reports, per provider profile, whether it resolves via the env var
 (safe unattended) or would fall through to an interactive keychain prompt
 (fine for the GUI, a problem for `watch`/cron).
 
+(workflows-stored)=
 ## Stored workflows
 
 A workflow is one YAML file per workflow under `~/.aida/workflows/NAME.yaml`
@@ -150,6 +161,8 @@ patterns checked against the workspace's target folder after the step
 completes — an empty list means "no assertion, whatever the agent did is
 accepted."
 
+% CHECK(Jan): `aida workflow run` (last line below) not run, needs a model; list, show and
+% validate ran as written on a scratch AIDA_HOME with this YAML saved as daily-report.yaml.
 ```bash
 aida workflow list
 aida workflow show daily-report
@@ -157,6 +170,7 @@ aida workflow validate daily-report --var folder=/data/latest
 aida workflow run daily-report --var folder=/data/latest --json
 ```
 
+(workflows-repeating)=
 ### Repeating steps — long batch jobs that run unattended
 
 Some jobs are too long for one conversation: a citation watch over 324
@@ -207,6 +221,13 @@ How it behaves:
 In the GUI, the step editor (Configure → Workflows… → Edit → a step) has
 **Repeat until file** and **Max passes** fields for the same settings.
 
+```{figure} img/workflows/workflows-02-repeating-step.png
+:alt: The step editor for the first step of citation-watch: the prompt text, an empty Expect files box, Repeat until file set to citation_watch.done and Max passes 20, with OK and Cancel.
+
+The step editor on the repeating step of the `citation-watch` example above.
+```
+
+(workflows-checking)=
 ### Checking and running
 
 `validate` checks the workspace exists, there's at least one step, and
@@ -223,7 +244,14 @@ always reports which step failed and why.
 recording the workspace, profile, model, every tool call, and timings, so a
 result can always be traced back to exactly what produced it.
 
+(workflows-gui)=
 ### From the GUI
+
+```{figure} img/workflows/workflows-01-dialog.png
+:alt: The Workflows dialog. On the left a list with citation-watch and daily-report, daily-report selected, and the buttons Add, Edit and Remove; on the right its details: description, workspace saxs-analysis, profile and MCP group workspace default, vars folder /data/latest, and the two steps, the first expecting *.h5.
+
+**Configure → Workflows…** with the two example workflows from this page.
+```
 
 - **File → Save Conversation as Workflow…** turns the current
   conversation's user prompts into an editable step list, pre-filled with
@@ -235,6 +263,7 @@ result can always be traced back to exactly what produced it.
   appears in the sidebar as its own conversation, tagged so it's
   distinguishable from an ordinary chat.
 
+(workflows-schedules)=
 ## Schedules
 
 A schedule is a workflow plus a time, stored in `~/.aida/schedules.yaml`
@@ -253,6 +282,12 @@ aida schedule remove nightly-report
 aida schedule run nightly-report      # fire it right now, regardless of whether it's due
 ```
 
+% CHECK(Jan): `aida schedule run` not run, needs a model; the other schedule commands ran as
+% written (with workflows daily-report and quick-check saved).
+% CHECK(Jan): `aida schedule add` also has `--reuse-chat` and `--rollover-hours HOURS` (one
+% pinned chat for every fire), and the Schedules dialog has a "Forget Pinned Chat" button and a
+% "chat reuse" line; none of this is described on this page.
+
 `--at HH:MM` fires once a day at that local wall-clock time; `--every`
 takes a duration (`30m`, `4h`, `24h`). Semantics: **catch-up-once, never
 skip-silently, never overlap.** If AIDA wasn't running when a daily time
@@ -260,6 +295,7 @@ passed, it fires once the next time the scheduler ticks — it does not
 replay every missed day. Only one fire of a given schedule runs at a time,
 enforced both in-process and (see below) across processes.
 
+(workflows-running)=
 ### Running it
 
 **In the GUI:** nothing to start — `MainWindow` runs the scheduler as a
@@ -275,8 +311,15 @@ config file while AIDA is open), a red **⚠ Scheduler problem** button
 appears in the status bar and at the top of the Schedules dialog, and goes
 away once the next poll succeeds.
 
+```{figure} img/workflows/workflows-03-schedules.png
+:alt: The Schedules dialog. On the left the schedules hourly-check, enabled, every 4h, and nightly-report, enabled, at 07:00, with buttons Add, Edit, Enable, Disable, Remove, Run Now and Forget Pinned Chat; on the right the details of hourly-check ending with status: failed at 2026-11-16T08:00:00, step 0: expected file(s) not found: *.h5.
+
+**Configure → Schedules…**: the selected schedule's settings and its last run, here a failed one.
+```
+
 **Headless, no GUI:**
 
+% CHECK(Jan): not run, needs a model (it fires due schedules).
 ```bash
 aida schedule watch --poll-seconds 30
 ```
@@ -292,6 +335,7 @@ double-fire a schedule: both take a non-blocking advisory lock
 there first on a given tick wins and the other skips that tick (and
 retries next tick, same "deferred, not skipped" behavior described below).
 
+(workflows-deferred)=
 ### Deferred, not skipped — the scheduler and you at the same time
 
 The scheduler will not fire a job on top of you while you're using AIDA.
@@ -325,6 +369,7 @@ there once it's due, so treat a headless `watch` box and an interactively
 used GUI as alternatives, not something you run against each other
 unattended.
 
+(workflows-no-os-scheduler)=
 ## Why no OS-level scheduler
 
 launchd, Task Scheduler, and systemd timers were considered and

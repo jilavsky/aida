@@ -37,3 +37,11 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | knowledge-bases-01-dialog | knowledge-bases | ollama-embed profile, usaxs-notes KB (not built) | Knowledge Bases dialog, usaxs-notes selected | list, Add/Edit/Remove/Rebuild/Update, Details | yes | done |
 | knowledge-bases-02-add-form | knowledge-bases | same | the Add/Edit form on usaxs-notes | name, source folders, embedding profile, chunk size and overlap | yes | done |
 | knowledge-bases-03-retrieval | knowledge-bases | two example passages (invented) | RetrievalRow, expanded | summary line, Details button, passages with file, heading, score, text | yes | done |
+
+## workflows
+
+| ID | page | dataset | state to set up | must show | automated? | status |
+|---|---|---|---|---|---|---|
+| workflows-01-dialog | workflows | daily-report and citation-watch from the page's YAML | Workflows dialog, daily-report selected | list, Add/Edit/Remove, details with vars and steps | yes | done |
+| workflows-02-repeating-step | workflows | citation-watch | step editor on its repeating step | prompt, Expect files, Repeat until file, Max passes | yes | done |
+| workflows-03-schedules | workflows | nightly-report (ok) and hourly-check (failed) runs written to the scratch DB | Schedules dialog, hourly-check selected | list, all buttons incl. Run Now, details with the failed status line | yes | done |
