@@ -340,9 +340,9 @@ sentinel value `"none"` (the default) means no MCP servers/tools at all for
 that workspace, not a group literally named "none".
 
 The rationale for grouping rather than "just turn on every configured
-server everywhere": a fully-loaded pyIrena server can expose 100+ tools,
-which overloads a small local model's context and tool-selection ability
-when most of those tools are irrelevant to the task at hand. Grouping lets
+server everywhere": every tool's schema is sent on every request (pyIrena's
+28 tools alone are ~5,500 tokens), which overloads a small local model's
+context and tool-selection ability when most of those tools are irrelevant to the task at hand. Grouping lets
 each workspace opt into only the servers/tools it actually needs.
 
 ## Per-tool permissions
