@@ -54,11 +54,11 @@ somewhere that is not this file if the repo is ever public.
 (axis-camera-part-a)=
 ## Part A — build and test on macOS
 
-% CHECK(Jan): this page builds an external package and uses real values: the home path
-% /Users/ilavsky/... (A9, A10), /home/beams/USAXS (B0, B2, B6) and the camera address
-% 10.54.122.46 (A9). Keep them on a public page, or switch to placeholders?
-% The source printed below may also lag the real repo: ~/GitHub/axis-cam-mcp has 23 tests
-% (`pytest -q` → 23 passed), the page says 10.
+% The real values on this page (camera IPs 10.54.122.x, /home/beams/USAXS, /Users/ilavsky/...)
+% are deliberate, not a leak (Jan, 2026-11-17): the cameras are behind the lab firewall and
+% password-protected, and their addresses are already on public pages. Do not flag them again.
+% CHECK(Jan): the source printed below may lag the real repo: ~/GitHub/axis-cam-mcp has 23
+% tests (`pytest -q` → 23 passed), the page says 10.
 
 ### A1. Create the repo
 

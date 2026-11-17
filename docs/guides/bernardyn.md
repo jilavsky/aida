@@ -69,7 +69,7 @@ Detection order is the same as pyIrena's (AIDA's own environment, `PATH`,
 | Setting | Value | Why |
 |---|---|---|
 | `command` | The **absolute path** to `bernardyn-mcp` | A GUI app on macOS or Windows inherits no shell `PATH`, so a bare `bernardyn-mcp` fails to launch with a confusing error. |
-| `groups` | `pyirena-analysis` **and** `bernardyn-plots` | Five tools is roughly 700 tokens of schema against pyirena-mcp's ~10,200, so adding them to the group an analysis workspace already enables costs almost nothing and saves a second setup step. `bernardyn-plots` is there for a figure-only workspace that wants plotting without pyIrena's full tool list in context. Override with `--groups`. |
+| `groups` | `pyirena-analysis` **and** `bernardyn-plots` | Five tools is roughly 1,500 tokens of schema against pyirena-mcp's ~5,500, so adding them to the group an analysis workspace already enables is cheap and saves a second setup step. `bernardyn-plots` is there for a figure-only workspace that wants plotting without pyIrena's full tool list in context. Override with `--groups`. |
 | `env.PATH` | The server's own environment prefix, first | A cross-environment stdio server otherwise can't find its own shared libraries. On Windows that kills CPython at import with exit 127 and *no* traceback — the client sees only "Connection closed". |
 | `BERNARDYN_OUTPUT_ROOT` | Only if you pass `--output-root DIR` | Where plot packages and preview images land. Without it, Bernardyn writes to a temporary `bernardyn-mcp` cache — fine for a one-off, easy to lose track of. The GUI button suggests the active workspace's **target folder**. |
 | `BERNARDYN_DATA_ROOT` | Only if you pass `--data-root DIR` | Restricts every file the server may *read* to that subtree (plus the output root, so a package it just made can be inspected again). The GUI button suggests the active workspace's first **source folder**. |
@@ -94,9 +94,6 @@ aida workspace edit my-figures  --mcp-group bernardyn-plots    # plotting only
 
 (bernardyn-what-good-looks-like)=
 ## What good looks like
-
-% CHECK(Jan): the groups row above compares against "pyirena-mcp's ~10,200" tokens; see the tool
-% count note on the pyIrena page (pyIrena 1.2.1 reports 28 tools).
 
 ```
 [mcp] bernardyn: 5 tool(s)
