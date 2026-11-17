@@ -124,7 +124,7 @@ External programs AIDA launches and talks to, each offering the agent a set
 of callable tools. This is how the agent fits data rather than describing
 how you would fit data.
 Grouped, because each tool costs context on every single turn — pyIrena's
-~70 tools cost ~10,000 tokens per request whether used or not.
+28 tools cost ~5,500 tokens per request whether used or not.
 > *Example:* group `pyirena-analysis` → the `pyirena-mcp` server → Unified
 > Fit, Size Distribution, plotting, NXcanSAS reading.
 → [mcp-servers.md](../reference/mcp-servers.md) · [pyirena.md](../guides/pyirena.md)
@@ -312,11 +312,10 @@ fixes that but uploads the document, and asks first
 ```bash
 pip install "pyirena[mcp]"
 aida mcp add-pyirena --data-root /share1/USAXS_data
-aida mcp test pyirena                   # must list ~70 tools
+aida mcp test pyirena                   # must list 28 tools
 ```
 
-% CHECK(Jan): with pyIrena 1.2.1 (the anisa env here) `aida mcp test pyirena` lists 28 tools, not
-% ~70. With several pyirena-mcp installs, `add-pyirena` stops and asks for --first or --command.
+% CHECK(Jan): with several pyirena-mcp installs, `add-pyirena` stops and asks for --first or --command.
 
 `add-pyirena` writes the server, its group `pyirena-analysis`, and installs
 the `saxs-basics` and `pyirena-usage` skills — it never overwrites a skill

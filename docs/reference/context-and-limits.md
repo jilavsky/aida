@@ -28,8 +28,8 @@ It's not just the visible conversation:
   tool results included.
 - **Every enabled MCP server's tool schemas**, sent fresh on *every single
   request*, not just the first. This is easy to underestimate: pyirena-mcp
-  alone exposes around 68 tools, whose JSON schemas measure out to roughly
-  **10,200 tokens on every turn** — see
+  alone exposes 28 tools, whose JSON schemas measure out to roughly
+  **5,500 tokens on every turn** — see
   [mcp-servers.md](mcp-servers.md#groups) on using a lean group instead of
   enabling every server's every tool.
 - **Vision images** — plot PNGs a tool returns, or an image you attach in
