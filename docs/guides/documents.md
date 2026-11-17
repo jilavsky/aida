@@ -1,8 +1,16 @@
+(documents)=
 # Attached documents and figures
 
 When you attach a document in the GUI, AIDA reads it for the current message
 and keeps a copy with the conversation. The status bar names the accepted
 files, and **File → Open Conversation Folder** opens their location:
+
+```{figure} img/documents/documents-01-attached.png
+:alt: The input box with one attached file shown as a chip reading silica-pdms-usaxs.pdf with a small × button above the typed question "What figures are in this paper?", and the Send and Attach… buttons on the right. Circle 1 marks the chip, circle 2 the Attach… button.
+
+A PDF attached before sending: (1) the attachment chip (× removes it), (2) **Attach…**. Dropping a
+file on the input box does the same.
+```
 
 ```text
 <records_dir>/attachments/<first-8-characters-of-conversation-id>/
@@ -24,6 +32,7 @@ aida conversations gc
 The command lists affected folders and asks before permanent deletion. Use
 `--yes` only when you intentionally want to skip that confirmation.
 
+(documents-figures)=
 ## Asking about figures
 
 Every session includes two tools for documents attached to that conversation:
@@ -53,6 +62,7 @@ nothing, no `paper.assets/` folder appears, and (with OCR enabled) no
 upload happens and no dialog is shown. Ask *"what figures are in that
 paper?"* to set it off.
 
+(documents-ocr)=
 ## Optional Mistral OCR
 
 Mistral OCR can improve figure/caption ordering in multi-column PDFs. Install
@@ -63,6 +73,13 @@ key is write-only in the GUI and is stored in the OS keychain. Headless
 systems can instead set `AIDA_SECRET_MISTRAL_OCR`.
 
 In `workspaces.yaml` the workspace field is `use_ocr: true`.
+
+```{figure} img/documents/documents-02-settings-ocr.png
+:alt: The Document OCR group of the Settings dialog: a link to console.mistral.ai/api-keys with a note about the free tier, a sentence saying documents you ask about are uploaded to Mistral and AIDA asks before each one, a password field showing (unchanged), and the Verify key and Clear key buttons.
+
+**Settings → Document OCR**. The key field is write-only; **Verify key** checks it without
+uploading anything.
+```
 
 This feature is off by default. When enabled, documents you ask about leave
 your machine and are uploaded to Mistral. AIDA asks before each document is
@@ -79,6 +96,7 @@ continues with the built-in extractor. The turn does not fail, but AIDA adds
 a clear note to what the model reads that OCR was not used and multi-column
 figure labels may be less reliable.
 
+(documents-checking)=
 ## Checking that it works
 
 Three ways, in increasing directness.

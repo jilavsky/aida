@@ -1,3 +1,4 @@
+(axis-camera)=
 # Axis cameras in AIDA (`axis-cam-mcp`)
 
 > **What you end up with:** a small MCP server, `axis-cam-mcp`, that lets the
@@ -50,7 +51,14 @@ somewhere that is not this file if the repo is ever public.
 | Shared home path | | `echo $HOME` — must be **identical** on both machines |
 | Networked Linux host sharing that home | | The host you will build the conda env from |
 
+(axis-camera-part-a)=
 ## Part A — build and test on macOS
+
+% CHECK(Jan): this page builds an external package and uses real values: the home path
+% /Users/ilavsky/... (A9, A10), /home/beams/USAXS (B0, B2, B6) and the camera address
+% 10.54.122.46 (A9). Keep them on a public page, or switch to placeholders?
+% The source printed below may also lag the real repo: ~/GitHub/axis-cam-mcp has 23 tests
+% (`pytest -q` → 23 passed), the page says 10.
 
 ### A1. Create the repo
 
@@ -733,7 +741,11 @@ def test_unreachable_host_says_so(cameras_yaml, monkeypatch, tmp_path):
 Also create an empty `tests/__init__.py` (the fixtures import
 `tests.fake_axis`).
 
+(axis-camera-install)=
 ### A7. Create the environment and install
+
+% CHECK(Jan): not run (it creates a conda environment). `axis-cam-mcp --help` from the existing
+% /opt/miniconda3/envs/axis-cam-mcp env works.
 
 ```bash
 cd ~/GitHub/axis-cam-mcp
@@ -752,7 +764,10 @@ pytest -q                  # expect: 10 passed
 ruff check . && ruff format --check .
 ```
 
+(axis-camera-curl)=
 ### A8. Prove the camera works — before any Python
+
+% CHECK(Jan): not run, needs the camera.
 
 Do this first whenever something is wrong. If `curl` cannot get a JPEG, no
 amount of MCP debugging will help.
@@ -769,7 +784,10 @@ If that 401s, try `--basic` instead of `--digest` (older firmware), and
 confirm the account exists with at least the **viewer** role in the camera's
 web UI under *System → Accounts*.
 
+(axis-camera-configure)=
 ### A9. Configure and check
+
+% CHECK(Jan): not run, needs the camera.
 
 ```bash
 mkdir -p ~/.axis-cam-mcp
@@ -792,6 +810,7 @@ config: /Users/ilavsky/.axis-cam-mcp/cameras.yaml  (1 camera(s))
 `--check` exits non-zero if any camera is unreachable, so it also works as a
 one-liner in a script. Record the model in the table in §0.
 
+(axis-camera-wire-into-aida)=
 ### A10. Wire into AIDA
 
 Store the password in the keychain — never in `mcp.json`:
@@ -801,6 +820,7 @@ aida config secret set axis_cam_hutch      # prompts without echo
 aida config secret get axis_cam_hutch      # confirms it is set; never prints it
 ```
 
+% CHECK(Jan): the next line is a working note that is published on the site as written.
 *NOTE* for axisserver withotu credentials user guest and space for password seems to work? 
 
 Then add the server. Either edit `~/.aida/mcp.json` directly:
@@ -850,6 +870,10 @@ Three things about that `env` block are load-bearing:
   server in your `mcp.json`. A bare name would depend on which environment
   was active when AIDA launched.
 
+% CHECK(Jan): neither command below starts the server: `aida mcp server list` prints the config
+% and `aida doctor` has no per-server check. `aida mcp test axis-cam` would start it and list its
+% tools. (The `aida config secret`, `aida mcp server add`, `server list` and `doctor` commands in
+% this section were run against a scratch AIDA_HOME; `server add` with these flags works.)
 Restart AIDA and check the server came up:
 
 ```bash
@@ -932,7 +956,10 @@ pytest -q        # 10 passed -- proves the install without needing a camera
 That is the only step that needs the internet. Everything after this happens
 on the isolated machine.
 
+(axis-camera-verify-beamline)=
 ### B3. Verify on the beamline machine — install first, camera second
+
+% CHECK(Jan): not run, needs the camera and the beamline machine.
 
 ```bash
 ssh <beamline-machine>
@@ -964,6 +991,7 @@ cp ~/GitHub/axis-cam-mcp/examples/cameras.yaml ~/.axis-cam-mcp/cameras.yaml
 $EDITOR ~/.axis-cam-mcp/cameras.yaml
 ```
 
+(axis-camera-credentials)=
 ### B5. Credentials without a keychain
 
 This is the one real difference from the Mac. A headless Linux machine
@@ -1001,7 +1029,10 @@ Note the shared home means that file is visible to anything that mounts it —
 which is the argument for a viewer-role account whose password grants nothing
 but the ability to look at a picture.
 
+(axis-camera-wire-beamline)=
 ### B6. Wire into AIDA on the beamline machine
+
+% CHECK(Jan): `axis-cam-mcp --check` not run, needs the camera.
 
 `~/.aida/mcp.json` is also in the shared home. Add:
 

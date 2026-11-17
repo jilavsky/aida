@@ -1,3 +1,4 @@
+(context-and-limits)=
 # Context window and limits
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -18,6 +19,7 @@ simply dead, with New Chat as the only way out. This page covers what fills
 the window, how AIDA manages it, and what to do when a conversation gets
 long.
 
+(context-and-limits-what-fills)=
 ## What actually fills the window
 
 It's not just the visible conversation:
@@ -43,6 +45,7 @@ results, JSON in general — is estimated at a different, more conservative
 rate than ordinary prose, since numeric/JSON data tokenizes more densely
 than English text.
 
+(context-and-limits-window)=
 ## Setting the model's real window
 
 `config.yaml`'s `max_context_tokens` is the *global* default (`120000` out
@@ -78,6 +81,7 @@ to a bare 8000-token floor regardless of `context_window`; see the callout
 in providers-and-secrets.md for exactly what that looks like in the logs
 and how to fix it. `aida doctor` catches this specific mistake.
 
+(context-and-limits-compaction)=
 ## Compaction
 
 When history no longer fits, AIDA doesn't just discard the oldest turns —
@@ -98,11 +102,22 @@ mid-thought:
 - **CLI**: type `/compact` in the chat REPL.
 - **GUI**: File → **Compact Conversation**.
 
+% CHECK(Jan): not run, needs a model (/compact and Compact Conversation both call the active model).
+
 Either way, AIDA reports what happened — "summarized N old turns into ~M
 tokens" when compaction succeeded, or "trimmed N old turns" if it had to
 fall back to a plain drop.
 
+(context-and-limits-indicator)=
 ## Reading the fullness indicator
+
+```{figure} img/context-and-limits/context-and-limits-01-status-bar.png
+:alt: The right-hand end of the AIDA status bar reading Session total: 0 in / 0 out (~$0.000 est.) and Context: 3k / 15k (20%), with circle 1 at the Session total label and circle 2 at the Context label.
+
+The status bar after resuming a conversation on a local model with `context_window: 32768`:
+(1) **Session total**, (2) **Context**. The budget (15k) is smaller than the 32k window: a 15 %
+safety margin, the reply reserve and the tool schemas come off it first.
+```
 
 - **CLI**: a `[context] used / budget tokens (P%)` line after each turn.
 - **GUI**: a **Context: Nk / Mk (P%)** label in the status bar, next to
@@ -111,10 +126,11 @@ fall back to a plain drop.
   **Context:** is the current fullness of the window and goes back down
   after a compaction.
 
-When it reads "(trimming disabled)", `max_context_tokens` is set to `0`
+When it reads "Context: trimming disabled", `max_context_tokens` is set to `0`
 (trimming/compaction off entirely) — not recommended for a long session,
 since the only recovery left at that point is starting a new conversation.
 
+(context-and-limits-long)=
 ## What to do when a conversation gets long
 
 1. Check the fullness indicator — if it's climbing toward 100%, that's the

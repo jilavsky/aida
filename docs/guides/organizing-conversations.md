@@ -1,3 +1,4 @@
+(organizing-conversations)=
 # Organizing conversations
 
 **This is organization, not security.** AIDA's user names are labels for
@@ -6,6 +7,7 @@ person's laptop. Anyone using the same OS account can pick any name. There is
 no password, no permission boundary, and nothing prevents one name from
 reading another name's files.
 
+(organizing-conversations-active-user)=
 ## Pick the active user
 
 In `aida-gui`, use the editable **User** box in the toolbar. Choose a name
@@ -14,6 +16,10 @@ never relabels the conversation already open.
 
 For terminal and unattended use:
 
+% CHECK(Jan): `aida chat --user` not run, needs a model. `aida run my-workflow --user …` fails
+% as written: `aida run` needs `--workspace W` and takes a prompt, not a workflow name ("the
+% following arguments are required: --workspace"), and `aida workflow run` has no `--user`
+% option. Meant `aida run --workspace W "prompt" --user "…"`?
 ```bash
 aida chat --user "Jan Ilavsky"
 aida run my-workflow --user "Jan Ilavsky"
@@ -24,6 +30,7 @@ You can also set `active_user` in `~/.aida/config.yaml`. Resolution order is
 the command-line `--user`, then `$AIDA_USER`, then `active_user`. A blank
 value means no user label.
 
+(organizing-conversations-names)=
 ## How conversations get their names
 
 The moment you send the first message, the conversation is named after the
@@ -57,7 +64,14 @@ Turn it off for a metered endpoint, or for a local model slow enough that
 the extra round trip at the end of a turn is noticeable. Conversations then
 keep the first-line placeholder until you rename them.
 
+(organizing-conversations-find)=
 ## Find conversations
+
+```{figure} img/organizing-conversations/organizing-conversations-01-sidebar.png
+:alt: The conversations sidebar with the user filter set to All users (circle 1) and the search box (circle 2) above a list grouped under Today, Yesterday and October 2026. Each entry shows a title, then the time, workspace and user label, for example 09:03, saxs-analysis, usaxs-team. The last entry has no user label. Resume, Delete, Rename and Clean Up buttons at the bottom.
+
+The sidebar with **All users** selected in the filter (1); the search box (2) is above the list.
+```
 
 Conversations are listed under date headings — **Today**, **Yesterday**,
 **Previous 7 days**, then by month — two lines each: the title, then when
@@ -81,6 +95,7 @@ aida conversations list --user "Jan Ilavsky"
 aida conversations list --all-users
 ```
 
+(organizing-conversations-fix)=
 ## Fix a mistake
 
 Nothing validates a typed name, so `Jan`, `jan` and `Jam` are three
@@ -101,9 +116,23 @@ different labels. Two repairs, for the two different mistakes:
   multi-selection, and offers **(no user)** and **New user…** alongside the
   existing names.
 
+```{figure} img/organizing-conversations/organizing-conversations-02-manage-users.png
+:alt: The Manage Users dialog: an explanation that labels group conversations and are not security, a list with saxs-student, 1 conversation, and usaxs-team, 3 conversations, active, selected; buttons New User, Rename or Merge and Clear Label, and Close.
+
+**File → Manage Users…** with two labels; `usaxs-team` is the active one.
+```
+
+```{figure} img/organizing-conversations/organizing-conversations-03-move-to-user.png
+:alt: The right-click menu of a conversation in the sidebar, with Resume, Rename, Export, Move to User and Delete, next to the Move to User submenu listing saxs-student, usaxs-team, (no user) and New user.
+
+Right-click a conversation: **Move to User** offers the known names, **(no user)** and
+**New user…**.
+```
+
 Neither changes a conversation's timestamp: relabelling is not activity, so
 it will not reorder the list or change what **Clean Up…** would catch.
 
+(organizing-conversations-personal-context)=
 ## Personal context per user
 
 **Settings → Personal context** is the sentence or two the model always
@@ -123,6 +152,7 @@ user_contexts:
   "Jan Ilavsky": "Jan runs the beamline and writes the analysis code."
 ```
 
+(organizing-conversations-files)=
 ## Separate files by user
 
 Write `{user}` in any of these configured paths:

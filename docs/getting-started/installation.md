@@ -1,3 +1,4 @@
+(installation)=
 # Installation
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -52,6 +53,7 @@ aida doctor
 
 `environment.yml` already includes the `gui` and `docs` extras.
 
+(installation-first-run)=
 ## First run
 
 Once `aida doctor` is clean, you still need one provider profile and
@@ -60,6 +62,13 @@ Once `aida doctor` is clean, you still need one provider profile and
 - **GUI:** launch `aida-gui`. On a fresh install it offers to set up a
   provider profile and a first workspace; you can reopen either later from
   the **Configure** menu's **Providers…** and **Workspaces…** entries.
+
+  ```{figure} img/installation/installation-01-onboarding.png
+  :alt: The onboarding dialog on a fresh install. Text saying AIDA needs at least one provider profile, a line reading 15/15 environment checks passed, and three buttons: Add a Provider Profile, Create a Workspace (greyed out until a profile exists) and Add pyIrena + Bernardyn MCP Tools. Below, No provider profiles configured yet.
+
+  The first-run dialog on a fresh install. The MCP button appears only when pyIrena or
+  Bernardyn is installed on the machine, and names whichever it found (here both).
+  ```
 - **CLI:** see [providers-and-secrets.md](../reference/providers-and-secrets.md) for the
   `providers.yaml` format and `aida config secret set` for API keys, then
   `aida workspace new` for a workspace.
@@ -75,14 +84,22 @@ pip install "pyirena[mcp]"    # if you don't have it already
 aida mcp add-pyirena
 ```
 
+% CHECK(Jan): with several pyirena-mcp installs on the machine (here 4 conda envs), `aida mcp
+% add-pyirena` lists them and stops ("Re-run with --first to accept it, or with --command PATH"),
+% so it is not quite "one command" there. Mention --first?
+
 `aida doctor` reports whether pyIrena is installed and whether AIDA is
 configured to use it. See [pyirena.md](../guides/pyirena.md), which also covers
 installing both packages into one environment.
 
+(installation-doctor)=
 ## `aida doctor`
 
 Run this after install, and any time something seems misconfigured. It
 checks, and reports pass/fail for each:
+
+% CHECK(Jan): `aida doctor` 1.1.1 also reports aida_version, orphan_attachments, ocr, pyirena_mcp,
+% context_windows and max_tokens_vs_context_window, not listed below.
 
 - Python version (`>= 3.11`)
 - `~/.aida/config.yaml`, `providers.yaml`, `workspaces.yaml`, `mcp.json`
@@ -181,6 +198,7 @@ saved through the GUI while this error appears is still saved — only the
 secret itself didn't make it into the keychain, so the environment variable
 picks up exactly where it left off.
 
+(installation-files)=
 ## Where AIDA keeps its files
 
 ```text
@@ -199,6 +217,10 @@ picks up exactly where it left off.
 ~/Documents/Aida/          # human-readable conversation records / exports
                            # (configurable — config.yaml's records_dir)
 ```
+
+% CHECK(Jan): a fresh ~/.aida also holds schedules.yaml and one <name>.lock file per config
+% file; workflows/, knowledge/ (index databases) and tmp/ (the scratch folder) appear when used.
+% None of them are in the tree above.
 
 Everything under `~/.aida/` is created with safe defaults the first time
 you run `aida` — you don't need to hand-create any of these files.

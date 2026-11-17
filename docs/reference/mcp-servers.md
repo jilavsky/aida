@@ -1,3 +1,4 @@
+(mcp-servers)=
 # MCP servers
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -55,6 +56,10 @@ extensions that other clients simply ignore:
 | `skills` | AIDA | Skill file names to load into context when this server is active |
 | `disabled_tools` | AIDA | Tool names hidden from the model entirely (see [Per-tool permissions](#per-tool-permissions)) |
 | `confirm_tools` | AIDA | Tool names that always require confirmation before a call |
+
+% CHECK(Jan): McpServerConfig also has `timeout_seconds` (the server form's "Timeout" row, and
+% the per-call bound mentioned in getting-started/gui-overview.md "Stopping a turn"); it is not in
+% this table.
 
 ```json
 {
@@ -140,10 +145,13 @@ arguments or environment variables:
 ```bash
 aida mcp server add bait-mcp \
   --command /opt/conda/envs/bait/bin/bait-mcp \
-  --arg --config --arg /etc/bait/instrument.yaml \
+  --arg=--config --arg /etc/bait/instrument.yaml \
   --env BAIT_LOG_LEVEL=INFO \
   --groups instrument-control
 ```
+
+An argument that itself starts with `-` is written `--arg=--config`; `--arg --config` is
+rejected ("argument --arg: expected one argument").
 
 `--header` is the http-transport equivalent of `--env` (also repeatable) —
 see [Remote HTTP MCP servers](#remote-http-mcp-servers) above.
@@ -184,7 +192,7 @@ aida mcp import ~/path/to/mcp.json --overwrite pyirena-mcp,bait-mcp
 ### Testing a server
 
 ```bash
-aida mcp server test pyirena-mcp
+aida mcp test pyirena-mcp
 ```
 
 This actually launches the server, initializes the connection, and lists
@@ -220,11 +228,32 @@ next to the Headers field): pick which `KEY=VALUE` line to convert, name it
 in the keychain, enter the value once, and the form swaps that line for
 `KEY=keyring:name` for you.
 
+(mcp-servers-gui)=
 ## Adding/editing via the GUI
 
 **Configure → MCP Servers…** opens the `McpManagementDialog`, a
 full front end over the same `mcp.json` the CLI edits (changes are saved
 immediately, no separate "Save" step for most actions).
+
+```{figure} img/mcp-servers/mcp-servers-01-dialog.png
+:alt: The MCP Servers dialog. On the left the server list (pyirena stopped, usaxscontrol-instrument stopped) and a column of buttons: Add Server, Add pyIrena, Add Bernardyn, Remove, Start, Stop, Restart, Test Connection, Import mcp.json, Groups, Skills. On the right the Details, Tools and Log tabs; Details shows the pyirena server's command, env, groups and skills, with an Edit button. Numbered circles mark the parts described in the legend.
+
+**Configure → MCP Servers…** with two configured servers, neither running.
+```
+
+1. **Server list**, with each server's live state.
+2. **Add Server…**, and the one-click **Add pyIrena…** / **Add Bernardyn…**; then **Remove…**.
+3. **Start / Stop / Restart**.
+4. **Test Connection**.
+5. **Import mcp.json…**, **Groups…** and **Skills…**.
+6. **Details / Tools / Log** tabs for the selected server.
+7. **Edit…** opens the server form.
+
+```{figure} img/mcp-servers/mcp-servers-02-server-form.png
+:alt: The Edit Server form for pyirena. Name, Type stdio, Command /opt/conda/envs/pyirena/bin/pyirena-mcp, an empty Args box, an Env box showing PYIRENA_MAX_ARRAY_POINTS=*** with Hide values ticked and a Store Value in Keychain button, a Groups checklist with pyirena-analysis ticked and a New group name box, a Skills checklist with pyirena-usage and saxs-basics ticked, and a Timeout row with an Override checkbox.
+
+**Edit…** on the `pyirena` server. Env values are hidden while **Hide values** is ticked.
+```
 
 - **Add Server…** opens a form with fields for name, a **Type** dropdown
   (stdio/http) that shows only the fields relevant to the chosen transport,
@@ -245,11 +274,14 @@ immediately, no separate "Save" step for most actions).
   it has stopped, and the server shows as stopped here: select it and
   click **Restart**. In `aida chat`, start a new chat.
 - **Test Connection** does the same initialize-and-list-tools check as
-  `aida mcp server test`, reporting tool count and timing (or the error).
+  `aida mcp test`, reporting tool count and timing (or the error).
 - **Import mcp.json…** file-picks a config and merges it the same
   "skip conflicts unless you say otherwise" way as `aida mcp import` — if
   imported names collide with existing servers, the dialog asks whether to
   overwrite them.
+% SCREENSHOT mcp-servers-03-tools-tab: the Tools tab of a running pyIrena server (Start it
+% first), a few tools with Enabled / Confirm before run ticked and unticked, and the Save Tool
+% Permissions button. Needs a real pyirena-mcp install.
 - **Tools tab** lists every tool the server exposes (discovered by
   starting or testing the server) with two checkboxes per tool: **Enabled**
   and **Confirm before run** — the GUI equivalent of `disabled_tools` and

@@ -1,3 +1,4 @@
+(pyirena)=
 # pyIrena and AIDA
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -8,6 +9,9 @@
 
 **Related:** [installation.md](../getting-started/installation.md) · [mcp-servers.md](../reference/mcp-servers.md) · [bernardyn.md](bernardyn.md) · [workspaces.md](workspaces.md) · [context-and-limits.md](../reference/context-and-limits.md)
 
+% CHECK(Jan): [behaviour] "~70 tools" (also "68 tool(s)" and "~10,200 tokens" below):
+% `aida mcp test pyirena` against pyIrena 1.2.1 on this machine reports 28 tools (the fitting
+% tools sit behind pyirena_call categories). Update the counts and the token measurement?
 [pyIrena](https://github.com/jilavsky/pyirena) is the small-angle scattering
 analysis package AIDA was built to drive. It ships an MCP server
 (`pyirena-mcp`) exposing ~70 tools: discovery and reading of NXcanSAS HDF5
@@ -21,6 +25,7 @@ and speaks MCP over stdio. That is why the two can live in one environment
 
 ---
 
+(pyirena-setup)=
 ## Setting it up — the short version
 
 ```bash
@@ -28,6 +33,10 @@ pip install "pyirena[mcp]"      # if you don't have it already
 aida mcp add-pyirena            # finds it and configures AIDA in one step
 aida mcp test pyirena           # confirms it starts and lists its tools
 ```
+
+% CHECK(Jan): with more than one pyIrena installation on the machine, `aida mcp add-pyirena` lists
+% them and stops (exit 1) until it is re-run with `--first` or `--command PATH`; `--first` is not
+% mentioned on this page.
 
 Then point a workspace at it:
 
@@ -42,6 +51,11 @@ detected — alongside Bernardyn, if that's installed too; see
 not, configured or not — and names the command that fixes whichever is
 missing.
 
+% SCREENSHOT pyirena-02-add-confirmation: the "Add pyIrena MCP Server" confirmation from
+% Configure → MCP Servers… → Add pyIrena… on a machine with pyIrena in its own conda env
+% (Command, Found in, Version, Group, Skills, Env).
+
+(pyirena-configures)=
 ## What `add-pyirena` actually configures
 
 | Setting | Value | Why |
@@ -52,10 +66,14 @@ missing.
 | `PYIRENA_MAX_ARRAY_POINTS` | `500` | pyIrena's own default, written out explicitly because it's the one knob controlling how much context a single tool result can consume. |
 | `PYIRENA_DATA_ROOT` | Only if you pass `--data-root DIR` | Restricts every file pyirena-mcp will touch to that subtree. pyIrena's docs call it strongly recommended when the server is exposed to an AI agent; your workspace's source folder is usually the right value. The GUI button suggests it automatically from the active workspace. |
 
+% CHECK(Jan): add-pyirena also writes a `PATH` env var (the pyIrena env's `bin` first, then the
+% PATH AIDA was started with, as a literal snapshot); it is not in the table above.
+
 Nothing is written until you say so: `add-pyirena` is an explicit command,
 and the GUI button shows exactly what it found and asks before saving. An
 MCP server is code AIDA launches on your machine.
 
+(pyirena-where-it-looks)=
 ### Where it looks
 
 In order, best first:
@@ -71,6 +89,9 @@ In order, best first:
    `~/.conda/envs/*`, the Homebrew miniconda location, and whatever
    `CONDA_PREFIX` is next to.
 
+% CHECK(Jan): the code also scans /opt/miniconda3/envs, /opt/anaconda3/envs and, on Windows,
+% the miniforge3/miniconda3/anaconda3/mambaforge envs under %LOCALAPPDATA% and %PROGRAMDATA%.
+
 `aida mcp find-pyirena` prints what it would find, changing nothing. If your
 install is somewhere else, skip detection:
 
@@ -80,6 +101,7 @@ aida mcp add-pyirena --command /path/to/envs/pyirena/bin/pyirena-mcp
 
 ---
 
+(pyirena-environments)=
 ## One environment or two?
 
 **Both work.** Pick on other grounds:
@@ -132,6 +154,7 @@ design requires a shared one.
 
 ---
 
+(pyirena-what-good-looks-like)=
 ## What good looks like
 
 Once configured and enabled in a workspace, a session starts with something
@@ -154,6 +177,15 @@ The plot comes back as an inline image, not a wall of text — if it doesn't,
 see [mcp-servers.md](../reference/mcp-servers.md) for the tool-call log and raw result
 inspector.
 
+```{figure} img/pyirena/pyirena-01-inline-plot.png
+:alt: A conversation in the AIDA transcript. The user asks which files in the source folder have a Unified fit and asks for a plot. Below, a grey line reads "2 tool calls" (circle 1), then an I(Q) plot of three validation datasets with their Unified models (circle 2), and the assistant's answer with a small table of the three files and their Q ranges.
+
+A pyIrena exchange: (1) the `pyirena_list_files` and `pyirena_plot_iq` calls, collapsed into one
+line (click to open), (2) the plot returned inline. The plot is from pyIrena's
+`validationData/unified/` files.
+```
+
+(pyirena-troubleshooting)=
 ## Troubleshooting
 
 | Symptom | Cause | Fix |

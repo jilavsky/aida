@@ -1,3 +1,4 @@
+(coding-and-scripting)=
 # Coding and scripting
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -8,6 +9,7 @@
 
 **Related:** [safety-and-permissions.md](../reference/safety-and-permissions.md) · [workspaces.md](workspaces.md)
 
+(coding-and-scripting-pieces)=
 ## The pieces
 
 A workspace controls whether the agent can run code at all, and how, through
@@ -22,6 +24,7 @@ six `WorkspaceConfig` fields:
 | `command_allowlist` | `[]` | Shell command patterns `run_command` may run without asking — see [safety-and-permissions.md](../reference/safety-and-permissions.md). |
 | `script_timeout_seconds` | `30.0` | Seconds a `run_python_script`/`run_command` invocation (or a Code Editor **Run**) gets before its subprocess is killed — see below. |
 
+(coding-and-scripting-enabled)=
 ## `scripting_enabled` — the master switch
 
 `scripting_enabled` defaults to `True`. Set it to `False` for a workspace
@@ -37,6 +40,14 @@ aida workspace edit <name> --scripting-enabled      # turn it back on
 In the GUI it's the **Enabled** checkbox at the top of the **Workspaces…**
 dialog's **Scripting** group.
 
+```{figure} img/coding-and-scripting/coding-and-scripting-03-scripting-group.png
+:alt: The Scripting group of the workspace form: an Enabled checkbox labelled "Allow running scripts/commands in this workspace", a Python interpreter field with a Browse… button, a Command allowlist box, a Script/command timeout spinner set to 30 s, and Templates folder and Saved scripts folder fields, each with Browse….
+
+The **Scripting** group of a workspace in **Configure → Workspaces…**: all six fields from the
+table above.
+```
+
+(coding-and-scripting-interpreter)=
 ## `python_interpreter` — which Python runs your scripts
 
 `python_interpreter` is a **direct path to a conda or venv environment's own
@@ -69,11 +80,12 @@ aida workspace edit <name> --python-interpreter ~/miniconda3/envs/aievaluator/bi
 ```
 
 or, in the GUI, the **Python interpreter** text field (with a **Browse…**
-picker) in the toolbar's Folders panel — see
+picker) in the session column's **Folders** section — see
 [workspaces.md](workspaces.md) for the full panel. Both the Code Editor's
 Run button and the model's own `run_python_script` calls use this same
 interpreter.
 
+(coding-and-scripting-timeout)=
 ## `script_timeout_seconds` — killing runaway scripts
 
 Every `run_python_script`/`run_command` invocation runs as a real subprocess
@@ -97,6 +109,7 @@ timeout** spinner (1-3600s) in the Workspace Management dialog, or by
 editing `workspaces.yaml` directly. The Code Editor's **Run** button uses
 the same workspace-configured value.
 
+(coding-and-scripting-which-tool)=
 ## `run_python_script` vs `run_command` — which to use
 
 This is the part that causes real confusion, so it's worth stating plainly:
@@ -137,6 +150,7 @@ with a raw `python3 -c "..."` just to find out what interpreter/packages
 were available, triggering a confirmation prompt for something
 `run_python_script` could have answered without one.
 
+(coding-and-scripting-skill-scripts)=
 ## Scripts shipped with a skill
 
 A folder skill can carry tested scripts (`~/.aida/skills/<name>/scripts/`).
@@ -146,6 +160,7 @@ working directory (so outputs land with your results, not in the skill),
 and the skills folder doesn't need to be an allowed folder. See
 [skills.md](skills.md#shipping-code-with-a-skill).
 
+(coding-and-scripting-templates)=
 ## `templates_dir` — house conventions for generated scripts
 
 `templates_dir` points at a flat folder of plain `.py` files (not recursive
@@ -164,6 +179,7 @@ aida workspace edit <name> --templates-dir ~/bits-usaxs/templates
 
 or edit `workspaces.yaml` by hand.
 
+(coding-and-scripting-saved-scripts)=
 ## `saved_scripts_dir` — where the Code Editor saves
 
 `saved_scripts_dir` is where the Code Editor's Save/Save As write scripts.
@@ -178,15 +194,26 @@ aida workspace edit <name> --saved-scripts-dir ~/bits-usaxs/scripts
 Like `templates_dir`, it also sits in the **Workspaces…** dialog's
 **Scripting** group.
 
+(coding-and-scripting-code-editor)=
 ## The Code Editor dialog
 
+% CHECK(Jan): there are more ways in than the two listed: the dialog's own "Open…" button loads
+% an existing file, and a file artifact in the chat has an "Open in Code Editor" button that opens
+% the real file (Save and Run then act on it in place).
 Open it two ways:
 
 - **Toolbar → "Code Editor…"** — opens a blank editor.
-- **"</> Open in Editor"** button on a chat message — appears under any
-  assistant message that contains a fenced code block, and pre-fills the
-  editor with that block's content (only the first fenced block in the
-  message, if there's more than one).
+- **"</> Open in Editor"** button on a chat message — appears at the top
+  right of any assistant message that contains a fenced code block, and
+  pre-fills the editor with that block's content (only the first fenced
+  block in the message, if there's more than one).
+
+```{figure} img/coding-and-scripting/coding-and-scripting-01-open-in-editor.png
+:alt: An assistant message containing a short Python script. At its top right, next to Copy, a flat button reads "</> Open in Editor", marked with circle 1.
+
+An assistant reply with a code block: (1) **</> Open in Editor** copies the block into a new
+editor.
+```
 
 Once open:
 
@@ -200,6 +227,13 @@ Once open:
   default), streaming exit code, stdout, and stderr back into the output
   pane below the editor.
 - **Kill** stops a script that's currently running.
+
+```{figure} img/coding-and-scripting/coding-and-scripting-02-code-editor.png
+:alt: The Code Editor dialog. The editor shows a syntax-highlighted script that lists HDF5 files; below it the buttons Open…, Save, Save As…, Run and a greyed-out Kill; at the bottom the output pane reads exit code 0, the duration, and stdout listing three .h5 files with their sizes. Circles mark the editor (1), Run (2) and the output pane (3).
+
+The Code Editor after **Run**: (1) the script, saved in the workspace's `saved_scripts` folder,
+(2) **Run**, (3) exit code, duration and output. **Kill** is enabled only while a script runs.
+```
 
 Running from the Code Editor uses the same execution path
 (`run_python_script`'s underlying runner) as the model's own tool calls, so

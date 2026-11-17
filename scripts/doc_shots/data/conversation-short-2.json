@@ -1,0 +1,10 @@
+{
+  "title": "Draft the run summary for the logbook",
+  "workspace": "notebook",
+  "profile": "claude-direct",
+  "user": "usaxs-team",
+  "messages": [
+    {"role": "user", "content": "Draft a short run summary for the logbook."},
+    {"role": "assistant", "content": "Here is a draft summary."}
+  ]
+}

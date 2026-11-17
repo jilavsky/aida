@@ -1,0 +1,16 @@
+{
+  "title": "List the November data files",
+  "workspace": "saxs-analysis",
+  "profile": "local-ollama",
+  "user": "usaxs-team",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write me a short script that lists the HDF5 files in the source folder, newest first."
+    },
+    {
+      "role": "assistant",
+      "content": "Here is a script you can run from the Code Editor or keep in your saved scripts:\n\n```python\n\"\"\"List the HDF5 files in the source folder, newest first.\"\"\"\nfrom pathlib import Path\n\nfolder = Path(\"/tmp/aida-docs/data/usaxs-2026-11\")\nfiles = sorted(folder.glob(\"*.h5\"), key=lambda p: p.stat().st_mtime, reverse=True)\nfor f in files:\n    print(f\"{f.name:28s} {f.stat().st_size / 1024:6.1f} KB\")\n```\n\nIt only reads file names, sizes and modification times; it does not open the files."
+    }
+  ]
+}

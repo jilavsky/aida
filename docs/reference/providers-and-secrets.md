@@ -1,3 +1,4 @@
+(providers-and-secrets)=
 # Providers and secrets
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -13,6 +14,7 @@ A **provider profile** tells AIDA how to reach one LLM endpoint: a name, a
 keychain (never a raw key). Profiles live in `~/.aida/providers.yaml`, and a
 workspace picks one by name (see [workspaces.md](../guides/workspaces.md)).
 
+(providers-and-secrets-fields)=
 ## Provider profile fields
 
 Each entry under `profiles:` in `providers.yaml` has:
@@ -30,6 +32,7 @@ Each entry under `profiles:` in `providers.yaml` has:
 | `usd_per_m_input` / `usd_per_m_output` | Your actual price per million tokens, used for the session cost estimate. Set both to `0` for a free local model so the estimate stops pretending it costs anything; omit them and a generic default rate is used |
 | `context_window` | The model's TOTAL context window, in tokens. Omit/`null` to fall back to `config.yaml`'s global `max_context_tokens` (see [context-and-limits.md](context-and-limits.md)). **Not the same field as `max_tokens` above** — `max_tokens` caps the *output* this profile generates; `context_window` is the model's total window that the output, the conversation history, and every enabled MCP server's tool schemas all have to fit inside together |
 
+% CHECK(Jan): "All six are optional" — the table has ten rows (kind … context_window); which six?
 All six are optional and can be set per profile — that's the point of
 having several profiles for the same endpoint (a cheap fast one and a
 careful long-output one, say).
@@ -135,10 +138,12 @@ Openrouter is AI providers proxy providing selection of paid and free AI models.
 To test capabilities, you can use Aida with this model - with varying results. 
 Go to https://openrouter.ai and setup free account and key API key, configure 
 through GUI "Secret ref."="opnerouter" and "Secret value"= your_key.
+% CHECK(Jan): "opnerouter" looks like a typo for the secret_ref "openrouter" used in the YAML above.
 OpenRouter forwards your requests to random free model offered by providers. 
 Works, but occasionally tool calling fails depending on model used.  
 *Remember, your data are stored and used for training!!!!*
 
+(providers-and-secrets-embedding)=
 ## Embedding profiles
 
 Embedding profiles have the exact same shape (`kind`, `base_url`, `model`,
@@ -202,19 +207,43 @@ aida config secret delete argo-claude
 Pasting a real API key or username directly into `providers.yaml` defeats
 the whole point of this design — don't do it.
 
+(providers-and-secrets-gui)=
 ## GUI: editing profiles
 
-The **Providers** dialog (Settings → Providers) has two tabs — Provider
+The **Providers** dialog (**Configure → Providers…**) has two tabs — Provider
 Profiles and Embedding Profiles — and each supports **Add**, **Edit**,
 **Remove**, and **Test** against the corresponding half of
 `providers.yaml`. "Test" performs the same live reachability check `aida
 doctor` does, for the one profile you are editing.
+
+```{figure} img/providers-and-secrets/providers-and-secrets-01-providers-dialog.png
+:alt: The Providers dialog. Two tabs, Provider Profiles and Embedding Profiles; on the left the list with claude-direct and local-ollama, under it the Add, Edit, Remove and Test buttons; on the right the Details box for claude-direct showing kind anthropic, model, secret_ref claude-direct and supports_vision True. Numbered circles mark the parts described in the legend.
+
+The Providers dialog with two profiles.
+```
+
+1. **Provider Profiles / Embedding Profiles** tabs: the `profiles:` and `embedding_profiles:`
+   halves of `providers.yaml`.
+2. **Profile list**; the selected profile's fields are shown under **Details**.
+3. **Add… / Edit… / Remove…**.
+4. **Test**: the live reachability check.
+
+```{figure} img/providers-and-secrets/providers-and-secrets-02-profile-form.png
+:alt: The Edit Provider Profile form for claude-direct. Fields Name, Kind (anthropic), Base URL (empty, SDK default), Model, Secret ref (claude-direct), Secret value (empty, placeholder says leave blank to keep the existing keychain secret), Capability notes, then Max tokens, Temperature, Input cost, Output cost and Context window, each with an Override checkbox, and a Vision checkbox (ticked).
+
+**Edit…** on `claude-direct`. Each optional numeric field has an **Override** box; unticked
+means the field is unset and its default applies.
+```
 
 Hand-editing `~/.aida/providers.yaml` still works and is still the
 documented source of truth for anything the dialog does not cover. Secrets
 never appear in either place: the dialog stores a `secret_ref` exactly as
 the file format does, and the values themselves are set with `aida config
 secret set/get/delete` (above) or through the OS keychain.
+
+% CHECK(Jan): the form also has a **Secret value** field ("leave blank to keep the existing
+% keychain secret") that stores the value in the keychain on OK, so the GUI can set secrets
+% itself; the paragraph above suggests it cannot. The OpenRouter section already uses it.
 
 ## Full example
 
@@ -223,6 +252,7 @@ Rather than re-deriving every field, see
 repo for a fully commented example covering local (Ollama), direct Claude,
 and Argo-proxied profiles for both `profiles:` and `embedding_profiles:`.
 
+(providers-and-secrets-checking)=
 ## Checking a profile actually works
 
 `aida doctor` does a live reachability check against every configured

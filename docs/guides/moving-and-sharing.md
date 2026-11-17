@@ -1,3 +1,4 @@
+(moving-and-sharing)=
 # Moving and sharing a setup
 
 Everything AIDA knows about *how you work* — provider profiles, workspaces,
@@ -13,6 +14,14 @@ aida config import ~/aida-setup.zip          # on the new one
 
 In the GUI: **File → Export Setup…** and **File → Import Setup…**.
 
+```{figure} img/moving-and-sharing/moving-and-sharing-01-export.png
+:alt: The Export Setup dialog: two sentences saying what is written and that no API key, token or password is ever written, a Save to field reading /tmp/aida-docs/transfer/aida-setup.zip with a Browse… button, an unticked checkbox "Include my personal context and private workspace notes", and Export and Cancel buttons.
+
+**File → Export Setup…**. The personal-fields checkbox is off by default (see
+[Personal fields](#moving-and-sharing-personal)).
+```
+
+(moving-and-sharing-secrets)=
 ## No secrets, ever
 
 **No API key, token or password is written to a bundle.** Provider secrets
@@ -33,6 +42,7 @@ SECRETS TO SET (none travel in a bundle):
 Run those (or use **Providers…** for a profile's key and **MCP Servers…**
 for a server's environment) and the imported setup is complete.
 
+(moving-and-sharing-paths)=
 ## Paths are translated, not copied
 
 Your folders are not in the same place on the other machine, so AIDA does
@@ -63,6 +73,7 @@ paths (`/etc/bait/instrument.yaml`) are already portable and are left
 untouched. `{user}` placeholders survive too — see
 [`organizing-conversations.md`](organizing-conversations.md).
 
+(moving-and-sharing-contents)=
 ## What a bundle contains
 
 | Included | Not included |
@@ -78,6 +89,7 @@ A bundle is a plain zip — open it and read it before sending it to anyone.
 `README.txt` inside says what it holds, `secrets.json` lists the secret
 names it expects, and `paths.json` lists every path that was translated.
 
+(moving-and-sharing-personal)=
 ### Personal fields
 
 Your personal context, user names and private workspace notes are **left
@@ -91,6 +103,7 @@ aida config export ~/aida-setup.zip --include-personal
 (In the GUI, the "Include my personal context and private workspace notes"
 checkbox.)
 
+(moving-and-sharing-partial)=
 ## Importing part of a bundle
 
 To see what a bundle holds without importing anything:
@@ -128,6 +141,14 @@ In the GUI, the import dialog's **Contents** tab is the same thing as a
 checkable tree: tick a workspace and its dependencies tick themselves, with
 a line underneath saying which ones and why.
 
+```{figure} img/moving-and-sharing/moving-and-sharing-02-import-contents.png
+:alt: The Import Setup dialog with the bundle /tmp/aida-docs/transfer/aida-setup.zip loaded. The Contents tab shows a tree of profiles, MCP servers, skills and workspaces; only the workspace saxs-analysis was ticked, and the profile local-ollama and the MCP server pyirena are ticked with it. A line below the tree reads "Also needed — MCP server: pyirena, profile: local-ollama". Below are the "If a name already exists" menu set to "Skip it, keep mine (recommended)", an unticked "Also apply the bundle's general settings", and Import and Cancel.
+
+**File → Import Setup…** with one workspace ticked: (1) the contents tree, where its profile and
+MCP server tick themselves, (2) the line saying what came along and why.
+```
+
+(moving-and-sharing-preview)=
 ## Previewing, and fixing paths
 
 `--check` runs the whole import and writes nothing:
@@ -164,6 +185,14 @@ The GUI's **Paths** tab is the same table: it appears only when something
 does not resolve, has an editable "Use instead" column with a Browse
 button, and shrinks as you fill it in.
 
+```{figure} img/moving-and-sharing/moving-and-sharing-03-import-paths.png
+:alt: The Paths (2) tab of the Import Setup dialog: a table with the columns Used by, In the bundle and Use instead. Row 1: MCP server 'bait-mcp' command, ${CONDA_ENV:bait}/bin/bait-mcp. Row 2: workspace 'beamline' source_folders, ${HOME}/Experiments/2026. The Use instead cells are empty; a "Browse for selected row…" button sits below.
+
+The **Paths** tab for a bundle whose `bait` conda environment and `Experiments` folder do not
+exist on this machine.
+```
+
+(moving-and-sharing-importing)=
 ## Importing
 
 An import **never deletes anything**. If a name already exists here, the
@@ -179,6 +208,7 @@ Any config file that already had content is copied to
 `<name>.bak-<timestamp>` before it is rewritten, next to the original in
 `~/.aida/`.
 
+(moving-and-sharing-app-settings)=
 ### General settings are opt-in
 
 The bundle carries your safety mode, allowed folders, iteration and context
@@ -194,6 +224,7 @@ Per-screen settings (window geometry, font size, column widths, the last
 workspace you used) are never exported at all — a window position from a
 two-monitor desk is wrong everywhere else.
 
+(moving-and-sharing-not-carried)=
 ## What a bundle cannot carry
 
 A bundle moves *configuration*. It cannot move the things that
@@ -217,6 +248,7 @@ aida config import ~/aida-setup.zip --map ...   # for real, with any paths corre
 aida doctor                                     # what is still missing on this machine
 ```
 
+(moving-and-sharing-conversations)=
 ## Conversations and knowledge indexes
 
 Deliberately not part of a bundle. Your conversation history lives in

@@ -1,3 +1,4 @@
+(knowledge-bases)=
 # Knowledge bases (RAG)
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -14,6 +15,7 @@ relevant passages during a chat turn instead of relying only on what's in
 its context window. Knowledge bases live in `~/.aida/knowledge.yaml`; a
 workspace opts into using specific ones by name.
 
+(knowledge-bases-prerequisite)=
 ## Prerequisite: an embedding profile
 
 Before you can create a knowledge base you need at least one **embedding
@@ -25,6 +27,7 @@ profile in providers.yaml (embedding_profiles:) first."), and the CLI's
 knowledge base's `embedding_profile` is unset or names a profile that
 doesn't exist.
 
+(knowledge-bases-create)=
 ## Creating a knowledge base
 
 ### CLI
@@ -63,7 +66,14 @@ SQLite index file is left on disk. Pass `--delete-index` to also delete
 that file; without it, `--yes` skips the confirmation prompt but still
 leaves the index behind.
 
+(knowledge-bases-gui)=
 ### GUI
+
+```{figure} img/knowledge-bases/knowledge-bases-01-dialog.png
+:alt: The Knowledge Bases dialog. On the left a list with one entry, usaxs-notes with 0 chunks, and the buttons Add, Edit, Remove, Rebuild and Update; on the right a Details box with its source folder, embedding profile ollama-embed, chunk size 1000, chunk overlap 150 and indexed chunks 0.
+
+**Configure → Knowledge Bases…** with one knowledge base, not yet built.
+```
 
 Open **Configure → Knowledge Bases…** to launch the knowledge
 management dialog, then click **Add…**. The form has the same fields as the
@@ -71,12 +81,19 @@ CLI: name, source folders (one folder or file per line), an embedding
 profile dropdown, chunk size, and chunk overlap. As with the CLI, Add is
 blocked with a warning dialog if no embedding profile is configured yet.
 
+```{figure} img/knowledge-bases/knowledge-bases-02-add-form.png
+:alt: The knowledge base form with name usaxs-notes, one source folder per line, the embedding profile dropdown set to ollama-embed, chunk size 1000 and chunk overlap 150.
+
+The form behind **Add…** and **Edit…** (here editing `usaxs-notes`).
+```
+
 A source folder pasted as a `file://` URI (e.g. Obsidian's "Copy as URI"
 action) is automatically normalized to a plain path, both in the CLI's
 `--source-folders` and the GUI's source-folders field — this used to fail
 silently (the folder just didn't resolve, with no error), so both entry
 points now fix it up before saving.
 
+(knowledge-bases-indexed)=
 ## What gets indexed
 
 Each entry in `source_folders` can be either a whole folder (walked
@@ -96,6 +113,7 @@ is chunked as plain text. Other formats `read_document` supports elsewhere
 in AIDA (images, spreadsheets) are deliberately excluded here — there's
 nothing for an embedding to act on in them.
 
+(knowledge-bases-build)=
 ## Building the index
 
 Two ways to (re-)index a knowledge base, both in the CLI and the GUI:
@@ -117,11 +135,14 @@ typo, a deleted folder, a cloud-synced placeholder mount, or an
 un-normalized URI) — CLI as a `WARNING` line, GUI as a popup — instead of
 silently indexing zero files with no explanation.
 
+% CHECK(Jan): not run, needs an embedding model (`kb build`, `kb update` and `kb query` below).
+% Without one configured they stop with "references unknown embedding profile", as described.
 ```bash
 aida kb build usaxs-notes
 aida kb update usaxs-notes
 ```
 
+(knowledge-bases-query)=
 ## Debugging retrieval
 
 To see what passages a question would retrieve without spending a real
@@ -144,8 +165,13 @@ AIDA's environment (it is whenever pyIrena is), it is used and retrieval
 takes a few milliseconds; without it AIDA uses a pure-Python fallback that
 gives the same results. NumPy is not required.
 
+(knowledge-bases-workspace)=
 ## Attaching a knowledge base to a workspace
 
+% CHECK(Jan): the Workspaces dialog's Add/Edit form now has a "Knowledge bases" tick list (see
+% the screenshot on guides/workspaces.md), so "CLI/config-file only" and "the workspace GUI's
+% editable fields don't include knowledge_bases" look out of date. (The Folders panel indeed
+% has no such control.)
 A workspace searches only the knowledge bases named in its
 `knowledge_bases` list (see [workspaces.md](workspaces.md)). This link is
 **CLI/config-file only today** — the knowledge management dialog manages
@@ -160,6 +186,7 @@ aida workspace edit usaxs-review --knowledge-bases usaxs-notes,another-kb
 or by hand-editing the workspace's `knowledge_bases:` entry in
 `workspaces.yaml`.
 
+(knowledge-bases-chat)=
 ## What you see in chat
 
 When a workspace's knowledge base(s) contribute passages to a turn, the
@@ -168,6 +195,13 @@ knowledge base(s)"**. Clicking its **Details** button expands it to show,
 per passage, the source file name, heading (if any), similarity score, and
 the retrieved text — grouped by which knowledge base it came from.
 
+```{figure} img/knowledge-bases/knowledge-bases-03-retrieval.png
+:alt: The retrieval row expanded. Header: Retrieved 2 passage(s) from 1 knowledge base(s), with a Details button. Below, from knowledge base usaxs-notes, two passages, each with file name, heading, score and text.
+
+The retrieval row after **Details**, with two example passages from `usaxs-notes`.
+```
+
+(knowledge-bases-mismatch)=
 ## Caveat: embedding profile mismatches aren't comparable
 
 An index is tied to the embedding profile it was built with. If you query a

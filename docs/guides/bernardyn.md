@@ -1,3 +1,4 @@
+(bernardyn)=
 # Bernardyn and AIDA
 
 > **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
@@ -28,6 +29,7 @@ recommended layout.
 
 ---
 
+(bernardyn-setup)=
 ## Setting it up — the short version
 
 ```bash
@@ -36,11 +38,19 @@ aida mcp add-bernardyn           # finds it and configures AIDA in one step
 aida mcp test bernardyn          # confirms it starts and lists its five tools
 ```
 
+% CHECK(Jan): with more than one Bernardyn installation, `aida mcp add-bernardyn` (also with
+% `--force` or `--output-root`) lists them and stops (exit 1) until re-run with `--first` or
+% `--command PATH`; `--first` is not mentioned on this page or in Troubleshooting.
+
 In the GUI, the same thing is the **MCP Servers…** dialog's **Add
 Bernardyn…** button. On the first-run onboarding screen there is a single
 button that adds whatever it detected — *Add pyIrena + Bernardyn MCP
 Tools…* when both are installed — still confirming each one separately
 before anything is written.
+
+% SCREENSHOT bernardyn-01-add-confirmation: the "Add Bernardyn" confirmation from Configure →
+% MCP Servers… → Add Bernardyn… on a machine with Bernardyn in its own conda env (command,
+% groups pyirena-analysis + bernardyn-plots, suggested output and data roots).
 
 If Bernardyn lives somewhere detection doesn't look, point at it directly:
 
@@ -53,6 +63,7 @@ Detection order is the same as pyIrena's (AIDA's own environment, `PATH`,
 `python -m bernardyn.mcp.server`, then sibling conda/mamba envs) — see
 [pyirena.md](pyirena.md#where-it-looks).
 
+(bernardyn-configures)=
 ## What `add-bernardyn` actually configures
 
 | Setting | Value | Why |
@@ -71,6 +82,7 @@ Nothing is written until you say so — `add-bernardyn` is an explicit
 command, and the GUI button shows exactly what it found and asks first. An
 MCP server is code AIDA launches on your machine.
 
+(bernardyn-workspace)=
 ## Enabling it in a workspace
 
 A configured server does nothing until a workspace enables its group:
@@ -80,7 +92,11 @@ aida workspace edit my-analysis --mcp-group pyirena-analysis   # pyIrena + Berna
 aida workspace edit my-figures  --mcp-group bernardyn-plots    # plotting only
 ```
 
+(bernardyn-what-good-looks-like)=
 ## What good looks like
+
+% CHECK(Jan): the groups row above compares against "pyirena-mcp's ~10,200" tokens; see the tool
+% count note on the pyIrena page (pyIrena 1.2.1 reports 28 tools).
 
 ```
 [mcp] bernardyn: 5 tool(s)
@@ -94,6 +110,7 @@ Then ask for something concrete:
 The preview image comes back inline; the portable package stays on disk
 under the output root for Bernardyn's desktop app to reopen.
 
+(bernardyn-troubleshooting)=
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
