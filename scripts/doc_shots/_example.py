@@ -24,7 +24,7 @@ def _open(ctx: Context):
 
 @shot("example-01-window")
 def window(ctx: Context):
-    w = _open(ctx)
-    image = w.grab()
+    w = _open(ctx)  # keep this reference until the grab: a shot that grabs only a
+    image = w.grab()  # child widget can otherwise lose the window to garbage collection
     # Numbered callouts from the widgets' own geometry; the page's legend uses the same numbers.
     return draw_callouts(image, [(1, widget_rect(w, w), "c")])
