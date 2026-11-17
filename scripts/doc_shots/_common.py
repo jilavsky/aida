@@ -156,12 +156,11 @@ def widget_rect(widget, root):
 
 def scene_item_rect(view, item, root):
     """Rectangle of a pyqtgraph scene item (e.g. a PlotItem) in *root* coordinates."""
-    from PySide6.QtCore import QPoint, QRect
+    from PySide6.QtCore import QRect
 
-    poly = view.mapFromScene(item.sceneBoundingRect())
-    r = poly.boundingRect()
-    top_left = view.mapTo(root, QPoint(int(r.x()), int(r.y())))
-    return QRect(top_left, r.size().toSize())
+    # mapFromScene(QRectF) returns an integer QPolygon, so this is a QRect.
+    r = view.mapFromScene(item.sceneBoundingRect()).boundingRect()
+    return QRect(view.mapTo(root, r.topLeft()), r.size())
 
 
 def draw_callouts(image, marks: Sequence[tuple]):
