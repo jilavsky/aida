@@ -54,7 +54,16 @@ def page_of(shot_id: str) -> str:
 
 
 def page_file(page: str) -> Path:
-    """The one ``docs/**/<page>.md`` file; raises if missing or ambiguous."""
+    """The ``docs/**/<page>.md`` file a shot belongs to.
+
+    A top-level ``docs/<page>.md`` wins, so ``index-01-…`` shots belong to the
+    home page ``docs/index.md`` (section ``index.md`` pages cannot carry
+    automated shots). Otherwise the name must be unique; raises if missing
+    or ambiguous.
+    """
+    top = DOCS / f"{page}.md"
+    if top.is_file():
+        return top
     hits = [p for p in DOCS.rglob(f"{page}.md") if "_build" not in p.parts]
     if len(hits) != 1:
         raise LookupError(f"expected one docs/**/{page}.md, found {len(hits)}")
@@ -214,6 +223,42 @@ def draw_callouts(image, marks: Sequence[tuple]):
         )
     p.end()
     return image
+
+
+def refuse_message_boxes() -> None:
+    """Make the static ``QMessageBox`` helpers raise instead of opening.
+
+    An unexpected modal box (``warning``, ``information``, ``critical``,
+    ``question``) blocks an offscreen run with no output. Call this in
+    ``_package.make_app()``; a shot that means to show such a box builds a
+    ``QMessageBox`` instance itself. (From Bernardyn.)
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    def refuse(kind):
+        def box(_parent, title, text, *args, **kwargs):
+            raise RuntimeError(f"unexpected {kind} dialog {title!r}: {text}")
+
+        return staticmethod(box)
+
+    for kind in ("warning", "information", "critical", "question"):
+        setattr(QMessageBox, kind, refuse(kind))
+
+
+def flush_deletes(app) -> None:
+    """Run deletes queued with ``deleteLater()``.
+
+    ``processEvents()`` outside a running event loop never handles deferred
+    deletes, so a widget a shot closed and queued for deletion would still be
+    a top-level widget during clean-up. Call it inside a shot, right after the
+    action that queued the delete (Bernardyn: after the 2-D renderer closes
+    its temporary widget). Not called by the script's own clean-up: forcing
+    every queued delete there crashed PySide6.
+    """
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
 
 
 def save_png(image, path: Path) -> int:
