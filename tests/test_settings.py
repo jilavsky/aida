@@ -1213,3 +1213,12 @@ def test_workflow_step_repeat_defaults_and_bad_values(caplog):
 
     blank = WorkflowStep.from_dict("w", {"prompt": "go", "repeat_until": "  "})
     assert blank.repeat_until is None
+
+
+def test_tool_result_char_caps_load_from_yaml_and_bad_values_fall_back():
+    from aida.config.settings import AppConfig
+
+    config = AppConfig.from_dict({"tool_result_char_caps": {"*fetch*": "6000"}})
+    assert config.tool_result_char_caps == {"*fetch*": 6000}
+    assert AppConfig.from_dict({"tool_result_char_caps": ["x"]}).tool_result_char_caps == {}
+    assert AppConfig.from_dict({}).auto_continue_on_stall is True

@@ -3,15 +3,22 @@ from __future__ import annotations
 from pathlib import Path
 
 from aida.core.context import (
+    COMPACTION_MERGE_INSTRUCTION,
+    COMPACTION_PROMPT,
     CONTEXT_SAFETY_FRACTION,
     DEFAULT_RESERVED_OUTPUT_TOKENS,
     IMAGE_TOKEN_ESTIMATE,
+    KEEP_RECENT_TOOL_ROUNDS,
     MIN_HISTORY_BUDGET,
+    MIN_SHRINK_CHARS,
     MISSING_TOOL_RESULT,
+    TOOL_RESULT_MAX_CHARS,
+    TOOL_RESULT_MIN_CHARS,
     build_coding_context_block,
     build_identity_context_block,
     build_system_message,
     build_workspace_context_block,
+    cap_tool_result,
     compaction_request_messages,
     compaction_summary_message,
     estimate_message_tokens,
@@ -19,10 +26,17 @@ from aida.core.context import (
     estimate_tokens_dense,
     estimate_tool_schema_tokens,
     history_budget,
+    is_compaction_summary,
+    is_shrunk_tool_result,
     load_skill_texts,
     plan_trim,
     repair_tool_call_pairing,
+    shrink_old_tool_results,
     split_into_turns,
+    summary_body,
+    summary_transcript_chunks,
+    tool_result_char_cap,
+    tool_specific_char_cap,
     trim_history,
 )
 from aida.providers.base import ImageRef, Message, ToolCall, ToolSchema
@@ -689,3 +703,211 @@ def test_flat_skill_has_no_file_note(tmp_path: Path):
     [text] = load_skill_texts(skills_dir, ["basics"])
     assert f"Folder: {skills_dir}" in text
     assert "This skill's files" not in text
+
+
+# --- context compaction in long runs (TODO §6, 2026-11-20) ------------------
+
+
+def _long_agent_turn(rounds: int, *, result_chars: int = 20_000) -> list[Message]:
+    """One user message followed by ``rounds`` tool rounds with big results —
+    the shape of an autonomous run that never returns to the user."""
+    messages = [Message(role="user", content="review every proposal in the folder")]
+    for i in range(rounds):
+        call = ToolCall(id=f"c{i}", name="read_file", arguments={"path": f"p{i}.pdf"})
+        messages.append(Message(role="assistant", content=f"reading {i}", tool_calls=[call]))
+        messages.append(
+            Message(
+                role="tool",
+                content=f"proposal {i} " + "z" * result_chars,
+                tool_call_id=f"c{i}",
+                name="read_file",
+                images=[ImageRef(path=f"/tmp/p{i}.png")],
+            )
+        )
+    return messages
+
+
+def _tokens(messages: list[Message]) -> int:
+    return sum(estimate_message_tokens(m) for m in messages)
+
+
+def test_shrink_brings_one_huge_turn_under_budget_without_dropping_anything():
+    messages = _long_agent_turn(150)
+    target = 100_000
+    assert _tokens(messages) > 10 * target
+
+    shrunk_messages, shrunk = shrink_old_tool_results(messages, target)
+
+    assert shrunk > 0
+    assert _tokens(shrunk_messages) <= target
+    assert len(shrunk_messages) == len(messages)
+    # Pairing still holds: repair has nothing to do.
+    assert repair_tool_call_pairing(shrunk_messages) == shrunk_messages
+    # The last KEEP_RECENT_TOOL_ROUNDS rounds are untouched (same objects).
+    tail = 2 * KEEP_RECENT_TOOL_ROUNDS
+    assert all(a is b for a, b in zip(shrunk_messages[-tail:], messages[-tail:], strict=True))
+    # The input list and its messages are not modified.
+    assert messages[2].content.startswith("proposal 0 ")
+
+
+def test_shrunk_stub_keeps_pairing_fields_names_the_call_and_drops_images():
+    messages = _long_agent_turn(10)
+    shrunk_messages, _ = shrink_old_tool_results(messages, 0)
+    stub = shrunk_messages[2]
+    assert is_shrunk_tool_result(stub)
+    assert stub.tool_call_id == "c0" and stub.name == "read_file"
+    assert "p0.pdf" in stub.content
+    assert "20,011 chars" in stub.content
+    assert stub.images == []
+
+
+def test_shrink_goes_oldest_first_and_stops_at_the_target():
+    messages = _long_agent_turn(10)
+    target = _tokens(messages) - 1
+    shrunk_messages, shrunk = shrink_old_tool_results(messages, target)
+    assert shrunk == 1
+    assert is_shrunk_tool_result(shrunk_messages[2])
+    assert not is_shrunk_tool_result(shrunk_messages[4])
+
+
+def test_shrink_is_idempotent_and_skips_small_results():
+    messages = _long_agent_turn(10, result_chars=100)
+    _, shrunk = shrink_old_tool_results(messages, 0)
+    # Small results are not worth a stub; only their images would be dropped.
+    assert shrunk == 10 - KEEP_RECENT_TOOL_ROUNDS
+    once, _ = shrink_old_tool_results(_long_agent_turn(10), 0)
+    twice, again = shrink_old_tool_results(once, 0)
+    assert again == 0
+    assert twice == once
+
+
+def test_shrink_shortens_long_arguments_of_old_tool_calls():
+    messages = [Message(role="user", content="write the report")]
+    for i in range(5):
+        call = ToolCall(
+            id=f"w{i}", name="write_file", arguments={"path": f"r{i}.md", "content": "r" * 30_000}
+        )
+        messages.append(Message(role="assistant", content="", tool_calls=[call]))
+        messages.append(Message(role="tool", content="Wrote it", tool_call_id=f"w{i}"))
+
+    shrunk_messages, shrunk = shrink_old_tool_results(messages, 0)
+
+    assert shrunk == 5 - KEEP_RECENT_TOOL_ROUNDS
+    arguments = shrunk_messages[1].tool_calls[0].arguments
+    assert arguments["path"] == "r0.md"
+    assert arguments["content"] == "[30,000 chars removed to save context]"
+    assert messages[1].tool_calls[0].arguments["content"] == "r" * 30_000
+
+
+def test_plan_trim_never_drops_a_summary_on_its_own():
+    summary = compaction_summary_message("- earlier facts")
+    turns = []
+    for i in range(4):
+        turns += [Message(role="user", content=f"q{i} " + "x" * 4000), Message(role="assistant")]
+    plan = plan_trim([summary, *turns], max_tokens=10)
+    assert plan.was_trimmed is False
+    assert plan.previous_summary is summary
+
+
+def test_plan_trim_holds_the_summary_aside_while_dropping_real_turns():
+    summary = compaction_summary_message("- earlier facts")
+    turns = []
+    for i in range(6):
+        turns += [Message(role="user", content=f"q{i} " + "x" * 4000), Message(role="assistant")]
+    plan = plan_trim([summary, *turns], max_tokens=10)
+    assert plan.was_trimmed is True
+    assert plan.previous_summary is summary
+    assert all(not is_compaction_summary(t[0]) for t in plan.dropped_turns)
+    assert len(plan.dropped_turns) == 2
+    assert plan.kept_messages[0] is summary
+
+
+def test_plan_trim_without_keep_summary_drops_the_summary_too():
+    summary = compaction_summary_message("- earlier facts")
+    messages = [summary, Message(role="user", content="q"), Message(role="assistant")]
+    plan = plan_trim(messages, 0, min_recent_turns=0, keep_summary=False)
+    assert plan.previous_summary is None
+    assert plan.kept_messages == []
+
+
+def test_plan_trim_fallback_floor_reaches_into_the_last_few_turns():
+    messages = []
+    for i in range(3):
+        messages += [
+            Message(role="user", content=f"q{i} " + "x" * 40_000),
+            Message(role="assistant"),
+        ]
+    assert plan_trim(messages, max_tokens=12_000).was_trimmed is False
+    plan = plan_trim(messages, max_tokens=12_000, fallback_min_recent_turns=1)
+    assert len(plan.dropped_turns) == 2
+    assert plan.kept_turn_messages[0].content.startswith("q2 ")
+
+
+def test_summary_request_clips_large_tool_results():
+    turns = [_long_agent_turn(20, result_chars=100_000)]
+    request = compaction_request_messages(turns)
+    # 20 results x 100k chars would be 2 M chars; clipped to a few k each.
+    assert len(request[0].content) < 20 * 5_000
+    assert "proposal 7 " in request[0].content
+    assert "chars omitted" in request[0].content
+
+
+def test_summary_transcript_chunks_stay_under_the_limit():
+    turns = [_long_agent_turn(200, result_chars=100_000)]
+    chunks = summary_transcript_chunks(turns, 50_000)
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 50_000 for chunk in chunks)
+    assert "proposal 0 " in chunks[0] and "proposal 199 " in chunks[-1]
+
+
+def test_compaction_request_merges_a_previous_summary():
+    turns = [[Message(role="user", content="fit run_043.dat")]]
+    request = compaction_request_messages(turns, previous_summary="- run_042.dat: Rg=32.4")
+    text = request[0].content
+    assert text.startswith(COMPACTION_PROMPT)
+    assert COMPACTION_MERGE_INSTRUCTION in text
+    assert text.index("Rg=32.4") < text.index("run_043.dat")
+
+
+def test_summary_body_strips_the_heading():
+    message = compaction_summary_message("- fact")
+    assert is_compaction_summary(message)
+    assert summary_body(message) == "- fact"
+
+
+def test_tool_result_char_cap_scales_with_budget_and_is_clamped():
+    assert tool_result_char_cap(8_000) == TOOL_RESULT_MIN_CHARS
+    assert tool_result_char_cap(300_000) == 45_000
+    assert tool_result_char_cap(10_000_000) == TOOL_RESULT_MAX_CHARS
+
+
+def test_cap_tool_result_keeps_head_and_tail_and_names_the_file(tmp_path: Path):
+    content = "HEAD" + "m" * 50_000 + "TAIL"
+    saved = tmp_path / "result.txt"
+    capped = cap_tool_result(content, 10_000, saved)
+    assert len(capped) < 10_000 + 400
+    assert capped.startswith("HEAD") and capped.endswith("TAIL")
+    assert str(saved) in capped
+    assert "offset=7000" in capped
+    assert cap_tool_result("short", 10_000, saved) == "short"
+    assert "could not be saved" in cap_tool_result(content, 10_000, None)
+
+
+def test_tool_specific_cap_matches_web_search_by_pattern():
+    assert tool_specific_char_cap("parallel-websearch__web_search") == 10_000
+    assert tool_specific_char_cap("Parallel__WEB_SEARCH") == 10_000
+    assert tool_specific_char_cap("read_file") is None
+
+
+def test_tool_specific_cap_overrides_and_floor():
+    overrides = {"*web_search*": 20_000, "*fetch_url*": 6_000, "tiny": 10}
+    assert tool_specific_char_cap("x__web_search", overrides) == 20_000
+    assert tool_specific_char_cap("fetch_url", overrides) == 6_000
+    assert tool_specific_char_cap("tiny", overrides) == MIN_SHRINK_CHARS
+
+
+def test_web_fetch_and_extract_tools_get_the_page_cap():
+    assert tool_specific_char_cap("parallel-websearch__web_fetch") == 15_000
+    assert tool_specific_char_cap("Tavily-web-search__tavily_extract") == 15_000
+    assert tool_specific_char_cap("fetch_url") == 15_000
+    assert tool_specific_char_cap("extract_figures") is None

@@ -21,6 +21,13 @@ The folder can contain the original file, extracted text such as
 files you explicitly attach are copied; a file the agent reads from a source
 folder stays where it already lives.
 
+The copy is made before the message is sent, and the message ends with the
+path of each copy. The agent can read anything in this folder with
+`read_file` without asking, even though it is outside your allowed folders,
+so it never has to look for the original. Writing or deleting there, or
+running an attached script, is confirmed like anywhere else outside the
+allowed folders.
+
 Deleting a conversation also deletes its attachment and figure-cache
 folders. If files were removed or moved outside AIDA and an orphan folder is
 left behind, inspect and remove it with:
@@ -53,85 +60,160 @@ beside it is listed positionally as *image N* rather than being given a
 number it does not have. Word documents have no page numbers until they are
 laid out, so those entries list no page. Pasted vector art (EMF/WMF/SVG —
 often an Excel chart) cannot be shown as a picture; the listing says how many
-were skipped so you can export those as PNG if one matters. OCR applies to
-PDFs only.
+were skipped so you can export those as PNG if one matters.
 
 **Nothing is extracted when you attach a document** — only when something
 asks about its figures. So a paper you attach and merely summarize costs
-nothing, no `paper.assets/` folder appears, and (with OCR enabled) no
-upload happens and no dialog is shown. Ask *"what figures are in that
-paper?"* to set it off.
+nothing, and no `paper.assets/` folder appears. Ask *"what figures are in
+that paper?"* to set it off.
 
-(documents-ocr)=
-## Optional Mistral OCR
+On a multi-column PDF the built-in extractor's caption pairing is a guess,
+and it says so (`low` confidence). When a model with vision is available
+(see below), AIDA converts just those pages and takes each caption from the
+page as the model reads it, in reading order. A page with one figure then
+gets `high` confidence. Pages whose figures were already paired confidently
+are not converted, so a paper usually costs a few page conversions, not
+one per page. The listing says which pages were re-captioned and by which
+model.
 
-Mistral OCR can improve figure/caption ordering in multi-column PDFs. Install
-the optional dependency with `pip install "aida-workbench[ocr]"`, enter the
-key under **Settings → Document OCR**, and enable **Use Mistral OCR for
-figures in attached documents** in each workspace that should use it. The
-key is write-only in the GUI and is stored in the OS keychain. Headless
-systems can instead set `AIDA_SECRET_MISTRAL_OCR`.
+(scanned-pdfs)=
+## Scanned PDFs and pages without text
 
-In `workspaces.yaml` the workspace field is `use_ocr: true`.
+A PDF page that is only an image (a scan, a photographed page) has no text
+for AIDA to read. Such pages are rendered as images and sent to a **model
+with vision**, which writes them out as Markdown in reading order, with
+equations as LaTeX and tables as Markdown tables. This happens when the
+agent reads the file with `read_file`; on a PDF that mixes text and scanned
+pages, only the scanned pages are converted. The agent can also ask for
+every page to be converted (`read_file` with `ocr: true`), for a PDF whose
+text layer exists but is garbled.
 
-```{figure} img/documents/documents-02-settings-ocr.png
-:alt: The Document OCR group of the Settings dialog: a link to console.mistral.ai/api-keys with a note about the free tier, a sentence saying documents you ask about are uploaded to Mistral and AIDA asks before each one, a password field showing (unchanged), and the Verify key and Clear key buttons.
+**Equations drawn as images.** Many typeset papers and proofs place each
+display equation as an image or as drawn lines, so the text layer holds
+only the equation number, "(3)", and none of the formula. AIDA recognises a
+number standing alone on its line, with no text beside it in its column,
+and treats that page like a scanned one: `read_file` converts it, so the
+formulas come back as LaTeX. The plain text says which equations are
+missing, so the agent knows to ask.
 
-**Settings → Document OCR**. The key field is write-only; **Verify key** checks it without
-uploading anything.
+For a document you attach in the GUI, the attachment's text tells the agent
+which pages need converting and where the file is, and the status bar says
+whether a model can convert them.
+
+**Long documents.** An attachment, or one `read_file` call, holds up to
+100,000 characters, roughly 15 to 20 dense two-column pages. A longer
+document ends with a note giving the page where the text stops and the
+`offset` that `read_file` continues from, so the agent reads the rest
+instead of stopping there.
+
+Converted pages are marked as such in what the agent reads, and they are
+kept in `~/.aida/cache/ocr` (by file content, model and render size), so a
+document is converted once. That folder is safe to delete.
+
+### Which model converts the pages
+
+In this order:
+
+1. **An OCR profile, if you set one**: any provider profile, chosen under
+   **Settings → Documents → OCR profile** (or `ocr_profile:` in
+   `config.yaml`). A small dedicated OCR model on a machine that can run
+   one is the best choice: faster and better on full pages than a general
+   model. If it does not answer (the server is not running, the laptop is
+   off the network), AIDA uses the next option and adds a note.
+2. **Otherwise the chat model**, if its profile has **vision** enabled
+   (`supports_vision: true`). At the beamline that is usually a cloud model
+   through the Argo proxy, and nothing needs to be installed.
+3. **Otherwise nothing is converted**, and the agent is told why and what
+   to change, for example: *"Converting it needs a model with vision, and
+   the current profile 'Splash-Flash' has supports_vision off. Enable
+   vision on this profile if the model supports images, or set an OCR
+   profile."* A scanned page is never passed off as an empty one.
+
+```{figure} img/documents/documents-02-settings-documents.png
+:alt: The Documents group of the Settings dialog: three lines saying scanned PDF pages are read by a model with vision, the OCR profile if set, otherwise the chat model when its profile has vision, and that a separate remote OCR profile asks first; a ticked "Convert scanned PDF pages" checkbox; and an "OCR profile" drop-down showing "(use the chat model)".
+
+**Settings → Documents**. Untick **Convert scanned PDF pages** (`ocr_backend: off`) to never
+convert; the agent is then told the pages are unread.
 ```
 
-This feature is off by default. When enabled, documents you ask about leave
-your machine and are uploaded to Mistral. AIDA asks before each document is
-sent — **at the moment its figures are first requested, not when it is
-attached** — and enabling the workspace option does not pre-approve an
-upload. A document already examined is never uploaded again. For an
-unattended run, the upload requires explicit
-`--preapprove-tool mistral_ocr_upload` approval.
+```yaml
+# config.yaml
+ocr_backend: auto        # or: off
+ocr_profile: light-ocr   # optional; a profile name from providers.yaml
+```
 
-You do not choose a model; `mistral-ocr-latest` is used.
+### Where the pages go
 
-If OCR is declined, unavailable, misconfigured, or times out, the request
-continues with the built-in extractor. The turn does not fail, but AIDA adds
-a clear note to what the model reads that OCR was not used and multi-column
-figure labels may be less reliable.
+Pages go to the same place your chat already goes, so using the chat model
+needs no extra permission. An OCR profile on this machine (`localhost`,
+`127.0.0.1`) needs none either. Only an OCR profile on a **different remote
+server** than the chat asks first, once per document, with **Allow for this
+chat** available. An unattended run (`aida run`, the scheduler) refuses
+that unless started with `--preapprove-tool ocr_page_upload`.
+
+### Local OCR models, where they can run
+
+If a machine can run models locally (Ollama, LM Studio, llama.cpp), a small
+dedicated OCR model set up as its own profile works well as the OCR
+profile. We recommend **LightOnOCR-3 1B** (Ollama
+`Maternion/LightOnOCR-3:1b`). On a 24-page two-column paper it gave the
+text in reading order, every display equation as LaTeX, each figure
+followed by its caption, and tables as HTML, at about 12 seconds per page
+on a Mac. Check equation labels and subscripts against the original: it
+occasionally drops a label or a subscript.
+
+The 4B version (`Maternion/LightOnOCR-3:4b`) is only slightly better and
+uses about 12 GB of memory while it runs. Next to a large chat model on the
+same machine, that left the computer barely responding, so use it only on a
+machine with memory to spare. Other candidates include LightOnOCR-2, GLM-OCR
+and PaddleOCR-VL. A profile for the 1B model:
+
+```yaml
+# providers.yaml
+profiles:
+  light-ocr:
+    kind: openai_compat
+    base_url: http://localhost:11434/v1
+    model: Maternion/LightOnOCR-3:1b
+    supports_vision: true
+```
+
+Then choose `light-ocr` in **Settings → Documents**. LightOnOCR-3 is a
+"thinking" model that sometimes writes the whole page into its hidden
+reasoning and sends an empty reply; AIDA notices, asks again with reasoning
+switched off (`reasoning_effort: none`), and keeps doing so for the rest of
+that document. Machines that cannot install a model runtime, which
+includes most beamline workstations, use the chat model instead.
+
+% CHECK(Jan): 1B recommended after one real paper (2026-11-21); a comparison with a general local model and a cloud model is still open (TODO §6).
 
 (documents-checking)=
 ## Checking that it works
 
-Three ways, in increasing directness.
+**Which model would convert a page?** `aida doctor` prints it for the
+active workspace, for example *"the OCR profile 'light-ocr', falling back
+to the chat model (profile 'argo-claude')"*, or why none would.
 
-**Is the key good?** **Settings → Document OCR → Verify key**, or:
-
-```bash
-aida documents verify-ocr
-```
-
-Both check the key against the service and report what they found. Neither
-uploads a document — otherwise the only way to test the setup would be to
-perform the exact action you are being careful about. A valid key whose
-account cannot see an OCR model is called out separately: that is the state
-where the upload succeeds and the OCR call then fails.
-
-**Is the whole path working?** Run the real extraction against a file and
-see exactly what happened:
+**Does it actually work?** Convert a real file and read the result:
 
 ```bash
-aida documents figures paper.pdf --workspace perform-reviews
+aida documents convert scan.pdf                 # pages without text or with missing equations
+aida documents convert paper.pdf --pages 2,5-6  # chosen pages
+aida documents convert paper.pdf --all --profile argo-claude
 ```
 
-It prints the backend that ran (`builtin` or `mistral-ocr`), each figure
-with its confidence, and — when OCR did not run — *which* reason applied:
-no key, the `ocr` extra missing, the workspace switch off, the upload
-declined, or the service's own error. An OCR failure exits non-zero.
-`--ocr` / `--no-ocr` force the choice, `--yes` skips the confirmation, and
-`--json` gives machine-readable output.
+It prints the route, the model that was used and each page's Markdown, and
+exits non-zero if a page could not be converted.
 
-**What did a real conversation do?** The answer from
-`list_document_figures` names the backend, and the cached
-`<document>.assets/index.json` records it as `"backend"` alongside every
-figure's confidence.
+**How were a document's figures labelled?** Run the same extraction a chat
+runs:
 
-`aida doctor` also reports OCR readiness — enabled by which workspaces,
-extra installed, key present — as three separate results, because they need
-three different fixes.
+```bash
+aida documents figures paper.pdf
+```
+
+It prints `builtin` or `vision`, each figure with its confidence, and the
+reason when vision re-captioning was not used. `--no-ocr` skips it and
+`--json` gives machine-readable output. In a conversation, the answer from
+`list_document_figures` says the same, and the cached
+`<document>.assets/index.json` records it as `"backend"`.

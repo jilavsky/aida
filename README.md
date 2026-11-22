@@ -38,9 +38,9 @@ for the rationale.
   conversation's own folder with the text that was extracted from it, and
   deleted again with the conversation. Ask about a figure and the agent
   fetches that one by label rather than being handed every image in the
-  file. Optional [Mistral OCR](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/documents.html#optional-mistral-ocr) makes
-  those labels reliable on multi-column journal PDFs — off by default, per
-  workspace, and it asks before a document leaves your machine.
+  file. Scanned PDF pages are [read by a model with vision](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/documents.html#scanned-pdfs)
+  — the chat model if it can see images, or a dedicated OCR profile, such
+  as a small local OCR model.
 - **Keep conversations sorted** — label them by person on a shared beamline
   machine, or by project on a laptop, and filter the list by it. Labels are
   organization, not security.
@@ -59,8 +59,7 @@ aida-gui
 
 The PyPI distribution name is `aida-workbench`; the import package and the
 console scripts are `aida` / `aida-gui`. Extras: `gui` (PySide6 desktop app),
-`docs` (PDF/DOCX/XLSX/PPTX reading, image handling), `ocr` (the optional
-Mistral OCR backend for figure extraction), `science` (numpy, matplotlib and
+`docs` (PDF/DOCX/XLSX/PPTX reading, image handling), `science` (numpy, matplotlib and
 h5py for the scripts the agent runs; AIDA itself does not need them).
 
 Already using pyIrena? Install both — in either order, in one environment or
@@ -89,7 +88,7 @@ conda activate aida
 aida doctor
 ```
 
-`environment.yml` already includes the `gui`, `docs` and `ocr` extras. If
+`environment.yml` already includes the `gui` and `docs` extras. If
 `aida doctor` or `aida-gui` says PySide6 isn't installed on a headless
 Linux machine even though the install above reported no errors, see
 [GUI fails to import on headless Linux](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/getting-started/installation.html#gui-fails-to-import-on-headless-linux)

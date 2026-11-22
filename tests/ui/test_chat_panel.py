@@ -987,3 +987,46 @@ def test_message_views_do_not_swallow_drops(qapp):
 
     assert panel.acceptDrops()
     assert not bubble._view.acceptDrops()
+
+
+def test_turn_nudged_shows_as_an_automatic_user_bubble(qapp):
+    from aida.core.events import TurnNudged
+
+    panel = ChatPanel()
+    panel.handle_event(TurnNudged(reason="stall", text="[Sent automatically by AIDA] Continue."))
+    bubble = panel.widget_at(panel.widget_count - 1)
+    assert isinstance(bubble, MessageBubble) and bubble.role == "user"
+    assert "Continue." in bubble.rendered_plain_text
+    assert "sent automatically by AIDA" in bubble._meta_label.text()
+
+
+def test_context_trimmed_leaves_a_quiet_note_in_the_chat(qapp):
+    from aida.core.events import ContextTrimmed
+    from aida.ui.qt.chat_panel import ContextNote
+
+    panel = ChatPanel()
+    panel.handle_event(
+        ContextTrimmed(
+            dropped_turns=0,
+            estimated_tokens=606_000,
+            shrunk_tool_results=34,
+            tokens_before=780_000,
+            over_budget=True,
+            budget_tokens=700_000,
+        )
+    )
+    note = panel.widget_at(panel.widget_count - 1)
+    assert isinstance(note, ContextNote)
+    assert note.note_text == (
+        "Context reduced: shortened 34 old tool results (~780,000 → ~606,000 tokens)"
+    )
+
+
+def test_bare_over_budget_notice_leaves_no_note(qapp):
+    from aida.core.events import ContextTrimmed
+
+    panel = ChatPanel()
+    panel.handle_event(
+        ContextTrimmed(dropped_turns=0, estimated_tokens=9, over_budget=True, budget_tokens=8)
+    )
+    assert panel.widget_count == 0

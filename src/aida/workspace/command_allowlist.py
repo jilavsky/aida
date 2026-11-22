@@ -46,6 +46,36 @@ def split_command(command: str) -> list[str]:
     return [_strip_one_quote_pair(token) for token in shlex.split(command, posix=False)]
 
 
+#: Words that only mean something to a shell; as a program name they either
+#: do not exist or, like macOS ``/usr/bin/cd``, run and do nothing.
+_SHELL_BUILTINS = frozenset(
+    {"cd", "for", "while", "until", "if", "export", "source", ".", "set", "alias", "function"}
+)
+_SHELL_OPERATOR_CHARS = "|&;<>"
+
+
+def shell_syntax_problem(command: str) -> str | None:
+    """What in ``command`` needs a shell, or ``None`` if it is one plain
+    program with arguments. ``run_command`` has no shell (``split_command``
+    then ``create_subprocess_exec``): ``cd x && make`` would run ``cd`` with
+    junk arguments, exit 0 and do nothing. Operators inside quotes are
+    arguments, not operators, and are allowed."""
+    if "$(" in command or "`" in command:
+        return "command substitution ($(...) or backticks)"
+    lexer = shlex.shlex(command, posix=os.name != "nt", punctuation_chars=_SHELL_OPERATOR_CHARS)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None  # unbalanced quotes: split_command reports it
+    for token in tokens:
+        if token and all(ch in _SHELL_OPERATOR_CHARS for ch in token):
+            return f"the shell operator {token!r}"
+    if tokens and tokens[0] in _SHELL_BUILTINS:
+        return f"the shell keyword {tokens[0]!r}"
+    return None
+
+
 def _strip_one_quote_pair(token: str) -> str:
     if len(token) >= 2 and token[0] == token[-1] and token[0] in ('"', "'"):
         return token[1:-1]

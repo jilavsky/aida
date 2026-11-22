@@ -55,6 +55,7 @@ from __future__ import annotations
 import csv
 import json
 import mimetypes
+import re
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -79,6 +80,8 @@ INTERACTIVE_MAX_CHARS = 100_000
 INTERACTIVE_MAX_PDF_PAGES = 150
 
 _TRUNCATION_NOTE = "\n... [truncated]"
+#: Room kept for the PDF reader's "only the first N characters" note.
+_TRUNCATED_PDF_NOTE_RESERVE = 200
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 _TEXT_SUFFIXES = {
@@ -283,6 +286,133 @@ def _read_image_file(path: Path, **_ignored) -> list[Artifact]:
     return [ImageArtifact(data=b"", mime_type=mime_type, path=str(path), filename=path.name)]
 
 
+#: A text-layer line that is nothing but an equation number: "(3)", "(12a)".
+_EQUATION_NUMBER = re.compile(r"^\(\d{1,3}[a-z]?\)$")
+#: How far, in points, an equation number may end short of its column's
+#: right edge.
+_EQUATION_EDGE_TOLERANCE_PT = 4.0
+
+
+def missing_equation_numbers(page) -> list[str]:
+    """Equation numbers on a PDF page whose formula is not in the text layer.
+
+    Typeset papers often place a display equation as an image or as vector
+    paths; the text layer then holds the "(3)" beside it and nothing else.
+    A line that is only such a number counts when
+
+    - it ends at the right edge of its column, where equation numbers sit
+      (which rules out a row of Miller indices, "(100) (110) (200)", in a
+      table). The edge is the median right end of the lines that pass
+      across the number's position, so a full-width caption does not move
+      it, and
+    - no other horizontal text shares its height within its column. The
+      column is everything whose centre lies at most half a page width to
+      the left of the number, which keeps a two-column page's other column
+      out and a single-column page's centred formula in.
+
+    Rotated text (a diagonal "UNCORRECTED PROOF" watermark) is ignored.
+
+    Args:
+        page: A ``pymupdf.Page``.
+
+    Returns:
+        The numbers as printed, such as ``["(1)", "(2)"]``, in page order.
+    """
+    lines: list[tuple[tuple[float, float, float, float], str]] = []
+    for block in page.get_text("dict").get("blocks", []):
+        for line in block.get("lines", []):
+            direction = line.get("dir", (1.0, 0.0))
+            if abs(direction[1]) > 0.05 or direction[0] < 0:
+                continue
+            text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+            if text:
+                lines.append((tuple(line["bbox"]), text))
+    half_width = page.rect.width / 2
+    missing: list[str] = []
+    for index, ((x0, y0, x1, y1), text) in enumerate(lines):
+        if not _EQUATION_NUMBER.match(text):
+            continue
+        height = max(y1 - y0, 1.0)
+        spanning = sorted(
+            ox1
+            for (ox0, _oy0, ox1, _oy1), _ in lines
+            if ox0 <= x0 and ox1 >= x1 - _EQUATION_EDGE_TOLERANCE_PT
+        )
+        column_edge = spanning[len(spanning) // 2] if spanning else x1
+        if x1 < column_edge - _EQUATION_EDGE_TOLERANCE_PT:
+            continue
+        has_formula_text = False
+        for other_index, ((ox0, oy0, ox1, oy1), _other) in enumerate(lines):
+            if other_index == index:
+                continue
+            overlap = min(y1, oy1) - max(y0, oy0)
+            centre = (ox0 + ox1) / 2
+            if overlap >= 0.5 * height and x0 - half_width <= centre < x0:
+                has_formula_text = True
+                break
+        if not has_formula_text:
+            missing.append(text)
+    return missing
+
+
+def page_needs_conversion(page_text: str) -> bool:
+    """Whether one PDF page has too little text layer to be worth reading
+    as text (a scanned page). Same threshold as the whole-document note."""
+    return len("".join(page_text.split())) < _SCANNED_TEXT_CHARS_PER_PAGE
+
+
+def pdf_page_texts(path: Path, max_pages: int = DEFAULT_MAX_PDF_PAGES) -> tuple[list[str], int]:
+    """The text layer of each of the first ``max_pages`` pages, and the
+    document's total page count."""
+    import pymupdf
+
+    with pymupdf.open(path) as doc:
+        texts = [doc[index].get_text() for index in range(min(doc.page_count, max_pages))]
+        return texts, doc.page_count
+
+
+def pdf_needs_conversion(path: Path, max_pages: int = DEFAULT_MAX_PDF_PAGES) -> bool:
+    """Whether any page of the PDF lacks a usable text layer."""
+    texts, _ = pdf_page_texts(path, max_pages)
+    return any(page_needs_conversion(text) for text in texts)
+
+
+def pdf_pages_to_convert(
+    path: Path, max_pages: int = DEFAULT_MAX_PDF_PAGES
+) -> tuple[list[str], int, list[int]]:
+    """The text layer of each of the first ``max_pages`` pages, the total
+    page count, and the 0-based pages a vision model should read instead:
+    those with no usable text layer and those with equations missing from it
+    (``missing_equation_numbers``)."""
+    import pymupdf
+
+    with pymupdf.open(path) as doc:
+        texts: list[str] = []
+        targets: list[int] = []
+        for index in range(min(doc.page_count, max_pages)):
+            page = doc[index]
+            text = page.get_text()
+            texts.append(text)
+            if page_needs_conversion(text) or missing_equation_numbers(page):
+                targets.append(index)
+        return texts, doc.page_count, targets
+
+
+def _equations_note(missing: dict[int, list[str]]) -> str:
+    """Tells the model which equations it has only the numbers of."""
+    if not missing:
+        return ""
+    pages = ", ".join(str(page) for page in sorted(missing))
+    numbers = ", ".join(n for page in sorted(missing) for n in missing[page])
+    which = "Equation" if len(numbers.split(", ")) == 1 else "Equations"
+    where = "page" if len(missing) == 1 else "pages"
+    return (
+        f"\n\n[{which} {numbers} on {where} {pages} are drawn as images or paths, so "
+        "only their numbers are in this text. read_file converts those pages with a vision "
+        "model, which recovers the formulas, when one is set up.]"
+    )
+
+
 def _read_pdf_file(
     path: Path, *, max_chars: int, max_pdf_pages: int = DEFAULT_MAX_PDF_PAGES, **_ignored
 ) -> list[Artifact]:
@@ -290,6 +420,7 @@ def _read_pdf_file(
 
     parts: list[str] = []
     image_xrefs: set[int] = set()
+    missing_equations: dict[int, list[str]] = {}
     text_chars = 0
     pages_read = 0
     with pymupdf.open(path) as doc:
@@ -301,6 +432,9 @@ def _read_pdf_file(
             page_text = page.get_text()
             parts.append(f"--- page {index + 1} ---\n{page_text}")
             pages_read += 1
+            numbers = missing_equation_numbers(page)
+            if numbers:
+                missing_equations[index + 1] = numbers
             # Non-whitespace only, and counted from the page text rather
             # than from `parts` — the "--- page N ---" markers are ours, and
             # counting them would make an image-only PDF look like it had
@@ -309,18 +443,24 @@ def _read_pdf_file(
             # Keyed by xref so one logo repeated on every page counts once,
             # not fourteen times. Metadata only; no pixels are decoded.
             image_xrefs.update(image[0] for image in page.get_images(full=False))
-    body = _truncate("\n\n".join(parts), max_chars)
-    # Appended *after* truncation, deliberately: a note explaining what was
-    # dropped is worthless if it is itself the thing that gets dropped. It
-    # costs a few dozen characters over the budget in the worst case.
-    return [
-        TextArtifact(
-            text=body
-            + _pdf_content_note(
-                pages_read=pages_read, text_chars=text_chars, image_count=len(image_xrefs)
-            )
+    notes = _pdf_content_note(
+        pages_read=pages_read, text_chars=text_chars, image_count=len(image_xrefs)
+    ) + _equations_note(missing_equations)
+    full = "\n\n".join(parts)
+    # The notes are kept inside ``max_chars`` by shortening the text instead:
+    # callers cut again at ``max_chars``, and a note explaining what was
+    # dropped is worthless if it is itself what gets dropped.
+    if len(full) + len(notes) > max_chars:
+        reserve = len(notes) + _TRUNCATED_PDF_NOTE_RESERVE
+        shown = max(0, max_chars - reserve)
+        stop_page = full.count("\n--- page ", 0, shown) + 1
+        notes = (
+            f"{_TRUNCATION_NOTE}\n\n[Only the first {shown:,} of {len(full):,} characters "
+            f"are included; the text stops on page {stop_page} of {page_count}. Read the "
+            f"rest with read_file and offset={shown}.]" + notes
         )
-    ]
+        full = full[:shown]
+    return [TextArtifact(text=full + notes)]
 
 
 def _read_docx_file(path: Path, *, max_chars: int, **_ignored) -> list[Artifact]:
@@ -475,6 +615,11 @@ __all__ = [
     "DEFAULT_MAX_CSV_ROWS",
     "DEFAULT_MAX_PDF_PAGES",
     "DEFAULT_MAX_ROWS_PER_SHEET",
+    "missing_equation_numbers",
+    "page_needs_conversion",
+    "pdf_needs_conversion",
+    "pdf_page_texts",
+    "pdf_pages_to_convert",
     "DEFAULT_MAX_SHEETS",
     "INTERACTIVE_MAX_CHARS",
     "INTERACTIVE_MAX_PDF_PAGES",

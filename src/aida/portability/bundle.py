@@ -149,6 +149,14 @@ _APP_PORTABLE_FIELDS = (
     # one screen or one machine.
     "auto_title_conversations",
     "auto_title_interval_turns",
+    # How long agent runs are handled (aida.core.agent, aida.core.context):
+    # working preferences about the models you use, not about the machine.
+    "auto_continue_on_stall",
+    "tool_result_char_caps",
+    # Whether scanned pages are converted, and by which profile: profiles
+    # are exported with the bundle, so the name stays meaningful.
+    "ocr_backend",
+    "ocr_profile",
 )
 
 #: About a *person*, not a setup. Portable, but wrong to hand to a

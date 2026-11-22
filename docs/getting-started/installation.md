@@ -33,7 +33,7 @@ Extras:
 |---|---|---|
 | `gui` | PySide6 | the desktop app (`aida-gui`) — the CLI works without it |
 | `docs` | pymupdf, python-docx, openpyxl, python-pptx, Pillow | reading PDF/DOCX/XLSX/PPTX, writing DOCX, downscaling images for vision |
-| `ocr` | httpx | the optional Mistral OCR backend for figure extraction |
+| `ocr` | nothing | kept so older install commands still work; scanned PDF pages are now read by a vision model through the provider you already use ([documents.md](../guides/documents.md#scanned-pdfs)) |
 | `science` | numpy, matplotlib, h5py | not AIDA itself: scripts the agent runs (`run_python_script`, skill scripts) use AIDA's Python unless the workspace sets `python_interpreter`, and SAXS work needs arrays, plots and HDF5 files. With NumPy present, knowledge-base search is also faster. |
 
 Nothing else is optional: the LLM SDKs, the MCP client, YAML, and keyring are

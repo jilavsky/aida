@@ -39,6 +39,7 @@ from aida.core.events import (
     TextStarted,
     ToolCallFinished,
     ToolCallStarted,
+    TurnNudged,
     UsageInfo,
 )
 from aida.core.session import (
@@ -116,22 +117,10 @@ def print_event(event: AgentEvent) -> None:
         elif event.input_tokens or event.output_tokens:
             print(f"[usage] {event.input_tokens} in / {event.output_tokens} out tokens{cache_note}")
     elif isinstance(event, ContextTrimmed):
-        # B7: trimming used to be a log line only — nothing told the user
-        # at the terminal that earlier turns had just been dropped to stay
-        # under budget, so a suddenly-forgetful-seeming model looked like a
-        # bug rather than an expected trade-off. PLAN.md §1.3: distinguishes
-        # a compaction summary from a plain drop — the two are very
-        # different outcomes for "will the model still remember this".
-        turn_word = "turn" if event.dropped_turns == 1 else "turns"
-        if event.summarized:
-            print(
-                f"[context] summarized {event.dropped_turns} old {turn_word} into ~{event.summary_tokens} "
-                f"tokens (~{event.estimated_tokens} tokens now)"
-            )
-        else:
-            print(
-                f"[context] trimmed {event.dropped_turns} old {turn_word} to fit budget (~{event.estimated_tokens} tokens now)"
-            )
+        print(f"[context] {event.describe()}")
+    elif isinstance(event, TurnNudged):
+        why = "reply cut off at the output limit" if event.reason == "length" else "agent stalled"
+        print(f"\n[aida] {why}; sent automatically: {event.text}")
     elif isinstance(event, SteeringMessageDelivered):
         # The CLI REPL reads one line at a time and cannot queue anything
         # mid-turn, so this only appears when something else drives the

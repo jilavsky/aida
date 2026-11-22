@@ -318,7 +318,7 @@ def test_text_only_pdf_gets_no_note_at_all(tmp_path: Path):
 
 def test_pdf_note_survives_truncation(tmp_path: Path):
     """A note explaining what was dropped is worthless if truncation drops
-    it — it is appended after the budget is applied, on purpose."""
+    it — the text is shortened instead, even below zero room."""
     pymupdf = pytest.importorskip("pymupdf")
     path = tmp_path / "long.pdf"
     _pdf_with_image(path, pymupdf, pages=1, text="x" * 500)
@@ -422,3 +422,79 @@ def test_non_office_file_is_not_probed_as_a_zip(tmp_path: Path):
     corrupt = tmp_path / "broken.docx"
     corrupt.write_bytes(b"not a zip at all")
     assert _count_embedded_media(corrupt) == 0
+
+
+def _paper_page(pymupdf, doc) -> None:
+    """A two-column page: Eq. (1) is text, Eq. (2) an image beside other-
+    column text, Eq. (3) vector paths. Also what a real proof adds: a
+    diagonal watermark, a table row of Miller indices and a full-width
+    caption, none of which may change the answer."""
+    page = doc.new_page(width=612, height=792)
+    for row in range(8):
+        page.insert_text((40, 120 + 12 * row), "Left column body text, justified. " * 2, fontsize=8)
+        page.insert_text(
+            (320, 120 + 12 * row), "Right column body text, justified. " * 2, fontsize=8
+        )
+    for x, label in ((60, "(100)"), (95, "(110)"), (130, "(200)")):
+        page.insert_text((x, 220), label, fontsize=8)
+    page.insert_text(
+        (120, 650),
+        "UNCORRECTED PROOF",
+        fontsize=48,
+        morph=(pymupdf.Point(120, 650), pymupdf.Matrix(1, 1).prerotate(55)),
+    )
+    page.insert_text((40, 740), "Fig. 1. A caption across both columns. " * 3, fontsize=8)
+    page.insert_text((90, 250), "I(q) = G exp(-q^2 Rg^2 / 3)", fontsize=10)
+    page.insert_text((285, 250), "(1)", fontsize=10)
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 120, 20), 0)
+    pix.clear_with(200)
+    page.insert_image(pymupdf.Rect(90, 290, 230, 310), pixmap=pix)
+    page.insert_text((285, 304), "(2)", fontsize=10)
+    page.insert_text((320, 304), "Right column words at the height of eq two.", fontsize=9)
+    page.draw_line((360, 400), (480, 400))
+    page.insert_text((560, 404), "(3)", fontsize=10)
+    page.insert_text((320, 440), "where q is the scattering vector, see Eq. (3).", fontsize=9)
+
+
+def test_equations_drawn_as_images_or_paths_are_found(tmp_path: Path):
+    pymupdf = pytest.importorskip("pymupdf")
+    from aida.documents.readers import missing_equation_numbers, pdf_pages_to_convert
+
+    doc = pymupdf.open()
+    _paper_page(pymupdf, doc)
+    doc.new_page().insert_text((72, 72), "Plain text page, no equations. " * 5)
+    path = tmp_path / "paper.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    with pymupdf.open(path) as reopened:
+        assert missing_equation_numbers(reopened[0]) == ["(2)", "(3)"]
+    _texts, total, targets = pdf_pages_to_convert(path)
+    assert (total, targets) == (2, [0])
+    text = read_document(path)[0].text
+    assert "[Equations (2), (3) on page 1 are drawn as images or paths" in text
+
+
+def test_a_truncated_pdf_says_where_it_stops_and_how_to_read_on(tmp_path: Path):
+    """The notes fit inside max_chars, so a caller cutting again at
+    max_chars (describe_for_model) keeps them."""
+    pymupdf = pytest.importorskip("pymupdf")
+    from aida.artifacts.policy import describe_for_model
+
+    doc = pymupdf.open()
+    for index in range(6):
+        doc.new_page().insert_text((72, 72), f"Page {index + 1} words. " * 20)
+    path = tmp_path / "long.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    artifact = read_document(path, max_chars=500)[0]
+    assert len(artifact.text) <= 500
+    rendered = describe_for_model(artifact, max_chars=500)
+    assert rendered == artifact.text
+    assert "read_file and offset=" in rendered
+    shown = int(rendered.split("offset=")[1].split(".]")[0])
+    full = read_document(path, max_chars=100_000)[0].text
+    assert rendered.startswith(full[:shown])
+    stop_page = full.count("\n--- page ", 0, shown) + 1
+    assert f"stops on page {stop_page} of 6" in rendered

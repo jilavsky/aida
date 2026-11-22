@@ -636,3 +636,21 @@ def test_for_workspace_passes_read_only_folders(tmp_path: Path):
     )
     assert guard.is_read_only(tmp_path / "skills" / "x" / "scripts" / "a.py")
     assert not guard.is_read_only(tmp_path / "t" / "a.py")
+
+
+@pytest.mark.asyncio
+async def test_a_readable_root_allows_reads_only(tmp_path: Path):
+    """The conversation's attachments folder: read without asking, but a
+    write, a delete or running an attached script is still confirmed."""
+    attachments = tmp_path / "records" / "attachments" / "abcd1234"
+    attachments.mkdir(parents=True)
+    script = attachments / "run.py"
+    script.write_text("print(1)")
+    guard = SafetyGuard(allowed_roots=[tmp_path / "work"], mode="relaxed")
+    guard.allow_reading(attachments)
+    guard.allow_reading(attachments)
+    assert len(guard.readable_roots) == 1
+    assert await guard.authorize_read(script) == script.resolve()
+    for check in (guard.authorize_write, guard.authorize_delete, guard.authorize_run_script):
+        with pytest.raises(ConfirmationDenied):
+            await check(script)

@@ -5,7 +5,6 @@ values back directly, per this module's own docstring."""
 from __future__ import annotations
 
 from aida.config.settings import AppConfig, ProviderProfile
-from aida.documents.ocr.mistral import SECRET_REF
 from aida.ui.qt.settings_dialog import SettingsDialog
 
 
@@ -340,29 +339,25 @@ def test_scheduler_timings_accept_the_disabling_zero(qapp, aida_home):
     assert updated.scheduler_max_defer_seconds == 0
 
 
-# --- Mistral document OCR key -----------------------------------------------
+# --- documents (scanned PDF conversion) -----------------------------------
 
 
-def test_ocr_key_is_write_only_and_not_part_of_app_config(qapp):
-    dialog = SettingsDialog(AppConfig())
-    assert dialog.ocr_api_key() == ""
-    assert dialog._ocr_api_key_edit.placeholderText() == "(unchanged)"
+def test_documents_section_round_trips_backend_and_profile(qapp):
+    profiles = {"light": ProviderProfile(name="light"), "argo": ProviderProfile(name="argo")}
+    dialog = SettingsDialog(AppConfig(ocr_backend="auto", ocr_profile="light"), profiles)
+    assert dialog.ocr_backend() == "auto" and dialog.ocr_profile() == "light"
 
-    dialog._ocr_api_key_edit.setText("secret-value")
-    assert dialog.ocr_api_key() == "secret-value"
-    assert not hasattr(dialog.updated_app_config(), "ocr_api_key")
+    dialog._ocr_profile_combo.setCurrentIndex(0)
+    dialog._ocr_backend_check.setChecked(False)
+    updated = dialog.updated_app_config()
+    assert (updated.ocr_backend, updated.ocr_profile) == ("off", None)
+    assert not dialog._ocr_profile_combo.isEnabled()
 
 
-def test_clear_ocr_key_deletes_the_secret_and_clears_the_field(qapp, monkeypatch):
-    deleted = []
-    monkeypatch.setattr("aida.ui.qt.settings_dialog.delete_secret", deleted.append)
-    dialog = SettingsDialog(AppConfig())
-    dialog._ocr_api_key_edit.setText("will-not-be-saved")
-
-    dialog._clear_ocr_key_button.click()
-
-    assert deleted == [SECRET_REF]
-    assert dialog.ocr_api_key() == ""
+def test_a_missing_ocr_profile_stays_visible_rather_than_being_dropped(qapp):
+    dialog = SettingsDialog(AppConfig(ocr_profile="gone"), {})
+    assert dialog.ocr_profile() == "gone"
+    assert "missing" in dialog._ocr_profile_combo.currentText()
 
 
 def test_personal_context_edits_the_active_users_own_text(qapp):
@@ -445,3 +440,10 @@ def test_updated_app_config_includes_the_edited_auto_title_fields(qapp):
     assert updated.auto_title_conversations is False
     assert updated.auto_title_interval_turns == 20
     assert cfg.auto_title_conversations is True  # original untouched
+
+
+def test_dialog_round_trips_auto_continue_on_stall(qapp):
+    dialog = SettingsDialog(AppConfig(auto_continue_on_stall=False))
+    assert dialog.auto_continue_on_stall() is False
+    dialog._auto_continue_check.setChecked(True)
+    assert dialog.updated_app_config().auto_continue_on_stall is True

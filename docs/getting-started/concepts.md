@@ -301,9 +301,9 @@ this order —
 4. *"Write the review to the target folder as review-<name>.md."*
 
 **Expect a confirmation dialog** on step 4 — that is `safety: confirm`
-working. Multi-column PDFs pair captions imperfectly; optional Mistral OCR
-fixes that but uploads the document, and asks first
-([documents.md](../guides/documents.md#optional-mistral-ocr)).
+working. On multi-column PDFs, and on scanned pages, a model with vision
+reads the pages that need it
+([documents.md](../guides/documents.md#scanned-pdfs)).
 
 ---
 

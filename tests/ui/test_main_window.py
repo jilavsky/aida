@@ -15,6 +15,8 @@ import logging
 import sys
 from pathlib import Path
 
+import pytest
+
 from aida._docs import docs_url
 from aida.config.settings import (
     McpConfig,
@@ -1188,50 +1190,27 @@ def test_settings_dialog_max_iterations_applies_to_the_running_session(
         window.close()
 
 
-def test_settings_dialog_empty_ocr_key_leaves_secret_unchanged(
-    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+def test_attaching_a_scanned_pdf_tells_the_agent_to_read_it_with_read_file(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch, tmp_path: Path
 ):
+    """The GUI cannot convert pages (no model on the GUI thread), so the
+    attachment text points the agent at read_file, which can."""
+    pymupdf = pytest.importorskip("pymupdf")
+    pdf = tmp_path / "scan.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(str(pdf))
+    doc.close()
     settings = _settings_with_profile()
     window = _make_window(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
     )
     try:
-        monkeypatch.setattr(
-            "aida.ui.qt.settings_dialog.SettingsDialog.exec",
-            lambda self: QDialog.DialogCode.Accepted,
-        )
-        saved = []
-        monkeypatch.setattr("aida.ui.qt.main_window.set_secret", lambda *args: saved.append(args))
-
-        window.open_settings_dialog()
-
-        assert saved == []
-    finally:
-        window.close()
-
-
-def test_settings_dialog_saves_a_nonempty_ocr_key(
-    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
-):
-    from aida.documents.ocr.mistral import SECRET_REF
-
-    settings = _settings_with_profile()
-    window = _make_window(
-        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
-    )
-    try:
-
-        def _fake_exec(self):
-            self._ocr_api_key_edit.setText("mistral-key")
-            return QDialog.DialogCode.Accepted
-
-        monkeypatch.setattr("aida.ui.qt.settings_dialog.SettingsDialog.exec", _fake_exec)
-        saved = []
-        monkeypatch.setattr("aida.ui.qt.main_window.set_secret", lambda *args: saved.append(args))
-
-        window.open_settings_dialog()
-
-        assert saved == [(SECRET_REF, "mistral-key")]
+        block, ok = window._read_attachment_for_model(str(pdf))
+        assert ok
+        assert "call read_file on the saved copy" in block
+        hint = window._scanned_attachment_hint(["scan.pdf"])
+        assert "cannot be read" in hint and "supports_vision off" in hint
     finally:
         window.close()
 
@@ -2226,7 +2205,7 @@ def test_context_trimmed_event_shows_in_the_status_bar(
         window._on_event_received(ContextTrimmed(dropped_turns=5, estimated_tokens=1234))
         message = window.statusBar().currentMessage()
         assert "5" in message
-        assert "1234" in message
+        assert "1,234" in message
     finally:
         window.close()
 
@@ -2251,6 +2230,30 @@ def test_context_trimmed_summarized_event_shows_compacted_wording(
         assert "compacted" in message.lower()
         assert "5" in message
         assert "90" in message
+    finally:
+        window.close()
+
+
+def test_context_over_budget_event_shows_a_banner_in_the_chat(
+    qapp, loop_thread, aida_home: Path, records_home: Path, monkeypatch
+):
+    """When compaction cannot get under budget, the user is told in the chat,
+    not only in a status-bar line that disappears."""
+    from aida.ui.qt.chat_panel import StartupNoticeBanner
+
+    settings = _settings_with_profile()
+    window = _make_window(
+        qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
+    )
+    try:
+        window._on_event_received(
+            ContextTrimmed(
+                dropped_turns=0, estimated_tokens=90_000, over_budget=True, budget_tokens=80_000
+            )
+        )
+        assert "80,000" in window.statusBar().currentMessage()
+        banners = window.chat_panel.findChildren(StartupNoticeBanner)
+        assert banners and "new conversation" in banners[-1].lines[0]
     finally:
         window.close()
 

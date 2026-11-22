@@ -14,6 +14,7 @@ from aida.core.events import (
     TextStarted,
     ToolCallFinished,
     ToolCallStarted,
+    TurnNudged,
     UsageInfo,
 )
 
@@ -30,6 +31,7 @@ ALL_EVENTS = [
     AgentError(layer="provider", message="boom", detail="details here"),
     ConversationTitled(conversation_id="abc123", title="Unified fit of S12_0042.h5"),
     ProviderRetrying(attempt=1, max_attempts=5, delay_seconds=2.0, message="busy", detail="x"),
+    TurnNudged(reason="stall", text="Continue."),
 ]
 
 

@@ -24,7 +24,7 @@ from aida.coding.runner import run_python_script as _run_python_script
 from aida.config.settings import WorkspaceConfig
 from aida.core.tools import NativeTool, ToolResult, wrap_tool_errors
 from aida.providers.base import ToolSchema
-from aida.workspace.command_allowlist import split_command
+from aida.workspace.command_allowlist import shell_syntax_problem, split_command
 from aida.workspace.safety import ConfirmationDenied, SafetyGuard
 
 _tool = wrap_tool_errors(ConfirmationDenied, OSError, TimeoutError, ValueError)
@@ -160,7 +160,13 @@ def default_coding_tools(
         args = [raw_args] if isinstance(raw_args, str) else [str(a) for a in raw_args]
         candidate = await guard.authorize_read(path)
         if not candidate.is_file():
-            return ToolResult(content=f"Not a file: {candidate}", is_error=True)
+            hint = (
+                " It does not exist yet: write it first with write_file, and run it in a later "
+                "step, not in the same batch of tool calls as the write."
+                if not candidate.exists()
+                else ""
+            )
+            return ToolResult(content=f"Not a file: {candidate}.{hint}", is_error=True)
         await guard.authorize_run_script(candidate)
         timeout = _effective_timeout(arguments, workspace)
         # A skill's script lives in the read-only skills folder; running it
@@ -187,6 +193,19 @@ def default_coding_tools(
     @_tool
     async def run_command(arguments: dict[str, Any]) -> ToolResult:
         command = arguments["command"]
+        problem = shell_syntax_problem(command)
+        if problem is not None:
+            # Refused before the safety check, so nobody is asked to approve
+            # a command that cannot do what it says.
+            return ToolResult(
+                content=(
+                    f"Not run: the command uses {problem}, but run_command has no shell. It runs "
+                    "one program with its arguments. Use the cwd argument instead of cd, run "
+                    "steps as separate calls, or write a Python script with write_file and run "
+                    "it with run_python_script."
+                ),
+                is_error=True,
+            )
         cwd_arg = arguments.get("cwd") or _default_cwd(workspace)
         if cwd_arg is None:
             return ToolResult(
@@ -244,15 +263,17 @@ def default_coding_tools(
             schema=ToolSchema(
                 name="run_command",
                 description=(
-                    "Run a shell command from the workspace's command allowlist. Anything not on the "
-                    "allowlist requires confirmation."
+                    "Run one program with its arguments (no shell: no cd, &&, |, ;, >, loops or "
+                    "variables; use the cwd argument for the folder). Programs on the workspace's "
+                    "command allowlist run directly; anything else asks for confirmation. For "
+                    "several steps, write a Python script and use run_python_script."
                 ),
                 parameters={
                     "type": "object",
                     "properties": {
                         "command": {
                             "type": "string",
-                            "description": "The full command line to run.",
+                            "description": "The program and its arguments, e.g. 'git status'.",
                         },
                         "cwd": {
                             "type": "string",

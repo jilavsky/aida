@@ -35,6 +35,7 @@ from aida.config.settings import (
     WorkspacesConfig,
     load_settings,
 )
+from aida.core.confirmation import ConfirmationDenied, deny_all
 from aida.core.context import WORKSPACE_FOLDERS_HEADING
 from aida.core.session import NoWorkspaceFoldersError, _ensure_workspace_folders
 from aida.persistence.recorder import ConversationNotFoundError
@@ -1191,6 +1192,38 @@ async def test_session_send_keeps_attached_documents(
         assert kept.exists()
         source.unlink()
         assert kept.read_bytes() == b"%PDF-1.4 pretend"
+    finally:
+        await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_the_agent_is_told_where_the_attached_copy_is_and_may_read_it(
+    monkeypatch, aida_home: Path, records_home: Path, tmp_path: Path
+):
+    """An attached file lives outside the allowed folders; the message
+    names the conversation's copy, and read_file opens it without asking;
+    writing there is still confirmed."""
+    monkeypatch.setattr(
+        "aida.core.session.build_provider", lambda profile: MockProvider([MockTurn(text="ok")])
+    )
+    source = tmp_path / "Downloads" / "notes.txt"
+    source.parent.mkdir(parents=True)
+    source.write_text("beam time is on Tuesday")
+
+    session, _ = await start_session(_settings(), profile_name="mock-profile")
+    try:
+        _ = [e async for e in session.send("read this", attachment_paths=[str(source)])]
+        kept = Path(session.recorder.attachments_dir()) / "notes.txt"
+        user_message = next(m for m in session.messages if m.role == "user")
+        assert user_message.content.startswith("read this")
+        assert f"- notes.txt: {kept}" in user_message.content
+        result = await session.tools["read_file"].func({"path": str(kept)})
+        assert not result.is_error, result.content
+        assert "beam time is on Tuesday" in result.content
+        assert session.guard is not None
+        session.guard.confirm_callback = deny_all
+        with pytest.raises(ConfirmationDenied):
+            await session.guard.authorize_write(kept)
     finally:
         await session.aclose()
 

@@ -49,6 +49,12 @@ def artifacts_dir() -> Path:
     return d
 
 
+def ocr_cache_dir() -> Path:
+    """Directory for PDF pages already converted by a vision model
+    (``aida.documents.ocr.vlm``), keyed by file hash. Safe to delete."""
+    return app_dir() / "cache" / "ocr"
+
+
 def logs_dir() -> Path:
     """Directory for rotating log files."""
     d = app_dir() / "logs"

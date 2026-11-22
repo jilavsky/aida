@@ -98,7 +98,7 @@ Every shot runs on a scratch `AIDA_HOME` with AIDA's `MockProvider`: no model, n
 | ID | page | dataset | state to set up | must show | automated? | status |
 |---|---|---|---|---|---|---|
 | documents-01-attached | documents | placeholder /tmp/aida-docs/papers/silica-pdms-usaxs.pdf | fresh session; file attached, question typed, not sent | chat column: attachment chip in the input box, Attach… button, callouts 1–2 | yes | done |
-| documents-02-settings-ocr | documents | none | Settings dialog on scratch config, no key | the Document OCR group: help text, key field, Verify key, Clear key | yes | done |
+| documents-02-settings-documents | documents | none | Settings dialog on scratch config | the Documents group: explanation, Convert scanned PDF pages checkbox, OCR profile picker | yes | done |
 
 ## coding-and-scripting
 

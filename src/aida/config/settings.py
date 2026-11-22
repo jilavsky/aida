@@ -118,6 +118,12 @@ def _coerce(kind: str, value: Any) -> Any:
         if any(isinstance(item, bool) for item in value):
             raise ValueError("expected numbers, got a boolean")
         return [int(item) for item in value]
+    if base == "dict[str,int]":
+        if not isinstance(value, dict):
+            raise ValueError("expected a mapping")
+        if any(isinstance(v, bool) for v in value.values()):
+            raise ValueError("expected numbers, got a boolean")
+        return {str(k): int(v) for k, v in value.items()}
     if base == "dict[str,str]":
         if not isinstance(value, dict):
             raise ValueError("expected a mapping")
@@ -352,6 +358,10 @@ def _coerced_fields(
 # --------------------------------------------------------------------------
 
 
+#: Allowed values of ``AppConfig.ocr_backend``.
+OCR_BACKENDS = ("auto", "off")
+
+
 @dataclass
 class AppConfig:
     """General settings: paths, safety default, UI prefs, log level.
@@ -545,6 +555,27 @@ class AppConfig:
     # moved on, so most of them change nothing. The *first* title is
     # generated after the first reply regardless of this value.
     auto_title_interval_turns: int = 5
+    # A short reply that announces a next step ("Writing the report now.")
+    # but makes no tool call, right after tool work, gets one automatic
+    # "continue" message instead of ending the turn (aida.core.agent,
+    # looks_like_announced_step). At most two per turn, and shown in the
+    # chat. Off: such a reply ends the turn, as any text-only reply does.
+    auto_continue_on_stall: bool = True
+    # Per-tool limits on how much of one result stays in the conversation,
+    # in characters, keyed by a shell-style pattern on the tool name (MCP
+    # tools are named "<server>__<tool>"). Added on top of the built-in
+    # aida.core.context.DEFAULT_TOOL_RESULT_CAPS (web search: 10,000), and
+    # wins over it for the same pattern. Longer results are saved whole to
+    # the scratch folder, as for the general per-result cap.
+    tool_result_char_caps: dict[str, int] = field(default_factory=dict)
+    # How PDF pages without a text layer (scans) are read
+    # (aida.documents.ocr.vlm): "auto" sends them, rendered as images, to a
+    # model with vision — ocr_profile when set, else the chat profile if it
+    # has supports_vision; "off" never converts and says so instead.
+    ocr_backend: str = "auto"
+    # A provider profile used only for converting pages (for example a small
+    # local OCR model). None: use the chat model.
+    ocr_profile: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -611,6 +642,13 @@ class AppConfig:
                 " or ".join(repr(m) for m in SAFETY_MODES),
             )
             filtered["default_safety_mode"] = "confirm"
+        if filtered.get("ocr_backend", "auto") not in OCR_BACKENDS:
+            _logger.warning(
+                "config.yaml: unknown ocr_backend %r (expected %s); using 'auto' instead",
+                filtered["ocr_backend"],
+                " or ".join(repr(m) for m in OCR_BACKENDS),
+            )
+            filtered["ocr_backend"] = "auto"
         return cls(**filtered)
 
     def context_for_user(self, user: str | None) -> str:
@@ -661,6 +699,10 @@ class AppConfig:
             "transcript_tool_results": self.transcript_tool_results,
             "auto_title_conversations": self.auto_title_conversations,
             "auto_title_interval_turns": self.auto_title_interval_turns,
+            "auto_continue_on_stall": self.auto_continue_on_stall,
+            "tool_result_char_caps": self.tool_result_char_caps,
+            "ocr_backend": self.ocr_backend,
+            "ocr_profile": self.ocr_profile,
         }
 
 
@@ -699,6 +741,10 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "transcript_tool_results": "str",
     "auto_title_conversations": "bool",
     "auto_title_interval_turns": "int",
+    "auto_continue_on_stall": "bool",
+    "tool_result_char_caps": "dict[str,int]",
+    "ocr_backend": "str",
+    "ocr_profile": "str?",
 }
 
 
@@ -932,6 +978,25 @@ def _coerce_quick_tasks(source: str, value: Any) -> list[QuickTask]:
     return tasks
 
 
+_mistral_note_logged = False
+
+
+def _note_mistral_removed(source: str) -> None:
+    """Say once that a workspace's ``use_ocr`` no longer does anything: the
+    Mistral OCR backend it switched on was removed, and scanned pages are now
+    converted by a vision model per ``AppConfig.ocr_backend``. The key is
+    dropped the next time the file is saved."""
+    global _mistral_note_logged
+    if _mistral_note_logged:
+        return
+    _mistral_note_logged = True
+    _logger.info(
+        "%s: use_ocr is no longer used — Mistral OCR was removed; scanned PDF pages are "
+        "converted with a vision model (ocr_backend in config.yaml)",
+        source,
+    )
+
+
 @dataclass
 class WorkspaceConfig:
     name: str
@@ -993,18 +1058,12 @@ class WorkspaceConfig:
     #: *private*: never added to the system prompt and not readable by any
     #: tool, so nothing typed here costs tokens or steers the model.
     notes: str = ""
-    #: Whether this workspace may send attached documents to the optional
-    #: OCR service for figure extraction (``aida.documents.ocr``). Off by
-    #: default and per *workspace*, not per install, because that is the
-    #: axis the decision actually varies on: a workspace for reading vendor
-    #: manuals can have it on while one used to review unpublished
-    #: manuscripts keeps it off. Enabling it does not skip the per-document
-    #: confirmation — it only makes asking possible at all.
-    use_ocr: bool = False
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> WorkspaceConfig:
         source = f"workspaces.yaml (workspace {name!r})"
+        if "use_ocr" in data:
+            _note_mistral_removed(source)
         return cls(
             name=name,
             profile=data.get("profile"),
@@ -1032,7 +1091,6 @@ class WorkspaceConfig:
             ),
             quick_tasks=_coerce_quick_tasks(source, data.get("quick_tasks")),
             notes=str(data.get("notes") or ""),
-            use_ocr=_coerce_bool(source, "use_ocr", data.get("use_ocr"), default=False),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -1054,7 +1112,6 @@ class WorkspaceConfig:
             "script_timeout_seconds": self.script_timeout_seconds,
             "quick_tasks": [task.to_dict() for task in self.quick_tasks],
             "notes": self.notes,
-            "use_ocr": self.use_ocr,
         }
 
     def resolved_saved_scripts_dir(self) -> str | None:

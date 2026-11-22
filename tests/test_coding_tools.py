@@ -458,3 +458,52 @@ def test_packages_note_lists_only_importable_packages(monkeypatch):
     assert tools_module._available_packages_note("/opt/env/bin/python") == ""
     present.clear()
     assert tools_module._available_packages_note(None) == ""
+
+
+@pytest.mark.asyncio
+async def test_run_python_script_on_a_missing_script_says_to_write_it_first(tmp_path: Path):
+    tools = default_coding_tools(_guard(tmp_path), workspace=_workspace(tmp_path))
+    result = await _call(tools, "run_python_script", path=str(tmp_path / "not_yet.py"))
+    assert result.is_error
+    assert "write_file" in result.content and "later step" in result.content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cd "/tmp/templates" && ls',
+        "ls || true",
+        "find . -name x | head",
+        "echo a; echo b",
+        "echo a > out.txt",
+        "sort < in.txt",
+        "echo $(date)",
+        "echo `date`",
+        "for s in a b; do echo $s; done",
+        "export X=1",
+    ],
+)
+async def test_run_command_refuses_shell_syntax_before_anything_runs(tmp_path: Path, command):
+    asked = []
+
+    async def _record(request):
+        asked.append(request)
+        return True
+
+    guard = _guard(tmp_path, mode="relaxed", confirm=_record)
+    tools = default_coding_tools(guard, workspace=_workspace(tmp_path))
+    result = await _call(tools, "run_command", command=command, cwd=str(tmp_path))
+    assert result.is_error
+    assert "no shell" in result.content
+    assert asked == []  # refused before the safety check, so nobody is asked
+
+
+@pytest.mark.parametrize(
+    "command",
+    ['ls -la "path with spaces"', 'grep "a|b" file.txt', "python -c 'print(1)'", "git status"],
+)
+def test_plain_commands_have_no_shell_syntax(command):
+    from aida.workspace.command_allowlist import shell_syntax_problem
+
+    assert shell_syntax_problem(command) is None

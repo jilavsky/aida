@@ -49,6 +49,9 @@ class MockTurn:
     input_tokens: int = 0
     output_tokens: int = 0
     chunk_size: int = DEFAULT_CHUNK_SIZE
+    #: Overrides the reported ``MessageFinished.stop_reason`` (``"length"``
+    #: simulates a reply cut off at the output limit).
+    stop_reason: str | None = None
 
 
 def _chunks(text: str, size: int) -> list[str]:
@@ -101,7 +104,7 @@ class MockProvider(LLMProvider):
                 call_id=call_id, tool_name=mtc.name, arguments=dict(mtc.arguments)
             )
 
-        stop_reason = "tool_calls" if turn.tool_calls else "stop"
+        stop_reason = turn.stop_reason or ("tool_calls" if turn.tool_calls else "stop")
         yield MessageFinished(message_id=message_id, stop_reason=stop_reason)
 
         if turn.input_tokens or turn.output_tokens:

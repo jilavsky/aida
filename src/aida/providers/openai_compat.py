@@ -12,7 +12,10 @@ glue that drives the real streaming call.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import weakref
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -28,6 +31,7 @@ from openai import (
 
 from aida.config.logging_setup import get_logger
 from aida.core.events import (
+    REASONING_TAIL_CHARS,
     AgentError,
     AgentEvent,
     MessageFinished,
@@ -51,6 +55,47 @@ from aida.providers.base import (
 from aida.providers.vision import read_image_b64, select_images_within_cap
 
 _logger = get_logger("provider")
+
+#: Event loops that already have ``_quiet_sdk_stream_close`` installed.
+_QUIETED_LOOPS: weakref.WeakSet[asyncio.AbstractEventLoop] = weakref.WeakSet()
+
+
+def _is_sdk_stream_close_error(context: dict[str, Any]) -> bool:
+    """Whether an event-loop error report is the HTTP library failing to
+    close an SSE byte stream the OpenAI SDK left suspended.
+
+    The SDK stops reading at ``[DONE]`` and closes the response, but leaves
+    its byte iterator suspended; when that generator is finalized,
+    ``httpcore`` raises "generator didn't stop after athrow()". The
+    connection is already closed, so the report is noise.
+    """
+    exc = context.get("exception")
+    generator = context.get("asyncgen")
+    if not isinstance(exc, RuntimeError) or "didn't stop after athrow" not in str(exc):
+        return False
+    code = getattr(generator, "ag_code", None)
+    return "httpcore" in getattr(code, "co_filename", "")
+
+
+def _quiet_sdk_stream_close(loop: asyncio.AbstractEventLoop) -> None:
+    """Log ``_is_sdk_stream_close_error`` reports at debug level on ``loop``
+    instead of printing them; every other report goes where it went before."""
+    if loop in _QUIETED_LOOPS:
+        return
+    previous = loop.get_exception_handler()
+
+    def handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        if _is_sdk_stream_close_error(context):
+            _logger.debug("ignored an SDK stream-close error: %s", context.get("exception"))
+            return
+        if previous is not None:
+            previous(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+    _QUIETED_LOOPS.add(loop)
+
 
 # Provider-normalized stop reasons (aida.core.events.MessageFinished.stop_reason).
 _FINISH_REASON_MAP = {
@@ -168,6 +213,10 @@ class _StreamState:
     #: ``finalize_stream`` can tell "the server ended the turn properly"
     #: from "the stream just stopped".
     finished: bool = False
+    #: Characters of reasoning streamed apart from the reply (see
+    #: ``MessageFinished.reasoning_chars``); counted, never kept.
+    reasoning_chars: int = 0
+    reasoning_tail: str = ""
 
     def full_text(self) -> str:
         return "".join(self.text_parts)
@@ -203,6 +252,14 @@ def process_openai_chunk(chunk: Any, state: _StreamState) -> list[AgentEvent]:
 
     choice = choices[0]
     delta = choice.delta
+
+    if delta:
+        # Servers that separate reasoning put it in `reasoning_content`
+        # (llama.cpp, vLLM, DeepSeek) or `reasoning` (some proxies).
+        reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
+        if isinstance(reasoning, str):
+            state.reasoning_chars += len(reasoning)
+            state.reasoning_tail = (state.reasoning_tail + reasoning)[-REASONING_TAIL_CHARS:]
 
     if delta and getattr(delta, "content", None):
         _ensure_started(state, events)
@@ -245,6 +302,8 @@ def process_openai_chunk(chunk: Any, state: _StreamState) -> list[AgentEvent]:
             MessageFinished(
                 message_id=state.message_id,
                 stop_reason=_FINISH_REASON_MAP.get(finish_reason, "stop"),
+                reasoning_chars=state.reasoning_chars,
+                reasoning_tail=state.reasoning_tail,
             )
         )
 
@@ -288,7 +347,14 @@ def finalize_stream(state: _StreamState) -> list[AgentEvent]:
                 arguments=arguments,
             )
         )
-    events.append(MessageFinished(message_id=state.message_id, stop_reason="stop"))
+    events.append(
+        MessageFinished(
+            message_id=state.message_id,
+            stop_reason="stop",
+            reasoning_chars=state.reasoning_chars,
+            reasoning_tail=state.reasoning_tail,
+        )
+    )
     return events
 
 
@@ -362,6 +428,7 @@ class OpenAICompatProvider(LLMProvider):
         tools: list[ToolSchema],
         settings: CompletionSettings,
     ) -> AsyncIterator[AgentEvent]:
+        _quiet_sdk_stream_close(asyncio.get_running_loop())
         message_id = f"oai-{id(messages)}-{len(messages)}"
         kwargs: dict[str, Any] = {
             "model": settings.model or self.model,
@@ -391,10 +458,18 @@ class OpenAICompatProvider(LLMProvider):
             retry_param: str | None = None
             try:
                 stream = await self._client.chat.completions.create(**kwargs)
-                async for chunk in stream:
-                    for event in process_openai_chunk(chunk, state):
-                        emitted = True
-                        yield event
+                try:
+                    async for chunk in stream:
+                        for event in process_openai_chunk(chunk, state):
+                            emitted = True
+                            yield event
+                finally:
+                    # Released here, not by the garbage collector after the
+                    # event loop has gone, when the caller stops early.
+                    close = getattr(stream, "close", None)
+                    if close is not None:
+                        with contextlib.suppress(Exception):
+                            await close()
                 # A compatible server that ended the stream without a
                 # finish_reason would otherwise leave the turn unterminated —
                 # see finalize_stream.

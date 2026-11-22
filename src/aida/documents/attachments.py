@@ -149,10 +149,41 @@ def store_attachments(
     return result
 
 
+#: Starts the note appended to a user message that had attachments.
+ATTACHMENT_LOCATIONS_HEADING = "[Attached files, saved in this conversation's folder"
+
+
+def append_attachment_locations(text: str, result: IngestResult) -> str:
+    """``text`` plus a note giving the path of each attachment's copy.
+
+    The attachment's extracted text is already in the message; the paths are
+    for everything else (``read_file`` with ``offset``/``ocr``, the figure
+    tools, scripts). The copies are readable without confirmation (see
+    ``SafetyGuard.readable_roots``), so the agent never has to look for the
+    original. A file that could not be copied is listed by its original path.
+    """
+    if not result.stored:
+        return text
+    lines = [
+        f"{ATTACHMENT_LOCATIONS_HEADING}; read them with read_file at these paths, do not "
+        "search for the originals:"
+    ]
+    for stored in result.stored:
+        name = Path(stored.source_path).name
+        if stored.error:
+            lines.append(f"- {name}: not copied ({stored.error}); original at {stored.source_path}")
+        else:
+            lines.append(f"- {name}: {stored.stored_path}")
+    lines[-1] += "]"
+    return f"{text}\n\n" + "\n".join(lines) if text else "\n".join(lines)
+
+
 __all__ = [
     "ASSETS_SUFFIX",
+    "ATTACHMENT_LOCATIONS_HEADING",
     "IngestResult",
     "StoredAttachment",
+    "append_attachment_locations",
     "assets_dir_for",
     "store_attachment",
     "store_attachments",
