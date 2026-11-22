@@ -59,6 +59,7 @@ import mimetypes
 import os
 import shutil
 import threading
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
@@ -67,16 +68,24 @@ from typing import Any
 from aida.artifacts.base import FileArtifact, JsonArtifact, TableArtifact
 from aida.artifacts.policy import describe_for_model
 from aida.core.tools import NativeTool, ToolResult, wrap_tool_errors
+from aida.documents.ocr.vlm import ConvertPages
 from aida.documents.readers import (
     INTERACTIVE_MAX_CHARS,
     INTERACTIVE_MAX_PDF_PAGES,
     UnsupportedDocumentFormatError,
+    pdf_pages_to_convert,
     read_document,
 )
 from aida.providers.base import ToolSchema
 from aida.workspace.safety import ConfirmationDenied, SafetyGuard
 
 DEFAULT_MAX_LIST_ENTRIES = 500
+#: Extraction limit for a ``read_file`` window (``offset``/``length``): the
+#: text up to the window has to be extracted to cut it out, but not without
+#: any bound.
+PAGED_READ_MAX_CHARS = 20_000_000
+#: What ``aida.documents.readers`` appends to text it truncated.
+_TRUNCATED_SUFFIX = "\n... [truncated]"
 DEFAULT_MAX_SEARCH_MATCHES = 100
 DEFAULT_SEARCH_FILE_SIZE_CAP = 2_000_000  # skip scanning files bigger than this for search_text
 
@@ -356,13 +365,21 @@ def _search_text_sync(
     max_matches: int,
     cancel: threading.Event | None = None,
 ) -> list[list[Any]]:
+    """Match rows for ``query`` in the files under ``root``, or in ``root``
+    itself when it is a file (its rows are then named by file name)."""
     needle = query if case_sensitive else query.lower()
     rows: list[list[Any]] = []
     truncated = False
+    if root.is_file():
+        candidates: Iterable[Path] = [root]
+        base = root.parent
+    else:
+        # Bounded and lazy, for the same reason as _find_files_sync: the
+        # search stops walking as soon as it has enough matches.
+        candidates = _walk_files(root, recursive=recursive, cancel=cancel)
+        base = root
 
-    # Bounded and lazy, for the same reason as _find_files_sync: the search
-    # stops walking as soon as it has enough matches.
-    for path in _walk_files(root, recursive=recursive, cancel=cancel):
+    for path in candidates:
         if len(rows) >= max_matches:
             truncated = True
             break
@@ -377,7 +394,7 @@ def _search_text_sync(
         for line_no, line in enumerate(text.splitlines(), start=1):
             haystack = line if case_sensitive else line.lower()
             if needle in haystack:
-                rows.append([str(path.relative_to(root)), line_no, line.strip()[:300]])
+                rows.append([str(path.relative_to(base)), line_no, line.strip()[:300]])
                 if len(rows) >= max_matches:
                     truncated = True
                     break
@@ -467,10 +484,64 @@ def default_file_tools(
     *,
     max_list_entries: int = DEFAULT_MAX_LIST_ENTRIES,
     max_search_matches: int = DEFAULT_MAX_SEARCH_MATCHES,
+    pdf_converter: ConvertPages | None = None,
 ) -> dict[str, NativeTool]:
     """Builds the eleven native file tools, each closing over ``guard`` (and,
     for the listing tools, the size caps) — the exact merge-into-``tools``-
-    dict pattern ``aida.mcp.manager``'s tools already use."""
+    dict pattern ``aida.mcp.manager``'s tools already use.
+
+    ``pdf_converter`` (``aida.documents.ocr.vlm.PdfPageConverter``) lets
+    ``read_file`` convert PDF pages with a vision model when they have no
+    text layer or their display equations are missing from it
+    (``aida.documents.readers.pdf_pages_to_convert``); without it such pages
+    are reported as unread."""
+
+    async def _pdf_text_with_conversion(candidate: Path, force: bool) -> str | None:
+        """The PDF's text with the pages ``pdf_pages_to_convert`` picks (every
+        page, with ``force``) replaced by their conversion, plus a note on what happened; ``None``
+        when no page needs converting or there is no converter."""
+        if pdf_converter is None:
+            return None
+        texts, total, needed = await _run_blocking(
+            pdf_pages_to_convert, candidate, INTERACTIVE_MAX_PDF_PAGES
+        )
+        targets = list(range(len(texts))) if force else needed
+        if not targets:
+            return None
+        result = await pdf_converter(candidate, targets)
+        parts = []
+        for index, text in enumerate(texts):
+            if index in result.pages:
+                parts.append(f"--- page {index + 1} (converted from the page image) ---")
+                parts.append(result.pages[index])
+            else:
+                parts.append(f"--- page {index + 1} ---\n{text}")
+        if total > len(texts):
+            parts.append(f"--- [{total - len(texts)} more pages truncated] ---")
+        body = "\n\n".join(parts)
+        pages_word = "page" if len(targets) == 1 else "pages"
+        if not result.pages:
+            reason = (
+                "were requested for conversion"
+                if force
+                else "have no text layer or equations missing from it"
+            )
+            note = (
+                f"[{candidate.name}: {len(targets)} {pages_word} {reason} and could not be "
+                f"read. {result.unavailable} Treat those pages as unread, not as empty.]"
+            )
+        else:
+            note = (
+                f"[{len(result.pages)} {pages_word} of {candidate.name} were converted from "
+                f"page images by {result.route_label}; check numbers and equations against "
+                "the original when they matter.]"
+            )
+            if result.failed:
+                failed = ", ".join(str(i + 1) for i in result.failed)
+                note += f" [Pages {failed} could not be converted and are unread.]"
+            if result.notes:
+                note += " [" + " ".join(result.notes) + "]"
+        return f"{body}\n\n{note}"
 
     @_tool
     async def list_directory(arguments: dict[str, Any]) -> ToolResult:
@@ -506,8 +577,8 @@ def default_file_tools(
         recursive = bool(arguments.get("recursive", True))
         case_sensitive = bool(arguments.get("case_sensitive", False))
         candidate = await guard.authorize_read(path)
-        if not candidate.is_dir():
-            return ToolResult(content=f"Not a directory: {candidate}", is_error=True)
+        if not candidate.exists():
+            return ToolResult(content=f"No such file or directory: {candidate}", is_error=True)
         rows = await _run_scan(
             _search_text_sync,
             candidate,
@@ -521,20 +592,78 @@ def default_file_tools(
 
     @_tool
     async def read_file(arguments: dict[str, Any]) -> ToolResult:
+        """Read a file's extracted text, whole (up to ``INTERACTIVE_MAX_CHARS``)
+        or, with ``offset``/``length``, one window of it in characters. The
+        window is how the model reads a file too big for one call, including
+        the full text of a long tool result saved to scratch (see
+        ``aida.core.context.cap_tool_result``)."""
         path = arguments["path"]
         candidate = await guard.authorize_read(path)
         if not candidate.is_file():
             return ToolResult(content=f"Not a file: {candidate}", is_error=True)
-        artifacts = await _run_blocking(
-            read_document,
-            candidate,
-            max_chars=INTERACTIVE_MAX_CHARS,
-            max_pdf_pages=INTERACTIVE_MAX_PDF_PAGES,
-        )
-        content = "\n\n".join(
-            describe_for_model(a, max_chars=INTERACTIVE_MAX_CHARS) for a in artifacts
-        )
-        return ToolResult(content=content, artifacts=artifacts)
+        paged = arguments.get("offset") is not None or arguments.get("length") is not None
+        converted: str | None = None
+        if candidate.suffix.lower() == ".pdf":
+            converted = await _pdf_text_with_conversion(candidate, bool(arguments.get("ocr")))
+        if converted is not None and not paged:
+            if len(converted) <= INTERACTIVE_MAX_CHARS:
+                return ToolResult(content=converted)
+            shown = INTERACTIVE_MAX_CHARS
+            return ToolResult(
+                content=(
+                    f"{converted[:shown]}{_TRUNCATED_SUFFIX}\n[Only the first {shown:,} "
+                    f"characters are shown. Call read_file again with offset={shown} to "
+                    "continue.]"
+                )
+            )
+        if not paged:
+            artifacts = await _run_blocking(
+                read_document,
+                candidate,
+                max_chars=INTERACTIVE_MAX_CHARS,
+                max_pdf_pages=INTERACTIVE_MAX_PDF_PAGES,
+            )
+            content = "\n\n".join(
+                describe_for_model(a, max_chars=INTERACTIVE_MAX_CHARS) for a in artifacts
+            )
+            if content.endswith(_TRUNCATED_SUFFIX):
+                shown = len(content) - len(_TRUNCATED_SUFFIX)
+                content += (
+                    f"\n[Only the first {shown:,} characters are shown. Call read_file again "
+                    f"with offset={shown} to continue.]"
+                )
+            return ToolResult(content=content, artifacts=artifacts)
+
+        try:
+            raw_offset = arguments.get("offset")
+            raw_length = arguments.get("length")
+            offset = max(0, int(raw_offset)) if raw_offset is not None else 0
+            length = int(raw_length) if raw_length is not None else INTERACTIVE_MAX_CHARS
+        except (TypeError, ValueError):
+            return ToolResult(content="offset and length must be integers.", is_error=True)
+        if length <= 0:
+            return ToolResult(content="length must be a positive integer.", is_error=True)
+        length = min(length, INTERACTIVE_MAX_CHARS)
+        if converted is not None:
+            full = converted
+        else:
+            artifacts = await _run_blocking(
+                read_document,
+                candidate,
+                max_chars=PAGED_READ_MAX_CHARS,
+                max_pdf_pages=INTERACTIVE_MAX_PDF_PAGES,
+            )
+            full = "\n\n".join(
+                describe_for_model(a, max_chars=PAGED_READ_MAX_CHARS) for a in artifacts
+            )
+        end = min(len(full), offset + length)
+        window = full[offset:end]
+        if end < len(full):
+            note = f"Call read_file again with offset={end} to continue."
+        else:
+            note = "This is the end of the file."
+        content = f"{window}\n[Characters {offset:,}-{end:,} of {len(full):,}. {note}]"
+        return ToolResult(content=content)
 
     @_tool
     async def write_file(arguments: dict[str, Any]) -> ToolResult:
@@ -795,11 +924,17 @@ def default_file_tools(
         NativeTool(
             schema=ToolSchema(
                 name="search_text",
-                description="Search for a text query inside files under a directory; returns matching file/line/text rows.",
+                description=(
+                    "Search for a text query inside the files under a directory, or inside one "
+                    "file; returns matching file/line/text rows."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Directory to search under."},
+                        "path": {
+                            "type": "string",
+                            "description": "Directory to search under, or a single file.",
+                        },
                         "query": {"type": "string", "description": "Text to search for."},
                         "recursive": {
                             "type": "boolean",
@@ -821,7 +956,32 @@ def default_file_tools(
                 ),
                 parameters={
                     "type": "object",
-                    "properties": {"path": {"type": "string", "description": "File to read."}},
+                    "properties": {
+                        "path": {"type": "string", "description": "File to read."},
+                        "ocr": {
+                            "type": "boolean",
+                            "description": (
+                                "PDF only. Convert every page from its image with a vision "
+                                "model, for a PDF whose text layer is garbled. Pages with no "
+                                "text layer (scans) and pages whose equations are missing from "
+                                "the text layer are converted without this."
+                            ),
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": (
+                                "Optional. Character position of the extracted text to start "
+                                "at, for reading a long file in parts. Default 0."
+                            ),
+                        },
+                        "length": {
+                            "type": "integer",
+                            "description": (
+                                "Optional. How many characters to return from offset "
+                                f"(at most {INTERACTIVE_MAX_CHARS})."
+                            ),
+                        },
+                    },
                     "required": ["path"],
                 },
             ),

@@ -48,6 +48,7 @@ from aida.providers.base import Message, ToolSchema
 from aida.providers.mock import MockProvider, MockToolCall, MockTurn
 from aida.providers.mock_embeddings import MockEmbeddings
 from aida.workspace.safety import ConfirmationRequest
+from tests.compaction_helpers import SummarizingMockProvider
 
 
 def _settings_with_profile(name="mock-profile", **overrides) -> Settings:
@@ -186,6 +187,25 @@ def test_print_event_context_trimmed_singular_turn_wording(capsys):
     print_event(ContextTrimmed(dropped_turns=1, estimated_tokens=100))
     out = capsys.readouterr().out
     assert "1 old turn " in out  # not "1 old turns"
+
+
+def test_print_event_context_trimmed_reports_shrunk_results(capsys):
+    print_event(ContextTrimmed(dropped_turns=0, estimated_tokens=90_000, shrunk_tool_results=12))
+    out = capsys.readouterr().out
+    assert "shortened 12 old tool results" in out
+    assert "90,000" in out
+    assert "dropped" not in out
+
+
+def test_print_event_context_over_budget_says_what_to_do(capsys):
+    print_event(
+        ContextTrimmed(
+            dropped_turns=0, estimated_tokens=90_000, over_budget=True, budget_tokens=80_000
+        )
+    )
+    out = capsys.readouterr().out
+    assert "80,000" in out
+    assert "new conversation" in out
 
 
 def test_print_event_agent_error(capsys):
@@ -861,14 +881,13 @@ async def test_send_trims_the_history_to_the_configured_budget(
     MIN_HISTORY_BUDGET (8000) rather than taken literally, since a budget
     that low is a misconfiguration, not an honest tight budget. So the
     fixture history here is sized to clearly exceed that floor regardless.
-    Two scripted turns: compaction's own summarization call consumes the
-    first (see ChatSession._compact_context), the actual reply consumes the
-    second."""
+    The summarization calls are answered by SummarizingMockProvider; the
+    one scripted turn is the actual reply."""
     settings = _settings_with_profile()
     settings.app.max_context_tokens = 200
     monkeypatch.setattr(
         "aida.core.session.build_provider",
-        lambda profile: MockProvider([MockTurn(text="summary of old turns"), MockTurn(text="ok")]),
+        lambda profile: SummarizingMockProvider([MockTurn(text="ok")]),
     )
 
     session = ChatSession(settings, "mock-profile")
@@ -920,7 +939,7 @@ async def test_send_yields_context_trimmed_event_when_it_actually_trims(
     settings.app.max_context_tokens = 200
     monkeypatch.setattr(
         "aida.core.session.build_provider",
-        lambda profile: MockProvider([MockTurn(text="summary of old turns"), MockTurn(text="ok")]),
+        lambda profile: SummarizingMockProvider([MockTurn(text="ok")]),
     )
 
     session = ChatSession(settings, "mock-profile")

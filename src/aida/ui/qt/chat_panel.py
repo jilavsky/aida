@@ -13,6 +13,7 @@ be driven directly in tests without a real bridge/session.
 
 from __future__ import annotations
 
+import html
 import itertools
 import re
 from collections.abc import Iterable
@@ -475,9 +476,12 @@ class StartupNoticeBanner(QFrame):
 
     Amber rather than ``ErrorBanner``'s pink: the chat works, something in
     it is missing. Selectable, with a Copy button, for the same reason as
-    ``ErrorBanner``."""
+    ``ErrorBanner``. ``title`` replaces the startup heading when the banner
+    is reused for a warning raised later in the chat."""
 
-    def __init__(self, lines: list[str], parent: QWidget | None = None) -> None:
+    def __init__(
+        self, lines: list[str], parent: QWidget | None = None, *, title: str | None = None
+    ) -> None:
         super().__init__(parent)
         self.lines = list(lines)
         self.setFrameShape(QFrame.Shape.StyledPanel)
@@ -486,10 +490,9 @@ class StartupNoticeBanner(QFrame):
         layout = QVBoxLayout(self)
         header = QHBoxLayout()
         count = len(self.lines)
-        title = QLabel(
-            f"<b>This chat started with {count} warning{'s' if count != 1 else ''}</b>", self
-        )
-        header.addWidget(title)
+        if title is None:
+            title = f"This chat started with {count} warning{'s' if count != 1 else ''}"
+        header.addWidget(QLabel(f"<b>{html.escape(title)}</b>", self))
         header.addStretch(1)
         self._raw_text = "\n".join(self.lines)
         copy_button = QPushButton("⧉ Copy", self)
@@ -509,6 +512,20 @@ class StartupNoticeBanner(QFrame):
             | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
         layout.addWidget(label)
+
+
+class ContextNote(QLabel):
+    """One quiet grey line marking where the context was compacted, so
+    the scrollback shows when the model stopped seeing old results in full.
+    Live only: not part of the conversation record or of what the model
+    sees. Over-budget warnings get a ``StartupNoticeBanner`` instead."""
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(f"──── {text} ────", parent)
+        self.note_text = text
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setWordWrap(True)
+        self.setStyleSheet("color: gray; font-size: 10px; font-style: italic; padding: 2px;")
 
 
 class TruncationNotice(QFrame):
@@ -737,6 +754,13 @@ class ChatPanel(QWidget):
         self._append_widget(banner)
         return banner
 
+    def add_warning_banner(self, title: str, lines: list[str]) -> StartupNoticeBanner:
+        """Show a warning raised during the chat (for example, the history
+        being too large to compact further) as an amber banner."""
+        banner = StartupNoticeBanner(lines, parent=self._content, title=title)
+        self._append_widget(banner)
+        return banner
+
     def add_artifact_widget(self, widget: QWidget) -> None:
         """Append an already-built artifact widget (``InlineImageWidget``/
         ``FileArtifactCard``) directly — used by ``MainWindow`` when
@@ -866,6 +890,23 @@ class ChatPanel(QWidget):
             # became in the conversation.
             bubble = self.add_user_message(event.text)
             bubble.append_meta("sent while the agent was working")
+        elif name == "ContextTrimmed":
+            # Only when something was actually removed; a bare "still over
+            # budget" notice is shown as a banner by MainWindow.
+            if event.dropped_turns or event.shrunk_tool_results:
+                prefix = "Context compacted" if event.summarized else "Context reduced"
+                note = f"{prefix}: {event.describe(include_warning=False)}"
+                self._append_widget(ContextNote(note, parent=self._content))
+        elif name == "TurnNudged":
+            # A user bubble, because the text is now part of the
+            # conversation, marked so nobody thinks they typed it.
+            bubble = self.add_user_message(event.text)
+            why = (
+                "reply cut off at the output limit"
+                if event.reason == "length"
+                else "agent stopped mid-task"
+            )
+            bubble.append_meta(f"sent automatically by AIDA — {why}")
         elif name == "AgentError":
             # "Continue" only for the one AgentError a resend actually
             # fixes — the iteration cap (aida.core.agent.AgentLoop's exact

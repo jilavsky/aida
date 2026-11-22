@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import logging
+import re
 import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -34,6 +36,7 @@ from aida.core.events import (
     TextFinished,
     ToolCallFinished,
     ToolCallStarted,
+    TurnNudged,
     UsageInfo,
 )
 from aida.core.tools import NativeTool
@@ -56,6 +59,128 @@ DEFAULT_MAX_ITERATIONS = 50
 #: it announced — see ``_run_turns``' cancel branch and
 #: ``aida.core.context.repair_tool_call_pairing``.
 CANCELLED_TOOL_RESULT = "(cancelled — this tool call was never executed)"
+
+#: Sent when a reply was cut off at the output token limit before it made a
+#: usable tool call. Once per turn (``MAX_LENGTH_RECOVERIES``).
+LENGTH_NUDGE = (
+    "[Sent automatically by AIDA] Your last reply was cut off at the output token limit "
+    "before it finished. Continue the task. Keep each reply short, and write a large file "
+    "in several smaller steps (write_file for the first part, then edit_file or further "
+    "writes for the rest)."
+)
+
+#: Sent when a short reply after tool work made no tool call and looks like a
+#: stall (``is_stall``). At most ``MAX_STALL_NUDGES`` per turn.
+STALL_NUDGE = (
+    "[Sent automatically by AIDA] Your last reply made no tool call, so nothing happened. "
+    "Continue the task now. If it is already finished, say so in one sentence."
+)
+
+#: The stall nudge when the end of the reasoning contains tool-call markup:
+#: the model wrote the call in its thinking and never sent it.
+STALL_NUDGE_CALL_IN_REASONING = (
+    "[Sent automatically by AIDA] Your reasoning contains a tool call, but it was never sent "
+    "as one, so nothing happened. Send it now as a real tool call. If the task is already "
+    "finished, say so in one sentence."
+)
+
+MAX_LENGTH_RECOVERIES = 1
+MAX_STALL_NUDGES = 2
+
+#: A reply longer than this is a real answer, not a stalled announcement.
+STALL_MAX_CHARS = 300
+
+#: A short reply is a stall by shape when its reasoning is at least this long
+#: *and* this many times longer than the visible text. Measured 2026-11-21:
+#: stalls had 15-17k chars of reasoning behind 140-175 chars of text; normal
+#: endings had at most ~1.5k behind 2.5k+ chars of text.
+STALL_MIN_REASONING_CHARS = 3000
+STALL_REASONING_RATIO = 10
+
+#: Tool-call markup a model may write inside its reasoning instead of sending
+#: the call: Qwen/Hermes ``<tool_call>``, the XML ``<function=...>`` form, or
+#: an OpenAI-style ``{"name": ..., "arguments": ...}`` object.
+_TOOL_CALL_MARKUP = re.compile(
+    r'<tool_call>|<function=|"name"\s*:\s*"[^"]+"\s*,\s*"(?:arguments|parameters)"\s*:'
+)
+
+_ANNOUNCES_STEP = re.compile(
+    r"\b(let me|let's|i'll|i will|i am going to|i'm going to|now i|next,? i|writing|"
+    r"creating|generating|proceeding|starting|moving on)\b",
+    re.IGNORECASE,
+)
+_CLOSING_PHRASE = re.compile(
+    r"\b(let me know|if you (?:want|need|would like|'d like)|feel free)\b", re.IGNORECASE
+)
+
+
+def looks_like_announced_step(text: str) -> bool:
+    """Whether a text-only reply reads as "I am about to do X" rather than
+    the end of the task: short (``STALL_MAX_CHARS``), not a question, and
+    either phrased as an upcoming action ("Let me check…", "Writing the
+    report now.") or ending in a colon or an ellipsis. Closing offers ("Let
+    me know if…") never count. English phrasing only; a miss just means
+    the turn ends as it always did."""
+    stripped = text.strip()
+    if not stripped or len(stripped) > STALL_MAX_CHARS or stripped.endswith("?"):
+        return False
+    if _CLOSING_PHRASE.search(stripped):
+        return False
+    return bool(_ANNOUNCES_STEP.search(stripped)) or stripped.endswith((":", "…", "..."))
+
+
+def is_stall(text: str, reasoning_chars: int) -> bool:
+    """Whether a text-only reply that follows tool work is a stall rather
+    than the end of the task.
+
+    By shape first: a short reply (``STALL_MAX_CHARS``) behind a large
+    amount of reasoning (``STALL_MIN_REASONING_CHARS`` and
+    ``STALL_REASONING_RATIO`` times the text), typically a model that drafted
+    the next step in its thinking and then stopped. For providers that send
+    no reasoning, ``looks_like_announced_step`` is the fallback. Never a
+    question, and never a closing offer ("Let me know if…").
+    """
+    stripped = text.strip()
+    if len(stripped) > STALL_MAX_CHARS or stripped.endswith("?"):
+        return False
+    if _CLOSING_PHRASE.search(stripped):
+        return False
+    if (
+        reasoning_chars >= STALL_MIN_REASONING_CHARS
+        and reasoning_chars >= STALL_REASONING_RATIO * len(stripped)
+    ):
+        return True
+    return looks_like_announced_step(stripped)
+
+
+def has_tool_call_markup(reasoning: str) -> bool:
+    """Whether ``reasoning`` contains something written like a tool call."""
+    return bool(_TOOL_CALL_MARKUP.search(reasoning))
+
+
+def unknown_tool_message(name: str, tools: dict[str, NativeTool]) -> str:
+    """The reply to a call naming no known tool, with a suggestion when the
+    name is a known tool plus garbage (``edit_file=path``, ``edit_file(``)
+    or a near-miss spelling. The guessed tool is never run: its arguments
+    may be incomplete."""
+    import difflib
+
+    guess: str | None = None
+    head = re.split(r"[=(\s]", name, maxsplit=1)[0]
+    if head in tools:
+        guess = head
+    else:
+        close = difflib.get_close_matches(name, list(tools), n=1, cutoff=0.8)
+        guess = close[0] if close else None
+    if guess is None:
+        return f"Unknown tool: {name}"
+    required = tools[guess].schema.parameters.get("required") or []
+    needs = f" Its required arguments are: {', '.join(required)}." if required else ""
+    return (
+        f"Unknown tool {name!r}. Did you mean {guess!r}?{needs} The call was not run; send it "
+        "again with the correct tool name and all of its arguments."
+    )
+
 
 logger = get_logger("agent")
 
@@ -92,6 +217,8 @@ class AgentLoop:
         max_iterations: int = DEFAULT_MAX_ITERATIONS,
         before_round_trip: Callable[[], Awaitable[AgentEvent | None]] | None = None,
         retry_policy: RetryPolicy = DEFAULT_RETRY_POLICY,
+        tool_result_filter: Callable[[str, str, str], str] | None = None,
+        auto_continue_on_stall: bool = True,
     ) -> None:
         self.provider = provider
         self.settings = settings
@@ -101,18 +228,21 @@ class AgentLoop:
         #: limited, ...) is resent before it reaches the user as an error —
         #: see aida.providers.retry.
         self.retry_policy = retry_policy
-        # planning/completed/improvement_plan_2026-09.md §2: context trimming used to
-        # run once, before the turn even started (ChatSession._run_turn) —
-        # with max_agent_iterations now 50, a single turn's tool results can
-        # grow the history by hundreds of thousands of characters with
-        # nothing re-checking it until the *next* user message. Awaited (and
-        # its event yielded, if any) at the top of every round trip below,
-        # including the first — ``ChatSession`` passes its own
-        # ``_trim_context``, which is safe to call repeatedly (a no-op,
-        # returning ``None``, whenever there is nothing to trim) and only
-        # ever drops whole *older* turns, so the one currently in progress
-        # is never at risk.
+        # Awaited (and its event yielded, if any) at the top of every round
+        # trip, including the first: one turn's tool results can grow the
+        # history by hundreds of thousands of characters. ``ChatSession``
+        # passes its ``_trim_context``, a no-op when under budget. It may
+        # shrink tool results older than the last few rounds and drop whole
+        # turns before the last one, but always leaves the messages since
+        # the last user message well-formed (calls still paired with results).
         self._before_round_trip = before_round_trip
+        #: ``(tool_name, call_id, content) -> content`` applied to each tool
+        #: result before it enters the history (``ChatSession`` caps its size
+        #: there). ``ToolCallFinished`` still carries the unfiltered result.
+        self._tool_result_filter = tool_result_filter
+        #: Whether a short "I'll do X now" reply with no tool call, right
+        #: after tool work, gets ``STALL_NUDGE`` instead of ending the turn.
+        self.auto_continue_on_stall = auto_continue_on_stall
         self._cancelled = False
         # Text the user typed while a turn was already running, waiting to
         # be handed to the model at the next round trip — see
@@ -219,6 +349,9 @@ class AgentLoop:
 
     async def _run_turns(self, messages: list[Message]) -> AsyncIterator[AgentEvent]:
         iterations = 0
+        length_cutoffs = 0
+        stall_nudges = 0
+        previous_round_had_tools = False
 
         while True:
             if self._cancelled:
@@ -255,6 +388,10 @@ class AgentLoop:
             pending_tool_calls: list[ToolCall] = []
             terminated_by_error = False
             cancelled_mid_stream = False
+            stop_reason: str | None = None
+            reasoning_chars = 0
+            reasoning_tail = ""
+            output_tokens: int | None = None
 
             round_trip_started = time.monotonic()
             # User report: "the Stop button seems to get stuck ... I have
@@ -308,7 +445,11 @@ class AgentLoop:
                             )
                         )
                     elif isinstance(event, MessageFinished):
-                        pass  # stop_reason itself doesn't drive control flow; tool_calls list does
+                        stop_reason = event.stop_reason
+                        reasoning_chars = event.reasoning_chars
+                        reasoning_tail = event.reasoning_tail
+                    elif isinstance(event, UsageInfo):
+                        output_tokens = event.output_tokens
                     elif isinstance(event, AgentError):
                         terminated_by_error = True
                     # Checked after the yield, so the event the caller is
@@ -326,6 +467,20 @@ class AgentLoop:
             if not assistant_text:
                 assistant_text = streamed_text
 
+            # Why the round trip ended: at INFO when it ends the turn (the
+            # line that explains an unexpected stop), DEBUG otherwise.
+            logger.log(
+                logging.DEBUG if pending_tool_calls else logging.INFO,
+                "round trip %d ended: stop_reason=%s, text=%d chars, tool_calls=%d, "
+                "output_tokens=%s, reasoning=%d chars",
+                iterations,
+                stop_reason,
+                len(assistant_text),
+                len(pending_tool_calls),
+                output_tokens if output_tokens is not None else "?",
+                reasoning_chars,
+            )
+
             if cancelled_mid_stream and not pending_tool_calls:
                 # Nothing was announced, so there is no orphaned tool_use
                 # for the next request to choke on and the shared cancel
@@ -339,12 +494,68 @@ class AgentLoop:
                 yield AgentError(layer="core", message="cancelled")
                 return
 
+            cut_off = (
+                not cancelled_mid_stream
+                and stop_reason == "length"
+                and all(UNPARSED_ARGUMENTS_KEY in tc.arguments for tc in pending_tool_calls)
+            )
+            if cut_off:
+                length_cutoffs += 1
+
+            if not pending_tool_calls:
+                if cut_off and length_cutoffs <= MAX_LENGTH_RECOVERIES:
+                    # Cut off before any tool call: keep the partial text and
+                    # ask the model to carry on in smaller steps.
+                    if assistant_text:
+                        messages.append(Message(role="assistant", content=assistant_text))
+                    yield self._nudge(messages, "length", LENGTH_NUDGE)
+                    previous_round_had_tools = False
+                    continue
+                messages.append(Message(role="assistant", content=assistant_text))
+                if cut_off:
+                    yield AgentError(layer="core", message=_REPEATED_CUTOFF_MESSAGE)
+                    return
+                if (
+                    stop_reason == "stop"
+                    and previous_round_had_tools
+                    and len(assistant_text.strip()) <= STALL_MAX_CHARS
+                ):
+                    # A short ending right after tool work: the case worth a
+                    # look in the log, nudged or not. The reasoning tail is
+                    # logged, never added to the history.
+                    # A question to the user is never answered for them, even
+                    # when the reasoning drafted the call it asks about.
+                    call_in_reasoning = has_tool_call_markup(
+                        reasoning_tail
+                    ) and not assistant_text.strip().endswith("?")
+                    logger.info(
+                        "short reply after tool work (%d chars, reasoning %d chars, tool-call "
+                        "markup in reasoning: %s); end of reasoning: %r",
+                        len(assistant_text),
+                        reasoning_chars,
+                        "yes" if call_in_reasoning else "no",
+                        reasoning_tail,
+                    )
+                    if (
+                        self.auto_continue_on_stall
+                        and stall_nudges < MAX_STALL_NUDGES
+                        and (call_in_reasoning or is_stall(assistant_text, reasoning_chars))
+                    ):
+                        stall_nudges += 1
+                        nudge = STALL_NUDGE_CALL_IN_REASONING if call_in_reasoning else STALL_NUDGE
+                        yield self._nudge(messages, "stall", nudge)
+                        previous_round_had_tools = False
+                        continue
+                return  # final answer — this turn is done
+
             messages.append(
                 Message(role="assistant", content=assistant_text, tool_calls=pending_tool_calls)
             )
-
-            if not pending_tool_calls:
-                return  # final answer — this turn is done
+            previous_round_had_tools = True
+            # Every call was cut off mid-arguments: each gets the "cut off"
+            # tool result below. The second time in one turn, answer them the
+            # same way and then end the turn instead of looping.
+            stop_after_results = cut_off and length_cutoffs > MAX_LENGTH_RECOVERIES
 
             # A stream cancelled *after* announcing calls falls through to
             # the per-call loop below, whose own cancel branch answers every
@@ -386,7 +597,7 @@ class AgentLoop:
                 result_artifacts: list[Artifact] = []
                 logger.debug("tool call: %s(%r)", tc.name, tc.arguments)
                 if tool is None:
-                    result_content: object = f"Unknown tool: {tc.name}"
+                    result_content: object = unknown_tool_message(tc.name, self.tools)
                     is_error = True
                     logger.warning(
                         "tool call to unknown tool %r (arguments=%r)", tc.name, tc.arguments
@@ -489,17 +700,49 @@ class AgentLoop:
                     for a in result_artifacts
                     if isinstance(a, ImageArtifact) and a.path
                 ]
+                history_content = _stringify(result_content)
+                if self._tool_result_filter is not None:
+                    history_content = self._tool_result_filter(tc.name, tc.id, history_content)
                 messages.append(
                     Message(
                         role="tool",
-                        content=_stringify(result_content),
+                        content=history_content,
                         tool_call_id=tc.id,
                         name=tc.name,
                         images=image_refs,
                     )
                 )
 
+            if stop_after_results:
+                yield AgentError(layer="core", message=_REPEATED_CUTOFF_MESSAGE)
+                return
             # loop continues: provider gets called again with tool results appended
 
+    def _nudge(self, messages: list[Message], reason: str, text: str) -> TurnNudged:
+        """Append ``text`` as a user message and return the event saying so."""
+        messages.append(Message(role="user", content=text))
+        logger.info("turn continued automatically (%s)", reason)
+        return TurnNudged(reason=reason, text=text)
 
-__all__ = ["CANCELLED_TOOL_RESULT", "DEFAULT_MAX_ITERATIONS", "AgentLoop"]
+
+_REPEATED_CUTOFF_MESSAGE = (
+    "The model's reply was cut off at the output token limit again, so the turn stopped. "
+    "Raise max_tokens for this profile (reasoning models spend part of it on thinking), "
+    "or ask for the work in smaller steps."
+)
+
+
+__all__ = [
+    "CANCELLED_TOOL_RESULT",
+    "DEFAULT_MAX_ITERATIONS",
+    "LENGTH_NUDGE",
+    "MAX_LENGTH_RECOVERIES",
+    "MAX_STALL_NUDGES",
+    "STALL_NUDGE",
+    "STALL_NUDGE_CALL_IN_REASONING",
+    "AgentLoop",
+    "has_tool_call_markup",
+    "is_stall",
+    "looks_like_announced_step",
+    "unknown_tool_message",
+]

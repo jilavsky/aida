@@ -273,48 +273,28 @@ def _effective_records_dir(settings: Settings | None) -> Path:
 
 
 def _check_ocr(settings: Settings | None) -> CheckResult:
-    """Whether the optional OCR backend can actually run.
+    """Which model would convert a scanned PDF page for the active workspace
+    (its profile, else the last profile used), or why none would.
 
-    Reports the three preconditions *separately*, because "no workspace
-    wants it", "the extra is missing" and "no API key" want completely
-    different fixes and a single pass/fail would hide which one applies.
-    Never contacts the service: a diagnostic must not upload anything, and
-    reachability is not something a key check can answer anyway.
+    No network access. Fails only for a misconfiguration: ``ocr_profile``
+    naming a profile that does not exist. A chat profile without vision is
+    reported, not failed — plenty of setups never meet a scanned PDF.
     """
-    from aida.config.secrets import env_var_name, get_secret
-    from aida.documents.ocr.mistral import SECRET_REF
+    if settings is None:
+        return CheckResult("ocr", True, "skipped — config failed to load")
+    from aida.cli.documents_cmds import route_line
 
-    wanting = (
-        sorted(w.name for w in settings.workspaces.workspaces.values() if w.use_ocr)
-        if settings is not None
-        else []
-    )
-    if not wanting:
-        return CheckResult("ocr", True, "not enabled by any workspace (use_ocr: false everywhere)")
-
-    try:
-        import httpx  # noqa: F401
-    except ImportError:
-        return CheckResult(
-            "ocr",
-            False,
-            f"workspace(s) {', '.join(wanting)} enable OCR but the 'ocr' extra is not installed "
-            f"(pip install 'aida-workbench[ocr]') — figures fall back to the built-in extractor",
-        )
-
-    if not get_secret(SECRET_REF):
-        return CheckResult(
-            "ocr",
-            False,
-            f"workspace(s) {', '.join(wanting)} enable OCR but no API key is set — add one in "
-            f"Settings or set ${env_var_name(SECRET_REF)}; figures fall back to the built-in extractor",
-        )
+    app = settings.app
+    workspace = settings.workspaces.workspaces.get(app.last_workspace_name or "")
+    profile_name = (workspace.profile if workspace else None) or app.last_profile_name
+    line = route_line(settings, profile_name)
+    if app.ocr_profile and app.ocr_profile not in settings.providers.profiles:
+        return CheckResult("ocr", False, f"ocr_profile {app.ocr_profile!r} does not exist: {line}")
+    where = f"workspace {workspace.name!r}" if workspace else f"profile {profile_name!r}"
     return CheckResult(
         "ocr",
         True,
-        f"enabled for {', '.join(wanting)}; key present. Nothing is uploaded when a document is "
-        f"attached — OCR runs the first time its figures are asked for, and asks first. "
-        f"`aida documents figures FILE --workspace {wanting[0]}` checks the whole path.",
+        f"scanned PDF pages for {where}: {line}. `aida documents convert FILE` tries it.",
     )
 
 
@@ -472,6 +452,11 @@ def _check_context_windows(settings: Settings | None) -> CheckResult:
     return CheckResult("context_windows", True, "; ".join(notes))
 
 
+#: Above this share of ``context_window``, ``max_tokens`` is reported as a
+#: note (not a failure): it is legal, but it shrinks the history budget.
+MAX_TOKENS_SHARE_WARNING = 0.15
+
+
 def _check_max_tokens_vs_context_window(settings: Settings | None) -> CheckResult:
     """Catches a specific, easy-to-hit mix-up between ``max_tokens`` and
     ``context_window`` (see ``ProviderProfile``'s docstring): someone reads
@@ -501,6 +486,7 @@ def _check_max_tokens_vs_context_window(settings: Settings | None) -> CheckResul
         )
 
     bad = []
+    heavy = []
     for name, profile in profiles.items():
         if profile.max_tokens is None or profile.context_window is None:
             continue
@@ -512,13 +498,23 @@ def _check_max_tokens_vs_context_window(settings: Settings | None) -> CheckResul
                 "OUTPUT length, it is not the model's total window; unset it (8192 default) or use "
                 "a modest reply budget like 4096-16000, not the context_window value"
             )
-    if not bad:
-        return CheckResult(
-            "max_tokens_vs_context_window",
-            True,
-            "no profile's max_tokens crowds out its context_window",
-        )
-    return CheckResult("max_tokens_vs_context_window", False, "; ".join(bad))
+        elif profile.max_tokens > MAX_TOKENS_SHARE_WARNING * profile.context_window:
+            share = profile.max_tokens / profile.context_window
+            heavy.append(
+                f"{name!r}: max_tokens ({profile.max_tokens:,}) reserves {share:.0%} of "
+                f"context_window ({profile.context_window:,}) for every reply, and that comes "
+                "out of the room for conversation history; a smaller value lets long runs go "
+                "further before compaction"
+            )
+    if bad:
+        return CheckResult("max_tokens_vs_context_window", False, "; ".join(bad))
+    if heavy:
+        return CheckResult("max_tokens_vs_context_window", True, "note: " + "; ".join(heavy))
+    return CheckResult(
+        "max_tokens_vs_context_window",
+        True,
+        "no profile's max_tokens crowds out its context_window",
+    )
 
 
 def run_checks() -> list[CheckResult]:

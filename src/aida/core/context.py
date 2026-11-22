@@ -9,11 +9,12 @@ nothing here talks to an index.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from aida.config.logging_setup import get_logger
-from aida.providers.base import Message, ToolSchema
+from aida.providers.base import Message, ToolCall, ToolSchema
 
 logger = get_logger("context")
 
@@ -551,65 +552,115 @@ def repair_tool_call_pairing(
     return repaired
 
 
+#: Heading of the message that replaces summarized turns. Also how a
+#: summary is recognized again (``is_compaction_summary``): it lives only in
+#: memory, never in the database, so no persisted flag is needed.
+COMPACTION_SUMMARY_HEADING = "# Summary of earlier conversation (compacted)"
+
+
+def is_compaction_summary(message: Message) -> bool:
+    """Whether ``message`` is a compaction summary (see
+    ``compaction_summary_message``)."""
+    return message.role == "user" and message.content.startswith(COMPACTION_SUMMARY_HEADING)
+
+
+def summary_body(message: Message) -> str:
+    """The summary text of a compaction summary message, without its heading."""
+    return message.content.removeprefix(COMPACTION_SUMMARY_HEADING).strip()
+
+
 @dataclass(frozen=True)
 class TrimPlan:
     """What ``plan_trim`` decided: which whole turns to drop to fit
     ``max_tokens``, without committing to *how* they get removed. Plain
-    discard (``trim_history``, still exactly what it always was) and
-    summarize-then-replace (``aida.core.session.ChatSession._trim_context``,
-    PLAN.md §1.3 compaction) both start from the same plan, so the two
-    policies can never disagree about *which* turns are old enough to go —
-    only about what replaces them."""
+    discard (``trim_history``) and summarize-then-replace
+    (``aida.core.session.ChatSession._trim_context``) both start from the
+    same plan, so they agree about *which* turns go and differ only in what
+    replaces them.
+
+    ``previous_summary`` is the compaction summary already at the front of
+    the history, if any. It is never one of the ``dropped_turns``: a summary
+    is only ever folded into a new one together with real turns, never
+    re-summarized on its own."""
 
     system_messages: list[Message]
     kept_turn_messages: list[Message]
     dropped_turns: list[list[Message]]
     was_trimmed: bool
+    previous_summary: Message | None = None
 
     @property
     def kept_messages(self) -> list[Message]:
-        """``system_messages + kept_turn_messages`` — the plain-discard
-        result ``trim_history`` returns."""
-        return self.system_messages + self.kept_turn_messages
+        """The plain-discard result: system messages, the previous summary
+        (still accurate for what it covers) and the kept turns."""
+        summary = [self.previous_summary] if self.previous_summary is not None else []
+        return [*self.system_messages, *summary, *self.kept_turn_messages]
 
 
-def plan_trim(messages: list[Message], max_tokens: int, *, min_recent_turns: int = 4) -> TrimPlan:
+def plan_trim(
+    messages: list[Message],
+    max_tokens: int,
+    *,
+    min_recent_turns: int = 4,
+    fallback_min_recent_turns: int | None = None,
+    keep_summary: bool = True,
+) -> TrimPlan:
     """Decide which oldest whole turns would need to go to fit
     ``max_tokens`` (estimated), without dropping them — see ``TrimPlan``.
 
     Always keeps every ``role="system"`` message and at least
-    ``min_recent_turns`` of the most recent turns, even if that means
-    staying over budget — trimming should never make the very next turn
-    unanswerable.
+    ``min_recent_turns`` of the most recent turns. If that still leaves the
+    history over budget and ``fallback_min_recent_turns`` is given, dropping
+    continues down to that smaller floor: a long autonomous run can sit
+    almost entirely inside the last few turns, and the normal floor would
+    then protect everything. Neither floor is ever crossed, even if that
+    means staying over budget, so the very next turn stays answerable.
+
+    With ``keep_summary`` (the default) a compaction summary at the front of
+    the history is held aside as ``TrimPlan.previous_summary``: it counts
+    toward the budget but is never dropped on its own. ``keep_summary=False``
+    treats it as an ordinary turn (``clear_context`` drops everything).
 
     Whole *turns* (a user message plus the assistant/tool messages it
     produced — see ``split_into_turns``), never individual messages: cutting
     between an assistant message and the tool results answering its calls
     produces exactly the orphaned-``tool_use`` history both providers reject
-    outright, so a message-at-a-time trim would break the conversation it
-    was meant to keep alive.
+    outright.
     """
     system_messages = [m for m in messages if m.role == "system"]
     turns = split_into_turns(messages)
 
+    previous_summary: Message | None = None
+    if keep_summary and turns and is_compaction_summary(turns[0][0]):
+        previous_summary = turns[0][0]
+        turns = [turns[0][1:], *turns[1:]] if len(turns[0]) > 1 else turns[1:]
+
     def total_tokens(msgs: list[Message]) -> int:
         return sum(estimate_message_tokens(m) for m in msgs)
 
-    system_tokens = total_tokens(system_messages)
+    fixed_tokens = total_tokens(system_messages)
+    if previous_summary is not None:
+        fixed_tokens += estimate_message_tokens(previous_summary)
     turn_tokens = [total_tokens(turn) for turn in turns]
 
-    dropped = 0
-    while (
-        system_tokens + sum(turn_tokens[dropped:]) > max_tokens
-        and len(turns) - dropped > min_recent_turns
-    ):
-        dropped += 1
+    def over_budget(dropped: int) -> bool:
+        return fixed_tokens + sum(turn_tokens[dropped:]) > max_tokens
 
-    if not dropped:
-        all_turn_messages = [m for turn in turns for m in turn]
-        return TrimPlan(system_messages, all_turn_messages, [], False)
+    dropped = 0
+    while over_budget(dropped) and len(turns) - dropped > min_recent_turns:
+        dropped += 1
+    if fallback_min_recent_turns is not None:
+        while over_budget(dropped) and len(turns) - dropped > fallback_min_recent_turns:
+            dropped += 1
+
     kept_turn_messages = [m for turn in turns[dropped:] for m in turn]
-    return TrimPlan(system_messages, kept_turn_messages, turns[:dropped], True)
+    return TrimPlan(
+        system_messages,
+        kept_turn_messages,
+        turns[:dropped],
+        bool(dropped),
+        previous_summary,
+    )
 
 
 def trim_history(
@@ -621,6 +672,194 @@ def trim_history(
     decision both this and compaction build on."""
     plan = plan_trim(messages, max_tokens, min_recent_turns=min_recent_turns)
     return plan.kept_messages, plan.was_trimmed
+
+
+# --- Stage A: shrinking old tool results in place ---------------------------
+
+#: How many of the most recent tool rounds (an assistant message with tool
+#: calls plus its results) ``shrink_old_tool_results`` never touches: the
+#: model is usually still working with them.
+KEEP_RECENT_TOOL_ROUNDS = 3
+
+#: Tool results shorter than this are left alone: a stub would save little
+#: and the model loses the actual answer.
+MIN_SHRINK_CHARS = 1000
+
+#: String arguments of old tool calls longer than this are shortened too
+#: (``write_file`` content, a long script for ``run_python_script``).
+MIN_SHRINK_ARGUMENT_CHARS = 2000
+
+#: Once stage A has to run, it shrinks down to this fraction of the budget
+#: rather than to just under it. Stopping right at the limit would shrink one
+#: more result on every round trip, and each change to old history also
+#: invalidates the provider's prompt cache from that point on.
+SHRINK_TARGET_FRACTION = 0.8
+
+SHRUNK_TOOL_RESULT_PREFIX = "[result removed to save context:"
+
+
+def is_shrunk_tool_result(message: Message) -> bool:
+    """Whether a ``role="tool"`` message has already been replaced by a stub."""
+    return message.role == "tool" and message.content.startswith(SHRUNK_TOOL_RESULT_PREFIX)
+
+
+def _call_preview(call: ToolCall | None, limit: int = 200) -> str:
+    if call is None:
+        return ""
+    payload = json.dumps(call.arguments, default=str, ensure_ascii=False)
+    if len(payload) > limit:
+        payload = payload[: limit - 3] + "..."
+    return payload
+
+
+def _tool_result_stub(message: Message, call: ToolCall | None) -> str:
+    name = message.name or (call.name if call else "tool")
+    return (
+        f"{SHRUNK_TOOL_RESULT_PREFIX} {name}({_call_preview(call)}) returned "
+        f"{len(message.content):,} chars — call the tool again if you need it]"
+    )
+
+
+def _shrink_arguments(call: ToolCall) -> ToolCall | None:
+    """``call`` with every long string argument replaced by a length note, or
+    ``None`` when nothing in it is long enough to bother."""
+    changed = False
+    arguments = dict(call.arguments)
+    for key, value in arguments.items():
+        if isinstance(value, str) and len(value) >= MIN_SHRINK_ARGUMENT_CHARS:
+            arguments[key] = f"[{len(value):,} chars removed to save context]"
+            changed = True
+    return replace(call, arguments=arguments) if changed else None
+
+
+def shrink_old_tool_results(
+    messages: list[Message],
+    target_tokens: int,
+    *,
+    keep_recent_rounds: int = KEEP_RECENT_TOOL_ROUNDS,
+) -> tuple[list[Message], int]:
+    """Replace the content of old, large tool results with short stubs until
+    the history is estimated at or below ``target_tokens``.
+
+    Works inside a turn, which dropping whole turns cannot: one autonomous
+    turn can hold hundreds of tool calls. Oldest first. The last
+    ``keep_recent_rounds`` tool rounds are never touched. A stub keeps
+    ``tool_call_id`` and ``name``, so call/result pairing still holds, says
+    which call produced it and how big the result was, and drops any images.
+    Long string arguments of old assistant tool calls are shortened the same
+    way. Messages already stubbed are skipped, so repeated calls are cheap.
+
+    Returns ``(new_messages, number_shrunk)``. The list has the same length
+    and order; changed messages are new objects, so the caller's originals
+    (and anything already persisted from them) are untouched. A
+    ``target_tokens`` of 0 shrinks everything eligible.
+    """
+    total = sum(estimate_message_tokens(m) for m in messages)
+    if total <= target_tokens:
+        return messages, 0
+
+    round_starts = [i for i, m in enumerate(messages) if m.role == "assistant" and m.tool_calls]
+    if len(round_starts) <= keep_recent_rounds:
+        return messages, 0
+    protected_from = round_starts[-keep_recent_rounds] if keep_recent_rounds else len(messages)
+
+    calls_by_id = {call.id: call for m in messages[:protected_from] for call in m.tool_calls}
+    result = list(messages)
+    shrunk = 0
+    for index in range(protected_from):
+        if total <= target_tokens:
+            break
+        message = result[index]
+        replacement: Message | None = None
+        if message.role == "tool" and not is_shrunk_tool_result(message):
+            if len(message.content) >= MIN_SHRINK_CHARS or message.images:
+                stub = _tool_result_stub(message, calls_by_id.get(message.tool_call_id or ""))
+                replacement = replace(message, content=stub, images=[])
+        elif message.role == "assistant" and message.tool_calls:
+            new_calls = [_shrink_arguments(call) for call in message.tool_calls]
+            if any(c is not None for c in new_calls):
+                replacement = replace(
+                    message,
+                    tool_calls=[
+                        new or old for new, old in zip(new_calls, message.tool_calls, strict=True)
+                    ],
+                )
+        if replacement is None:
+            continue
+        total -= estimate_message_tokens(message) - estimate_message_tokens(replacement)
+        result[index] = replacement
+        shrunk += 1
+    return result, shrunk
+
+
+# --- Stage D: capping one tool result relative to the budget ----------------
+
+#: A single tool result may take this share of the history budget before the
+#: rest is moved out to a file (``cap_tool_result``).
+TOOL_RESULT_BUDGET_FRACTION = 0.05
+#: Never cap below this, however small the window: smaller and the model has
+#: to page through every ordinary result.
+TOOL_RESULT_MIN_CHARS = 8_000
+#: Never allow more than the interactive read limit in one result.
+TOOL_RESULT_MAX_CHARS = 100_000
+
+
+def tool_result_char_cap(history_budget_tokens: int) -> int:
+    """How many characters one tool result may keep in the history, given the
+    history budget in tokens. Tool output is dense, so the conversion uses
+    ``DENSE_CHARS_PER_TOKEN``."""
+    cap = int(history_budget_tokens * TOOL_RESULT_BUDGET_FRACTION * DENSE_CHARS_PER_TOKEN)
+    return max(TOOL_RESULT_MIN_CHARS, min(TOOL_RESULT_MAX_CHARS, cap))
+
+
+#: Built-in per-tool caps, in characters, by shell-style pattern on the tool
+#: name (MCP tools are ``<server>__<tool>``). A web search returns a list of
+#: hits whose start is what the model uses; ~28k characters per search
+#: filled most of a long research session. A fetched or extracted page is
+#: more useful longer, so it gets more. ``AppConfig.tool_result_char_caps``
+#: adds to and overrides these.
+DEFAULT_TOOL_RESULT_CAPS: dict[str, int] = {
+    "*web_search*": 10_000,
+    "*search_web*": 10_000,
+    "*web_fetch*": 15_000,
+    "*fetch_url*": 15_000,
+    "*web_extract*": 15_000,
+    "*tavily_extract*": 15_000,
+}
+
+
+def tool_specific_char_cap(tool_name: str, overrides: dict[str, int] | None = None) -> int | None:
+    """The per-tool character cap for ``tool_name``, or ``None`` when no
+    pattern matches. User ``overrides`` replace a built-in entry with the
+    same pattern; when several patterns match, the smallest cap wins. Case
+    is ignored. A cap below ``MIN_SHRINK_CHARS`` is raised to it."""
+    caps = {**DEFAULT_TOOL_RESULT_CAPS, **(overrides or {})}
+    name = tool_name.lower()
+    matches = [cap for pattern, cap in caps.items() if fnmatchcase(name, pattern.lower())]
+    if not matches:
+        return None
+    return max(MIN_SHRINK_CHARS, min(matches))
+
+
+def cap_tool_result(content: str, cap: int, saved_path: Path | None) -> str:
+    """Shorten ``content`` to about ``cap`` characters: its head and tail plus
+    a note saying how much was left out and, when ``saved_path`` is given,
+    where the full text was saved and how to read it in pieces. Content
+    within the cap is returned unchanged."""
+    if len(content) <= cap:
+        return content
+    head = content[: int(cap * 0.7)]
+    tail = content[-int(cap * 0.2) :]
+    omitted = len(content) - len(head) - len(tail)
+    if saved_path is not None:
+        where = (
+            f"The full result was saved to {saved_path}. Read the omitted part with "
+            f"read_file(path=..., offset={len(head)}, length=...) if you need it."
+        )
+    else:
+        where = "The full result could not be saved."
+    note = f"\n\n[... {omitted:,} of {len(content):,} chars omitted to save context. {where}]\n\n"
+    return f"{head}{note}{tail}"
 
 
 def history_budget(
@@ -675,35 +914,105 @@ COMPACTION_PROMPT = (
 )
 
 
-def _render_turns_for_summary(turns: list[list[Message]]) -> str:
-    """Flatten dropped turns into plain text for the compaction request —
-    the summarizer reads a transcript, not AIDA's internal ``Message``/
-    ``ToolCall`` shapes."""
+#: Added to ``COMPACTION_PROMPT`` when an earlier summary exists, so the
+#: model folds it in rather than summarizing only the new turns.
+COMPACTION_MERGE_INSTRUCTION = (
+    "A summary of the conversation before these turns is given first. Merge it with the "
+    "turns that follow into one updated summary: keep every fact from it that is still "
+    "relevant, and add what the new turns contain."
+)
+
+#: In the summary request, each tool result and each long tool-call argument
+#: keeps only this many characters from its start and from its end. A
+#: summary needs what was done and found, not whole file contents, and the
+#: request has to fit in the model's window.
+SUMMARY_TOOL_TEXT_EDGE_CHARS = 1500
+#: User and assistant text is clipped too, but much more generously.
+SUMMARY_MESSAGE_TEXT_EDGE_CHARS = 10_000
+
+
+def _clip_middle(text: str, edge: int) -> str:
+    if len(text) <= 2 * edge + 100:
+        return text
+    omitted = len(text) - 2 * edge
+    return f"{text[:edge]}\n[... {omitted:,} chars omitted ...]\n{text[-edge:]}"
+
+
+def _render_turns_for_summary(turns: list[list[Message]]) -> list[str]:
+    """Flatten turns into plain-text transcript lines for the compaction
+    request — the summarizer reads a transcript, not AIDA's internal
+    ``Message``/``ToolCall`` shapes. Long tool output, long tool arguments and
+    very long messages are clipped to their start and end."""
     lines: list[str] = []
     for turn in turns:
         for message in turn:
             if message.role == "user":
-                lines.append(f"User: {message.content}")
+                text = _clip_middle(message.content, SUMMARY_MESSAGE_TEXT_EDGE_CHARS)
+                lines.append(f"User: {text}")
             elif message.role == "assistant":
                 if message.content:
-                    lines.append(f"Assistant: {message.content}")
+                    text = _clip_middle(message.content, SUMMARY_MESSAGE_TEXT_EDGE_CHARS)
+                    lines.append(f"Assistant: {text}")
                 for call in message.tool_calls:
-                    payload = json.dumps(call.arguments, default=str)
+                    payload = _clip_middle(
+                        json.dumps(call.arguments, default=str), SUMMARY_TOOL_TEXT_EDGE_CHARS
+                    )
                     lines.append(f"Assistant called tool {call.name}({payload})")
             elif message.role == "tool":
-                lines.append(f"Tool result ({message.name}): {message.content}")
-    return "\n".join(lines)
+                text = _clip_middle(message.content, SUMMARY_TOOL_TEXT_EDGE_CHARS)
+                lines.append(f"Tool result ({message.name}): {text}")
+    return lines
 
 
-def compaction_request_messages(turns: list[list[Message]]) -> list[Message]:
-    """Build the (single-message) request that asks the active provider to
-    summarize ``turns`` (whole turns about to be dropped, oldest first —
-    see ``plan_trim``) — a bare ``role="user"`` request with
-    ``COMPACTION_PROMPT`` plus the rendered transcript, no tools, no system
-    prompt. Sent through the ordinary ``provider.complete()``, so no new
-    provider API is needed."""
-    transcript = _render_turns_for_summary(turns)
+def summary_transcript_chunks(turns: list[list[Message]], max_chars: int) -> list[str]:
+    """The rendered transcript of ``turns``, split into pieces of at most
+    about ``max_chars`` characters each, at line boundaries. Usually one
+    piece. Each piece is summarized in turn, folding the previous result in
+    (see ``ChatSession._compact_context``), so no single request outgrows
+    the window. A single line longer than ``max_chars`` is clipped."""
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for line in _render_turns_for_summary(turns):
+        if len(line) > max_chars:
+            line = _clip_middle(line, max_chars // 2 - 100)
+        if current and size + len(line) + 1 > max_chars:
+            chunks.append("\n".join(current))
+            current, size = [], 0
+        current.append(line)
+        size += len(line) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
+def compaction_request_from_transcript(
+    transcript: str, *, previous_summary: str | None = None
+) -> list[Message]:
+    """The single-message request that asks the active provider to summarize
+    ``transcript``, merging ``previous_summary`` in when given. A bare
+    ``role="user"`` request, no tools, no system prompt, sent through the
+    ordinary ``provider.complete()``."""
+    if previous_summary:
+        return [
+            Message(
+                role="user",
+                content=(
+                    f"{COMPACTION_PROMPT} {COMPACTION_MERGE_INSTRUCTION}\n\n---\n\n"
+                    f"Earlier summary:\n{previous_summary}\n\n---\n\n{transcript}"
+                ),
+            )
+        ]
     return [Message(role="user", content=f"{COMPACTION_PROMPT}\n\n---\n\n{transcript}")]
+
+
+def compaction_request_messages(
+    turns: list[list[Message]], *, previous_summary: str | None = None
+) -> list[Message]:
+    """``compaction_request_from_transcript`` for whole ``turns`` (oldest
+    first, as ``plan_trim`` returns them), rendered as one piece."""
+    transcript = "\n".join(_render_turns_for_summary(turns))
+    return compaction_request_from_transcript(transcript, previous_summary=previous_summary)
 
 
 def compaction_summary_message(summary_text: str) -> Message:
@@ -712,13 +1021,29 @@ def compaction_summary_message(summary_text: str) -> Message:
     message) is the safe choice across both API dialects — an assistant
     message with no matching tool-call history risks confusing tool-call
     pairing on the next request."""
-    return Message(
-        role="user", content=f"# Summary of earlier conversation (compacted)\n\n{summary_text}"
-    )
+    return Message(role="user", content=f"{COMPACTION_SUMMARY_HEADING}\n\n{summary_text}")
 
 
 __all__ = [
+    "COMPACTION_MERGE_INSTRUCTION",
     "COMPACTION_PROMPT",
+    "COMPACTION_SUMMARY_HEADING",
+    "KEEP_RECENT_TOOL_ROUNDS",
+    "SHRINK_TARGET_FRACTION",
+    "SHRUNK_TOOL_RESULT_PREFIX",
+    "DEFAULT_TOOL_RESULT_CAPS",
+    "TOOL_RESULT_BUDGET_FRACTION",
+    "tool_specific_char_cap",
+    "TOOL_RESULT_MAX_CHARS",
+    "TOOL_RESULT_MIN_CHARS",
+    "cap_tool_result",
+    "compaction_request_from_transcript",
+    "is_compaction_summary",
+    "is_shrunk_tool_result",
+    "shrink_old_tool_results",
+    "summary_body",
+    "summary_transcript_chunks",
+    "tool_result_char_cap",
     "SKILL_DIR_PLACEHOLDER",
     "render_skill_text",
     "CONTEXT_SAFETY_FRACTION",

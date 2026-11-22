@@ -21,7 +21,7 @@ six `WorkspaceConfig` fields:
 | `python_interpreter` | `None` | Path to the `python` executable `run_python_script` runs with. `None` uses whatever AIDA itself runs under. |
 | `templates_dir` | `None` | A flat folder of `.py` files whose docstrings get surfaced to the model as house-convention templates. |
 | `saved_scripts_dir` | `None` | Where the Code Editor's Save/Save As write to. `None` defaults to `<target_folder>/saved_scripts`. |
-| `command_allowlist` | `[]` | Shell command patterns `run_command` may run without asking — see [safety-and-permissions.md](../reference/safety-and-permissions.md). |
+| `command_allowlist` | `[]` | Command patterns `run_command` may run without asking — see [safety-and-permissions.md](../reference/safety-and-permissions.md). |
 | `script_timeout_seconds` | `30.0` | Seconds a `run_python_script`/`run_command` invocation (or a Code Editor **Run**) gets before its subprocess is killed — see below. |
 
 (coding-and-scripting-enabled)=
@@ -128,6 +128,16 @@ the full allowlist syntax) — both conditions have to hold before the
 workspace's `confirm`/`relaxed` mode even applies; if either fails, it
 always asks first.
 
+**`run_command` has no shell.** It runs one program with its arguments, so
+`cd`, `&&`, `||`, `|`, `;`, `>`, `<`, `$(...)`, backticks and shell keywords
+(`for`, `while`, `if`, `export`) do not work there. A command that uses
+them is refused before anything runs, with a message telling the model to
+use the `cwd` argument for the folder, to run steps as separate calls, or
+to write a Python script and run it with `run_python_script`. Without that
+check, `cd folder && make` ran macOS's `/usr/bin/cd` with junk arguments,
+exited 0 and did nothing. Quoted arguments such as `grep "a|b" notes.txt`
+are fine.
+
 So:
 
 - **Use `run_python_script`** for ad hoc, one-off Python — checking data,
@@ -136,7 +146,7 @@ So:
   sense; this tool exists precisely so the model doesn't need a command
   allowlisted for every one-liner it wants to try.
 - **Use `run_command`** (plus the allowlist) for a short, fixed, reusable
-  list of shell invocations you're comfortable pre-approving —
+  list of program invocations you're comfortable pre-approving —
   `git status`, `git log *`, a named test/lint/analysis script. It is not
   meant to launder arbitrary Python through the allowlist: trying to
   allowlist every `python3 -c "..."` invocation you might want doesn't

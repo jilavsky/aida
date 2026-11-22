@@ -96,8 +96,9 @@ def read_image_b64(ref: ImageRef) -> tuple[str, str] | None:
 
         with Image.open(io.BytesIO(raw)) as img:
             img.load()  # force the decode now, inside this try, not lazily later
-            if max(img.size) > MAX_IMAGE_EDGE_PX:
-                img.thumbnail((MAX_IMAGE_EDGE_PX, MAX_IMAGE_EDGE_PX))
+            max_edge = ref.max_edge_px or MAX_IMAGE_EDGE_PX
+            if max(img.size) > max_edge:
+                img.thumbnail((max_edge, max_edge))
                 fmt = "JPEG" if img.mode == "RGB" else "PNG"
                 if fmt == "JPEG" and img.mode != "RGB":
                     img = img.convert("RGB")

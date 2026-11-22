@@ -172,6 +172,25 @@ async def test_search_text_skips_binary_files_without_crashing(tmp_path: Path):
     assert len(result.artifacts[0].rows) == 1
 
 
+@pytest.mark.asyncio
+async def test_search_text_accepts_a_single_file(tmp_path: Path):
+    """Models often pass the file they want to search; that used to be a
+    "Not a directory" error."""
+    (tmp_path / "a.txt").write_text("alpha\nfindme here\n")
+    (tmp_path / "b.txt").write_text("findme too\n")
+    tools = default_file_tools(_guard(tmp_path))
+    result = await _call(tools, "search_text", path=str(tmp_path / "a.txt"), query="findme")
+    assert not result.is_error
+    assert result.artifacts[0].rows == [["a.txt", 2, "findme here"]]
+
+
+@pytest.mark.asyncio
+async def test_search_text_on_a_missing_path_is_an_error(tmp_path: Path):
+    tools = default_file_tools(_guard(tmp_path))
+    result = await _call(tools, "search_text", path=str(tmp_path / "nope"), query="x")
+    assert result.is_error
+
+
 # --- read_file --------------------------------------------------------
 
 
@@ -215,6 +234,41 @@ async def test_read_file_still_truncates_above_the_interactive_cap(tmp_path: Pat
     assert not result.is_error
     assert "truncated" in result.content
     assert len(result.content) < len(text)
+
+
+@pytest.mark.asyncio
+async def test_read_file_truncated_read_says_where_to_continue(tmp_path: Path):
+    text = "".join(f"{i:07d}\n" for i in range(20_000))  # 160,000 chars
+    (tmp_path / "a.txt").write_text(text)
+    tools = default_file_tools(_guard(tmp_path))
+    first = await _call(tools, "read_file", path=str(tmp_path / "a.txt"))
+    offset = int(first.content.rsplit("offset=", 1)[1].split(" ")[0])
+    shown = first.content.split("\n... [truncated]")[0]
+    assert text.startswith(shown) and len(shown) == offset
+
+    rest = await _call(tools, "read_file", path=str(tmp_path / "a.txt"), offset=offset)
+    assert rest.content.startswith(text[offset : offset + 100])
+    assert "of 160,000" in rest.content
+    assert "end of the file" in rest.content
+
+
+@pytest.mark.asyncio
+async def test_read_file_offset_and_length_return_one_window(tmp_path: Path):
+    text = "".join(chr(ord("a") + i % 26) for i in range(1_000))
+    (tmp_path / "a.txt").write_text(text)
+    tools = default_file_tools(_guard(tmp_path))
+    result = await _call(tools, "read_file", path=str(tmp_path / "a.txt"), offset=100, length=50)
+    assert not result.is_error
+    assert result.content.startswith(text[100:150] + "\n[Characters 100-150 of 1,000.")
+    assert "offset=150" in result.content
+
+
+@pytest.mark.asyncio
+async def test_read_file_rejects_a_bad_length(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("hello")
+    tools = default_file_tools(_guard(tmp_path))
+    result = await _call(tools, "read_file", path=str(tmp_path / "a.txt"), length=0)
+    assert result.is_error
 
 
 @pytest.mark.asyncio

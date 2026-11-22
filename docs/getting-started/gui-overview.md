@@ -127,8 +127,8 @@ At the right-hand end, separated from the rest:
   last-run status). See [workflows.md](../guides/workflows.md).
 - **Configure → Settings…** (`Ctrl+,`) — font size, records folder, log
   level, max agent iterations, assistant name and personal context,
-  scheduler timings, and the optional document-OCR key. See
-  [documents.md](../guides/documents.md#optional-mistral-ocr) for the OCR part. On
+  scheduler timings, and which model reads scanned PDF pages. See
+  [documents.md](../guides/documents.md#scanned-pdfs) for that part. On
   macOS this one is in the application menu, **AIDA → Settings…** (`⌘,`),
   where Qt puts it to match the platform convention.
 - **Help → Documentation** — opens this documentation in your web browser.

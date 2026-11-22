@@ -11,8 +11,6 @@ dependencies:
   - matplotlib>=3.7
   - h5py>=3.9
   - pip:
-      # Matches what CI installs, `ocr` included: it is only httpx, which
-      # the openai/anthropic SDKs already pull in, so adding it costs
-      # nothing and keeps the documented conda path exercising the same
-      # optional-import branches CI does.
-      - -e .[gui,docs,ocr,science,dev]
+      # Matches what CI installs, so the documented conda path exercises
+      # the same optional-import branches CI does.
+      - -e .[gui,docs,science,dev]

@@ -1,9 +1,12 @@
 # AIDA — where we are, and what is left
 
-**Updated 2026-11-13 for 1.1.0.** §1 and §2 below are the 1.0 readiness
-review of 2026-10-16, kept as the record of that release; §3 to §5 are the
-live working list. `PLAN.md` keeps the reasoning behind each item and
-`planning/COMPLETED.md` keeps what is already done.
+**Updated 2026-11-21.** §1 and §2 below are the 1.0 readiness review of
+2026-10-16, kept as the record of that release; §3 to §5 are the live
+working list, and §6 is what was left from the PDF work. `PLAN.md` keeps
+the reasoning behind each item and `planning/COMPLETED.md` keeps what is
+already done. The context-compaction work of 2026-11-20/21 is recorded in
+`planning/COMPLETED.md` §14, and the vision-model PDF conversion that
+replaced Mistral OCR in §15.
 
 The November 2026 code review was worked through for 1.1.0 and is
 recorded, item by item, in `planning/COMPLETED.md` §13. The one item left
@@ -272,6 +275,29 @@ combination CI deliberately avoids, without a crash. If it returns as the
 suite grows, the next escalation is one pytest process per `tests/ui/*.py`
 file. Full writeup in
 `planning/completed/improvement_plan_2026-08.md` §6.
+
+## 6. Left from the PDF vision work (2026-11-21)
+
+The vision-model conversion of scanned PDF pages shipped (see
+`planning/COMPLETED.md` §15). Deliberately left for later:
+
+- [ ] **Compare models on real papers.** The docs recommend LightOnOCR-3
+      1B (4B needs ~12 GB and starved a machine also running a chat model);
+      tried on one real two-column paper. Still to do: 2–3 more papers
+      against a general local vision model and a cloud model, with
+      `aida documents convert --all`.
+- [ ] **Figure crops from LightOnOCR bounding boxes.** Use the returned
+      embedded-image boxes to crop figures from the rendered page, so
+      figures that are vector drawings (not embedded images) can be shown.
+      Needs the model running to confirm its output format.
+- [ ] **Per-profile OCR prompt override**, if a general model turns out to
+      need different wording.
+- [ ] **"Test on a page" in Settings → Documents**, if the CLI
+      (`aida documents convert FILE --pages 1`) turns out not to be enough.
+- [ ] If stalls or garbled tool calls keep appearing on `Splash-Flash`,
+      run one proposal with `Splash-dense` (27B dense, less quantized) for
+      comparison; the new log lines (`short reply after tool work … end of
+      reasoning`) show whether the model writes the call in its reasoning.
 
 ---
 

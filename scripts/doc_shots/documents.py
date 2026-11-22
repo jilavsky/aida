@@ -1,8 +1,8 @@
 """Shots for docs/guides/documents.md (attached documents and figures).
 
 No document is read: the attached "paper" is a placeholder file under
-/tmp/aida-docs, shown as a chip in the input box before sending. The OCR
-settings shot is the real Settings dialog on the scratch config (no key).
+/tmp/aida-docs, shown as a chip in the input box before sending. The
+Documents settings shot is the real Settings dialog on the scratch config.
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ def attached(ctx: Context):
     )
 
 
-@shot("documents-02-settings-ocr")
-def settings_ocr(ctx: Context):
+@shot("documents-02-settings-documents")
+def settings_documents(ctx: Context):
     reset_docs_tmp()
     settings = standard_settings()
     from aida.ui.qt.window_state import apply_font_size
@@ -55,6 +55,6 @@ def settings_ocr(ctx: Context):
     ctx.show(dialog, (640, 980))
     from aida.ui.qt._qt import QGroupBox
 
-    group = next(g for g in dialog.findChildren(QGroupBox) if g.title() == "Document OCR")
+    group = next(g for g in dialog.findChildren(QGroupBox) if g.title() == "Documents")
     rect = widget_rect(group, dialog).adjusted(-4, -2, 4, 4)
     return dialog.grab(rect)

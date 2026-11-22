@@ -31,7 +31,6 @@ from aida.config.paths import (
     ensure_scratch_dir,
     skills_dir,
 )
-from aida.config.secrets import set_secret
 from aida.config.settings import (
     QuickTask,
     Settings,
@@ -54,7 +53,6 @@ from aida.core.events import (
     ToolCallFinished,
     ToolCallStarted,
 )
-from aida.documents.ocr.mistral import SECRET_REF as OCR_SECRET_REF
 from aida.persistence.cleanup import delete_conversation, list_conversations_older_than
 from aida.persistence.recorder import ConversationRecorder
 from aida.persistence.store import TITLE_MANUAL, ArtifactRecord, ConversationStore
@@ -165,6 +163,22 @@ SPLITTER_SAVE_DELAY_MS = 800
 #: provider call). Cheap enough to be a poll, frequent enough that the
 #: number is never meaningfully behind.
 USAGE_REFRESH_INTERVAL_MS = 30_000
+
+
+#: Starts the note added to an attached PDF's text when some pages have no
+#: text layer; also how the status-bar hint finds such attachments.
+SCANNED_ATTACHMENT_MARKER = "[Some pages of this PDF have no text layer."
+
+
+def _pdf_has_scanned_pages(path: str) -> bool:
+    """Whether an attached PDF has pages without a text layer; ``False`` if
+    it cannot be checked."""
+    from aida.documents.readers import INTERACTIVE_MAX_PDF_PAGES, pdf_needs_conversion
+
+    try:
+        return pdf_needs_conversion(Path(path), INTERACTIVE_MAX_PDF_PAGES)
+    except Exception:  # noqa: BLE001 - a hint, never a reason to fail an attachment
+        return False
 
 
 def _skill_data(info: SkillInfo) -> SkillData:
@@ -1082,26 +1096,23 @@ class MainWindow(QMainWindow):
         ``bridge.disconnect(self)`` never dropped it and a retired bridge
         kept painting into the live panel. See ``_wire_bridge_signals``."""
         if isinstance(event, ContextTrimmed):
-            # B7: trimming used to be invisible in the GUI entirely (a log
-            # line only) — the status bar is the same low-key channel
-            # already used for "Ready — profile" / "Saved folders to
-            # workspace X", so this doesn't interrupt the chat transcript
-            # the way an inline notice would. PLAN.md §1.3: this also fires
-            # for a manual "Compact Conversation" (ChatBridge.compact_context
-            # emits the same event via event_received), not only an
-            # automatic mid-turn trim.
-            turn_word = "turn" if event.dropped_turns == 1 else "turns"
+            # The status bar, not the transcript: routine trimming should not
+            # interrupt the chat. Also fires for a manual "Compact
+            # Conversation" (ChatBridge.compact_context re-emits the event).
+            # Only "can't get under budget" is worth a banner in the chat,
+            # because the next request may be refused.
             if event.summarized:
-                self.statusBar().showMessage(
-                    f"Context compacted: summarized {event.dropped_turns} old {turn_word} into "
-                    f"~{event.summary_tokens} tokens (~{event.estimated_tokens} tokens now)",
-                    8000,
-                )
+                prefix = "Context compacted"
+            elif event.dropped_turns:
+                prefix = "Context trimmed"
             else:
-                self.statusBar().showMessage(
-                    f"Context trimmed: dropped {event.dropped_turns} old {turn_word} "
-                    f"(~{event.estimated_tokens} tokens now)",
-                    8000,
+                prefix = "Context"
+            self.statusBar().showMessage(
+                f"{prefix}: {event.describe()}", 20000 if event.over_budget else 8000
+            )
+            if event.over_budget:
+                self.chat_panel.add_warning_banner(
+                    "The conversation is too large to compact further", [event.describe()]
                 )
             self._update_context_label()
         elif isinstance(event, ConversationTitled):
@@ -1543,17 +1554,11 @@ class MainWindow(QMainWindow):
         if kept:
             names = ", ".join(Path(path).name for path in kept)
             message = f"Attached {names} — copied into this conversation's folder"
-            # Nothing has been sent to OCR at this point and nothing will be
-            # until the figures are asked for, which is not obvious from the
-            # outside: with the workspace switch on, the natural assumption
-            # is that attaching a PDF uploads it.
-            workspace = self._current_workspace_config
-            if (
-                workspace is not None
-                and workspace.use_ocr
-                and any(path.lower().endswith(".pdf") for path in kept)
-            ):
-                message += ". Ask about its figures to read them (OCR runs then, and asks first)"
+            scanned = [
+                Path(path).name for path in kept if SCANNED_ATTACHMENT_MARKER in texts.get(path, "")
+            ]
+            if scanned:
+                message += self._scanned_attachment_hint(scanned)
             # Bug report: attaching an image to a profile with vision
             # disabled silently sent only the text placeholder — the model
             # then answered "I can't see images" with nothing in the GUI
@@ -1709,7 +1714,26 @@ class MainWindow(QMainWindow):
                 f"--- Attached file: {name} ---\n[could not read: {detail}]\n--- End of {name} ---",
                 False,
             )
+        if name.lower().endswith(".pdf") and _pdf_has_scanned_pages(path):
+            # Converting needs the model, which the GUI thread does not
+            # have; read_file does it. The session appends the path of the
+            # conversation's copy to the message (append_attachment_locations).
+            body += (
+                f"\n\n{SCANNED_ATTACHMENT_MARKER} To read them, call read_file on "
+                "the saved copy listed at the end of this message: AIDA converts those pages "
+                "with a vision model when one is set up, and otherwise says why it cannot.]"
+            )
         return f"--- Attached file: {name} ---\n{body}\n--- End of {name} ---", True
+
+    def _scanned_attachment_hint(self, names: list[str]) -> str:
+        """Status-bar text for attached PDFs with scanned pages: who will
+        convert them, or why nobody can."""
+        session = getattr(self.bridge, "session", None)
+        route = session.ocr_route_description() if session is not None else ""
+        which = ", ".join(names)
+        if route.startswith(("unavailable", "off")):
+            return f". {which} has scanned pages that cannot be read: conversion is {route}"
+        return f". {which} has scanned pages; the agent converts them with {route} when it reads it"
 
     def _on_folder_dropped(self, folder: str) -> None:
         """A folder (rather than a file) dropped onto the chat: offer to add
@@ -2902,9 +2926,6 @@ class MainWindow(QMainWindow):
             return
         previous_safety_mode = self.settings.app.default_safety_mode
         self.settings.app = dialog.updated_app_config()
-        ocr_key = dialog.ocr_api_key()
-        if ocr_key:
-            set_secret(OCR_SECRET_REF, ocr_key)
         # U3: the global default gets the same one-time relaxed-mode
         # warning a workspace's own safety field already shows on the
         # CLI/GUI workspace editor (relaxed_mode_warning_if_newly_enabled)

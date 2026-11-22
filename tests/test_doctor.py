@@ -437,6 +437,28 @@ def test_max_tokens_vs_context_window_fails_when_max_tokens_set_to_the_full_wind
     assert "250,000" in result.detail
 
 
+def test_max_tokens_vs_context_window_notes_a_large_reply_reservation(aida_home, records_home):
+    """The Splash-Flash setup of 2026-11-20: 128k of a 512k window reserved
+    for replies. Legal, so not a failure, but worth a note."""
+    from aida.cli import doctor
+    from aida.config.settings import load_settings
+
+    settings = load_settings()
+    settings.providers.profiles["Splash-Flash"] = ProviderProfile(
+        name="Splash-Flash",
+        kind="openai_compat",
+        model="m",
+        context_window=512_000,
+        max_tokens=128_000,
+    )
+
+    result = doctor._check_max_tokens_vs_context_window(settings)
+
+    assert result.ok
+    assert result.detail.startswith("note:")
+    assert "Splash-Flash" in result.detail and "25%" in result.detail
+
+
 def test_max_tokens_vs_context_window_silent_when_either_field_is_unset(aida_home, records_home):
     from aida.cli import doctor
     from aida.config.settings import load_settings

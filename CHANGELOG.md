@@ -16,7 +16,151 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Fixed
+
+- **Long PDFs no longer stop without a word.** A PDF longer than the
+  100,000-character read limit (about 15 to 20 two-column pages) was cut
+  mid-sentence, and the note saying so was cut with it. So the agent
+  believed it had the whole paper and never saw the conclusions. The text
+  now ends with the page where it stops and the `offset` that `read_file`
+  continues from.
+- **Equations drawn as images are recovered.** In many typeset papers
+  each display equation is an image or drawn lines, so the agent saw only
+  "(1)", "(2)" and the "where …" text after them. Such pages are now
+  converted by the vision model like scanned pages (formulas come back as
+  LaTeX), and the plain text names the missing equations. See
+  [Scanned PDFs](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/documents.html#scanned-pdfs).
+- **No traceback after a thinking model's reply.** With a local thinking
+  model (Ollama), `aida documents convert` and other commands could print
+  "generator didn't stop after athrow()" tracebacks when they finished. It
+  came from the OpenAI SDK leaving a finished stream half-closed and was
+  harmless; AIDA now closes the stream itself and logs the leftover report
+  at debug level instead of printing it.
+- **The agent can find a file you attached.** Attached files are copied
+  into the conversation's folder, but the agent was never told where, and
+  reading that folder needed your approval. So when it wanted more than
+  the text in the message (other pages, scanned pages, figures), it went
+  looking for the original outside your allowed folders. The copy is now
+  made before the message is sent, the message gives its path, and the
+  agent may read that folder without asking. Writing there, or running an
+  attached script, still asks first. See
+  [Attached documents](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/documents.html).
+- **Long agent runs no longer run out of context.** A single request that
+  makes hundreds of tool calls (reviewing a folder of proposals, say)
+  could grow past the model's window, and neither automatic compaction
+  nor File ▸ Compact Conversation helped, because both could only remove
+  whole turns and always kept the last four. Old tool results are now
+  replaced by a short note before any turn is summarized, inside the
+  current turn too, with no model call; the database and the Markdown
+  record keep the full text. If that is not enough, compaction now goes
+  down to keeping only the current turn. See
+  [Compaction](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/reference/context-and-limits.html#context-and-limits-compaction).
+- **The compaction summary is no longer summarized again on every
+  request.** Once only the summary was left to remove, every request
+  re-summarized it (about 30 times in a row in one log), losing detail
+  each time and never getting under budget. A later compaction now merges
+  the previous summary and the newly removed turns into one summary.
+- **The summary request fits in the window.** Tool results in it are cut
+  to their first and last 1,500 characters, and a long transcript is
+  summarized in pieces. On smaller windows the single oversized request
+  used to fail, and the turns were dropped without a summary.
+- **A reply cut off at the output limit no longer ends a long task
+  silently.** When a reply hits `max_tokens` before making a tool call
+  (reasoning models spend part of that limit thinking), AIDA asks the
+  model to continue in smaller steps, once per turn; a second cut-off
+  stops the turn with an error that says to raise `max_tokens`. See
+  [When the agent stops in the middle of a task](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/reference/context-and-limits.html#context-and-limits-stops).
+- **`run_command` refuses shell syntax instead of silently doing
+  nothing.** It has no shell, but its description said "shell command", so
+  models wrote `cd folder && …`, which ran `/usr/bin/cd`, exited 0 and did
+  nothing. A command with `&&`, `|`, `;`, redirection, substitution or a
+  shell keyword is now refused before anything runs, with a message saying
+  what to do instead, and the description says "one program and its
+  arguments, no shell".
+- **A garbled tool name gets a useful reply.** A call to `edit_file=path`
+  or a misspelled tool now names the likely tool and its required
+  arguments instead of a bare "Unknown tool"; the call is not run.
+- **`search_text` accepts a single file** as well as a folder. Passing a
+  file was the most common tool error in long runs ("Not a directory").
+- **`run_python_script` on a script that doesn't exist yet** now says to
+  write it first, in a separate step, instead of only "Not a file".
+
+### Added
+
+- **One very large tool result is saved to a file instead of filling the
+  context.** A result longer than about 5 % of the history budget (at
+  least 8,000, at most 100,000 characters), from any tool including MCP
+  servers, is saved in full under `tool-results/` in the scratch folder;
+  the model gets its start and end plus the path. The chat still shows
+  the whole result.
+- **Automatic "continue" when the agent stalls mid-task.** A short reply
+  right after tool work that makes no tool call gets one automatic message
+  to continue, at most twice per turn, shown in the chat as sent by AIDA.
+  It is recognised by its shape (a short reply behind long hidden
+  reasoning, as in both measured stalls) or, for models that send no
+  reasoning, by phrasing ("Writing the dossier now."). Questions and
+  closing offers are left alone. When the reasoning contains a tool call
+  that was never sent, the message asks the model to send it. New setting
+  `auto_continue_on_stall` (default on, also a Settings checkbox).
+- **Web results are held to a fixed size** in the conversation, whatever
+  the window, with the full result saved to scratch: 10,000 characters for
+  a search, 15,000 for a fetched or extracted page. In one long research
+  session web searches were more than half of all context. New
+  `config.yaml` setting `tool_result_char_caps` sets limits by tool-name
+  pattern for any tool.
+- **The log says why each turn ended**: stop reason, reply and output
+  token sizes, and how much reasoning the model produced (counted, not
+  stored). A short reply after tool work also logs the end of the
+  reasoning, so an unexpected stop can be explained rather than guessed.
+- **Scanned PDF pages are read by a model with vision.** Pages with no
+  text layer are rendered and converted to Markdown (equations as LaTeX,
+  tables as Markdown) by a dedicated OCR profile if one is set, otherwise
+  by the chat model when its profile has vision. On a mixed PDF only the
+  scanned pages are converted, and `read_file` takes `ocr: true` to
+  convert every page of a PDF with a garbled text layer. Without a model
+  that can see, the agent is told which pages are unread, why, and what to
+  change. Converted pages are cached. Pages go where the chat already
+  goes; only an OCR profile on a different remote server asks first. A
+  thinking OCR model that puts the page into its reasoning and returns an
+  empty reply (LightOnOCR-3 on Ollama does) is asked again with reasoning
+  off. New settings `ocr_backend` and `ocr_profile` (Settings, Documents). See
+  [Scanned PDFs](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/documents.html#scanned-pdfs).
+- **Better figure captions on multi-column PDFs, with no upload service.**
+  Pages where the built-in extractor's caption pairing is uncertain are
+  converted by the same vision route and re-captioned in reading order.
+- **`aida documents convert FILE`** shows which model would convert a PDF's
+  scanned pages, converts them (or `--pages`, `--all`) and prints the
+  Markdown; `aida doctor` reports the route for the active workspace.
+- **`read_file` takes `offset` and `length`** (in characters) to read a
+  long file in parts, and a truncated read says where to continue.
+- **A warning when the conversation can't be compacted further** (the
+  current turn alone is over budget): a banner in the GUI chat and a
+  `[context]` line in the CLI, instead of only the provider's length error.
+  Each compaction also leaves a quiet one-line note in the GUI chat
+  where it happened ("Context reduced: shortened 34 old tool results
+  (~780,412 → ~606,003 tokens)"), instead of only an 8-second status-bar
+  message; the CLI prints the same line.
+- **`aida doctor` notes a large `max_tokens`**: more than 15 % of a
+  profile's `context_window` reserved for each reply, which comes out of
+  the room for history. The docs now say that `context_window` must match
+  the context size the server was started with.
+
+### Removed
+
+- **Mistral OCR.** Its free tier is no longer usable from AIDA, and it
+  uploaded documents to a third party. Scanned pages and multi-column
+  captions are now handled by a vision model through the providers you
+  already use (see Added). A workspace's `use_ocr` setting is ignored and
+  dropped when the file is next saved; a stored Mistral key is no longer
+  read (delete the `mistral-ocr` keychain entry if you like). The `ocr`
+  extra is now empty and kept only so existing install commands work;
+  `aida documents verify-ocr` is gone.
+
 ### Documentation
+
+- **Local OCR model.** The documents guide recommends the 1B LightOnOCR-3 model.
+  The 4B model needs about 12 GB of memory while it runs, which slows a
+  machine that is also running a local chat model to a crawl.
 
 - **Screenshots in the manual.** The
   [GUI overview](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/getting-started/gui-overview.html)

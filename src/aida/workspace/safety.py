@@ -154,10 +154,17 @@ class SafetyGuard:
     #: treated as outside the allowed folders and always confirmed, so the
     #: agent cannot quietly rewrite its own instructions or code.
     read_only_roots: list[Path] = field(default_factory=list)
+    #: Folders the agent may only *read* without being asked: the current
+    #: conversation's attachments folder, holding copies of files the person
+    #: attached. Unlike ``read_only_roots``, running a script from here is
+    #: treated as outside the allowed folders, so an attached script is never
+    #: run without the usual confirmation.
+    readable_roots: list[Path] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.allowed_roots = [normalize_path(p) for p in self.allowed_roots]
         self.read_only_roots = [normalize_path(p) for p in self.read_only_roots]
+        self.readable_roots = [normalize_path(p) for p in self.readable_roots]
         # Second line of defense behind config-load validation: whatever
         # reaches the guard is coerced to a mode it actually understands,
         # so no code path can reach an authorize_* call with a value that
@@ -221,6 +228,18 @@ class SafetyGuard:
 
     def is_allowed(self, path: str | Path) -> bool:
         return self._containing_root(normalize_path(path)) is not None
+
+    def allow_reading(self, folder: str | Path) -> None:
+        """Let the agent read inside ``folder`` without being asked (see
+        ``readable_roots``). Idempotent."""
+        root = normalize_path(folder)
+        if root not in self.readable_roots:
+            self.readable_roots.append(root)
+
+    def _is_readable(self, candidate: Path) -> bool:
+        return self.is_read_only(candidate) or any(
+            candidate == root or root in candidate.parents for root in self.readable_roots
+        )
 
     async def _authorize(
         self,
@@ -300,7 +319,7 @@ class SafetyGuard:
         only reads *outside* the allowed set need confirmation (handled by
         ``_authorize``'s inside/outside branch)."""
         candidate = normalize_path(path)
-        if self._containing_root(candidate) is None and not self.is_read_only(candidate):
+        if self._containing_root(candidate) is None and not self._is_readable(candidate):
             return await self._authorize("read", candidate, always_confirm_in_bounds=False)
         return candidate
 

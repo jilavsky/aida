@@ -22,8 +22,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from aida.artifacts.store import ArtifactStore
@@ -35,9 +38,9 @@ from aida.config.paths import (
     ensure_records_dir,
     ensure_scratch_dir,
     knowledge_db_path,
+    ocr_cache_dir,
     skills_dir,
 )
-from aida.config.secrets import env_var_name, get_secret
 from aida.config.settings import McpConfig, McpServerConfig, Settings, WorkspaceConfig
 from aida.config.users import (
     resolve_active_user,
@@ -48,13 +51,16 @@ from aida.core.agent import AgentLoop
 from aida.core.confirmation import REMEMBERABLE_ACTIONS, ConfirmAnswer, RememberingConfirm
 from aida.core.context import (
     DEFAULT_RESERVED_OUTPUT_TOKENS,
+    DENSE_CHARS_PER_TOKEN,
+    SHRINK_TARGET_FRACTION,
     WORKSPACE_FOLDERS_HEADING,
     TrimPlan,
     build_coding_context_block,
     build_identity_context_block,
     build_system_message,
     build_workspace_context_block,
-    compaction_request_messages,
+    cap_tool_result,
+    compaction_request_from_transcript,
     compaction_summary_message,
     estimate_message_tokens,
     estimate_tool_schema_tokens,
@@ -62,7 +68,13 @@ from aida.core.context import (
     load_skill_texts,
     plan_trim,
     repair_tool_call_pairing,
+    shrink_old_tool_results,
     skill_exists,
+    split_into_turns,
+    summary_body,
+    summary_transcript_chunks,
+    tool_result_char_cap,
+    tool_specific_char_cap,
 )
 from aida.core.events import (
     AgentError,
@@ -76,8 +88,9 @@ from aida.core.events import (
 )
 from aida.core.titling import clean_title, title_request_messages
 from aida.core.tools import NativeTool, default_native_tools
-from aida.documents.figure_tools import OcrBackend, default_figure_tools
-from aida.documents.ocr.mistral import SECRET_REF as OCR_SECRET_REF
+from aida.documents.attachments import append_attachment_locations
+from aida.documents.figure_tools import default_figure_tools
+from aida.documents.ocr.vlm import PdfPageConverter, RouteDecision, build_routes, describe_route
 from aida.documents.tools import default_document_tools
 from aida.knowledge.rag import index as kb_index
 from aida.knowledge.rag.retrieval import (
@@ -296,9 +309,10 @@ class ChatSession:
             self.tools,
             max_iterations=settings.app.max_agent_iterations,
             # Re-check the budget before every round trip, since one long turn
-            # can add huge tool results. Safe mid-turn: _trim_context only
-            # drops whole older turns and is a no-op when nothing needs trimming.
+            # can add huge tool results. Safe mid-turn: see _trim_context.
             before_round_trip=self._trim_context,
+            tool_result_filter=self._cap_tool_result,
+            auto_continue_on_stall=settings.app.auto_continue_on_stall,
         )
         self.recorder = recorder
         # Resolved once at start, queried every turn in send(): retrieval is
@@ -325,6 +339,16 @@ class ChatSession:
         #: ``_apply_trim_plan`` can shift it when a mid-turn trim shortens the
         #: prefix (the running turn itself is never trimmed).
         self._persist_index: int | None = None
+        #: The running turn's ephemeral context message (notices, retrieved
+        #: passages), which must never be recorded; ``None`` between turns.
+        self._turn_context_message: Message | None = None
+        #: The message that started the running turn; ``None`` between turns.
+        #: Trimming never drops it or anything after it (see
+        #: ``_current_turn_floor``).
+        self._turn_user_message: Message | None = None
+        #: Whether this turn already reported that compaction could not get
+        #: under budget, so the notice is not repeated on every round trip.
+        self._over_budget_reported = False
         #: True while ``send()`` is running a turn — see ``cancel``.
         self._turn_active = False
         #: Set by frontends that can show events outside a turn (the GUI).
@@ -668,6 +692,8 @@ class ChatSession:
                 self.tools,
                 max_iterations=self.loop.max_iterations,
                 before_round_trip=self._trim_context,
+                tool_result_filter=self._cap_tool_result,
+                auto_continue_on_stall=self.loop.auto_continue_on_stall,
             )
 
             # Nothing below here can fail, so the swap is all-or-nothing.
@@ -739,17 +765,87 @@ class ChatSession:
         current = sum(estimate_message_tokens(m) for m in self.messages)
         return current, (self._history_budget() or 0)
 
-    async def _compact_context(self, turns: list[list[Message]]) -> Message | None:
-        """Summarize ``turns`` (whole turns about to be dropped, oldest first)
-        via the *active* provider.
+    def _cap_tool_result(self, tool_name: str, call_id: str, content: str) -> str:
+        """Keep one tool result within ``tool_result_char_cap`` of the history
+        budget, or within a lower per-tool cap (``tool_specific_char_cap``,
+        web search by default). A longer result is saved whole to
+        ``<scratch>/tool-results/`` and the history gets its head and tail
+        plus the file path, so the model can read the rest with ``read_file``
+        offsets. Applied by ``AgentLoop`` to every tool, MCP tools included;
+        the frontend still receives the full result in ``ToolCallFinished``.
+        Nothing is capped when trimming is disabled."""
+        budget = self._history_budget()
+        if budget is None:
+            return content
+        cap = tool_result_char_cap(budget)
+        tool_cap = tool_specific_char_cap(tool_name, self.settings.app.tool_result_char_caps)
+        if tool_cap is not None:
+            cap = min(cap, tool_cap)
+        if len(content) <= cap:
+            return content
+        saved_path: Path | None = None
+        try:
+            folder = ensure_scratch_dir(self._scratch_dir()) / "tool-results"
+            folder.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", f"{tool_name}-{call_id}")[:80]
+            saved_path = folder / f"{stamp}-{safe_name}.txt"
+            saved_path.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            logger.warning("could not save a long %s result to scratch: %s", tool_name, exc)
+            saved_path = None
+        logger.info(
+            "tool %s result capped from %d to ~%d chars (full text: %s)",
+            tool_name,
+            len(content),
+            cap,
+            saved_path,
+        )
+        return cap_tool_result(content, cap, saved_path)
 
-        Returns the summary ``Message``, or ``None`` on provider error, empty
-        reply, or exception — callers then fall back to plain dropping.
-        Never raises: compaction failing must never fail the user's turn."""
-        if not turns:
-            return None
-        request_messages = compaction_request_messages(turns)
-        # Factual extraction with the active model: low temperature, no tools.
+    def ocr_routes(self) -> RouteDecision:
+        """Which models can convert scanned PDF pages right now, in the
+        order to try them (``aida.documents.ocr.vlm.build_routes``)."""
+        app = self.settings.app
+        ocr_profile = (
+            self.settings.providers.profiles.get(app.ocr_profile) if app.ocr_profile else None
+        )
+        return build_routes(
+            mode=app.ocr_backend,
+            ocr_profile=ocr_profile,
+            ocr_profile_name=app.ocr_profile,
+            chat_profile=self.profile,
+            chat_provider=self.provider,
+            chat_settings=self.completion_settings,
+            build_provider=build_provider,
+            settings_for=_completion_settings_for_profile,
+        )
+
+    def ocr_route_description(self) -> str:
+        """One line: which model would convert a scanned page, or why none
+        would. No network access."""
+        app = self.settings.app
+        return describe_route(
+            mode=app.ocr_backend,
+            ocr_profile_name=app.ocr_profile,
+            ocr_profile_exists=bool(
+                app.ocr_profile and app.ocr_profile in self.settings.providers.profiles
+            ),
+            chat_profile_name=self.profile_name,
+            chat_supports_vision=bool(self.profile.supports_vision),
+        )
+
+    def _scratch_dir(self) -> Path | None:
+        state = self.folder_state
+        if state is not None and state.scratch_dir:
+            return Path(state.scratch_dir)
+        configured = self.settings.app.scratch_dir
+        return Path(configured) if configured else None
+
+    async def _summarize_once(self, request_messages: list[Message]) -> str | None:
+        """One summarization call with the active provider: low temperature,
+        no tools, short retries. Returns the text, or ``None`` on error or an
+        empty reply. Never raises."""
         summary_settings = CompletionSettings(
             model=self.completion_settings.model,
             # Pin 0.0 only if the profile sends a temperature at all: models
@@ -773,20 +869,48 @@ class ChatSession:
                     summary_text = event.text
                 elif isinstance(event, AgentError):
                     for_error = f"{event.layer}: {event.message}"
-            if for_error is not None:
-                logger.warning(
-                    "context compaction failed, falling back to plain trim: %s", for_error
-                )
-                return None
-            if not summary_text.strip():
-                logger.warning(
-                    "context compaction produced an empty summary, falling back to plain trim"
-                )
-                return None
-            return compaction_summary_message(summary_text)
         except Exception as exc:  # noqa: BLE001 - compaction failing must never fail the turn
             logger.warning("context compaction failed, falling back to plain trim: %s", exc)
             return None
+        if for_error is not None:
+            logger.warning("context compaction failed, falling back to plain trim: %s", for_error)
+            return None
+        if not summary_text.strip():
+            logger.warning(
+                "context compaction produced an empty summary, falling back to plain trim"
+            )
+            return None
+        return summary_text
+
+    async def _compact_context(
+        self, turns: list[list[Message]], previous_summary: Message | None = None
+    ) -> Message | None:
+        """Summarize ``turns`` (whole turns about to be dropped, oldest first)
+        via the *active* provider, folding ``previous_summary`` in, into one
+        new summary message.
+
+        The transcript is sent in pieces that each fit in about half the
+        history budget; each piece is merged with the summary so far, so one
+        oversized transcript costs a few calls instead of a rejected request.
+
+        Returns ``None`` on any failure — callers then fall back to plain
+        dropping. Never raises: compaction failing must never fail the turn."""
+        if not turns:
+            return None
+        budget = self._history_budget() or 0
+        max_chars = max(20_000, budget // 2 * DENSE_CHARS_PER_TOKEN)
+        chunks = summary_transcript_chunks(turns, max_chars)
+        if len(chunks) > 1:
+            logger.info("summarizing %d turn(s) in %d pieces", len(turns), len(chunks))
+        summary_text = summary_body(previous_summary) if previous_summary is not None else None
+        for chunk in chunks:
+            request = compaction_request_from_transcript(chunk, previous_summary=summary_text)
+            result = await self._summarize_once(request)
+            if result is None:
+                return None
+            summary_text = result
+        assert summary_text is not None
+        return compaction_summary_message(summary_text)
 
     def _title_check_is_due(self) -> bool:
         """Whether this turn should spend a call on (re)naming the
@@ -866,11 +990,12 @@ class ChatSession:
         return ConversationTitled(conversation_id=recorder.conversation_id, title=title)
 
     async def _apply_trim_plan(
-        self, plan: TrimPlan, *, summarize: bool = True
+        self, plan: TrimPlan, *, summarize: bool = True, shrunk_tool_results: int = 0
     ) -> ContextTrimmed | None:
-        """Summarize ``plan.dropped_turns`` (or plain-drop them if that fails,
-        or if ``summarize`` is false) and apply the plan; shared by
-        ``_trim_context``, ``compact_now`` and ``clear_context``.
+        """Summarize ``plan.dropped_turns`` together with any previous summary
+        (or plain-drop them if that fails, or if ``summarize`` is false) and
+        apply the plan; shared by ``_trim_context``, ``compact_now`` and
+        ``clear_context``. ``shrunk_tool_results`` is only reported.
 
         Mutates ``self.messages`` in place because ``AgentLoop.run`` appends
         to that same list object."""
@@ -878,7 +1003,11 @@ class ChatSession:
         # during summarization would make the slice assignment drop messages.
         # The mutation lock prevents this; the check catches a caller without it.
         generation = self._history_generation
-        summary_message = await self._compact_context(plan.dropped_turns) if summarize else None
+        summary_message = (
+            await self._compact_context(plan.dropped_turns, plan.previous_summary)
+            if summarize
+            else None
+        )
         if generation != self._history_generation:
             logger.warning(
                 "conversation history changed while compaction was summarizing "
@@ -917,30 +1046,120 @@ class ChatSession:
             estimated_tokens=estimated_tokens,
             summarized=summarized,
             summary_tokens=summary_tokens,
+            shrunk_tool_results=shrunk_tool_results,
         )
 
-    async def _trim_context(self) -> ContextTrimmed | None:
-        """Summarize (or drop) the oldest whole turns once the in-memory
-        history exceeds ``_history_budget``, so the provider never rejects a
-        request for length.
+    def _shrink_tool_results(self, target_tokens: int) -> int:
+        """Stage A: stub out old tool results until the history is at or
+        below ``target_tokens``. Only the in-memory history changes; the
+        database and the transcript keep the full text. Returns how many
+        messages were shrunk."""
+        # Record anything the running turn has not recorded yet, so only
+        # already-persisted messages are ever replaced or dropped.
+        self._persist_new_messages(self._turn_context_message)
+        before = sum(estimate_message_tokens(m) for m in self.messages)
+        new_messages, shrunk = shrink_old_tool_results(self.messages, target_tokens)
+        if shrunk:
+            self.messages[:] = new_messages
+            self._history_generation += 1
+            logger.info(
+                "shrank %d old tool result(s): ~%d -> ~%d tokens (target ~%d)",
+                shrunk,
+                before,
+                sum(estimate_message_tokens(m) for m in self.messages),
+                target_tokens,
+            )
+        return shrunk
 
-        Returns a ``ContextTrimmed`` event for the frontend when something
-        changed, ``None`` otherwise (disabled, or already under budget)."""
+    def _over_budget_event(
+        self, budget: int, event: ContextTrimmed | None
+    ) -> ContextTrimmed | None:
+        """Mark ``event`` (or make a bare notice) when the history is still
+        over ``budget`` after every step. The bare notice goes out once per
+        turn; a real change is always reported."""
+        estimated = sum(estimate_message_tokens(m) for m in self.messages)
+        if estimated <= budget:
+            return event
+        if event is None and self._over_budget_reported:
+            return None
+        if not self._over_budget_reported:
+            logger.warning(
+                "conversation history is ~%d tokens, over the %d-token budget, and nothing "
+                "more can be compacted; the current turn alone is too large",
+                estimated,
+                budget,
+            )
+        self._over_budget_reported = True
+        if event is None:
+            return ContextTrimmed(
+                dropped_turns=0, estimated_tokens=estimated, over_budget=True, budget_tokens=budget
+            )
+        return dataclasses.replace(event, over_budget=True, budget_tokens=budget)
+
+    def _current_turn_floor(self) -> int:
+        """How many trailing turns (``split_into_turns``) belong to the
+        running ``send()``: an ephemeral context message or a steering
+        message is ``role="user"`` too and starts a turn of its own, but the
+        user's request that began this turn must not be trimmed mid-turn.
+        1 between turns."""
+        start = self._turn_user_message
+        if start is None:
+            return 1
+        turns = split_into_turns(self.messages)
+        for index, turn in enumerate(turns):
+            if turn[0] is start:
+                return max(1, len(turns) - index)
+        return 1
+
+    async def _trim_context(self) -> ContextTrimmed | None:
+        """Keep the in-memory history within ``_history_budget`` so the
+        provider never rejects a request for length. Safe to call before
+        every round trip, mid-turn included.
+
+        In order, each step only if still over budget:
+
+        1. Shrink old tool results to stubs (``shrink_old_tool_results``),
+           down to ``SHRINK_TARGET_FRACTION`` of the budget. No model call.
+        2. Summarize the oldest whole turns, keeping the last 4.
+        3. If still over, go down to keeping only the last turn.
+
+        A previous summary is merged into the new one, never re-summarized on
+        its own. Returns a ``ContextTrimmed`` event when something changed or
+        when nothing more can be done, ``None`` otherwise (disabled, or
+        already under budget)."""
         budget = self._history_budget()
         if budget is None:
             return None  # 0 (global default or resolved profile window) disables trimming
-        plan = plan_trim(self.messages, budget)
-        if not plan.was_trimmed:
+        tokens_before = sum(estimate_message_tokens(m) for m in self.messages)
+        if tokens_before <= budget:
             return None
-        return await self._apply_trim_plan(plan)
+        shrunk = self._shrink_tool_results(int(budget * SHRINK_TARGET_FRACTION))
+        plan = plan_trim(
+            self.messages, budget, fallback_min_recent_turns=self._current_turn_floor()
+        )
+        event: ContextTrimmed | None
+        if plan.was_trimmed:
+            event = await self._apply_trim_plan(plan, shrunk_tool_results=shrunk)
+        elif shrunk:
+            event = ContextTrimmed(
+                dropped_turns=0,
+                estimated_tokens=sum(estimate_message_tokens(m) for m in self.messages),
+                shrunk_tool_results=shrunk,
+            )
+        else:
+            event = None
+        if event is not None:
+            event = dataclasses.replace(event, tokens_before=tokens_before)
+        return self._over_budget_event(budget, event)
 
     async def compact_now(self, *, min_recent_turns: int = 4) -> ContextTrimmed | None:
         """Manual compaction (CLI ``/compact``, GUI "Compact Conversation").
 
-        Summarizes everything but the most recent ``min_recent_turns`` turns
-        now, regardless of budget, so the user can compact at a natural task
-        boundary. Same path as automatic trimming, with the threshold forced
-        to ``0``. Returns ``None`` if there are fewer turns than the floor.
+        Regardless of budget: shrinks every old tool result outside the last
+        few tool rounds, then summarizes everything but the most recent
+        ``min_recent_turns`` turns, so the user can compact at a natural task
+        boundary and it helps even inside one long turn. Returns ``None`` if
+        there was nothing to do.
 
         Raises ``SessionBusyError`` if a turn or profile switch is in flight
         (see ``SessionBusyError``)."""
@@ -950,10 +1169,23 @@ class ChatSession:
             )
         await self._wait_for_background_title()
         async with self._mutation_lock:
+            tokens_before = sum(estimate_message_tokens(m) for m in self.messages)
+            shrunk = self._shrink_tool_results(0)
             plan = plan_trim(self.messages, 0, min_recent_turns=min_recent_turns)
-            if not plan.was_trimmed:
+            event: ContextTrimmed | None
+            if plan.was_trimmed:
+                event = await self._apply_trim_plan(plan, shrunk_tool_results=shrunk)
+            elif shrunk:
+                event = ContextTrimmed(
+                    dropped_turns=0,
+                    estimated_tokens=sum(estimate_message_tokens(m) for m in self.messages),
+                    shrunk_tool_results=shrunk,
+                )
+            else:
+                event = None
+            if event is None:
                 return None
-            return await self._apply_trim_plan(plan)
+            return dataclasses.replace(event, tokens_before=tokens_before)
 
     async def clear_context(self) -> ContextTrimmed | None:
         """Drop every turn from the history sent to the model, keeping the
@@ -963,9 +1195,9 @@ class ChatSession:
         Used by repeating workflow steps (``aida.core.workflows``), where a
         state file, not the chat history, carries progress between passes.
         Nothing is summarized, so no provider call is made and nothing of the
-        earlier passes is carried forward. The stored conversation (database
-        and Markdown record) keeps every turn. Returns ``None`` when there
-        was nothing to drop.
+        earlier passes is carried forward (a compaction summary goes too).
+        The stored conversation (database and Markdown record) keeps every
+        turn. Returns ``None`` when there was nothing to drop.
 
         Raises ``SessionBusyError`` if a turn or profile switch is in flight."""
         if self._mutation_lock.locked():
@@ -975,7 +1207,7 @@ class ChatSession:
             )
         await self._wait_for_background_title()
         async with self._mutation_lock:
-            plan = plan_trim(self.messages, 0, min_recent_turns=0)
+            plan = plan_trim(self.messages, 0, min_recent_turns=0, keep_summary=False)
             if not plan.was_trimmed:
                 return None
             return await self._apply_trim_plan(plan, summarize=False)
@@ -1117,17 +1349,21 @@ class ChatSession:
                 Never used for files the agent opened itself.
             attachment_texts: Already-extracted text of those attachments,
                 saved beside the copies."""
+        if attachment_paths and self.recorder is not None:
+            # Copied before the message is built so the message can name the
+            # copies; keep_attachments never raises. Texts are passed in so
+            # large PDFs aren't parsed twice.
+            kept = self.recorder.keep_attachments(
+                list(attachment_paths), texts=attachment_texts or None
+            )
+            user_text = append_attachment_locations(user_text, kept)
         user_message = Message(role="user", content=user_text, images=list(images or []))
+        self._over_budget_reported = False
+        self._turn_user_message = user_message
         self.messages.append(user_message)
         self._history_generation += 1  # see __init__ / _apply_trim_plan
         if self.recorder is not None:
             self.recorder.record_message(user_message)
-            if attachment_paths:
-                # Only after the message is recorded; keep_attachments never
-                # raises. Texts are passed in so large PDFs aren't parsed twice.
-                self.recorder.keep_attachments(
-                    list(attachment_paths), texts=attachment_texts or None
-                )
         # Trim only the *sent* history (the DB keeps everything), before the
         # persist index is captured. Whole turns only, so tool results stay
         # with their calls.
@@ -1164,6 +1400,7 @@ class ChatSession:
         if context_parts:
             context_message = Message(role="user", content="\n\n".join(context_parts))
             self.messages.append(context_message)
+        self._turn_context_message = context_message
 
         try:
             async for event in self.loop.run(self.messages):
@@ -1204,6 +1441,8 @@ class ChatSession:
             self._persist_new_messages(context_message)
         finally:
             self._persist_index = None
+            self._turn_context_message = None
+            self._turn_user_message = None
             # Remove the ephemeral message *by identity*: list.remove() uses ==
             # and could delete an identical-looking real message instead.
             if context_message is not None:
@@ -1627,7 +1866,10 @@ async def _start_session(
 
     mcp_manager: McpManager | None = None
     tools = default_native_tools()
-    tools.update(default_file_tools(guard))
+    # One page converter for read_file and the figure tools; it is bound to
+    # the session below so it always uses the current chat profile.
+    pdf_converter = PdfPageConverter(confirm=confirm_callback, cache_dir=ocr_cache_dir())
+    tools.update(default_file_tools(guard, pdf_converter=pdf_converter))
     tools.update(default_document_tools(guard, artifact_store, sidecar_dirname=sidecar_dirname))
     tools.update(default_coding_tools(guard, workspace=workspace, scratch_dir=scratch))
     tools.update(default_web_tools(guard))
@@ -1708,25 +1950,10 @@ async def _start_session(
 
     # Figure tools are registered after the recorder because they need its
     # attachments folder (passed as a callable, re-read per call).
-    # OCR is triple opt-in: workspace use_ocr, an API key, and per-document
-    # user approval (OcrBackend.approved_for). A None backend means "off" —
-    # nothing downstream has to check a flag.
-    ocr_backend = None
-    if workspace is not None and workspace.use_ocr:
-        ocr_key = get_secret(OCR_SECRET_REF)
-        if ocr_key:
-            ocr_backend = OcrBackend(api_key=ocr_key, confirm=confirm_callback)
-        else:
-            notices.warning(
-                "ocr",
-                f"workspace {workspace.name!r} has use_ocr enabled but no API key is set "
-                f"(Settings, or ${env_var_name(OCR_SECRET_REF)}) — falling back to the built-in "
-                f"figure extractor.",
-            )
-            logger.warning(
-                "workspace %r: use_ocr enabled but no %r secret", workspace.name, OCR_SECRET_REF
-            )
-    tools.update(default_figure_tools(recorder.attachments_dir, ocr=ocr_backend))
+    tools.update(default_figure_tools(recorder.attachments_dir, convert_pages=pdf_converter))
+    # Files the person attached are copied there; the agent reads them with
+    # read_file without being asked, wherever the originals were.
+    guard.allow_reading(recorder.attachments_dir())
 
     # No try/except: failures here (UnknownProviderKindError, unreadable
     # skill files, locked/corrupt DB above) are cleaned up by the caller's
@@ -1748,6 +1975,7 @@ async def _start_session(
         folder_state=folder_state,
     )
     session.startup_notices = notices.items
+    pdf_converter.resolver = session.ocr_routes
     return session, mcp_manager
 
 

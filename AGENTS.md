@@ -36,7 +36,7 @@ PyPI name `aida-workbench`, import package `aida`, CLI `aida`, GUI `aida-gui`.
 ## Commands
 
 ```bash
-pip install -e ".[dev,gui,docs,ocr,science]"     # or: conda env create -f environment.yml
+pip install -e ".[dev,gui,docs,science]"         # or: conda env create -f environment.yml
 ruff check . && ruff format --check .
 pytest --ignore=tests/ui                          # non-GUI suite
 QT_QPA_PLATFORM=offscreen pytest tests/ui         # GUI suite, run separately (see ci.yml)

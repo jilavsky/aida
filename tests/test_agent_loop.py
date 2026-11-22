@@ -3,7 +3,18 @@ from __future__ import annotations
 import pytest
 
 from aida.artifacts.base import FileArtifact, ImageArtifact, TextArtifact
-from aida.core.agent import CANCELLED_TOOL_RESULT, AgentLoop
+from aida.core.agent import (
+    CANCELLED_TOOL_RESULT,
+    LENGTH_NUDGE,
+    MAX_STALL_NUDGES,
+    STALL_NUDGE,
+    STALL_NUDGE_CALL_IN_REASONING,
+    AgentLoop,
+    has_tool_call_markup,
+    is_stall,
+    looks_like_announced_step,
+    unknown_tool_message,
+)
 from aida.core.events import (
     AgentError,
     FileArtifactCreated,
@@ -15,6 +26,7 @@ from aida.core.events import (
     TextStarted,
     ToolCallFinished,
     ToolCallStarted,
+    TurnNudged,
 )
 from aida.core.tools import NativeTool, ToolResult
 from aida.providers.base import CompletionSettings, Message, ToolSchema
@@ -1045,3 +1057,242 @@ async def test_native_tool_arguments_are_coerced_against_the_schema():
     loop = AgentLoop(provider, _settings(), tools={"write_file": tool})
     [e async for e in loop.run([Message(role="user", content="hi")])]
     assert received == {"overwrite": False, "count": 3}
+
+
+# --- replies that end a long task too early (TODO §6, 2026-11-21) -----------
+
+
+def _tool_round(call_id: str = "t1") -> MockTurn:
+    return MockTurn(tool_calls=[MockToolCall(name="get_current_time", id=call_id)])
+
+
+async def _run(script: list[MockTurn], **loop_kwargs) -> tuple[list, list[Message], MockProvider]:
+    provider = MockProvider(script)
+    loop = AgentLoop(provider, _settings(), {"get_current_time": TIME_TOOL}, **loop_kwargs)
+    messages = [Message(role="user", content="write the dossier")]
+    events = [e async for e in loop.run(messages)]
+    return events, messages, provider
+
+
+@pytest.mark.asyncio
+async def test_reply_cut_off_without_a_tool_call_gets_one_continue():
+    events, messages, provider = await _run(
+        [
+            _tool_round(),
+            MockTurn(text="Writing the dossier", stop_reason="length"),
+            MockTurn(text="Done."),
+        ]
+    )
+    nudges = [e for e in events if isinstance(e, TurnNudged)]
+    assert [n.reason for n in nudges] == ["length"]
+    assert len(provider.calls) == 3
+    assert messages[-2].role == "user" and messages[-2].content == LENGTH_NUDGE
+    assert messages[-3].content == "Writing the dossier"  # partial text kept
+    assert messages[-1].content == "Done."
+    assert not any(isinstance(e, AgentError) for e in events)
+
+
+@pytest.mark.asyncio
+async def test_a_second_cut_off_ends_the_turn_with_a_notice():
+    events, messages, provider = await _run(
+        [
+            MockTurn(text="a", stop_reason="length"),
+            MockTurn(text="b", stop_reason="length"),
+            MockTurn(text="never reached"),
+        ]
+    )
+    assert len(provider.calls) == 2
+    assert sum(isinstance(e, TurnNudged) for e in events) == 1
+    errors = [e for e in events if isinstance(e, AgentError)]
+    assert len(errors) == 1 and "output token limit" in errors[0].message
+    assert messages[-1].role == "assistant" and messages[-1].content == "b"
+
+
+@pytest.mark.asyncio
+async def test_an_empty_cut_off_reply_is_not_kept_as_an_empty_message():
+    _, messages, _ = await _run([MockTurn(text="", stop_reason="length"), MockTurn(text="ok")])
+    assert [m.role for m in messages] == ["user", "user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_cut_off_mid_tool_arguments_is_answered_then_stops_the_second_time():
+    from aida.providers.base import UNPARSED_ARGUMENTS_KEY
+
+    partial = MockToolCall(name="get_current_time", arguments={UNPARSED_ARGUMENTS_KEY: '{"p'})
+    events, messages, provider = await _run(
+        [
+            MockTurn(tool_calls=[partial], stop_reason="length"),
+            MockTurn(tool_calls=[partial], stop_reason="length"),
+            MockTurn(text="never reached"),
+        ]
+    )
+    assert len(provider.calls) == 2
+    # Both partial calls were answered, so the history stays well-formed.
+    tool_results = [m for m in messages if m.role == "tool"]
+    assert len(tool_results) == 2
+    assert all("cut off" in m.content for m in tool_results)
+    errors = [e for e in events if isinstance(e, AgentError)]
+    assert len(errors) == 1 and "output token limit" in errors[0].message
+
+
+@pytest.mark.asyncio
+async def test_short_announcement_after_tool_work_gets_a_stall_nudge():
+    events, messages, provider = await _run(
+        [
+            _tool_round(),
+            MockTurn(text="I have everything needed. Writing the dossier now."),
+            MockTurn(text="The dossier is saved to dossier.md and covers all 12 proposals."),
+        ]
+    )
+    nudges = [e for e in events if isinstance(e, TurnNudged)]
+    assert [n.reason for n in nudges] == ["stall"]
+    assert len(provider.calls) == 3
+    assert messages[-2].content == STALL_NUDGE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Done — the plot is saved to fig.png.",  # a normal short ending
+        "Should I also write the summary table?",  # a question to the user
+        "Let me know if you need anything else.",  # a closing offer
+        "Writing it now. " + "Details of the result. " * 20,  # a long answer
+    ],
+)
+async def test_no_stall_nudge_on_a_normal_end_of_task(reply):
+    events, _, provider = await _run([_tool_round(), MockTurn(text=reply)])
+    assert not any(isinstance(e, TurnNudged) for e in events)
+    assert len(provider.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_no_stall_nudge_without_tool_work_or_when_disabled():
+    events, _, _ = await _run([MockTurn(text="Let me think about that.")])
+    assert not any(isinstance(e, TurnNudged) for e in events)
+    events, _, provider = await _run(
+        [_tool_round(), MockTurn(text="Let me check one thing.")], auto_continue_on_stall=False
+    )
+    assert not any(isinstance(e, TurnNudged) for e in events)
+    assert len(provider.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_stall_nudges_are_capped_per_turn():
+    script = []
+    for i in range(MAX_STALL_NUDGES + 1):
+        script += [_tool_round(f"t{i}"), MockTurn(text="Let me check one more thing.")]
+    events, _, _ = await _run(script)
+    assert sum(isinstance(e, TurnNudged) for e in events) == MAX_STALL_NUDGES
+
+
+def test_looks_like_announced_step_examples():
+    assert looks_like_announced_step("Let me check one thing — the deadline.")
+    assert looks_like_announced_step("Next, I compare the two budgets:")
+    assert not looks_like_announced_step("All 12 proposals are reviewed.")
+    assert not looks_like_announced_step("")
+
+
+@pytest.mark.asyncio
+async def test_round_trip_end_is_logged_with_stop_reason_and_reasoning(caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="aida")
+    await _run([MockTurn(text="hi", output_tokens=7, stop_reason="stop")])
+    line = next(r.getMessage() for r in caplog.records if "round trip" in r.getMessage())
+    assert "stop_reason=stop" in line and "output_tokens=7" in line and "reasoning=0" in line
+
+
+# --- second test run (2026-11-21 evening) ------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text_chars", "reasoning_chars", "expected"),
+    [(175, 17_316, True), (139, 15_094, True), (2_452, 1_526, False), (6_500, 60, False)],
+)
+def test_stall_shape_matches_the_measured_run(text_chars, reasoning_chars, expected):
+    """The rows of the 2026-11-21 table: the two real stalls nudge, the
+    normal endings do not."""
+    text = "…so the calibration file will fix them rather than repeat them" + "." * text_chars
+    assert is_stall(text[:text_chars], reasoning_chars) is expected
+
+
+def test_stall_shape_never_overrides_a_question_or_a_closing_offer():
+    assert not is_stall("Should I write the calibration file now?", 20_000)
+    assert not is_stall("Let me know if you want changes.", 20_000)
+
+
+async def _run_with_reasoning(text: str, reasoning: str) -> tuple[list, list[Message]]:
+    """A tool round, then a short reply carrying ``reasoning``."""
+
+    class _ReasoningProvider(MockProvider):
+        async def complete(self, messages, tools, settings):
+            async for event in super().complete(messages, tools, settings):
+                if isinstance(event, MessageFinished) and len(self.calls) == 2:
+                    event = MessageFinished(
+                        message_id=event.message_id,
+                        stop_reason=event.stop_reason,
+                        reasoning_chars=len(reasoning),
+                        reasoning_tail=reasoning[-1500:],
+                    )
+                yield event
+
+    provider = _ReasoningProvider([_tool_round(), MockTurn(text=text), MockTurn(text="Done.")])
+    loop = AgentLoop(provider, _settings(), {"get_current_time": TIME_TOOL})
+    messages = [Message(role="user", content="score the proposals")]
+    events = [e async for e in loop.run(messages)]
+    return events, messages
+
+
+@pytest.mark.asyncio
+async def test_short_reply_behind_long_reasoning_is_nudged(caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="aida")
+    events, messages = await _run_with_reasoning(
+        "…so the calibration file will fix them rather than repeat them.", "plan " * 4000
+    )
+    assert [e.reason for e in events if isinstance(e, TurnNudged)] == ["stall"]
+    assert messages[-2].content == STALL_NUDGE
+    assert any("end of reasoning" in r.getMessage() for r in caplog.records)
+    assert not any("plan plan" in m.content for m in messages)  # reasoning stays out
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_written_in_the_reasoning_gets_the_send_it_nudge():
+    reasoning = 'Now write it. <tool_call>{"name": "write_file", "arguments": {"path": "a.md"}}'
+    events, messages = await _run_with_reasoning("Writing it.", reasoning)
+    assert [e.reason for e in events if isinstance(e, TurnNudged)] == ["stall"]
+    assert messages[-2].content == STALL_NUDGE_CALL_IN_REASONING
+
+
+def test_tool_call_markup_forms_are_recognised():
+    assert has_tool_call_markup("x <function=write_file> y")
+    assert has_tool_call_markup('{"name": "edit_file", "arguments": {}}')
+    assert not has_tool_call_markup("I will call write_file next.")
+
+
+def test_unknown_tool_suggests_the_intended_one_with_its_arguments():
+    edit = NativeTool(
+        schema=ToolSchema(
+            name="edit_file",
+            description="",
+            parameters={"type": "object", "required": ["path", "old_text", "new_text"]},
+        ),
+        func=_get_current_time,
+    )
+    tools = {"edit_file": edit, "get_current_time": TIME_TOOL}
+    message = unknown_tool_message("edit_file=path", tools)
+    assert "Did you mean 'edit_file'?" in message
+    assert "path, old_text, new_text" in message
+    assert "Did you mean 'get_current_time'" in unknown_tool_message("get_curent_time", tools)
+    assert unknown_tool_message("totally_new", tools) == "Unknown tool: totally_new"
+
+
+@pytest.mark.asyncio
+async def test_a_garbled_tool_name_is_not_run_but_explained():
+    events, messages, _ = await _run(
+        [MockTurn(tool_calls=[MockToolCall(name="get_current_time=now", id="x")]), MockTurn("ok")]
+    )
+    result = next(m for m in messages if m.role == "tool")
+    assert "Did you mean 'get_current_time'?" in result.content

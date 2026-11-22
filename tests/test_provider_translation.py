@@ -1095,3 +1095,91 @@ def test_finalize_stream_emits_nothing_when_the_stream_carried_no_content_at_all
     from aida.providers.openai_compat import _StreamState, finalize_stream
 
     assert finalize_stream(_StreamState(message_id="m4")) == []
+
+
+def test_openai_reasoning_is_counted_not_shown():
+    """llama.cpp/vLLM stream reasoning as `reasoning_content`; its length is
+    reported on MessageFinished for the log and never becomes reply text."""
+    from openai.types.chat import ChatCompletionChunk
+    from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
+
+    from aida.core.events import MessageFinished, TextFinished
+    from aida.providers.openai_compat import _StreamState, process_openai_chunk
+
+    def chunk(delta, finish_reason=None):
+        return ChatCompletionChunk(
+            id="1",
+            created=0,
+            model="x",
+            object="chat.completion.chunk",
+            choices=[Choice(index=0, delta=delta, finish_reason=finish_reason)],
+        )
+
+    state = _StreamState(message_id="m1")
+    events = []
+    events += process_openai_chunk(chunk(ChoiceDelta(reasoning_content="think " * 10)), state)
+    events += process_openai_chunk(chunk(ChoiceDelta(reasoning="more")), state)
+    events += process_openai_chunk(chunk(ChoiceDelta(content="Answer")), state)
+    events += process_openai_chunk(chunk(ChoiceDelta(), finish_reason="length"), state)
+
+    finished = next(e for e in events if isinstance(e, MessageFinished))
+    assert finished.reasoning_chars == 64
+    assert finished.reasoning_tail.endswith("think more")
+    assert finished.stop_reason == "length"
+    assert next(e for e in events if isinstance(e, TextFinished)).text == "Answer"
+
+
+def test_anthropic_thinking_is_counted_not_shown():
+    from types import SimpleNamespace
+
+    from aida.core.events import MessageFinished, TextFinished
+    from aida.providers.anthropic_ import _StreamState, process_anthropic_event
+
+    state = _StreamState(message_id="m1")
+    thinking = SimpleNamespace(
+        type="content_block_delta",
+        index=0,
+        delta=SimpleNamespace(type="thinking_delta", thinking="x" * 40),
+    )
+    stop = SimpleNamespace(
+        type="message_delta", delta=SimpleNamespace(stop_reason="max_tokens"), usage=None
+    )
+    events = []
+    for event in (thinking, stop, SimpleNamespace(type="message_stop")):
+        events += process_anthropic_event(event, state)
+
+    finished = next(e for e in events if isinstance(e, MessageFinished))
+    assert finished.reasoning_chars == 40
+    assert finished.reasoning_tail == "x" * 40
+    assert finished.stop_reason == "length"
+    assert next(e for e in events if isinstance(e, TextFinished)).text == ""
+
+
+def test_only_the_sdk_stream_close_error_is_quieted():
+    """The OpenAI SDK leaves a suspended httpcore byte iterator behind;
+    finalizing it raises a harmless RuntimeError. Only that report is
+    dropped; anything else still reaches the previous handler."""
+    import asyncio
+
+    from aida.providers.openai_compat import _quiet_sdk_stream_close
+
+    class _Code:
+        co_filename = "/site-packages/httpcore2/_async/http11.py"
+
+    class _Generator:
+        ag_code = _Code()
+
+    seen: list[dict] = []
+    loop = asyncio.new_event_loop()
+    try:
+        loop.set_exception_handler(lambda _loop, context: seen.append(context))
+        _quiet_sdk_stream_close(loop)
+        _quiet_sdk_stream_close(loop)
+        noise = RuntimeError("generator didn't stop after athrow()")
+        loop.call_exception_handler({"exception": noise, "asyncgen": _Generator()})
+        other = {"exception": RuntimeError("generator didn't stop after athrow()")}
+        loop.call_exception_handler(other)
+        loop.call_exception_handler({"message": "something else"})
+    finally:
+        loop.close()
+    assert seen == [other, {"message": "something else"}]

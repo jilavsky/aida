@@ -19,9 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from aida.config.secrets import delete_secret
 from aida.config.settings import AppConfig, ProviderProfile
-from aida.documents.ocr.mistral import SECRET_REF
 from aida.ui.qt._qt import (
     QCheckBox,
     QComboBox,
@@ -34,7 +32,6 @@ from aida.ui.qt._qt import (
     QLabel,
     QLineEdit,
     QListWidget,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -204,6 +201,16 @@ class SettingsDialog(QDialog):
         self._auto_title_check.toggled.connect(self._auto_title_interval_spin.setEnabled)
         form.addRow("Re-check the title every:", self._auto_title_interval_spin)
 
+        self._auto_continue_check = QCheckBox("Nudge the agent when it stalls mid-task", self)
+        self._auto_continue_check.setChecked(app_config.auto_continue_on_stall)
+        self._auto_continue_check.setToolTip(
+            "When a short reply right after tool work announces a next step "
+            '("Writing the report now.") but makes no tool call, AIDA sends one '
+            'automatic "continue" message instead of ending the turn. '
+            "At most twice per turn; the message is shown in the chat."
+        )
+        form.addRow("Long tasks:", self._auto_continue_check)
+
         # Phase 10: how considerate the in-app scheduler is of a user who
         # is mid-something. Both are in seconds but shown in minutes —
         # nobody reasons about "wait 300 seconds before starting a job".
@@ -229,41 +236,45 @@ class SettingsDialog(QDialog):
         )
         form.addRow("Scheduler: run anyway after:", self._scheduler_max_defer_spin)
 
-        ocr_group = QGroupBox("Document OCR", self)
-        ocr_layout = QVBoxLayout(ocr_group)
-        key_help = QLabel(
-            'Get a free API key from <a href="https://console.mistral.ai/api-keys">'
-            "console.mistral.ai/api-keys</a>. The free tier covers roughly 10 documents / "
-            "50 MB at a time — enough for occasional use.",
-            ocr_group,
+        documents_group = QGroupBox("Documents", self)
+        # A vertical layout, not a form: a word-wrapped label in a form row is
+        # not given its full height and gets clipped.
+        documents_layout = QVBoxLayout(documents_group)
+        # Explicit line breaks, no word wrap: a wrapped label can be squeezed
+        # to one line when the dialog is short; this one keeps its height.
+        explain = QLabel(
+            "Scanned PDF pages are read by a model with vision: the OCR profile\n"
+            "below if set, otherwise the chat model when its profile has vision.\n"
+            "A separate remote OCR profile asks before pages are sent.",
+            documents_group,
         )
-        key_help.setOpenExternalLinks(True)
-        key_help.setWordWrap(True)
-        ocr_layout.addWidget(key_help)
-        consent = QLabel(
-            "Documents you ask about are uploaded to Mistral. AIDA asks before each one. "
-            "Enable it per workspace in Workspaces…",
-            ocr_group,
+        documents_layout.addWidget(explain)
+        self._ocr_backend_check = QCheckBox("Convert scanned PDF pages", documents_group)
+        self._ocr_backend_check.setChecked(app_config.ocr_backend != "off")
+        documents_layout.addWidget(self._ocr_backend_check)
+        self._ocr_profile_combo = QComboBox(documents_group)
+        self._ocr_profile_combo.addItem("(use the chat model)", None)
+        for name in sorted(profiles or {}):
+            self._ocr_profile_combo.addItem(name, name)
+        if app_config.ocr_profile:
+            index = self._ocr_profile_combo.findData(app_config.ocr_profile)
+            if index < 0:  # configured but missing: keep it visible, not silently dropped
+                self._ocr_profile_combo.addItem(
+                    f"{app_config.ocr_profile} (missing)", app_config.ocr_profile
+                )
+                index = self._ocr_profile_combo.count() - 1
+            self._ocr_profile_combo.setCurrentIndex(index)
+        self._ocr_profile_combo.setToolTip(
+            "A profile used only for converting pages, for example a small local OCR model. "
+            "Test it with: aida documents convert FILE"
         )
-        consent.setWordWrap(True)
-        ocr_layout.addWidget(consent)
-        key_row = QHBoxLayout()
-        self._ocr_api_key_edit = QLineEdit(ocr_group)
-        self._ocr_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self._ocr_api_key_edit.setPlaceholderText("(unchanged)")
-        key_row.addWidget(self._ocr_api_key_edit)
-        # "Is my key working?" must be answerable without uploading a
-        # document — otherwise the only way to test the configuration is to
-        # perform the exact action the user is being careful about. This
-        # lists models instead, the cheapest authenticated call there is.
-        self._verify_ocr_key_button = QPushButton("Verify key", ocr_group)
-        self._verify_ocr_key_button.clicked.connect(self._on_verify_ocr_key)
-        key_row.addWidget(self._verify_ocr_key_button)
-        self._clear_ocr_key_button = QPushButton("Clear key", ocr_group)
-        self._clear_ocr_key_button.clicked.connect(self._on_clear_ocr_key)
-        key_row.addWidget(self._clear_ocr_key_button)
-        ocr_layout.addLayout(key_row)
-        form.addRow(ocr_group)
+        self._ocr_profile_combo.setEnabled(self._ocr_backend_check.isChecked())
+        self._ocr_backend_check.toggled.connect(self._ocr_profile_combo.setEnabled)
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(QLabel("OCR profile:", documents_group))
+        profile_row.addWidget(self._ocr_profile_combo, stretch=1)
+        documents_layout.addLayout(profile_row)
+        form.addRow(documents_group)
 
         layout.addLayout(form)
 
@@ -291,27 +302,6 @@ class SettingsDialog(QDialog):
         )
         if folder:
             self._scratch_dir_edit.setText(folder)
-
-    def _on_verify_ocr_key(self) -> None:
-        """Check the key in the box, or the stored one if the box is empty
-        (it is never pre-filled, so "empty" means "the saved one")."""
-        from aida.config.secrets import get_secret
-        from aida.documents.ocr.mistral import MistralOcrError, verify_api_key
-
-        key = self._ocr_api_key_edit.text().strip() or (get_secret(SECRET_REF) or "")
-        if not key:
-            QMessageBox.warning(self, "Document OCR", "No API key to check — enter one first.")
-            return
-        try:
-            detail = verify_api_key(key)
-        except MistralOcrError as exc:
-            QMessageBox.warning(self, "Document OCR", f"That key did not work:\n\n{exc}")
-            return
-        QMessageBox.information(self, "Document OCR", detail)
-
-    def _on_clear_ocr_key(self) -> None:
-        delete_secret(SECRET_REF)
-        self._ocr_api_key_edit.clear()
 
     # --- edited values ---------------------------------------------------
 
@@ -393,8 +383,14 @@ class SettingsDialog(QDialog):
     def auto_title_interval_turns(self) -> int:
         return self._auto_title_interval_spin.value()
 
-    def ocr_api_key(self) -> str:
-        return self._ocr_api_key_edit.text().strip()
+    def auto_continue_on_stall(self) -> bool:
+        return self._auto_continue_check.isChecked()
+
+    def ocr_backend(self) -> str:
+        return "auto" if self._ocr_backend_check.isChecked() else "off"
+
+    def ocr_profile(self) -> str | None:
+        return self._ocr_profile_combo.currentData()
 
     def updated_app_config(self) -> AppConfig:
         """A copy of the ``AppConfig`` this dialog was opened with, with
@@ -419,6 +415,9 @@ class SettingsDialog(QDialog):
             transcript_tool_results=self.transcript_tool_results(),
             auto_title_conversations=self.auto_title_conversations(),
             auto_title_interval_turns=self.auto_title_interval_turns(),
+            auto_continue_on_stall=self.auto_continue_on_stall(),
+            ocr_backend=self.ocr_backend(),
+            ocr_profile=self.ocr_profile(),
         )
 
 

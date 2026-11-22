@@ -200,18 +200,6 @@ class WorkspaceFormDialog(QDialog):
         system_prompt_row.addWidget(load_file_button)
         form.addRow("System prompt:", system_prompt_row)
 
-        self._use_ocr_checkbox = QCheckBox(
-            "Use Mistral OCR for figures in attached documents", self
-        )
-        self._use_ocr_checkbox.setChecked(workspace.use_ocr if workspace else False)
-        self._use_ocr_checkbox.setToolTip(
-            "Uploads attached documents to Mistral to read their figures. Off by default. "
-            "Per workspace because the answer differs: a manuals workspace can have it on "
-            "while one used to review unpublished manuscripts keeps it off. You are still "
-            "asked before each document is sent."
-        )
-        form.addRow("Document OCR:", self._use_ocr_checkbox)
-
         # Everything that governs running code is boxed together rather than
         # scattered through the flat form: these six settings are only
         # meaningful in relation to each other (an interpreter and a
@@ -407,7 +395,6 @@ class WorkspaceFormDialog(QDialog):
             ],
             python_interpreter=self._interpreter_edit.text().strip() or None,
             scripting_enabled=self._scripting_checkbox.isChecked(),
-            use_ocr=self._use_ocr_checkbox.isChecked(),
             script_timeout_seconds=float(self._script_timeout_spin.value()),
             templates_dir=self._templates_dir_edit.text().strip() or None,
             saved_scripts_dir=self._saved_scripts_dir_edit.text().strip() or None,
@@ -431,7 +418,6 @@ def _workspace_detail_lines(
         f"knowledge_bases: {', '.join(workspace.knowledge_bases) or '(none)'}",
         f"safety: {workspace.safety}",
         f"scripting_enabled: {workspace.scripting_enabled}",
-        f"use_ocr: {workspace.use_ocr}",
         f"python_interpreter: {workspace.python_interpreter or '(default)'}",
         f"command_allowlist: {', '.join(workspace.command_allowlist) or '(none)'}",
         f"script_timeout_seconds: {workspace.script_timeout_seconds:g}",

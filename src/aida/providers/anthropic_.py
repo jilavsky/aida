@@ -29,6 +29,7 @@ from anthropic import (
 
 from aida.config.logging_setup import get_logger
 from aida.core.events import (
+    REASONING_TAIL_CHARS,
     AgentError,
     AgentEvent,
     MessageFinished,
@@ -283,6 +284,10 @@ class _StreamState:
     #: rather than an invisible backend detail — see UsageInfo.
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
+    #: Characters of extended-thinking text (see
+    #: ``MessageFinished.reasoning_chars``); counted, never kept.
+    reasoning_chars: int = 0
+    reasoning_tail: str = ""
 
     def full_text(self) -> str:
         return "".join(self.text_parts)
@@ -329,6 +334,10 @@ def process_anthropic_event(event: Any, state: _StreamState) -> list[AgentEvent]
             _ensure_started(state, events)
             state.text_parts.append(delta.text)
             events.append(TextDelta(message_id=state.message_id, text=delta.text))
+        elif dtype == "thinking_delta":
+            thinking = getattr(delta, "thinking", "") or ""
+            state.reasoning_chars += len(thinking)
+            state.reasoning_tail = (state.reasoning_tail + thinking)[-REASONING_TAIL_CHARS:]
         elif dtype == "input_json_delta":
             builder = state.tool_blocks.setdefault(
                 event.index, {"id": None, "name": None, "partial_json": ""}
@@ -362,6 +371,8 @@ def process_anthropic_event(event: Any, state: _StreamState) -> list[AgentEvent]
             MessageFinished(
                 message_id=state.message_id,
                 stop_reason=_STOP_REASON_MAP.get(state.stop_reason, "stop"),
+                reasoning_chars=state.reasoning_chars,
+                reasoning_tail=state.reasoning_tail,
             )
         )
         if state.input_tokens or state.output_tokens:

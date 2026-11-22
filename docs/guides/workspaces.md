@@ -44,8 +44,7 @@ editor, from the GUI's **Configure** menu.
 | `templates_dir` | `None` | Folder of `.py` code templates offered to this workspace; `None` means no templates — see [coding-and-scripting.md](coding-and-scripting.md). |
 | `saved_scripts_dir` | `None` | Where the Code Editor saves scripts; `None` defaults to `<target_folder>/saved_scripts` — see [coding-and-scripting.md](coding-and-scripting.md). |
 | `quick_tasks` | `[]` | Up to ten named prompt templates for this workspace's routine jobs, shown in the GUI's **Quick Tasks** panel — see [gui-overview.md](../getting-started/gui-overview.md). Each entry is a `name`/`text` pair; managed from the panel's right-click menu, no CLI flag. |
-% CHECK(Jan): the table has no rows for `use_ocr` (the form's "Document OCR" checkbox, see
-% guides/documents.md) or `notes` (the "Workspace Notes" panel); both are WorkspaceConfig fields.
+% CHECK(Jan): the table has no row for `notes` (the "Workspace Notes" panel), a WorkspaceConfig field.
 | `script_timeout_seconds` | `30.0` | Seconds a `run_python_script`/`run_command` invocation gets before its subprocess is killed — a true per-workspace ceiling (a model-requested longer timeout is capped at this, not honored unbounded) — see [coding-and-scripting.md](coding-and-scripting.md). |
 
 (workspaces-cli)=
@@ -148,7 +147,7 @@ at all: `profile`, `mcp_group`, `skills`, `knowledge_bases`,
 and folder pickers for `templates_dir` and `saved_scripts_dir`.
 
 ```{figure} img/workspaces/workspaces-02-edit-form.png
-:alt: The Edit Workspace form for saxs-analysis, scrolled to the top. Fields for name, profile, source folders, target folder, sidecar folder name, MCP group, skills and knowledge bases as tick lists, safety mode, system prompt with a Use a File Reference button, Document OCR, and the Scripting group with enabled, Python interpreter, command allowlist, script and command timeout and templates folder. OK and Cancel at the bottom.
+:alt: The Edit Workspace form for saxs-analysis, scrolled to the top. Fields for name, profile, source folders, target folder, sidecar folder name, MCP group, skills and knowledge bases as tick lists, safety mode, system prompt with a Use a File Reference button, and the Scripting group with enabled, Python interpreter, command allowlist, script and command timeout and templates folder. OK and Cancel at the bottom.
 
 **Edit…** on `saxs-analysis`: the form scrolls; OK and Cancel stay visible.
 ```

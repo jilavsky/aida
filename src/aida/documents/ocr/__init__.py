@@ -1,22 +1,25 @@
-"""Optional OCR/layout backends for document figure extraction.
+"""Converting PDF pages that have no usable text layer.
 
-Everything here is opt-in and must degrade to the built-in `pymupdf`
-extractor whenever it is unavailable — see ``aida.documents.figure_tools``
-for where that fallback is enforced.
+``vlm`` renders such pages and sends them to a model with vision through the
+ordinary provider layer; ``common`` pairs figure captions from the resulting
+reading-order Markdown. Without a model that can see, nothing is converted
+and the reader says so — see ``aida.documents.ocr.vlm``.
 """
 
-from aida.documents.ocr.mistral import (
-    DEFAULT_MODEL,
-    SECRET_REF,
-    MistralOcrError,
-    figures_from_ocr,
-    ocr_pdf,
+from aida.documents.ocr.common import apply_page_captions
+from aida.documents.ocr.vlm import (
+    ConversionResult,
+    PdfPageConverter,
+    RouteDecision,
+    build_routes,
+    describe_route,
 )
 
 __all__ = [
-    "DEFAULT_MODEL",
-    "SECRET_REF",
-    "MistralOcrError",
-    "figures_from_ocr",
-    "ocr_pdf",
+    "ConversionResult",
+    "PdfPageConverter",
+    "RouteDecision",
+    "apply_page_captions",
+    "build_routes",
+    "describe_route",
 ]

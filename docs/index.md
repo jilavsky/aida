@@ -34,7 +34,7 @@ commented example config files, see [`examples/config/`](https://github.com/jila
 | {doc}`reference/mcp-servers` | Adding MCP servers (pyIrena, bait_mcp, web search, ...), groups, per-tool permissions |
 | {doc}`reference/context-and-limits` | The model's context window, what fills it, compaction, and the fullness indicator |
 | {doc}`guides/organizing-conversations` | User/project labels, sidebar filtering, and `{user}` paths |
-| {doc}`guides/documents` | Attachment storage and cleanup, figure tools, and optional Mistral OCR |
+| {doc}`guides/documents` | Attachment storage and cleanup, figure tools, and scanned PDFs read by a vision model |
 | {doc}`guides/coding-and-scripting` | Letting the agent run Python/shell commands, code templates, the Code Editor |
 | {doc}`guides/knowledge-bases` | RAG: indexing your own documents so the agent can search them |
 | {doc}`guides/pyirena` | Using AIDA with pyIrena: one-click MCP setup, and sharing an environment between the two packages |

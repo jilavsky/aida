@@ -230,6 +230,10 @@ class ImageRef:
 
     path: str
     mime_type: str | None = None
+    #: Longest edge to downscale to before sending, when this image needs
+    #: more detail than ``aida.providers.vision.MAX_IMAGE_EDGE_PX`` (a page
+    #: rendered for OCR). In memory only; never saved with a message.
+    max_edge_px: int | None = None
 
 
 @dataclass

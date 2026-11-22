@@ -761,3 +761,254 @@ signals from a retired `ChatBridge` reaching the new chat (Qt delivers an
 already-queued cross-thread call even after `disconnect()`, which showed
 up as a Windows-only CI failure); and live application of changed global
 allowed folders.
+
+## 14. Context compaction in long agent runs (2026-11-20)
+
+**What happened.** A proposal-review session (profile `Splash-Flash`, 512k
+window) ran out of context although both automatic and manual compaction
+ran. It had 395 messages and ~1.78 M characters but only 5 user messages,
+so 5 turns; one turn alone held 157 messages and ~840k characters, mostly
+`read_file` results at the 100,000-character cap and `web_fetch` results.
+The log showed `239 message(s) -> 239 (1 turn(s) summarized)` repeating,
+and the same loop (~30 times) on 2026-11-05.
+
+**Root causes.** (1) The smallest removable unit was a whole turn and the
+last 4 turns were always kept, so a run that sits inside 1 to 3 huge turns
+could not be reduced, and "Compact Conversation" did nothing visible.
+(2) The summary was a `role="user"` message, hence a turn of its own; once
+it was the only turn above the floor, every round trip re-summarized it.
+(3) Old tool results inside a turn were never shrunk. (4) No per-result
+cap relative to the budget. (5) The summary request carried every dropped
+turn with full tool results and could itself exceed the window, falling
+back to a plain drop. (6) Nothing told the user when compaction could not
+get under budget.
+
+**What changed** (`core/context.py`, `core/session.py`, `core/agent.py`):
+
+- *Stage A*, `shrink_old_tool_results`: before any turn is dropped, old
+  tool results (and long string arguments of old tool calls) become
+  one-line stubs that keep `tool_call_id` and `name`, oldest first, never
+  in the last 3 tool rounds. It shrinks to 80 % of the budget once
+  triggered, so it does not change old history (and break the prompt
+  cache) on every round trip. Stubs are recognized by a content prefix,
+  so no persisted schema changed. Before shrinking or dropping anything
+  mid-turn, the session records any not-yet-recorded messages, so only
+  persisted messages are ever replaced and the DB keeps full text.
+- *Summary handling*: `plan_trim` holds a summary at the front aside as
+  `TrimPlan.previous_summary`; it is never dropped on its own, and a later
+  compaction folds it into the new summary (rolling summary).
+  `clear_context` passes `keep_summary=False`.
+- *Turn floor*: when still over budget at 4 kept turns, `plan_trim` goes on
+  to `fallback_min_recent_turns`, which the session sets to the turns of
+  the running `send()` (so the user's request is kept even when a context
+  or steering message, also `role="user"`, splits the turn). Manual
+  `compact_now()` runs stage A at target 0 first.
+- *Per-result cap*: `AgentLoop(tool_result_filter=...)`; the session caps a
+  result at 5 % of the history budget (8k to 100k chars), saves the full
+  text to `<scratch>/tool-results/` and keeps head, tail and path.
+  `read_file` gained `offset`/`length` to page through it.
+  `ToolCallFinished` still carries the full result for the frontend.
+- *Summary request*: tool output clipped to 1,500 chars at each end, and
+  the transcript split into pieces of about half the budget, each merged
+  into the running summary.
+- *Visibility*: `ContextTrimmed` gained `shrunk_tool_results`,
+  `over_budget` and `budget_tokens` (defaulted), and a `describe()` both
+  frontends use. "Still over budget" is reported once per turn; the GUI
+  shows it as a banner in the chat.
+- *Doctor*: `max_tokens` over 15 % of `context_window` is a note.
+
+**Choices made against the original proposal.** The rolling summary
+replaces "chunk, then combine chunk summaries": one mechanism covers both
+the merge of a previous summary and an oversized transcript. "Still over
+budget" rides on `ContextTrimmed` rather than a new event type, so CLI,
+GUI, bridge and serialization needed no new branch. Spilled results live
+in scratch (cleaned on the scratch retention schedule), not in the
+conversation's record; the DB stores the capped message the model saw.
+
+**Follow-up, 2026-11-21.** A torture test (conversation `7c728e95`,
+Splash-Flash at 1M window and `max_tokens: 64000`, 433 messages, ~3.2 M
+characters, ~250 tool calls) confirmed stage A: two passes (34 and 24
+results), each reaching the 80 % target at once, with no summary loop.
+It found two other problems:
+
+- *Two stops mid-task*: text-only replies announcing an action ("Writing
+  the dossier now.") ended the turn, each followed after the user's nudge
+  by the largest `write_file` of the session. Most likely the reply hit
+  `max_tokens` (Qwen's reasoning counts against it) and the server dropped
+  the incomplete tool call; a partially streamed call already arrived
+  with `UNPARSED_ARGUMENTS_KEY` and was answered, so the server must have
+  sent none. AIDA could not tell, because `AgentLoop` ignored
+  `stop_reason`. Now: every turn-ending round trip logs stop reason,
+  output tokens and reasoning length (`MessageFinished.reasoning_chars`,
+  from `reasoning_content`/`reasoning` or Anthropic `thinking_delta`);
+  a `length` stop with no usable tool call gets one `LENGTH_NUDGE` per
+  turn and then ends with an error; a short reply that announces a step
+  after tool work gets `STALL_NUDGE` (at most 2 per turn,
+  `auto_continue_on_stall`), both emitted as `TurnNudged`.
+  The proposal's stall rule ("any text-only reply under 300 chars after a
+  tool round") was narrowed to replies phrased as an upcoming action,
+  because a short "Done — saved to fig.png." after tool work is the
+  ordinary end of most tasks and would have drawn a pointless extra call.
+- *Web search was 59 % of the context* (69 calls, ~28k chars each):
+  `DEFAULT_TOOL_RESULT_CAPS` holds `*web_search*`/`*search_web*` to
+  10,000 chars; `AppConfig.tool_result_char_caps` (new config kind
+  `dict[str,int]`) adds patterns, merged over the defaults at use so a
+  saved config does not freeze them.
+- *Tool errors*: `search_text` takes a file; `run_python_script` on a
+  missing script says to write it first in a separate step.
+
+**Second follow-up, 2026-11-21 evening** (conversation `ba1b5437`, 371
+messages, 213 tool calls, ~1.56 M chars). The history peaked at ~450k of a
+~764k budget, so stage A never ran; the web search cap trimmed all 45
+searches; the "write it first" hint worked. The two remaining stops both
+ended with `stop`, not `length` (17:09: 175 chars of text behind 17,316 of
+reasoning; 17:17: 139 behind 15,094), which ruled out the output-limit
+theory for them, and one was missed because its wording matched none of
+`_ANNOUNCES_STEP`. Changes:
+
+- *Stall by shape* (`is_stall`): short reply (≤ 300 chars) behind
+  reasoning ≥ 3,000 chars and ≥ 10× the text; phrasing stays the fallback
+  for providers with no reasoning; questions and closing offers excluded.
+  Providers now keep the last 1,500 chars of reasoning
+  (`MessageFinished.reasoning_tail`), logged at INFO for any short reply
+  after tool work, never stored.
+- *Tool call in the reasoning*: detected (`<tool_call>`, `<function=`,
+  `{"name":…,"arguments":…}`) and answered with a nudge asking the model
+  to send it. **Not executed**, against the proposal: reasoning routinely
+  contains drafted calls the model then rejects, and AIDA running one would
+  be acting on something the model never sent. The log line settles
+  whether this is what happens.
+- *`run_command` shell syntax*: `shell_syntax_problem` (shlex with
+  punctuation splitting, so quoted operators pass) refuses `&&`, `||`,
+  `|`, `;`, redirection, `$(`, backticks and shell keywords before the
+  safety prompt; the description says "no shell". Running through a shell
+  after confirmation was not adopted (DESIGN.md §5: never `shell=True`).
+- *Unknown tool*: prefix-before-`=`/`(`/space or difflib ≥ 0.8 suggests
+  the tool and its required arguments; never run automatically.
+- *Fetch caps*: `*web_fetch*`, `*fetch_url*`, `*web_extract*`,
+  `*tavily_extract*` at 15,000 chars. The proposed `*extract*` was
+  narrowed: it would also catch unrelated tools.
+
+## 15. Scanned PDFs read by a vision model; Mistral OCR removed (2026-11-21)
+
+**Why.** Mistral's free OCR tier stopped working from AIDA, and uploading
+papers to a third party was always its weak point. Two gaps: scanned or
+image-only PDF pages gave the agent no text (the reader only said so), and
+figure/caption pairing on two-column papers, the one job Mistral did.
+
+**Design** (`documents/ocr/vlm.py`, `documents/ocr/common.py`):
+
+- Pages are rendered with PyMuPDF (longest side 1540 px, JPEG above
+  3.5 MB) and sent through the ordinary provider layer, so Argo,
+  Anthropic and local OpenAI-compatible servers all work with no new
+  transport and no new dependency. `ImageRef.max_edge_px` (in memory, not
+  saved) lets a page render bypass the 1024 px vision downscale.
+- Route order: `AppConfig.ocr_profile` if set, then the chat profile if
+  `supports_vision`, else a message naming the profile and the fix. A
+  route that converts nothing falls through to the next with a note; a
+  failed page is a marked gap. Concurrency 1 for loopback, 3 for remote.
+- Privacy: the chat route and loopback OCR profiles need no consent; a
+  dedicated profile on a different remote host asks once per document
+  (`ocr_page_upload`, rememberable, refused in unattended runs unless
+  pre-approved).
+- `read_file` converts pages under the 50-chars-per-page threshold (or all
+  pages with `ocr: true`) and marks converted pages. GUI attachments are
+  extracted on the GUI thread, which has no model, so a scanned
+  attachment's text points the agent at `read_file` with the file's path,
+  and the status bar names the route or why there is none.
+- Figures: the built-in extractor runs first; only pages with a figure
+  below "high" confidence are converted, and captions are taken from the
+  placeholders in reading order when the counts match (one figure on the
+  page: "high"; several: matched in order, built-in confidence kept, since
+  image order is not guaranteed to be reading order).
+- Cache: `~/.aida/cache/ocr/<sha256>/`, keyed by model, render size and a
+  conversion version. A central cache rather than the document's assets
+  folder, because `read_file` also converts files that are not
+  attachments.
+- Settings: `ocr_backend: auto | off` (default auto) and `ocr_profile`
+  replace the workspace `use_ocr`; an old `use_ocr` key is ignored with a
+  one-time log line and dropped on save. The `ocr` extra is kept empty so
+  existing install commands do not warn. `aida documents convert`
+  replaces `verify-ocr`; doctor prints the route.
+
+**Tested live** against `Maternion/LightOnOCR-3:4b` on Ollama 0.40.17
+(synthetic scanned two-column page): with the prompt before the image, and
+equally with the image first, the model wrote the page into its
+`reasoning` and returned empty `content`, deterministically at
+temperature 0. `think: false` is ignored on Ollama's OpenAI endpoint;
+`reasoning_effort: "none"` works (clean content, 2.7 s instead of 6 s).
+Hence `convert_page`: an empty reply with reasoning is retried once with
+`REASONING_OFF`, and the route keeps it for later pages. Not sent up
+front, because AIDA only auto-drops sampling parameters and other
+providers may reject it. The model wrote `![image](image_1.png)` rather
+than the requested `![fig-N]`; the placeholder regex accepts any image
+link, and caption pairing parsed it. Fallback from a broken OCR profile
+(404) to the vision chat model and the no-vision message were also
+checked live. Also: the page request now closes its stream with
+`aclosing` (an unclosed stream printed an httpcore traceback at exit).
+
+**Left out on purpose, in TODO.md:** cropping figures from LightOnOCR-2
+`-bbox` boxes (its output format needs a real model to verify), a "Test
+on a page" button (the CLI covers it), a per-profile prompt override, and
+the model comparison a docs recommendation needs.
+
+
+### 15.1 Attached files readable from the conversation folder (2026-11-21)
+
+Live test: a PDF attached in the GUI was read and its figures extracted,
+yet the agent reported it "couldn't locate the file on disk" and searched
+outside the allowed folders. The copy in
+`<records_dir>/attachments/<conv8>/` existed, but the message never named
+it (it was made after the message was recorded) and `authorize_read`
+treated that folder as outside. The scanned-page note also pointed at the
+original path, which is usually outside the allowed folders too.
+
+- `ChatSession._run_turn` copies attachments first and appends their paths
+  (`documents.attachments.append_attachment_locations`).
+- `SafetyGuard.readable_roots` / `allow_reading()`: read without asking,
+  nothing else. Kept separate from `read_only_roots`, which also lets
+  scripts run under the workspace's mode; an attached script must not.
+  `start_session` adds the conversation's attachments folder.
+- The GUI's scanned-page note now points at the saved copy.
+
+### 15.2 Long PDFs and equations drawn as images (2026-11-21)
+
+Live test on a 22-page two-column proof with 13 figures: equations (1)–(8)
+arrived as numbers only, and the text stopped on page 17 with no note.
+
+- Truncation: `_read_pdf_file` appended its notes after cutting to
+  `max_chars`, and every caller (`describe_for_model`) cut again at
+  `max_chars`, which removed them. The text is now shortened so the notes
+  fit, and a truncation note gives the stop page and the `read_file`
+  offset. Offsets match `read_file`'s paged mode because both read the same
+  text.
+- Equations: `readers.missing_equation_numbers` flags a line that is only
+  "(n)" with no other text overlapping its height and centred in its column
+  (within half a page width to the left). `pdf_pages_to_convert` adds those
+  pages to the scanned ones for `read_file` and `aida documents convert`;
+  the plain reader adds a note naming the equations. The GUI status-bar
+  hint still covers scanned pages only.
+
+Checked on the real paper (`pagination_DES_120805.pdf`, 24 pages, proof
+with an "UNCORRECTED PROOF" watermark). The first version found 5 of 8
+equations and two false hits; three rules came out of it:
+
+- The diagonal watermark is one text line spanning the page; it hid every
+  right-column number. Rotated lines (`dir` not horizontal) are skipped.
+- A WAXS table row "(100) (110) (200)" matched. A number must now end at
+  its column's right edge: the median right end of the lines passing
+  across its position (median, because a full-width figure caption spans
+  both columns and otherwise moved the left column's edge to the page
+  margin).
+- Result: Eqs. (1)–(8) on pages 4, 5, 11, 13, 14, no false pages.
+  LightOnOCR-3 1b converted the five pages in about 60 s with all eight
+  formulas as LaTeX (it dropped one equation's "(4)" label).
+
+The same run printed httpcore "generator didn't stop after athrow()"
+tracebacks at exit with reasoning on. Cause: openai 3.3's
+`AsyncStream.__stream__` breaks at `[DONE]` and closes the response but
+never closes its `_iter_events()` iterator; finalizing it trips httpcore2.
+`OpenAICompatProvider.complete` now closes the SDK stream in `finally` and
+installs a loop exception handler that drops only that report (RuntimeError
+with that text from an httpcore async generator), chaining to the previous
+handler for everything else.

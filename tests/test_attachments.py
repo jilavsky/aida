@@ -19,7 +19,15 @@ import sqlite3
 from pathlib import Path
 
 from aida.artifacts.store import ArtifactStore
-from aida.documents.attachments import assets_dir_for, store_attachment, store_attachments
+from aida.documents.attachments import (
+    ATTACHMENT_LOCATIONS_HEADING,
+    IngestResult,
+    StoredAttachment,
+    append_attachment_locations,
+    assets_dir_for,
+    store_attachment,
+    store_attachments,
+)
 from aida.persistence.cleanup import delete_conversation
 from aida.persistence.db import CURRENT_SCHEMA_VERSION, connect
 from aida.persistence.recorder import ConversationRecorder
@@ -378,3 +386,23 @@ def test_the_extracted_text_is_written_beside_the_document(tmp_path: Path):
     folder = attachments_dir(records, recorder.conversation_id)
     assert (folder / "paper.pdf").exists()
     assert (folder / "paper.pdf.md").read_text() == "Extracted body text"
+
+
+def test_the_message_lists_each_copy_and_any_file_that_was_not_copied():
+    result = IngestResult(
+        stored=[
+            StoredAttachment(
+                source_path="/Downloads/paper.pdf", stored_path="/rec/a/paper (1).pdf"
+            ),
+            StoredAttachment(source_path="/gone/x.pdf", stored_path="", error="No such file"),
+        ],
+        directory="/rec/a",
+    )
+    text = append_attachment_locations("summarise", result)
+    assert text.startswith("summarise\n\n" + ATTACHMENT_LOCATIONS_HEADING)
+    assert "- paper.pdf: /rec/a/paper (1).pdf" in text
+    assert "- x.pdf: not copied (No such file); original at /gone/x.pdf]" in text
+
+
+def test_no_attachments_leaves_the_message_alone():
+    assert append_attachment_locations("hello", IngestResult()) == "hello"
