@@ -23,6 +23,7 @@ from typing import Any
 
 from aida.config.logging_setup import configure_logging
 from aida.config.settings import ConfigFileError, Settings, load_settings
+from aida.ui.qt import raised_buttons
 from aida.ui.qt._qt import QApplication, QMessageBox
 from aida.ui.qt.bridge import AsyncLoopThread
 from aida.ui.qt.icon import app_icon
@@ -80,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(sys.argv)
     app.setWindowIcon(app_icon())
     apply_font_size(app, settings.app)
+    raised_buttons.install(app)   # shared raised-button look (vendored from pyIrena)
 
     loop_thread = AsyncLoopThread()
     loop_thread.start()

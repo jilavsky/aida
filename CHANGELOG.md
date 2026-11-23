@@ -16,6 +16,17 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Changed
+
+- **Buttons look like buttons.** Push buttons are drawn raised (gradient
+  face, bevel, sunken when pressed), with the same look and colour meaning
+  as pyIrena, Matilda, Bernardyn and DataReporter. Stop stays the one red
+  action button; Documentation stays red (help). Collapsible headers and
+  link-style buttons are unchanged, and plain buttons switch to a dark face
+  when the system is in dark mode. `ui/qt/raised_buttons.py` is a vendored
+  copy of pyIrena's; do not edit it here, refresh it with
+  `pyirena/scripts/sync_raised_buttons.py`.
+
 ### Fixed
 
 - **Long PDFs no longer stop without a word.** A PDF longer than the

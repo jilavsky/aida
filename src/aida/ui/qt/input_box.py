@@ -27,6 +27,7 @@ import os
 import time
 from pathlib import Path
 
+from aida.ui.qt import raised_buttons
 from aida.ui.qt._qt import (
     QFileDialog,
     QHBoxLayout,
@@ -54,19 +55,8 @@ _BUSY_PLACEHOLDER = "Agent is working — type to add a note for its next step (
 #: (the one colored button in the window: red = "this stops something"),
 #: visible only while a turn is running, with a live "Working… 12s" label
 #: beside it — so both the state and how long it has been going are
-#: readable at a glance.
-_STOP_BUTTON_STYLE = """
-QPushButton {
-    background-color: #c0392b;
-    color: white;
-    font-weight: bold;
-    border: 1px solid #96281b;
-    border-radius: 4px;
-    padding: 4px 10px;
-}
-QPushButton:hover { background-color: #d64535; }
-QPushButton:pressed { background-color: #96281b; }
-"""
+#: readable at a glance. Its colour is the shared "stop" role
+#: (``raised_buttons``, same red as every Stop/Cancel in pyIrena & co.).
 
 #: How often the "Working…" label repaints. Sub-second so the animated
 #: dots read as motion (the point: motion is what says "not frozen"),
@@ -279,7 +269,7 @@ class InputBox(QWidget):
         # "send this text" and "stop the turn" — the user needs Send to
         # stay Send while the agent works.
         self._stop_button = QPushButton("Stop", self)
-        self._stop_button.setStyleSheet(_STOP_BUTTON_STYLE)
+        raised_buttons.set_role(self._stop_button, "stop")
         self._stop_button.setToolTip("Stop the turn in progress")
         self._stop_button.clicked.connect(self.cancel_requested.emit)
         self._stop_button.setVisible(False)
@@ -318,7 +308,7 @@ class InputBox(QWidget):
         """Called by whatever owns this widget (MainWindow) on
         ``ChatBridge.turn_started``/``turn_finished`` — while busy, the
         red **Stop** button appears, Send becomes **Queue**, and the
-        "Working… Ns" label ticks beside them (see ``_STOP_BUTTON_STYLE``).
+        "Working… Ns" label ticks beside them (the shared red ``stop`` role).
 
         The text box deliberately stays *enabled* while busy: text typed
         during a turn is handed to that turn rather than rejected (see
