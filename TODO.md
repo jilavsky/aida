@@ -1,8 +1,8 @@
 # AIDA — where we are, and what is left
 
-**Updated 2026-11-21.** §1 and §2 below are the 1.0 readiness review of
-2026-10-16, kept as the record of that release; §3 to §5 are the live
-working list, and §6 is what was left from the PDF work. `PLAN.md` keeps
+**Updated 2026-11-23, for 1.1.2.** §1 and §2 below are the 1.0 readiness
+review of 2026-10-16, kept as the record of that release; §3 to §5 are the
+live working list, and §6 is what was left from the PDF work. `PLAN.md` keeps
 the reasoning behind each item and `planning/COMPLETED.md` keeps what is
 already done. The context-compaction work of 2026-11-20/21 is recorded in
 `planning/COMPLETED.md` §14, and the vision-model PDF conversion that
@@ -213,10 +213,10 @@ OSes was verified in this review and the boxes are ticked.
 
 ### GUI, on each OS
 
-- [ ] **Manual smoke checklist on macOS and Windows**, including: the Stop
-      button interrupting a long generation cleanly with the app still
-      usable afterwards, and the flagship pyIrena demo on both a cloud and
-      a local Ollama model.
+- [ ] **Manual smoke checklist on Windows**, including: the Stop button
+      interrupting a long generation cleanly with the app still usable
+      afterwards, and the flagship pyIrena demo on both a cloud and a
+      local Ollama model. Done on macOS (2026-11-23).
 - [ ] **Clean-machine install from PyPI on all three OSes** —
       `pip install "aida-workbench[gui,docs,science]"` → working
       `aida-gui`. 1.0.1 is on PyPI, so this can be done now.
@@ -281,11 +281,12 @@ file. Full writeup in
 The vision-model conversion of scanned PDF pages shipped (see
 `planning/COMPLETED.md` §15). Deliberately left for later:
 
-- [ ] **Compare models on real papers.** The docs recommend LightOnOCR-3
-      1B (4B needs ~12 GB and starved a machine also running a chat model);
-      tried on one real two-column paper. Still to do: 2–3 more papers
-      against a general local vision model and a cloud model, with
-      `aida documents convert --all`.
+- [ ] **PDF reading with only a cloud model.** Reading PDFs (long ones,
+      scanned pages, image-only equations) was tested on many real papers
+      with a local model on 2026-11-23 and works well. Still to do: the
+      same on a machine that has only a large cloud model, so the chat
+      model's vision does the conversion, with
+      `aida documents convert --all`. Not blocking a release.
 - [ ] **Figure crops from LightOnOCR bounding boxes.** Use the returned
       embedded-image boxes to crop figures from the rendered page, so
       figures that are vector drawings (not embedded images) can be shown.
@@ -294,10 +295,6 @@ The vision-model conversion of scanned PDF pages shipped (see
       need different wording.
 - [ ] **"Test on a page" in Settings → Documents**, if the CLI
       (`aida documents convert FILE --pages 1`) turns out not to be enough.
-- [ ] If stalls or garbled tool calls keep appearing on `Splash-Flash`,
-      run one proposal with `Splash-dense` (27B dense, less quantized) for
-      comparison; the new log lines (`short reply after tool work … end of
-      reasoning`) show whether the model writes the call in its reasoning.
 
 ---
 

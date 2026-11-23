@@ -16,6 +16,15 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-23
+
+Long agent runs that no longer run out of context or stop silently,
+scanned pages and image-only equations in PDFs read by a vision model
+(replacing Mistral OCR), long PDFs read in parts, and raised buttons
+shared with pyIrena. Config files, databases and bundles from 1.1.x load
+unchanged, and neither database schema changes; a workspace's `use_ocr`
+setting is ignored and dropped when the file is next saved.
+
 ### Changed
 
 - **Buttons look like buttons.** Push buttons are drawn raised (gradient
@@ -1462,7 +1471,8 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/jilavsky/aida/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/jilavsky/aida/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/jilavsky/aida/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/jilavsky/aida/compare/v1.0.0...v1.0.1

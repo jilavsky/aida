@@ -11,7 +11,7 @@ build-backend = "hatchling.build"
 # documented fallback; `pip install aida-workbench[gui]` still gives you
 # `import aida` and the `aida` / `aida-gui` console scripts.
 name = "aida-workbench"
-version = "1.1.1"
+version = "1.1.2"
 description = "AIDA — AI Data Assistant: a local scientific agent workbench."
 readme = "README.md"
 license = { text = "MIT" }
@@ -137,7 +137,12 @@ exclude = ["Claude outputs"]
 # docs/ are written at the indentation they will actually live at, so a
 # reader (or an agent following a guide) can see where a block belongs.
 # Reformatting them to column zero silently destroys that.
-exclude = ["*.md"]
+#
+# src/aida/ui/qt/raised_buttons.py is a vendored copy of pyIrena's
+# pyirena/gui/raised_buttons.py and must stay byte-identical to it
+# (pyirena/scripts/sync_raised_buttons.py checks that). Formatting it here
+# would make it drift; it is still linted.
+exclude = ["*.md", "src/aida/ui/qt/raised_buttons.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]

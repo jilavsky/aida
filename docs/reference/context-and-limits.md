@@ -1,7 +1,7 @@
 (context-and-limits)=
 # Context window and limits
 
-> **Status: 1.1.1.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.2.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
 > [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what

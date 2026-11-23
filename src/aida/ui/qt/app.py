@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(sys.argv)
     app.setWindowIcon(app_icon())
     apply_font_size(app, settings.app)
-    raised_buttons.install(app)   # shared raised-button look (vendored from pyIrena)
+    raised_buttons.install(app)  # shared raised-button look (vendored from pyIrena)
 
     loop_thread = AsyncLoopThread()
     loop_thread.start()

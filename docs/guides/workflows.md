@@ -1,7 +1,7 @@
 (workflows)=
 # Automation: `aida run`, workflows, and schedules
 
-> **Status: 1.1.1.** Implemented on top of the same
+> **Status: 1.1.2.** Implemented on top of the same
 > session engine every interactive chat uses — a headless run or a
 > scheduled job is not a separate code path, it's a different *driver* of
 > `start_session`/`ChatSession.send`. See

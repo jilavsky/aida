@@ -21,8 +21,11 @@ def test_module_imports_no_gui_toolkit():
     tree = ast.parse(Path(rb.__file__).read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
-            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
-                     else [node.module or ""])
+            names = (
+                [a.name for a in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""]
+            )
             for name in names:
                 assert not re.match(r"(PySide|PyQt)", name), name
 

@@ -3,7 +3,7 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 1.1.1, released 2026-11-16.** All ten phases are implemented,
+**Status: 1.1.2, released 2026-11-23.** All ten phases are implemented,
 tested (2,575 tests, three OSes, CI green on all six matrix legs) and in
 daily use. This file holds **only what is not done** —
 anything ticked here has been moved to `planning/COMPLETED.md`, and
@@ -122,7 +122,7 @@ left this box open for the same reason are ticked too.*
       folder + an Obsidian vault). Speed is settled (see §2.4); what is
       owed is retrieval quality on real documents.
 - [ ] Stop button interrupts a long generation cleanly and the app stays
-      usable; manual smoke checklist on macOS *and* Windows.
+      usable; manual smoke checklist on Windows (done on macOS 2026-11-23).
 
 ### 1.5 Small, decided, not yet done
 

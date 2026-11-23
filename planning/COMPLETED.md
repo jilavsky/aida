@@ -1012,3 +1012,10 @@ never closes its `_iter_events()` iterator; finalizing it trips httpcore2.
 installs a loop exception handler that drops only that report (RuntimeError
 with that text from an httpcore async generator), chaining to the previous
 handler for everything else.
+
+**Verified 2026-11-23, before 1.1.2.** PDF reading (long PDFs in parts,
+scanned pages, image-only equations) tested on many real papers with a
+local model, and it works well. The stalls and garbled tool calls seen on
+`Splash-Flash` (§14) no longer appear. The GUI smoke checklist, including
+Stop, passed on macOS. Still open in `TODO.md`: the same PDF test on a
+machine with only a cloud model, and the smoke checklist on Windows.
