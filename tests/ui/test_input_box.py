@@ -475,7 +475,8 @@ def test_busy_state_is_visible_not_just_implied(qapp):
     box.set_busy(True)
 
     assert box._stop_button.isVisibleTo(box)
-    assert box._stop_button.styleSheet()  # recolored, not a default button
+    # recoloured by the shared red "stop" role, not a default button
+    assert box._stop_button.property("btnRole") == "stop"
     assert box._busy_label.isVisible() or box._busy_label.isVisibleTo(box)
     assert box.busy_status_text().startswith("Working")
     assert "Stop" in box.busy_status_text()

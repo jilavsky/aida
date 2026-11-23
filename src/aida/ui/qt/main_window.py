@@ -57,6 +57,7 @@ from aida.persistence.cleanup import delete_conversation, list_conversations_old
 from aida.persistence.recorder import ConversationRecorder
 from aida.persistence.store import TITLE_MANUAL, ArtifactRecord, ConversationStore
 from aida.providers.base import ImageRef
+from aida.ui.qt import raised_buttons
 from aida.ui.qt._qt import (
     QAction,
     QActionGroup,
@@ -352,12 +353,7 @@ class MainWindow(QMainWindow):
         self.documentation_button.setToolTip(
             f"Open the AIDA documentation in your web browser\n{docs_url()}"
         )
-        self.documentation_button.setStyleSheet(
-            "QPushButton { background-color: #c0392b; color: white; font-weight: bold; "
-            "border: none; border-radius: 4px; padding: 4px 12px; }"
-            "QPushButton:hover { background-color: #e74c3c; }"
-            "QPushButton:pressed { background-color: #96281b; }"
-        )
+        raised_buttons.set_role(self.documentation_button, "help")
         self.documentation_button.clicked.connect(self._on_open_documentation)
         toolbar.addWidget(self.documentation_button)
 
