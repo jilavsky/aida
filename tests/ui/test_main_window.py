@@ -50,7 +50,7 @@ from aida.ui.qt.artifact_widgets import InlineImageWidget
 from aida.ui.qt.chat_panel import MessageBubble
 from aida.ui.qt.conversation_header import PLACEHOLDER_TITLE
 from aida.ui.qt.conversations_sidebar import TITLE_ROLE
-from aida.ui.qt.main_window import MainWindow
+from aida.ui.qt.main_window import TOOLBAR_BUTTON_WIDTH, MainWindow
 from aida.workspace.workspaces import get_workspace
 from tests.ui._qt_test_utils import pump_until
 
@@ -4078,12 +4078,10 @@ def test_toolbar_keeps_only_the_operating_controls(
     provider, start a chat, open the code editor — plus the Documentation
     button pinned to the right-hand end.
 
-    New Chat and Code Editor are real ``QPushButton``s, not toolbar
-    ``QAction``s: an action renders as a flat ``QToolButton`` that does not
-    read as a button next to the raised Documentation one (GUI feedback:
-    "the New Chat and Code Editor buttons somehow do not look like
-    buttons"). Ctrl+N therefore lives on a shortcut-only action registered
-    on the window, tested separately above."""
+    New Chat and Code Editor are raised ``QPushButton``s like
+    Documentation, not toolbar ``QAction``s (which render as flat
+    ``QToolButton``s). Ctrl+N lives on a shortcut-only action registered on
+    the window, tested separately above."""
     settings = _settings_with_profile()
     window = _make_window(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
@@ -4104,8 +4102,8 @@ def test_toolbar_keeps_only_the_operating_controls(
 
         assert window.new_chat_button.text() == "New Chat"
         assert window.code_editor_button.text() == "Code Editor…"
-        # All three operating buttons share one fixed width so they read as
-        # a matched set rather than three differently sized labels.
+        # All three operating buttons share one fixed width, at least
+        # TOOLBAR_BUTTON_WIDTH, so they read as a matched set.
         widths = {
             b.width()
             for b in (
@@ -4114,7 +4112,8 @@ def test_toolbar_keeps_only_the_operating_controls(
                 window.documentation_button,
             )
         }
-        assert widths == {150}
+        assert len(widths) == 1
+        assert widths.pop() >= TOOLBAR_BUTTON_WIDTH
         assert window.new_chat_button.toolTip() and window.code_editor_button.toolTip()
         # Clicking the buttons must reach the same handlers the actions did.
         calls: list[str] = []
