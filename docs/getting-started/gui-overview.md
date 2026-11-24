@@ -62,6 +62,7 @@ scratch database for the screenshot; no model was running.)
   [providers-and-secrets.md](../reference/providers-and-secrets.md).
 - **New Chat** — starts a fresh conversation in the current workspace/profile
   without switching either; the old conversation stays saved in the sidebar.
+  The `Ctrl+N` shortcut does the same thing.
 - **Code Editor…** — opens a syntax-highlighted Python editor (Save/Save
   As/Run/Kill) pre-filled from a chat code block, or blank. See
   [coding-and-scripting.md](../guides/coding-and-scripting.md).

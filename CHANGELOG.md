@@ -16,6 +16,14 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+### Changed
+
+- **The toolbar's New Chat and Code Editor controls look like buttons.**
+  They were toolbar `QAction`s, which Qt renders as flat `QToolButton`s —
+  unlike the raised, pyIrena-style `Documentation` button beside them. They
+  are now real `QPushButton`s with the same raised look, tooltips, and
+  behavior; `Ctrl+N` still starts a new chat.
+
 ## [1.1.2] - 2026-11-23
 
 Long agent runs that no longer run out of context or stop silently,

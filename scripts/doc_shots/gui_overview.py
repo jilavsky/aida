@@ -29,14 +29,6 @@ def _window_with_conversation(ctx: Context):
     return open_main_window(ctx, settings, resume=conv_id)
 
 
-def _toolbar_button(window, text: str):
-    from aida.ui.qt._qt import QToolButton
-
-    return next(
-        b for b in window.findChildren(QToolButton) if b.text().rstrip("…") == text.rstrip("…")
-    )
-
-
 @shot("gui-overview-01-window")
 def window(ctx: Context):
     w = _window_with_conversation(ctx)
@@ -48,7 +40,7 @@ def window(ctx: Context):
         (2, widget_rect(w.user_selector, w), "r", (-10, 0)),
         (3, widget_rect(w.workspace_selector, w), "r", (-10, 0)),
         (4, widget_rect(w.profile_selector, w), "r", (-10, 0)),
-        (5, widget_rect(_toolbar_button(w, "Code Editor…"), w), "r", (16, 0)),
+        (5, widget_rect(w.code_editor_button, w), "r", (16, 0)),
         (6, widget_rect(w.documentation_button, w), "l", (-14, 0)),
         (7, widget_rect(w.sidebar, w), "tr", (-14, 14)),
         (8, widget_rect(w.conversation_header, w), "r", (-14, 0)),

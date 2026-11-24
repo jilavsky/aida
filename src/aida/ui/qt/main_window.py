@@ -313,15 +313,37 @@ class MainWindow(QMainWindow):
         # workspaces (or profiles, which explicitly keep history) —
         # _on_new_chat_requested reuses the same _restart_session machinery
         # pinned to the workspace/profile already active.
+        # These two are real QPushButtons rather than toolbar QActions:
+        # a QAction renders as a flat QToolButton, which does not read as
+        # a button next to the raised Documentation button (GUI feedback:
+        # "the New Chat and Code Editor buttons somehow do not look like
+        # buttons").
+        self.new_chat_button = QPushButton("New Chat", self)
+        self.new_chat_button.setToolTip(
+            "Start a fresh conversation in the current workspace/profile "
+            "— the old one stays saved in the sidebar (Ctrl+N)."
+        )
+        raised_buttons.set_role(self.new_chat_button, "neutral")
+        self.new_chat_button.clicked.connect(self._on_new_chat_requested)
+        toolbar.addWidget(self.new_chat_button)
+
+        # Ctrl+N survives as a shortcut-only action registered on the
+        # window, the same way Stop (Esc) and Focus Input (Ctrl+L) are:
+        # a QPushButton can carry no shortcut of its own.
         new_chat_action = QAction("New Chat", self)
         new_chat_action.setShortcut(QKeySequence("Ctrl+N"))
         new_chat_action.triggered.connect(self._on_new_chat_requested)
-        toolbar.addAction(new_chat_action)
+        self.addAction(new_chat_action)
 
         # Phase 9: code templates/editor/execution.
-        code_editor_action = QAction("Code Editor…", self)
-        code_editor_action.triggered.connect(self.open_code_editor_dialog)
-        toolbar.addAction(code_editor_action)
+        self.code_editor_button = QPushButton("Code Editor…", self)
+        self.code_editor_button.setToolTip(
+            "Write, save and run a Python script against the current "
+            "workspace's saved-scripts folder."
+        )
+        raised_buttons.set_role(self.code_editor_button, "neutral")
+        self.code_editor_button.clicked.connect(self.open_code_editor_dialog)
+        toolbar.addWidget(self.code_editor_button)
 
         # And that is the whole toolbar. Everything that used to follow
         # here — MCP Servers…, Knowledge Bases…, Providers…, Workspaces…,
