@@ -4104,6 +4104,17 @@ def test_toolbar_keeps_only_the_operating_controls(
 
         assert window.new_chat_button.text() == "New Chat"
         assert window.code_editor_button.text() == "Code Editor…"
+        # All three operating buttons share one fixed width so they read as
+        # a matched set rather than three differently sized labels.
+        widths = {
+            b.width()
+            for b in (
+                window.new_chat_button,
+                window.code_editor_button,
+                window.documentation_button,
+            )
+        }
+        assert widths == {150}
         assert window.new_chat_button.toolTip() and window.code_editor_button.toolTip()
         # Clicking the buttons must reach the same handlers the actions did.
         calls: list[str] = []
@@ -4111,7 +4122,9 @@ def test_toolbar_keeps_only_the_operating_controls(
             "aida.ui.qt.main_window.QMessageBox.question",
             lambda *a, **kw: QMessageBox.StandardButton.No,
         )
-        monkeypatch.setattr(window, "open_code_editor_dialog", lambda *a, **kw: calls.append("editor"))
+        monkeypatch.setattr(
+            window, "open_code_editor_dialog", lambda *a, **kw: calls.append("editor")
+        )
         window.new_chat_button.click()
         window.code_editor_button.click()
         qapp.processEvents()

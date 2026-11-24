@@ -127,6 +127,13 @@ from aida.workspace.workspaces import (
 
 #: The three columns of the main window's splitter, left to right.
 CONVERSATIONS_COLUMN = 0
+
+#: Fixed width (px) shared by the toolbar's operating buttons — New Chat,
+#: Code Editor and Documentation. Sized to about twice the natural width of
+#: "New Chat" so the buttons read as buttons and stay legible when the
+#: window is narrow; without it each sized itself to its own label, so the
+#: three looked uneven and the shortest one easy to miss.
+TOOLBAR_BUTTON_WIDTH = 150
 CHAT_COLUMN = 1
 SESSION_COLUMN = 2
 
@@ -324,6 +331,7 @@ class MainWindow(QMainWindow):
             "— the old one stays saved in the sidebar (Ctrl+N)."
         )
         raised_buttons.set_role(self.new_chat_button, "neutral")
+        self.new_chat_button.setFixedWidth(TOOLBAR_BUTTON_WIDTH)
         self.new_chat_button.clicked.connect(self._on_new_chat_requested)
         toolbar.addWidget(self.new_chat_button)
 
@@ -342,6 +350,7 @@ class MainWindow(QMainWindow):
             "workspace's saved-scripts folder."
         )
         raised_buttons.set_role(self.code_editor_button, "neutral")
+        self.code_editor_button.setFixedWidth(TOOLBAR_BUTTON_WIDTH)
         self.code_editor_button.clicked.connect(self.open_code_editor_dialog)
         toolbar.addWidget(self.code_editor_button)
 
@@ -376,6 +385,7 @@ class MainWindow(QMainWindow):
             f"Open the AIDA documentation in your web browser\n{docs_url()}"
         )
         raised_buttons.set_role(self.documentation_button, "help")
+        self.documentation_button.setFixedWidth(TOOLBAR_BUTTON_WIDTH)
         self.documentation_button.clicked.connect(self._on_open_documentation)
         toolbar.addWidget(self.documentation_button)
 

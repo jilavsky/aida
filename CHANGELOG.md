@@ -22,7 +22,9 @@ decision revised), unrelated to what shipped when. Entries below link to
   They were toolbar `QAction`s, which Qt renders as flat `QToolButton`s —
   unlike the raised, pyIrena-style `Documentation` button beside them. They
   are now real `QPushButton`s with the same raised look, tooltips, and
-  behavior; `Ctrl+N` still starts a new chat.
+  behavior; `Ctrl+N` still starts a new chat. All three toolbar buttons
+  (New Chat, Code Editor, Documentation) share the same fixed width, so
+  they read as a matched set.
 
 ## [1.1.2] - 2026-11-23
 
