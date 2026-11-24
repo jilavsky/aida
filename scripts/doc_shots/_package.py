@@ -100,6 +100,11 @@ def make_app():
     from aida.ui.qt.window_state import apply_font_size
 
     apply_font_size(app, AppConfig())
+    # The shared raised-button look, as aida-gui installs it; light, because
+    # every shot is taken in the light theme.
+    from aida.ui.qt import raised_buttons
+
+    raised_buttons.install(app, dark=False)
     return app
 
 
