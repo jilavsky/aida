@@ -50,7 +50,7 @@ from aida.ui.qt.artifact_widgets import InlineImageWidget
 from aida.ui.qt.chat_panel import MessageBubble
 from aida.ui.qt.conversation_header import PLACEHOLDER_TITLE
 from aida.ui.qt.conversations_sidebar import TITLE_ROLE
-from aida.ui.qt.main_window import MainWindow
+from aida.ui.qt.main_window import TOOLBAR_BUTTON_WIDTH, MainWindow
 from aida.workspace.workspaces import get_workspace
 from tests.ui._qt_test_utils import pump_until
 
@@ -4076,16 +4076,18 @@ def test_toolbar_keeps_only_the_operating_controls(
     """What is left on the toolbar is the single-click path through an
     actual beamline session: say who you are, pick a workspace and a
     provider, start a chat, open the code editor — plus the Documentation
-    button pinned to the right-hand end."""
+    button pinned to the right-hand end.
+
+    New Chat and Code Editor are raised ``QPushButton``s like
+    Documentation, not toolbar ``QAction``s (which render as flat
+    ``QToolButton``s). Ctrl+N lives on a shortcut-only action registered on
+    the window, tested separately above."""
     settings = _settings_with_profile()
     window = _make_window(
         qapp, loop_thread, settings, monkeypatch, [MockTurn(text="hi")], profile_name="mock-profile"
     )
     try:
         toolbar = window.findChildren(QToolBar)[0]
-        texts = [a.text() for a in toolbar.actions() if a.text()]
-        assert texts == ["New Chat", "Code Editor…"]
-
         widgets = [
             toolbar.widgetForAction(a)
             for a in toolbar.actions()
@@ -4094,10 +4096,43 @@ def test_toolbar_keeps_only_the_operating_controls(
         assert widgets[0] is window.user_selector
         assert widgets[1] is window.workspace_selector
         assert widgets[2] is window.profile_selector
+        assert widgets[3] is window.new_chat_button
+        assert widgets[4] is window.code_editor_button
         assert widgets[-1] is window.documentation_button
 
+        assert window.new_chat_button.text() == "New Chat"
+        assert window.code_editor_button.text() == "Code Editor…"
+        # All three operating buttons share one fixed width, at least
+        # TOOLBAR_BUTTON_WIDTH, so they read as a matched set.
+        widths = {
+            b.width()
+            for b in (
+                window.new_chat_button,
+                window.code_editor_button,
+                window.documentation_button,
+            )
+        }
+        assert len(widths) == 1
+        assert widths.pop() >= TOOLBAR_BUTTON_WIDTH
+        assert window.new_chat_button.toolTip() and window.code_editor_button.toolTip()
+        # Clicking the buttons must reach the same handlers the actions did.
+        calls: list[str] = []
+        monkeypatch.setattr(
+            "aida.ui.qt.main_window.QMessageBox.question",
+            lambda *a, **kw: QMessageBox.StandardButton.No,
+        )
+        monkeypatch.setattr(
+            window, "open_code_editor_dialog", lambda *a, **kw: calls.append("editor")
+        )
+        window.new_chat_button.click()
+        window.code_editor_button.click()
+        qapp.processEvents()
+        assert calls == ["editor"]
+        assert window.bridge.session is not None  # declined New Chat: session intact
+
+        menu_texts = [a.text() for a in toolbar.actions() if a.text()]
         for label in _CONFIGURE_MENU_ITEMS:
-            assert label not in texts, f"{label} should have moved off the toolbar"
+            assert label not in menu_texts, f"{label} should have moved off the toolbar"
     finally:
         window.close()
 

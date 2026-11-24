@@ -130,6 +130,12 @@ CONVERSATIONS_COLUMN = 0
 CHAT_COLUMN = 1
 SESSION_COLUMN = 2
 
+#: Width (px) shared by the toolbar's operating buttons — New Chat, Code
+#: Editor and Documentation — so they read as a matched set. A floor, not a
+#: cap: if a label needs more room (large system font), all three widen
+#: together rather than clipping it.
+TOOLBAR_BUTTON_WIDTH = 150
+
 #: Fallback widths for the three columns (conversations / chat / session
 #: panels) before the user has dragged anything. Proportions rather than
 #: pixels: QSplitter.setSizes normalizes whatever it is given to the actual
@@ -313,15 +319,37 @@ class MainWindow(QMainWindow):
         # workspaces (or profiles, which explicitly keep history) —
         # _on_new_chat_requested reuses the same _restart_session machinery
         # pinned to the workspace/profile already active.
+        # New Chat and Code Editor are raised QPushButtons, like
+        # Documentation, not toolbar QActions: a toolbar QAction renders as
+        # a flat QToolButton that does not read as a button.
+        new_chat_shortcut = QKeySequence("Ctrl+N")
+        self.new_chat_button = QPushButton("New Chat", self)
+        self.new_chat_button.setToolTip(
+            "Start a fresh conversation in the current workspace/profile "
+            "— the old one stays saved in the sidebar "
+            f"({new_chat_shortcut.toString(QKeySequence.SequenceFormat.NativeText)})."
+        )
+        raised_buttons.set_role(self.new_chat_button, "neutral")
+        self.new_chat_button.clicked.connect(self._on_new_chat_requested)
+        toolbar.addWidget(self.new_chat_button)
+
+        # The shortcut is a shortcut-only action on the window, like Stop
+        # (Esc) and Focus Input (Ctrl+L), so it keeps working when the
+        # toolbar is hidden (a button's own shortcut would not).
         new_chat_action = QAction("New Chat", self)
-        new_chat_action.setShortcut(QKeySequence("Ctrl+N"))
+        new_chat_action.setShortcut(new_chat_shortcut)
         new_chat_action.triggered.connect(self._on_new_chat_requested)
-        toolbar.addAction(new_chat_action)
+        self.addAction(new_chat_action)
 
         # Phase 9: code templates/editor/execution.
-        code_editor_action = QAction("Code Editor…", self)
-        code_editor_action.triggered.connect(self.open_code_editor_dialog)
-        toolbar.addAction(code_editor_action)
+        self.code_editor_button = QPushButton("Code Editor…", self)
+        self.code_editor_button.setToolTip(
+            "Write, save and run a Python script against the current "
+            "workspace's saved-scripts folder."
+        )
+        raised_buttons.set_role(self.code_editor_button, "neutral")
+        self.code_editor_button.clicked.connect(self.open_code_editor_dialog)
+        toolbar.addWidget(self.code_editor_button)
 
         # And that is the whole toolbar. Everything that used to follow
         # here — MCP Servers…, Knowledge Bases…, Providers…, Workspaces…,
@@ -356,6 +384,19 @@ class MainWindow(QMainWindow):
         raised_buttons.set_role(self.documentation_button, "help")
         self.documentation_button.clicked.connect(self._on_open_documentation)
         toolbar.addWidget(self.documentation_button)
+
+        toolbar_buttons = (
+            self.new_chat_button,
+            self.code_editor_button,
+            self.documentation_button,
+        )
+        for button in toolbar_buttons:
+            button.ensurePolished()  # so sizeHint includes the stylesheet padding
+        toolbar_button_width = max(
+            TOOLBAR_BUTTON_WIDTH, *(b.sizeHint().width() for b in toolbar_buttons)
+        )
+        for button in toolbar_buttons:
+            button.setFixedWidth(toolbar_button_width)
 
         self.sidebar = ConversationsSidebar(self)
         # Bug report: "unless user renames the chat, the chat name is start
@@ -2768,7 +2809,7 @@ class MainWindow(QMainWindow):
     def open_code_editor_dialog(
         self, *, initial_text: str = "", initial_path: str | None = None
     ) -> None:
-        """Opens blank from the toolbar action, pre-filled with a message's
+        """Opens blank from the toolbar button, pre-filled with a message's
         first code block via ``_on_code_editor_requested`` (a copy of its
         text, no file behind it), or — bug report: "code editor has no way
         in" — opened *at* a real file via ``initial_path`` (a chat file
