@@ -39,6 +39,12 @@ from aida.core.events import (
     TurnNudged,
     UsageInfo,
 )
+from aida.core.loop_detection import (
+    DEFAULT_LOOP_NUDGE_THRESHOLD,
+    MAX_LOOP_NUDGES,
+    LoopSign,
+    ProgressMonitor,
+)
 from aida.core.tools import NativeTool
 from aida.providers.base import (
     UNPARSED_ARGUMENTS_KEY,
@@ -219,6 +225,7 @@ class AgentLoop:
         retry_policy: RetryPolicy = DEFAULT_RETRY_POLICY,
         tool_result_filter: Callable[[str, str, str], str] | None = None,
         auto_continue_on_stall: bool = True,
+        loop_nudge_threshold: int = DEFAULT_LOOP_NUDGE_THRESHOLD,
     ) -> None:
         self.provider = provider
         self.settings = settings
@@ -243,6 +250,10 @@ class AgentLoop:
         #: Whether a short "I'll do X now" reply with no tool call, right
         #: after tool work, gets ``STALL_NUDGE`` instead of ending the turn.
         self.auto_continue_on_stall = auto_continue_on_stall
+        #: Repeats (same call and result, same error, near-copy scripts)
+        #: before a turn that keeps working without progress is nudged
+        #: (``aida.core.loop_detection``). Below 2: off.
+        self.loop_nudge_threshold = loop_nudge_threshold
         self._cancelled = False
         # Text the user typed while a turn was already running, waiting to
         # be handed to the model at the next round trip — see
@@ -351,6 +362,8 @@ class AgentLoop:
         iterations = 0
         length_cutoffs = 0
         stall_nudges = 0
+        loop_nudges = 0
+        progress = ProgressMonitor(threshold=self.loop_nudge_threshold)
         previous_round_had_tools = False
 
         while True:
@@ -556,6 +569,9 @@ class AgentLoop:
             # tool result below. The second time in one turn, answer them the
             # same way and then end the turn instead of looping.
             stop_after_results = cut_off and length_cutoffs > MAX_LENGTH_RECOVERIES
+            #: The first sign of looping this round's calls completed; sent
+            #: once all of their results are in the history.
+            loop_sign: LoopSign | None = None
 
             # A stream cancelled *after* announcing calls falls through to
             # the per-call loop below, whose own cancel branch answers every
@@ -701,6 +717,10 @@ class AgentLoop:
                     if isinstance(a, ImageArtifact) and a.path
                 ]
                 history_content = _stringify(result_content)
+                sign = progress.observe(tc.name, tc.arguments, history_content, is_error)
+                if sign is not None:
+                    logger.info("loop sign (%s) after %s", sign.kind, tc.name)
+                    loop_sign = loop_sign or sign
                 if self._tool_result_filter is not None:
                     history_content = self._tool_result_filter(tc.name, tc.id, history_content)
                 messages.append(
@@ -716,6 +736,12 @@ class AgentLoop:
             if stop_after_results:
                 yield AgentError(layer="core", message=_REPEATED_CUTOFF_MESSAGE)
                 return
+            if loop_sign is not None and loop_nudges < MAX_LOOP_NUDGES:
+                # After the results, so every call stays paired with its
+                # result; a short "I'll consolidate" reply to it with no
+                # tool call is then caught by the stall check.
+                loop_nudges += 1
+                yield self._nudge(messages, "loop", loop_sign.message)
             # loop continues: provider gets called again with tool results appended
 
     def _nudge(self, messages: list[Message], reason: str, text: str) -> TurnNudged:
@@ -737,6 +763,7 @@ __all__ = [
     "DEFAULT_MAX_ITERATIONS",
     "LENGTH_NUDGE",
     "MAX_LENGTH_RECOVERIES",
+    "MAX_LOOP_NUDGES",
     "MAX_STALL_NUDGES",
     "STALL_NUDGE",
     "STALL_NUDGE_CALL_IN_REASONING",

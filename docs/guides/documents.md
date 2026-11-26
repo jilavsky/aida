@@ -185,7 +185,7 @@ switched off (`reasoning_effort: none`), and keeps doing so for the rest of
 that document. Machines that cannot install a model runtime, which
 includes most beamline workstations, use the chat model instead.
 
-% CHECK(Jan): 1B recommended after one real paper (2026-11-21); a comparison with a general local model and a cloud model is still open (TODO §6).
+% CHECK(Jan): 1B recommended after one real paper (2026-11-21); the chat-model route checked with a cloud model on Windows (2026-11-26).
 
 (documents-checking)=
 ## Checking that it works
@@ -194,7 +194,20 @@ includes most beamline workstations, use the chat model instead.
 active workspace, for example *"the OCR profile 'light-ocr', falling back
 to the chat model (profile 'argo-claude')"*, or why none would.
 
-**Does it actually work?** Convert a real file and read the result:
+**Does it actually work?** Convert a real page and read the result. In
+the GUI, click **Settings → Documents → Test on a page…**, choose a PDF and
+a page number (it suggests the first page a chat would convert, and says
+which model the page will be sent to). The page is converted with the
+settings shown in the dialog, saved or not, so you can try an OCR profile
+before keeping it. The result opens beside the rendered page, as raw
+Markdown and as a preview, with the model used and the time it took. The
+**Figures** tab shows the figures a chat would extract from that page, with
+their labels and captions. When their number matches the image placeholders
+in the Markdown (`![fig-1](fig-1)`), they are paired in order, as in a chat,
+and the preview shows each one in place; when it does not, the tab says so.
+The test always converts afresh rather than reusing the cache.
+
+From the command line:
 
 ```bash
 aida documents convert scan.pdf                 # pages without text or with missing equations

@@ -119,7 +119,10 @@ def print_event(event: AgentEvent) -> None:
     elif isinstance(event, ContextTrimmed):
         print(f"[context] {event.describe()}")
     elif isinstance(event, TurnNudged):
-        why = "reply cut off at the output limit" if event.reason == "length" else "agent stalled"
+        why = {
+            "length": "reply cut off at the output limit",
+            "loop": "agent repeating itself",
+        }.get(event.reason, "agent stalled")
         print(f"\n[aida] {why}; sent automatically: {event.text}")
     elif isinstance(event, SteeringMessageDelivered):
         # The CLI REPL reads one line at a time and cannot queue anything

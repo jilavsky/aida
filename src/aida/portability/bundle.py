@@ -152,6 +152,7 @@ _APP_PORTABLE_FIELDS = (
     # How long agent runs are handled (aida.core.agent, aida.core.context):
     # working preferences about the models you use, not about the machine.
     "auto_continue_on_stall",
+    "loop_nudge_threshold",
     "tool_result_char_caps",
     # Whether scanned pages are converted, and by which profile: profiles
     # are exported with the bundle, so the name stays meaningful.

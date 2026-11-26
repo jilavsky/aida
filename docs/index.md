@@ -4,7 +4,7 @@ AIDA (AI Data Assistant) is a local scientific agent workbench: a chat agent wit
 MCP, knowledge-base and workflow tools, used at APS beamlines 12-ID/9-ID. Install it with
 `pip install aida-workbench[gui]`; run it as `aida` (command line) or `aida-gui` (desktop app).
 
-> **Status: 1.1.2.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.3.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in the
 > {doc}`changelog`. See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what

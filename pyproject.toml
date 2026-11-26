@@ -11,7 +11,7 @@ build-backend = "hatchling.build"
 # documented fallback; `pip install aida-workbench[gui]` still gives you
 # `import aida` and the `aida` / `aida-gui` console scripts.
 name = "aida-workbench"
-version = "1.1.2"
+version = "1.1.3"
 description = "AIDA — AI Data Assistant: a local scientific agent workbench."
 readme = "README.md"
 license = { text = "MIT" }

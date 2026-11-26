@@ -18,8 +18,13 @@ test, just construct + mutate + read back.
 from __future__ import annotations
 
 import dataclasses
+import threading
+from collections.abc import Callable
+from concurrent.futures import Future
+from pathlib import Path
 
 from aida.config.settings import AppConfig, ProviderProfile
+from aida.documents.ocr.standalone import PageTestResult, route_description, run_page_test
 from aida.ui.qt._qt import (
     QCheckBox,
     QComboBox,
@@ -29,19 +34,64 @@ from aida.ui.qt._qt import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
+    QTimer,
     QVBoxLayout,
     QWidget,
 )
+from aida.ui.qt.page_test_dialog import PageTestDialog
 
 LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
 SAFETY_MODES = ["confirm", "relaxed"]
 TRANSCRIPT_TOOL_RESULT_MODES = ["off", "summary", "full"]
+
+#: ``(app_config, profiles, chat_profile_name, pdf, page_index)`` -> a future
+#: ``PageTestResult``; the default runs ``run_page_test`` on a worker thread.
+PageTester = Callable[
+    [AppConfig, dict[str, ProviderProfile], str | None, Path, int], Future[PageTestResult]
+]
+
+#: How often a running page test is checked for completion.
+_PAGE_TEST_POLL_MS = 200
+
+
+def _page_test_in_thread(
+    app_config: AppConfig,
+    profiles: dict[str, ProviderProfile],
+    chat_profile_name: str | None,
+    pdf: Path,
+    page_index: int,
+) -> Future[PageTestResult]:
+    """Run ``run_page_test`` on a daemon thread, so a slow model never blocks
+    the GUI and a page still converting never holds up quitting."""
+    future: Future[PageTestResult] = Future()
+
+    def _work() -> None:
+        try:
+            future.set_result(
+                run_page_test(app_config, profiles, chat_profile_name, pdf, page_index)
+            )
+        except BaseException as exc:  # noqa: BLE001 - reported in the dialog
+            future.set_exception(exc)
+
+    threading.Thread(target=_work, name="aida-page-test", daemon=True).start()
+    return future
+
+
+def _pdf_pages(pdf: Path) -> tuple[int, int | None]:
+    """The page count and the first page (0-based) a chat would convert, if
+    any among the first 200."""
+    from aida.documents.readers import pdf_pages_to_convert
+
+    _texts, total, needed = pdf_pages_to_convert(pdf, max_pages=200)
+    return total, (needed[0] if needed else None)
 
 
 class SettingsDialog(QDialog):
@@ -50,10 +100,19 @@ class SettingsDialog(QDialog):
         app_config: AppConfig,
         profiles: dict[str, ProviderProfile] | None = None,
         parent: QWidget | None = None,
+        *,
+        chat_profile_name: str | None = None,
+        page_tester: PageTester | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self._original = app_config
+        self._profiles = dict(profiles or {})
+        #: The chat profile a page test falls back to, as a chat would.
+        self._chat_profile_name = chat_profile_name or app_config.last_profile_name
+        self._page_tester = page_tester or _page_test_in_thread
+        self._page_test_future: Future[PageTestResult] | None = None
+        self._page_test_dialog: PageTestDialog | None = None
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -211,6 +270,21 @@ class SettingsDialog(QDialog):
         )
         form.addRow("Long tasks:", self._auto_continue_check)
 
+        self._loop_threshold_spin = QSpinBox(self)
+        self._loop_threshold_spin.setRange(0, 20)
+        self._loop_threshold_spin.setSpecialValueText("Off")
+        self._loop_threshold_spin.setSuffix(" repeats")
+        self._loop_threshold_spin.setValue(app_config.loop_nudge_threshold)
+        self._loop_threshold_previous = self._loop_threshold_spin.value()
+        self._loop_threshold_spin.valueChanged.connect(self._skip_loop_threshold_one)
+        self._loop_threshold_spin.setToolTip(
+            "When the agent keeps working without progress (the same call with the same "
+            "result, the same error again, or new scripts that are near-copies of one it "
+            "already wrote), AIDA asks it to change approach after this many repeats. "
+            "At most three times per turn; the message is shown in the chat."
+        )
+        form.addRow("Nudge when going in circles after:", self._loop_threshold_spin)
+
         # Phase 10: how considerate the in-app scheduler is of a user who
         # is mid-something. Both are in seconds but shown in minutes —
         # nobody reasons about "wait 300 seconds before starting a job".
@@ -266,7 +340,7 @@ class SettingsDialog(QDialog):
             self._ocr_profile_combo.setCurrentIndex(index)
         self._ocr_profile_combo.setToolTip(
             "A profile used only for converting pages, for example a small local OCR model. "
-            "Test it with: aida documents convert FILE"
+            "Try it with Test on a page."
         )
         self._ocr_profile_combo.setEnabled(self._ocr_backend_check.isChecked())
         self._ocr_backend_check.toggled.connect(self._ocr_profile_combo.setEnabled)
@@ -274,6 +348,20 @@ class SettingsDialog(QDialog):
         profile_row.addWidget(QLabel("OCR profile:", documents_group))
         profile_row.addWidget(self._ocr_profile_combo, stretch=1)
         documents_layout.addLayout(profile_row)
+        test_row = QHBoxLayout()
+        self._test_page_button = QPushButton("Test on a page…", documents_group)
+        self._test_page_button.setToolTip(
+            "Choose a PDF and a page; the page is converted with the settings shown here "
+            "(saved or not) and shown beside the Markdown the model returned."
+        )
+        self._test_page_button.clicked.connect(self._on_test_page)
+        test_row.addWidget(self._test_page_button)
+        self._page_test_status = QLabel("", documents_group)
+        test_row.addWidget(self._page_test_status, stretch=1)
+        documents_layout.addLayout(test_row)
+        self._page_test_timer = QTimer(self)
+        self._page_test_timer.setInterval(_PAGE_TEST_POLL_MS)
+        self._page_test_timer.timeout.connect(self._poll_page_test)
         form.addRow(documents_group)
 
         layout.addLayout(form)
@@ -302,6 +390,90 @@ class SettingsDialog(QDialog):
         )
         if folder:
             self._scratch_dir_edit.setText(folder)
+
+    def _skip_loop_threshold_one(self, value: int) -> None:
+        """1 is not a valid threshold (every call would be a repeat of
+        itself): step over it in the direction the user was going."""
+        if value == 1:
+            self._loop_threshold_spin.setValue(2 if self._loop_threshold_previous < 1 else 0)
+            return
+        self._loop_threshold_previous = value
+
+    # --- Test on a page ----------------------------------------------------
+
+    def _on_test_page(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Test on a Page", "", "PDF files (*.pdf);;All files (*)"
+        )
+        if path:
+            self.start_page_test(Path(path))
+
+    def start_page_test(self, pdf: Path, page_index: int | None = None) -> bool:
+        """Convert one page of ``pdf`` with the OCR settings currently shown,
+        asking for the page (and showing where it will be sent) unless
+        ``page_index`` is given. Returns whether a conversion started."""
+        if self._page_test_future is not None:
+            return False
+        app_config = self.updated_app_config()
+        route = route_description(app_config, self._profiles, self._chat_profile_name)
+        if route.startswith(("off", "unavailable")):
+            QMessageBox.information(
+                self,
+                "Test on a Page",
+                f"No model would convert a page with these settings: {route}.",
+            )
+            return False
+        if page_index is None:
+            try:
+                total, suggested = _pdf_pages(pdf)
+            except Exception as exc:  # noqa: BLE001 - shown to the user
+                QMessageBox.warning(self, "Test on a Page", f"Could not read {pdf.name}: {exc}")
+                return False
+            hint = (
+                f" Page {suggested + 1} is the first one a chat would convert."
+                if suggested is not None
+                else " Every page has a text layer, so a chat would convert none of them."
+            )
+            page, ok = QInputDialog.getInt(
+                self,
+                "Test on a Page",
+                f"{pdf.name} has {total} page(s).{hint}\n"
+                f"The page will be sent to {route}.\n\nPage to convert:",
+                (suggested or 0) + 1,
+                1,
+                total,
+            )
+            if not ok:
+                return False
+            page_index = page - 1
+        self._page_test_future = self._page_tester(
+            app_config, self._profiles, self._chat_profile_name, pdf, page_index
+        )
+        self._test_page_button.setEnabled(False)
+        self._page_test_status.setText(f"Converting page {page_index + 1} of {pdf.name}…")
+        self._page_test_timer.start()
+        return True
+
+    def _poll_page_test(self) -> None:
+        future = self._page_test_future
+        if future is None or not future.done():
+            return
+        self._page_test_timer.stop()
+        self._page_test_future = None
+        self._test_page_button.setEnabled(True)
+        try:
+            result = future.result()
+        except Exception as exc:  # noqa: BLE001 - shown to the user
+            self._page_test_status.setText("")
+            QMessageBox.warning(self, "Test on a Page", f"The conversion failed: {exc}")
+            return
+        self._page_test_status.setText(
+            f"Page {result.page_index + 1}: {result.seconds:.1f} s"
+            if result.markdown
+            else f"Page {result.page_index + 1}: not converted"
+        )
+        self._page_test_dialog = PageTestDialog(result, self)
+        self._page_test_dialog.open()
 
     # --- edited values ---------------------------------------------------
 
@@ -386,6 +558,9 @@ class SettingsDialog(QDialog):
     def auto_continue_on_stall(self) -> bool:
         return self._auto_continue_check.isChecked()
 
+    def loop_nudge_threshold(self) -> int:
+        return self._loop_threshold_spin.value()
+
     def ocr_backend(self) -> str:
         return "auto" if self._ocr_backend_check.isChecked() else "off"
 
@@ -416,6 +591,7 @@ class SettingsDialog(QDialog):
             auto_title_conversations=self.auto_title_conversations(),
             auto_title_interval_turns=self.auto_title_interval_turns(),
             auto_continue_on_stall=self.auto_continue_on_stall(),
+            loop_nudge_threshold=self.loop_nudge_threshold(),
             ocr_backend=self.ocr_backend(),
             ocr_profile=self.ocr_profile(),
         )

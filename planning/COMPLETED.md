@@ -1019,3 +1019,37 @@ local model, and it works well. The stalls and garbled tool calls seen on
 `Splash-Flash` (§14) no longer appear. The GUI smoke checklist, including
 Stop, passed on macOS. Still open in `TODO.md`: the same PDF test on a
 machine with only a cloud model, and the smoke checklist on Windows.
+
+## 16. Loop nudges, and the PDF follow-ups closed (2026-11-26, 1.1.3)
+
+**Agent going in circles.** Multi-hour runs with a local model (Qwen via
+Splash) got good results in the end but looped on the way: near-identical
+scripts rewritten, the same calls rerun; the model once said itself "I
+have been iterating on scripts too much, let me consolidate". The stall
+nudges only catch a turn that stops too early. `core/loop_detection.py`
+(`ProgressMonitor`) watches one turn's tool calls for three signs, each on
+evidence only: the same call with the same result (durations, timestamps
+and hex ids masked, so an edited script whose output changed is progress),
+the same error signature from one tool (last line, numbers masked), and
+new script files at least 70% similar by lines to one already written in
+the turn. A sign fires at each multiple of `loop_nudge_threshold`
+(default 3); `AgentLoop` sends at most `MAX_LOOP_NUDGES` (3) per turn,
+through the existing `_nudge`/`TurnNudged` path with reason `"loop"`,
+after the round's results so every call stays paired. The nudge asks for
+one or two sentences on what is established and what changes, then the
+next call; a text-only reply to it is caught by the stall check.
+
+The third proposal, a status checkpoint every N tool calls, was not built;
+the reasoning is in `PLAN.md` §2.3. Its useful part is in the nudge text.
+
+**PDF follow-ups from §15.** The chat-model route was checked with a cloud
+model on Windows and figure crops looked right, so both items closed; the
+per-profile prompt override stays unbuilt until a model needs it.
+Settings → Documents gained **Test on a page…** (`ui/qt/page_test_dialog.py`,
+`documents/ocr/standalone.py`, which `aida documents convert` now shares):
+the OCR settings on screen, saved or not, one page converted without the
+cache on a worker thread, the rendered page shown beside the Markdown.
+`page_figures` runs the chat's own figure extraction for that page and
+pairs it with the placeholders by `apply_page_captions`' rule (counts must
+match); paired images are served to the preview under the placeholder
+names (`_PreviewBrowser.loadResource`), and a Figures tab lists them all.

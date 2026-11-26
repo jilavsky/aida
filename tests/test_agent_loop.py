@@ -1183,7 +1183,8 @@ async def test_stall_nudges_are_capped_per_turn():
     for i in range(MAX_STALL_NUDGES + 1):
         script += [_tool_round(f"t{i}"), MockTurn(text="Let me check one more thing.")]
     events, _, _ = await _run(script)
-    assert sum(isinstance(e, TurnNudged) for e in events) == MAX_STALL_NUDGES
+    stalls = [e for e in events if isinstance(e, TurnNudged) and e.reason == "stall"]
+    assert len(stalls) == MAX_STALL_NUDGES
 
 
 def test_looks_like_announced_step_examples():

@@ -50,6 +50,14 @@ def _now_str() -> str:
 
 _CODE_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 
+#: Why AIDA sent a message of its own (``TurnNudged.reason``), as shown
+#: under that message in the chat.
+NUDGE_REASONS = {
+    "length": "reply cut off at the output limit",
+    "stall": "agent stopped mid-task",
+    "loop": "agent repeating itself without progress",
+}
+
 #: How often a streaming reply is re-rendered, at most.
 #:
 #: Every ``TextDelta`` used to call ``setMarkdown`` on the *whole*
@@ -901,11 +909,7 @@ class ChatPanel(QWidget):
             # A user bubble, because the text is now part of the
             # conversation, marked so nobody thinks they typed it.
             bubble = self.add_user_message(event.text)
-            why = (
-                "reply cut off at the output limit"
-                if event.reason == "length"
-                else "agent stopped mid-task"
-            )
+            why = NUDGE_REASONS.get(event.reason, "agent stopped mid-task")
             bubble.append_meta(f"sent automatically by AIDA — {why}")
         elif name == "AgentError":
             # "Continue" only for the one AgentError a resend actually

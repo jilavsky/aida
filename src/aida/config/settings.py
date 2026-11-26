@@ -561,6 +561,12 @@ class AppConfig:
     # looks_like_announced_step). At most two per turn, and shown in the
     # chat. Off: such a reply ends the turn, as any text-only reply does.
     auto_continue_on_stall: bool = True
+    # A turn that keeps calling tools without progress gets an automatic
+    # message asking it to change approach (aida.core.loop_detection): after
+    # this many identical calls with identical results, identical errors from
+    # one tool, or new scripts that are near-copies of one already written in
+    # the turn. At most three per turn, shown in the chat. 0 turns it off.
+    loop_nudge_threshold: int = 3
     # Per-tool limits on how much of one result stays in the conversation,
     # in characters, keyed by a shell-style pattern on the tool name (MCP
     # tools are named "<server>__<tool>"). Added on top of the built-in
@@ -607,6 +613,14 @@ class AppConfig:
                 "config.yaml: auto_title_interval_turns=%r must be at least 1; "
                 "using the default instead",
                 filtered.pop("auto_title_interval_turns"),
+            )
+        # 0 is off; 1 would call every tool call a repeat of itself.
+        threshold = filtered.get("loop_nudge_threshold", 0)
+        if threshold < 0 or threshold == 1:
+            _logger.warning(
+                "config.yaml: loop_nudge_threshold=%r must be 0 (off) or at least 2; "
+                "using the default instead",
+                filtered.pop("loop_nudge_threshold"),
             )
         # Both scheduler timings accept 0 (quiet period 0 = never wait for
         # idleness; cap 0 = never waive the quiet period) but neither is
@@ -700,6 +714,7 @@ class AppConfig:
             "auto_title_conversations": self.auto_title_conversations,
             "auto_title_interval_turns": self.auto_title_interval_turns,
             "auto_continue_on_stall": self.auto_continue_on_stall,
+            "loop_nudge_threshold": self.loop_nudge_threshold,
             "tool_result_char_caps": self.tool_result_char_caps,
             "ocr_backend": self.ocr_backend,
             "ocr_profile": self.ocr_profile,
@@ -742,6 +757,7 @@ _APP_FIELD_KINDS: dict[str, str] = {
     "auto_title_conversations": "bool",
     "auto_title_interval_turns": "int",
     "auto_continue_on_stall": "bool",
+    "loop_nudge_threshold": "int",
     "tool_result_char_caps": "dict[str,int]",
     "ocr_backend": "str",
     "ocr_profile": "str?",

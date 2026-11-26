@@ -20,13 +20,8 @@ from aida.config.settings import Settings, load_settings
 from aida.core.confirmation import ConfirmationRequest
 from aida.documents.figures import extract_docx_figures, extract_pdf_figures, write_index
 from aida.documents.ocr.common import apply_page_captions
-from aida.documents.ocr.vlm import (
-    ConversionResult,
-    PdfPageConverter,
-    RouteDecision,
-    build_routes,
-    describe_route,
-)
+from aida.documents.ocr.standalone import convert_pages, route_description
+from aida.documents.ocr.vlm import ConversionResult
 
 
 def _profile_name(args: argparse.Namespace, settings: Settings) -> str | None:
@@ -34,43 +29,15 @@ def _profile_name(args: argparse.Namespace, settings: Settings) -> str | None:
 
 
 def route_line(settings: Settings, profile_name: str | None) -> str:
-    """``describe_route`` for ``profile_name`` as the chat profile."""
-    app = settings.app
-    profile = settings.providers.profiles.get(profile_name) if profile_name else None
-    return describe_route(
-        mode=app.ocr_backend,
-        ocr_profile_name=app.ocr_profile,
-        ocr_profile_exists=bool(app.ocr_profile and app.ocr_profile in settings.providers.profiles),
-        chat_profile_name=profile_name,
-        chat_supports_vision=bool(profile and profile.supports_vision),
-    )
+    """``route_description`` for ``profile_name`` as the chat profile."""
+    return route_description(settings.app, settings.providers.profiles, profile_name)
 
 
 async def _convert(
     settings: Settings, profile_name: str | None, pdf: Path, pages: list[int], *, yes: bool
 ) -> ConversionResult:
     """Convert ``pages`` (0-based) of ``pdf`` as a chat with ``profile_name``
-    would, building and closing the providers involved."""
-    from aida.core.session import _completion_settings_for_profile
-    from aida.providers.profiles import build_provider
-
-    app = settings.app
-    chat_profile = settings.providers.profiles.get(profile_name) if profile_name else None
-    chat_provider = build_provider(chat_profile) if chat_profile is not None else None
-
-    def _routes() -> RouteDecision:
-        return build_routes(
-            mode=app.ocr_backend,
-            ocr_profile=settings.providers.profiles.get(app.ocr_profile)
-            if app.ocr_profile
-            else None,
-            ocr_profile_name=app.ocr_profile,
-            chat_profile=chat_profile,
-            chat_provider=chat_provider,
-            chat_settings=_completion_settings_for_profile(chat_profile) if chat_profile else None,
-            build_provider=build_provider,
-            settings_for=_completion_settings_for_profile,
-        )
+    would, asking on the terminal before pages go to a remote OCR profile."""
 
     async def _confirm(request: ConfirmationRequest) -> bool:
         if yes:
@@ -78,12 +45,15 @@ async def _convert(
         answer = await asyncio.to_thread(input, f"{request.detail} [y/N] ")
         return answer.strip().lower() in ("y", "yes")
 
-    converter = PdfPageConverter(_routes, confirm=_confirm, cache_dir=ocr_cache_dir())
-    try:
-        return await converter.convert(pdf, pages)
-    finally:
-        if chat_provider is not None:
-            await chat_provider.aclose()
+    return await convert_pages(
+        settings.app,
+        settings.providers.profiles,
+        profile_name,
+        pdf,
+        pages,
+        confirm=_confirm,
+        cache_dir=ocr_cache_dir(),
+    )
 
 
 def _parse_pages(spec: str, page_count: int) -> list[int]:

@@ -1,7 +1,7 @@
 (context-and-limits)=
 # Context window and limits
 
-> **Status: 1.1.2.** In daily use at APS beamlines 12-ID/9-ID. Config
+> **Status: 1.1.3.** In daily use at APS beamlines 12-ID/9-ID. Config
 > formats and CLI commands are stable: from here, a breaking change to
 > either means a new major version, and every change is dated in
 > [`CHANGELOG.md`](https://github.com/jilavsky/aida/blob/main/CHANGELOG.md). See [`TODO.md`](https://github.com/jilavsky/aida/blob/main/TODO.md) for what
@@ -229,6 +229,40 @@ its own. That message is shown in the chat as a user message marked
   ```yaml
   auto_continue_on_stall: false
   ```
+
+(context-and-limits-loops)=
+## When the agent goes in circles
+
+On long runs, especially with local models, the agent sometimes keeps
+working without getting anywhere: it reruns the same call, hits the same
+error with one variation after another, or writes `fit_v2.py`,
+`fit_fixed.py` and `fit_final.py` instead of editing one script. AIDA
+watches each turn's tool calls for three signs of this and, when one shows
+up, sends a message of its own asking the model to say in a sentence or two
+what it has established and what it will do differently, or to stop and
+tell you what is blocking it. Like the messages above, it is shown in the
+chat as "sent automatically by AIDA".
+
+- **The same call with the same result**, three times. Run times,
+  timestamps and generated file names are ignored when results are
+  compared, so rerunning an unchanged script counts, while rerunning a
+  script after an edit that changed its output does not. If the repeat is
+  deliberate (polling a motor position while it moves), the message says
+  the model may carry on.
+- **The same error from one tool**, three times, even with different
+  arguments: three script variants that all end in the same exception.
+  Line numbers and array shapes are ignored when errors are compared.
+- **Three new scripts that are close copies** (70% of their lines or
+  more) of a script already written in the turn. Rewriting the same file,
+  writing data files, and writing different scripts never count.
+
+Each sign fires again at six, nine, and so on, and a turn gets at most
+three of these messages. The count of three is the Settings value **Nudge
+when going in circles after** (0 is off), or in `config.yaml`:
+
+```yaml
+loop_nudge_threshold: 3   # 0 turns it off
+```
 
 To see why a turn ended, look in `aida.log`. Every round trip that ends a
 turn logs one line with the stop reason (`stop`, or `length` for the

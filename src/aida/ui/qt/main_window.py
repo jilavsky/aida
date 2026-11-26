@@ -2958,7 +2958,14 @@ class MainWindow(QMainWindow):
         # worth telling the user about if another AIDA window changed
         # config.yaml in the meantime.
         app_mtime = config_mtime(app_config_path())
-        dialog = SettingsDialog(self.settings.app, self.settings.providers.profiles, self)
+        dialog = SettingsDialog(
+            self.settings.app,
+            self.settings.providers.profiles,
+            self,
+            chat_profile_name=self.bridge.session.profile_name
+            if self.bridge.session is not None
+            else None,
+        )
         if not dialog.exec():
             return
         previous_safety_mode = self.settings.app.default_safety_mode
@@ -2994,6 +3001,10 @@ class MainWindow(QMainWindow):
         # font size/log level above.
         if self.bridge.session is not None:
             self.bridge.session.loop.max_iterations = self.settings.app.max_agent_iterations
+            self.bridge.session.loop.auto_continue_on_stall = (
+                self.settings.app.auto_continue_on_stall
+            )
+            self.bridge.session.loop.loop_nudge_threshold = self.settings.app.loop_nudge_threshold
         # Bug report (2026-11): a folder added to the global allowed list
         # still prompted in the open chat — the guard's roots were fixed at
         # session start. Same "takes effect immediately" treatment; the

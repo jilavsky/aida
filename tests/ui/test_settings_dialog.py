@@ -447,3 +447,113 @@ def test_dialog_round_trips_auto_continue_on_stall(qapp):
     assert dialog.auto_continue_on_stall() is False
     dialog._auto_continue_check.setChecked(True)
     assert dialog.updated_app_config().auto_continue_on_stall is True
+
+
+def test_loop_nudge_threshold_round_trips_and_skips_one(qapp):
+    dialog = SettingsDialog(AppConfig(loop_nudge_threshold=3))
+    assert dialog.loop_nudge_threshold() == 3
+    dialog._loop_threshold_spin.setValue(0)
+    assert dialog._loop_threshold_spin.text() == "Off"
+    dialog._loop_threshold_spin.setValue(1)  # stepping up from Off
+    assert dialog.loop_nudge_threshold() == 2
+    dialog._loop_threshold_spin.setValue(1)  # stepping down from 2
+    assert dialog.loop_nudge_threshold() == 0
+    dialog._loop_threshold_spin.setValue(6)
+    assert dialog.updated_app_config().loop_nudge_threshold == 6
+
+
+def test_test_on_a_page_uses_the_settings_on_screen_and_shows_the_result(qapp, tmp_path):
+    from concurrent.futures import Future
+
+    from aida.documents.ocr.standalone import PageTestResult
+    from aida.documents.ocr.vlm import ConversionResult
+    from aida.ui.qt.page_test_dialog import PageTestDialog
+
+    calls = []
+    future: Future = Future()
+
+    def tester(app_config, profiles, chat_profile_name, pdf, page_index):
+        calls.append((app_config.ocr_profile, chat_profile_name, pdf, page_index))
+        return future
+
+    profiles = {
+        "chat": ProviderProfile(name="chat", kind="openai_compat", model="m"),
+        "ocr": ProviderProfile(
+            name="ocr", kind="openai_compat", model="o", base_url="http://127.0.0.1:1234/v1"
+        ),
+    }
+    dialog = SettingsDialog(AppConfig(), profiles, chat_profile_name="chat", page_tester=tester)
+    dialog._ocr_profile_combo.setCurrentIndex(dialog._ocr_profile_combo.findData("ocr"))
+    pdf = tmp_path / "scan.pdf"
+
+    assert dialog.start_page_test(pdf, page_index=2)
+    assert calls == [("ocr", "chat", pdf, 2)]
+    assert not dialog._test_page_button.isEnabled()
+    assert not dialog.start_page_test(pdf, page_index=0)  # one at a time
+
+    conversion = ConversionResult(
+        pages={2: "# Title\n\n$E = mc^2$"}, route_label="the OCR profile 'ocr'"
+    )
+    future.set_result(
+        PageTestResult(pdf=pdf, page_index=2, conversion=conversion, page_image=b"", seconds=4.2)
+    )
+    dialog._poll_page_test()
+
+    assert dialog._test_page_button.isEnabled()
+    shown = dialog._page_test_dialog
+    assert isinstance(shown, PageTestDialog)
+    assert shown.markdown() == "# Title\n\n$E = mc^2$"
+    assert "page 3: converted by the OCR profile 'ocr' in 4.2 s" in shown._summary_label.text()
+    shown.close()
+
+
+def test_test_on_a_page_says_why_when_no_model_would_convert(qapp, tmp_path, monkeypatch):
+    from aida.ui.qt import settings_dialog
+
+    shown = []
+    monkeypatch.setattr(
+        settings_dialog.QMessageBox, "information", lambda *args: shown.append(args[2])
+    )
+    profiles = {"chat": ProviderProfile(name="chat", kind="openai_compat", model="m")}
+    dialog = SettingsDialog(
+        AppConfig(), profiles, chat_profile_name="chat", page_tester=lambda *a: None
+    )
+    assert not dialog.start_page_test(tmp_path / "scan.pdf", page_index=0)
+    assert shown and "supports_vision off" in shown[0]
+
+
+def test_page_test_dialog_shows_figures_in_their_tab_and_in_the_preview(qapp, tmp_path):
+    from aida.documents.figures import FigureEntry
+    from aida.documents.ocr.standalone import PageFigure, PageTestResult
+    from aida.documents.ocr.vlm import ConversionResult
+    from aida.ui.qt._qt import QColor, QImage, QTextDocument, QUrl
+    from aida.ui.qt.page_test_dialog import PageTestDialog, preview_markdown
+
+    image = QImage(40, 30, QImage.Format.Format_RGB32)
+    image.fill(QColor("red"))
+    image.save(str(tmp_path / "fig.png"))
+    png = (tmp_path / "fig.png").read_bytes()
+    entry = FigureEntry(
+        label="Figure 3", caption="Figure 3. I(q).", file="fig-01.png", page=1, confidence="high"
+    )
+    markdown = "# Results\n![fig-1](fig-1)\nFigure 3. I(q).\n![fig-2](fig-2)\n"
+    result = PageTestResult(
+        pdf=tmp_path / "x.pdf",
+        page_index=0,
+        conversion=ConversionResult(pages={0: markdown}, route_label="the chat model"),
+        page_image=b"",
+        seconds=1.0,
+        figures=[PageFigure(entry, png, "fig-1")],
+    )
+    dialog = PageTestDialog(result)
+
+    assert dialog._tabs.tabText(2) == "Figures (1)"
+    assert "paired in order" in dialog.figures_note()
+    kind = QTextDocument.ResourceType.ImageResource.value
+    shown = dialog._preview.loadResource(kind, QUrl("fig-1"))
+    assert isinstance(shown, QImage) and shown.width() == 40
+    assert not isinstance(dialog._preview.loadResource(kind, QUrl("fig-2")), QImage)
+    paragraphs = [b.strip() for b in preview_markdown(markdown).split("\n\n") if b.strip()]
+    assert paragraphs == ["# Results", "![fig-1](fig-1)", "Figure 3. I(q).", "![fig-2](fig-2)"]
+    assert dialog.markdown() == markdown  # the raw tab is left as returned
+    dialog.close()

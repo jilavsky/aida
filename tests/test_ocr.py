@@ -470,3 +470,48 @@ def test_a_thinking_ocr_model_is_asked_again_with_reasoning_off(tmp_path: Path):
     efforts = [call[2].extra.get("reasoning_effort") for call in model.calls]
     # Page 1: tried as configured, then with reasoning off; page 2: off at once.
     assert efforts == [None, "none", "none"]
+
+
+def test_page_test_converts_one_page_afresh_with_the_settings_given(tmp_path, monkeypatch):
+    """Settings → Documents → Test on a page: the OCR choice on screen (not
+    the saved one) is used, the cache is bypassed, and the rendered page
+    comes back to show beside the Markdown."""
+    from aida.config.settings import AppConfig
+    from aida.documents.ocr.standalone import route_description, run_page_test
+
+    model = MockProvider([MockTurn(text="# Page two"), MockTurn(text="# Page two again")])
+    monkeypatch.setattr("aida.providers.profiles.build_provider", lambda profile: model)
+    profiles = {"chat": _profile("chat"), "ocr": _profile("ocr", vision=True)}
+    app = AppConfig(ocr_profile="ocr")
+    pdf = _pdf(tmp_path / "scan.pdf", "ts")
+
+    assert route_description(app, profiles, "chat") == "the OCR profile 'ocr'"
+    first = run_page_test(app, profiles, "chat", pdf, 1)
+    second = run_page_test(app, profiles, "chat", pdf, 1)
+
+    assert first.markdown == "# Page two" and second.markdown == "# Page two again"
+    assert first.conversion.route_label == "the OCR profile 'ocr'"
+    assert first.page_image[:4] in (b"\x89PNG", b"\xff\xd8\xff\xe0")
+    assert first.seconds >= 0
+    # The scanned page's image is extracted as a chat would; the Markdown has
+    # no placeholder for it, so it is not paired.
+    assert len(first.figures) == 1 and first.figures[0].entry.page == 2
+    assert first.figures[0].image and first.figures[0].placeholder == ""
+    off = run_page_test(AppConfig(ocr_backend="off"), profiles, "chat", pdf, 1)
+    assert not off.markdown and "turned off" in off.conversion.unavailable
+
+
+def test_page_figures_pair_with_placeholders_only_when_the_counts_match(tmp_path):
+    from aida.documents.ocr.standalone import page_figures
+
+    pdf = _pdf(tmp_path / "scan.pdf", "s")
+    markdown = "# Results\n\n![fig-1](fig-1)\nFigure 3. Intensity versus q.\n"
+
+    paired = page_figures(pdf, 0, markdown, tmp_path / "a")
+    assert [f.placeholder for f in paired] == ["fig-1"]
+    assert paired[0].entry.label == "Figure 3" and paired[0].entry.confidence == "high"
+
+    two = markdown + "![fig-2](fig-2)\nFigure 4. Fit residuals.\n"
+    unpaired = page_figures(pdf, 0, two, tmp_path / "b")
+    assert [f.placeholder for f in unpaired] == [""]
+    assert page_figures(_pdf(tmp_path / "text.pdf", "t"), 0, markdown, tmp_path / "c") == []

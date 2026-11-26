@@ -16,8 +16,42 @@ decision revised), unrelated to what shipped when. Entries below link to
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-11-26
+
+AIDA notices when a long agent run goes in circles and asks the model to
+change approach, and a scanned-page conversion can be tested from
+Settings, figures included. Config files, databases and bundles from 1.1.x
+load unchanged; the one new `config.yaml` key, `loop_nudge_threshold`,
+defaults to 3 when absent.
+
+### Added
+
+- **AIDA notices when the agent goes in circles.** On long runs a model
+  can keep working without progress: rerunning the same call, hitting the
+  same error with one variant after another, or writing `fit_v2.py`,
+  `fit_fixed.py`, `fit_final.py` instead of editing one script. AIDA now
+  watches each turn for three signs (the same call with the same result
+  three times, ignoring run times and timestamps; the same error from one
+  tool three times; three new scripts that are close copies of one already
+  written) and sends a message asking the model to say what it has
+  established and change approach, or to stop and say what blocks it. At
+  most three per turn, shown in the chat as "sent automatically by AIDA".
+  Set the count in Settings (**Nudge when going in circles after**) or with
+  `loop_nudge_threshold` in `config.yaml` (default 3, 0 is off). See
+  [When the agent goes in circles](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/reference/context-and-limits.html#context-and-limits-loops).
+- **Settings → Documents → Test on a page…** converts one page of a PDF
+  you choose with the OCR settings shown in the dialog, saved or not, and
+  shows the result beside the rendered page, as Markdown and as a preview,
+  with the model used and the time taken. A Figures tab shows the figures
+  a chat would extract from the page; when they pair with the Markdown's
+  image placeholders, the preview shows them in place. The same check as
+  `aida documents convert FILE --pages N`, without the command line. See
+  [Checking that it works](https://jilavsky-docs.readthedocs.io/projects/aida/en/latest/guides/documents.html#documents-checking).
+
 ### Changed
 
+- **Settings changes to "Nudge the agent when it stalls mid-task" apply to
+  the open chat** right away, instead of from the next session.
 - **The toolbar's New Chat and Code Editor controls look like buttons.**
   They were toolbar `QAction`s, which Qt renders as flat `QToolButton`s —
   unlike the raised, pyIrena-style `Documentation` button beside them. They
@@ -1481,7 +1515,8 @@ for the feature summary as of this release, and `planning/COMPLETED.md`
 
 Earliest tagged snapshot, pre-beta.
 
-[Unreleased]: https://github.com/jilavsky/aida/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/jilavsky/aida/compare/v1.1.3...HEAD
+[1.1.3]: https://github.com/jilavsky/aida/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/jilavsky/aida/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/jilavsky/aida/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/jilavsky/aida/compare/v1.0.1...v1.1.0

@@ -3,8 +3,8 @@
 **A local scientific agent workbench.** Repo `jilavsky/Aida` · import package
 `aida` · PyPI distribution `aida-workbench` · MIT · Python >= 3.11 · PySide6.
 
-**Status: 1.1.2, released 2026-11-23.** All ten phases are implemented,
-tested (2,575 tests, three OSes, CI green on all six matrix legs) and in
+**Status: 1.1.3, released 2026-11-26.** All ten phases are implemented,
+tested (2,693 tests, three OSes, CI green on all six matrix legs) and in
 daily use. This file holds **only what is not done** —
 anything ticked here has been moved to `planning/COMPLETED.md`, and
 anything shipped is dated in `CHANGELOG.md`. If you find a `[x]` below,
@@ -88,7 +88,7 @@ remains is distribution, plus one deliberate deferral:
 
 *Closed 2026-10-16: release automation. `.github/workflows/publish.yml`
 has existed and run for real since v0.2.0; its tag check was genuinely
-missing and is now in place. Account in `TODO.md` §2.*
+missing and is now in place (see the `[1.0.0]` entry in `CHANGELOG.md`).*
 
 - [ ] conda: keep `environment.yml` current; evaluate a conda-forge feedstock
       once PyPI releases are routine (record the decision either way).
@@ -290,6 +290,19 @@ concrete asks for it.
 - **Native app bundles** (PyInstaller/Briefcase) — a timeboxed investigation
   at most. `pip install aida-workbench[gui]` is acceptable for an audience
   that already installs pyIrena that way.
+
+- **A periodic progress checkpoint on long runs** (2026-11-26): every N
+  tool calls, ask the model for a short done / remaining / what-changed
+  status. Considered with the loop detection that shipped
+  (`aida.core.loop_detection`) and not built: it fires on productive runs
+  as often as on stuck ones, costs a reply and context each time, and a
+  model that answers with a status and no tool call ends the turn, which
+  is the opposite of what a long run needs. The useful part, asking the
+  model to say what it has established and what it will change, is in the
+  loop nudges instead, which fire only on evidence (repeated call and
+  result, repeated error, near-copy scripts). Revisit if runs are seen
+  going in circles in ways those three signs miss, and then make it
+  opt-in.
 
 ### 2.4 Knowledge and analysis
 

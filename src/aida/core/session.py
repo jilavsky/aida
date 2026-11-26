@@ -313,6 +313,7 @@ class ChatSession:
             before_round_trip=self._trim_context,
             tool_result_filter=self._cap_tool_result,
             auto_continue_on_stall=settings.app.auto_continue_on_stall,
+            loop_nudge_threshold=settings.app.loop_nudge_threshold,
         )
         self.recorder = recorder
         # Resolved once at start, queried every turn in send(): retrieval is
@@ -694,6 +695,7 @@ class ChatSession:
                 before_round_trip=self._trim_context,
                 tool_result_filter=self._cap_tool_result,
                 auto_continue_on_stall=self.loop.auto_continue_on_stall,
+                loop_nudge_threshold=self.loop.loop_nudge_threshold,
             )
 
             # Nothing below here can fail, so the swap is all-or-nothing.

@@ -313,8 +313,10 @@ class TurnNudged:
     instead of ending it on a reply that did not finish the job.
 
     ``reason`` is ``"length"`` (the reply was cut off at the output token
-    limit before it made a tool call) or ``"stall"`` (a short reply announced
-    a next step, "Writing the report now.", but made no tool call). ``text``
+    limit before it made a tool call), ``"stall"`` (a short reply announced
+    a next step, "Writing the report now.", but made no tool call) or
+    ``"loop"`` (the turn keeps repeating calls, errors or near-identical
+    scripts without progress, ``aida.core.loop_detection``). ``text``
     is the ``role="user"`` message that was appended; it is part of the
     conversation from here on, so a frontend shows it like a user message,
     marked as sent by AIDA.
